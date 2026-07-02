@@ -1,0 +1,24 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+compile_commands.json
+
+# Editors / tools
+.cache/
+.vscode/
+.idea/
+*.swp
+
+# Objects / artifacts
+*.o
+*.a
+*.elf
+*.bin
+*.hex
+*.map
