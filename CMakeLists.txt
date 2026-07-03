@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# No C++ modules here: scanning only adds -fmodules-ts noise to every compile
+# command (breaking clang-tidy on the GCC database) and slows builds down.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Firmware = any cross build with CMAKE_SYSTEM_NAME=Generic (see cmake/toolchains/).
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")

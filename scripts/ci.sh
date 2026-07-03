@@ -12,4 +12,7 @@ echo "== arm: configure + cross-build (freestanding link gate) =="
 cmake --preset arm
 cmake --build --preset arm
 
-echo "CI OK: host tests green, arm cross-build green"
+echo "== lint: style enforcement (m_ members, mandatory braces) =="
+./scripts/lint.sh
+
+echo "CI OK: host tests green, arm cross-build green, lint clean"

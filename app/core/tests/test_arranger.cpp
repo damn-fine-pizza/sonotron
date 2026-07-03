@@ -14,8 +14,7 @@ struct Band {
   Engine e;
   Events ev;
 
-  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0,
-           Op op = Op::kDo) {
+  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {
     Command command;
     command.op = op;
     command.param = p;
@@ -32,25 +31,33 @@ struct Band {
     cmd(Param::kStyleLoad, 0);
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8), 0,
         Op::kSet);
-    cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0,
-        Op::kSet);
+    cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0, Op::kSet);
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8), 0,
         Op::kSet);
   }
   int ons(std::uint8_t channel, std::uint8_t note = 255) const {
     int n = 0;
     for (const OutEvent& o : ev) {
-      if (o.kind != OutEvent::Kind::kMidi || o.msg.type() != midi::kNoteOn) continue;
-      if (o.msg.channel() != channel) continue;
-      if (note != 255 && o.msg.d1 != note) continue;
+      if (o.kind != OutEvent::Kind::kMidi || o.msg.type() != midi::kNoteOn) {
+        continue;
+      }
+      if (o.msg.channel() != channel) {
+        continue;
+      }
+      if (note != 255 && o.msg.d1 != note) {
+        continue;
+      }
       ++n;
     }
     return n;
   }
   StaticVector<std::uint16_t, 16> sections() const {
     StaticVector<std::uint16_t, 16> out;
-    for (const OutEvent& o : ev)
-      if (o.kind == OutEvent::Kind::kSection) CHECK(out.push_back(o.code));
+    for (const OutEvent& o : ev) {
+      if (o.kind == OutEvent::Kind::kSection) {
+        CHECK(out.push_back(o.code));
+      }
+    }
     return out;
   }
 };
@@ -81,7 +88,7 @@ void test_ntt_resolution_follows_chord() {
   b.cmd(Param::kChordPlay, 62, -1, 100);
   b.ev.clear();
   b.advance(kTicksPerBar);
-  CHECK(b.ons(1, 38) >= 1);  // bass root D2 = 38
+  CHECK(b.ons(1, 38) >= 1);                       // bass root D2 = 38
   CHECK(b.ons(2, 62) >= 1 && b.ons(2, 65) >= 1);  // Dm7 comp: 62 65 69 72
 }
 
@@ -136,8 +143,9 @@ void test_ending_stops_transport() {
   bool saw_stop = false;
   for (const OutEvent& o : b.ev) {
     if (o.kind == OutEvent::Kind::kTransport &&
-        o.code == static_cast<std::uint16_t>(TransportState::kStopped))
+        o.code == static_cast<std::uint16_t>(TransportState::kStopped)) {
       saw_stop = true;
+    }
   }
   CHECK(saw_stop);
 }
@@ -147,8 +155,7 @@ void test_triad_wrap_and_route_gating() {
   b.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
   b.cmd(Param::kStyleLoad, 0);
   // Only bass routed: chord/drums silent.
-  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0,
-        Op::kSet);
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0, Op::kSet);
   // Sus4 triad (3 tones): VarB bass uses tone 3 -> wraps to root +1 octave.
   b.cmd(Param::kChordPlay, 60, static_cast<std::int8_t>(ChordQuality::kSus4), 100);
   b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kVarB));
@@ -163,16 +170,19 @@ void test_triad_wrap_and_route_gating() {
 
 void test_style_warns() {
   Band b;
-  b.cmd(Param::kStyleLoad, 7);  // no such builtin
+  b.cmd(Param::kStyleLoad, 7);     // no such builtin
   b.cmd(Param::kStyleSection, 2);  // no style loaded
   b.cmd(Param::kStyleLoad, 0);
-  b.cmd(Param::kStyleSection, 99);  // bogus section id
+  b.cmd(Param::kStyleSection, 99);                                             // bogus section id
   b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kVarC));  // absent
   b.cmd(Param::kStyleRoute, 99, 0, 0, Op::kSet);
   b.cmd(Param::kStyleRoute, 0, 9, 0, Op::kSet);  // bad port
   int warns = 0;
-  for (const OutEvent& o : b.ev)
-    if (o.kind == OutEvent::Kind::kWarn) ++warns;
+  for (const OutEvent& o : b.ev) {
+    if (o.kind == OutEvent::Kind::kWarn) {
+      ++warns;
+    }
+  }
   CHECK(warns == 6);
 }
 
@@ -198,6 +208,8 @@ int main() {
   test_triad_wrap_and_route_gating();
   test_style_warns();
   test_immediate_switch_when_stopped();
-  if (arrangrr::test::failures() == 0) std::printf("test_arranger: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_arranger: all OK\n");
+  }
   return arrangrr::test::failures();
 }

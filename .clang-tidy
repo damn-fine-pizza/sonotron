@@ -1,0 +1,13 @@
+---
+# Project style enforcement (see docs/DESIGN.md + memory: cpp-style):
+#  - data members are m_snake_case (never a trailing underscore)
+#  - every control-flow body is braced
+Checks: '-*,readability-identifier-naming,readability-braces-around-statements'
+WarningsAsErrors: '*'
+CheckOptions:
+  readability-identifier-naming.PrivateMemberCase: lower_case
+  readability-identifier-naming.PrivateMemberPrefix: m_
+  readability-identifier-naming.ProtectedMemberCase: lower_case
+  readability-identifier-naming.ProtectedMemberPrefix: m_
+  readability-braces-around-statements.ShortStatementLines: 0
+...

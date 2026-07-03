@@ -20,19 +20,16 @@ class FunctionRef<R(Args...)> {
     requires(!std::is_same_v<std::remove_cvref_t<F>, FunctionRef> &&
              std::is_invocable_r_v<R, F&, Args...>)
   constexpr FunctionRef(F&& f) noexcept  // NOLINT: implicit by design
-      : obj_(const_cast<void*>(static_cast<const void*>(std::addressof(f)))),
-        fn_(+[](void* obj, Args... args) -> R {
-          return (*static_cast<std::remove_reference_t<F>*>(obj))(
-              static_cast<Args&&>(args)...);
+      : m_obj(const_cast<void*>(static_cast<const void*>(std::addressof(f)))),
+        m_fn(+[](void* obj, Args... args) -> R {
+          return (*static_cast<std::remove_reference_t<F>*>(obj))(static_cast<Args&&>(args)...);
         }) {}
 
-  constexpr R operator()(Args... args) const {
-    return fn_(obj_, static_cast<Args&&>(args)...);
-  }
+  constexpr R operator()(Args... args) const { return m_fn(m_obj, static_cast<Args&&>(args)...); }
 
  private:
-  void* obj_;
-  R (*fn_)(void*, Args...);
+  void* m_obj;
+  R (*m_fn)(void*, Args...);
 };
 
 }  // namespace arrangrr

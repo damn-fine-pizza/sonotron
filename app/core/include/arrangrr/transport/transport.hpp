@@ -31,48 +31,48 @@ struct Position {
 
 class Transport {
  public:
-  constexpr TransportState state() const noexcept { return state_; }
-  constexpr bool playing() const noexcept { return state_ == TransportState::kPlaying; }
-  constexpr Tick tick() const noexcept { return tick_; }
+  constexpr TransportState state() const noexcept { return m_state; }
+  constexpr bool playing() const noexcept { return m_state == TransportState::kPlaying; }
+  constexpr Tick tick() const noexcept { return m_tick; }
 
-  constexpr BpmX100 bpm() const noexcept { return bpm_; }
+  constexpr BpmX100 bpm() const noexcept { return m_bpm; }
   constexpr bool set_bpm(BpmX100 bpm) noexcept {
-    if (bpm < kMinBpm || bpm > kMaxBpm) return false;
-    bpm_ = bpm;
+    if (bpm < kMinBpm || bpm > kMaxBpm) {
+      return false;
+    }
+    m_bpm = bpm;
     return true;
   }
 
   // MIDI Start semantics: rewind to zero and play.
   constexpr void start() noexcept {
-    tick_ = 0;
-    state_ = TransportState::kPlaying;
+    m_tick = 0;
+    m_state = TransportState::kPlaying;
   }
   // MIDI Continue semantics: play from the current position.
-  constexpr void resume() noexcept { state_ = TransportState::kPlaying; }
-  constexpr void stop() noexcept { state_ = TransportState::kStopped; }
+  constexpr void resume() noexcept { m_state = TransportState::kPlaying; }
+  constexpr void stop() noexcept { m_state = TransportState::kStopped; }
 
-  constexpr void locate(Tick t) noexcept { tick_ = t; }
+  constexpr void locate(Tick t) noexcept { m_tick = t; }
 
   // Advance by exactly one tick; caller loops (the engine reacts per tick).
-  constexpr void advance_one() noexcept { ++tick_; }
+  constexpr void advance_one() noexcept { ++m_tick; }
 
   // True when a MIDI clock byte (F8) belongs on this tick (960/24 = 40).
-  static constexpr bool is_midi_clock_tick(Tick t) noexcept {
-    return t % kMidiClockDivider == 0;
-  }
+  static constexpr bool is_midi_clock_tick(Tick t) noexcept { return t % kMidiClockDivider == 0; }
 
   constexpr Position position() const noexcept {
     return Position{
-        .bar = tick_ / kTicksPerBar + 1,
-        .beat = static_cast<std::uint8_t>((tick_ % kTicksPerBar) / kTicksPerBeat + 1),
-        .tick = static_cast<std::uint16_t>(tick_ % kTicksPerBeat),
+        .bar = m_tick / kTicksPerBar + 1,
+        .beat = static_cast<std::uint8_t>((m_tick % kTicksPerBar) / kTicksPerBeat + 1),
+        .tick = static_cast<std::uint16_t>(m_tick % kTicksPerBeat),
     };
   }
 
  private:
-  Tick tick_ = 0;
-  BpmX100 bpm_ = kDefaultBpm;
-  TransportState state_ = TransportState::kStopped;
+  Tick m_tick = 0;
+  BpmX100 m_bpm = kDefaultBpm;
+  TransportState m_state = TransportState::kStopped;
 };
 
 }  // namespace arrangrr

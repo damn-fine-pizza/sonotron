@@ -12,7 +12,9 @@ namespace arrangrr {
 namespace detail {
 consteval std::uint32_t crc32_entry(std::uint32_t i) {
   std::uint32_t c = i;
-  for (int k = 0; k < 8; ++k) c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+  for (int k = 0; k < 8; ++k) {
+    c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+  }
   return c;
 }
 
@@ -22,7 +24,9 @@ struct Crc32Table {
 
 consteval Crc32Table make_crc32_table() {
   Crc32Table t{};
-  for (std::uint32_t i = 0; i < 256; ++i) t.entries[i] = crc32_entry(i);
+  for (std::uint32_t i = 0; i < 256; ++i) {
+    t.entries[i] = crc32_entry(i);
+  }
   return t;
 }
 
@@ -32,8 +36,9 @@ inline constexpr Crc32Table kCrc32Table = make_crc32_table();
 constexpr std::uint32_t crc32(Span<const std::uint8_t> data,
                               std::uint32_t seed = 0xFFFFFFFFu) noexcept {
   std::uint32_t c = seed;
-  for (std::uint8_t byte : data)
+  for (std::uint8_t byte : data) {
     c = detail::kCrc32Table.entries[(c ^ byte) & 0xFFu] ^ (c >> 8);
+  }
   return c ^ 0xFFFFFFFFu;
 }
 

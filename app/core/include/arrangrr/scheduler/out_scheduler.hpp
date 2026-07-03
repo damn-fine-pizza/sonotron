@@ -23,10 +23,16 @@ enum class EventClass : std::uint8_t {
 };
 
 constexpr EventClass classify(const MidiMessage& msg) noexcept {
-  if (midi::is_realtime(msg.status)) return EventClass::kRealtime;
+  if (midi::is_realtime(msg.status)) {
+    return EventClass::kRealtime;
+  }
   const std::uint8_t type = msg.type();
-  if (type == midi::kNoteOff) return EventClass::kNoteOff;
-  if (type == midi::kNoteOn) return EventClass::kNoteOn;
+  if (type == midi::kNoteOff) {
+    return EventClass::kNoteOff;
+  }
+  if (type == midi::kNoteOn) {
+    return EventClass::kNoteOn;
+  }
   return EventClass::kOther;
 }
 
@@ -41,23 +47,25 @@ struct ScheduledEvent {
 template <std::size_t N>
 class OutScheduler {
  public:
-  constexpr std::size_t size() const noexcept { return size_; }
-  constexpr bool empty() const noexcept { return size_ == 0; }
+  constexpr std::size_t size() const noexcept { return m_size; }
+  constexpr bool empty() const noexcept { return m_size == 0; }
   static constexpr std::size_t capacity() noexcept { return N; }
 
   // False when full — the caller surfaces a warn event; clock/realtime must
   // never be the class that gets dropped (graceful degradation, §9.C).
   [[nodiscard]] constexpr bool schedule(std::uint8_t port, Tick tick,
                                         const MidiMessage& msg) noexcept {
-    if (size_ == N) return false;
-    heap_[size_] = ScheduledEvent{
+    if (m_size == N) {
+      return false;
+    }
+    m_heap[m_size] = ScheduledEvent{
         .tick = tick,
-        .seq = seq_++,
+        .seq = m_seq++,
         .msg = msg,
         .port = port,
         .cls = static_cast<std::uint8_t>(classify(msg)),
     };
-    sift_up(size_++);
+    sift_up(m_size++);
     return true;
   }
 
@@ -65,30 +73,38 @@ class OutScheduler {
   // Sink signature: void(const ScheduledEvent&).
   template <typename Sink>
   constexpr void pop_due(Tick now, Sink&& sink) {
-    while (size_ > 0 && heap_[0].tick <= now) {
-      const ScheduledEvent ev = heap_[0];
-      heap_[0] = heap_[--size_];
-      if (size_ > 0) sift_down(0);
+    while (m_size > 0 && m_heap[0].tick <= now) {
+      const ScheduledEvent ev = m_heap[0];
+      m_heap[0] = m_heap[--m_size];
+      if (m_size > 0) {
+        sift_down(0);
+      }
       sink(ev);
     }
   }
 
-  constexpr void clear() noexcept { size_ = 0; }
+  constexpr void clear() noexcept { m_size = 0; }
 
  private:
   static constexpr bool before(const ScheduledEvent& a, const ScheduledEvent& b) noexcept {
-    if (a.tick != b.tick) return a.tick < b.tick;
-    if (a.cls != b.cls) return a.cls < b.cls;
+    if (a.tick != b.tick) {
+      return a.tick < b.tick;
+    }
+    if (a.cls != b.cls) {
+      return a.cls < b.cls;
+    }
     return a.seq < b.seq;
   }
 
   constexpr void sift_up(std::size_t i) noexcept {
     while (i > 0) {
       const std::size_t parent = (i - 1) / 2;
-      if (!before(heap_[i], heap_[parent])) break;
-      const ScheduledEvent tmp = heap_[i];
-      heap_[i] = heap_[parent];
-      heap_[parent] = tmp;
+      if (!before(m_heap[i], m_heap[parent])) {
+        break;
+      }
+      const ScheduledEvent tmp = m_heap[i];
+      m_heap[i] = m_heap[parent];
+      m_heap[parent] = tmp;
       i = parent;
     }
   }
@@ -98,19 +114,25 @@ class OutScheduler {
       const std::size_t left = 2 * i + 1;
       const std::size_t right = left + 1;
       std::size_t smallest = i;
-      if (left < size_ && before(heap_[left], heap_[smallest])) smallest = left;
-      if (right < size_ && before(heap_[right], heap_[smallest])) smallest = right;
-      if (smallest == i) return;
-      const ScheduledEvent tmp = heap_[i];
-      heap_[i] = heap_[smallest];
-      heap_[smallest] = tmp;
+      if (left < m_size && before(m_heap[left], m_heap[smallest])) {
+        smallest = left;
+      }
+      if (right < m_size && before(m_heap[right], m_heap[smallest])) {
+        smallest = right;
+      }
+      if (smallest == i) {
+        return;
+      }
+      const ScheduledEvent tmp = m_heap[i];
+      m_heap[i] = m_heap[smallest];
+      m_heap[smallest] = tmp;
       i = smallest;
     }
   }
 
-  ScheduledEvent heap_[N]{};
-  std::size_t size_ = 0;
-  std::uint32_t seq_ = 0;
+  ScheduledEvent m_heap[N]{};
+  std::size_t m_size = 0;
+  std::uint32_t m_seq = 0;
 };
 
 }  // namespace arrangrr

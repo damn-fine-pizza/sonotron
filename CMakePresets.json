@@ -31,6 +31,17 @@
       }
     },
     {
+      "name": "tidy",
+      "displayName": "Clang compile database for clang-tidy",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/tidy",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_COMPILER_LAUNCHER": ""
+      }
+    },
+    {
       "name": "arm",
       "displayName": "STM32 anchor (Cortex-M7 cross)",
       "generator": "Ninja",

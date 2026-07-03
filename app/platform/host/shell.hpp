@@ -18,7 +18,7 @@
 namespace arrangrr::host {
 
 struct PortDef {
-  std::string name;   // user alias
+  std::string name;  // user alias
   bool is_input = false;
   std::uint8_t index = 0;  // core port index
 };
@@ -31,15 +31,15 @@ class Shell {
   using PortHook = std::function<void(const PortDef&)>;
   // Sends raw bytes into the engine input path (used by the live backend).
   void feed_midi(std::uint8_t port, Span<const std::uint8_t> bytes) {
-    engine_.push_midi_in(port, bytes, sink_);
+    m_engine.push_midi_in(port, bytes, m_sink);
   }
 
-  explicit Shell(EventSink sink) : sink_(std::move(sink)) {}
-  void set_port_hook(PortHook hook) { port_hook_ = std::move(hook); }
+  explicit Shell(EventSink sink) : m_sink(std::move(sink)) {}
+  void set_port_hook(PortHook hook) { m_port_hook = std::move(hook); }
 
-  Engine& engine() { return engine_; }
-  const Engine& engine() const { return engine_; }
-  const std::vector<PortDef>& ports() const { return ports_; }
+  Engine& engine() { return m_engine; }
+  const Engine& engine() const { return m_engine; }
+  const std::vector<PortDef>& ports() const { return m_ports; }
 
   // Executes one line (L2 sugar). Returns false on parse error; the error
   // message is passed to `error`. `@tick` lines are queued, not executed.
@@ -48,15 +48,15 @@ class Shell {
   // Advances stream time by n ticks, firing pending @tick lines on the way —
   // the live clock thread drives this (same path as the `advance` command).
   bool advance_by(std::uint64_t n, std::string& error) {
-    return advance_to(engine_.now() + n, error);
+    return advance_to(m_engine.now() + n, error);
   }
 
   // True after a `quit` line.
-  bool quit_requested() const { return quit_; }
+  bool quit_requested() const { return m_quit; }
 
   // Enharmonic spelling for event rendering, derived from the current key
   // (flat-side keys print Bb, sharp-side keys print A#). §29.7 nit.
-  bool prefer_flats() const { return prefer_flats_; }
+  bool prefer_flats() const { return m_prefer_flats; }
 
  private:
   bool exec_now(const std::vector<std::string>& tokens, std::string& error);
@@ -67,23 +67,23 @@ class Shell {
   int find_seq(const std::string& name) const;
   void print_help(const std::string& topic) const;
 
-  Engine engine_;
-  EventSink sink_;
-  PortHook port_hook_;
-  std::vector<PortDef> ports_;
-  std::vector<std::string> tracks_;  // name -> index (D26: names live host-side)
-  std::vector<std::string> seqs_;
-  std::uint8_t next_in_ = 0, next_out_ = 0;
-  bool prefer_flats_ = false;
+  Engine m_engine;
+  EventSink m_sink;
+  PortHook m_port_hook;
+  std::vector<PortDef> m_ports;
+  std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)
+  std::vector<std::string> m_seqs;
+  std::uint8_t m_next_in = 0, m_next_out = 0;
+  bool m_prefer_flats = false;
 
   struct Pending {
     std::uint64_t tick;
     std::uint64_t order;  // stable FIFO among same-tick lines
     std::vector<std::string> tokens;
   };
-  std::vector<Pending> pending_;
-  std::uint64_t pending_order_ = 0;
-  bool quit_ = false;
+  std::vector<Pending> m_pending;
+  std::uint64_t m_pending_order = 0;
+  bool m_quit = false;
 };
 
 }  // namespace arrangrr::host

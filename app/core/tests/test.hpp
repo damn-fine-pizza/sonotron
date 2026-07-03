@@ -19,7 +19,7 @@ inline void report(const char* file, int line, const char* expr) noexcept {
 
 }  // namespace arrangrr::test
 
-#define CHECK(cond)                                    \
-  do {                                                 \
+#define CHECK(cond)                                                 \
+  do {                                                              \
     if (!(cond)) arrangrr::test::report(__FILE__, __LINE__, #cond); \
   } while (false)

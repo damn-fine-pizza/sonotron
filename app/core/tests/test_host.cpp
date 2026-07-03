@@ -5,9 +5,9 @@
 #include <vector>
 
 #include "alsa_midi.hpp"
-#include "console.hpp"
 #include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/transport/transport.hpp"
+#include "console.hpp"
 #include "jsonl.hpp"
 #include "shell.hpp"
 #include "test.hpp"
@@ -45,14 +45,11 @@ void test_jsonl_all_kinds() {
   CHECK(to_jsonl(OutEvent::midi(0, MidiMessage::realtime(midi::kSystemReset), 0)) ==
         R"({"ev":"midi-out","port":0,"msg":"reset","@":0})");
 
-  CHECK(to_jsonl(OutEvent::transport(
-            static_cast<std::uint16_t>(TransportState::kPlaying), 5)) ==
+  CHECK(to_jsonl(OutEvent::transport(static_cast<std::uint16_t>(TransportState::kPlaying), 5)) ==
         R"({"ev":"transport","state":"playing","@":5})");
-  CHECK(to_jsonl(OutEvent::transport(
-            static_cast<std::uint16_t>(TransportState::kStopped), 5)) ==
+  CHECK(to_jsonl(OutEvent::transport(static_cast<std::uint16_t>(TransportState::kStopped), 5)) ==
         R"({"ev":"transport","state":"stopped","@":5})");
-  CHECK(to_jsonl(OutEvent::transport(
-            static_cast<std::uint16_t>(TransportState::kPaused), 5)) ==
+  CHECK(to_jsonl(OutEvent::transport(static_cast<std::uint16_t>(TransportState::kPaused), 5)) ==
         R"({"ev":"transport","state":"paused","@":5})");
 
   CHECK(to_jsonl(OutEvent::warn(WarnCode::kSchedulerFull, 1)) ==
@@ -88,8 +85,11 @@ struct ShellFixture {
   bool run(const char* line) { return shell.exec_line(line, err); }
   int midi_count() const {
     int n = 0;
-    for (const OutEvent& e : events)
-      if (e.kind == OutEvent::Kind::kMidi) ++n;
+    for (const OutEvent& e : events) {
+      if (e.kind == OutEvent::Kind::kMidi) {
+        ++n;
+      }
+    }
     return n;
   }
 };
@@ -130,8 +130,11 @@ void test_shell_transport_and_clock() {
   CHECK(f.run("transport continue"));
   CHECK(f.run("clock out none"));
   int clocks = 0;
-  for (const OutEvent& e : f.events)
-    if (e.kind == OutEvent::Kind::kMidi && e.msg.status == midi::kClock) ++clocks;
+  for (const OutEvent& e : f.events) {
+    if (e.kind == OutEvent::Kind::kMidi && e.msg.status == midi::kClock) {
+      ++clocks;
+    }
+  }
   CHECK(clocks == 2);  // immediate F8 at start + F8 at tick 40
 }
 
@@ -187,10 +190,10 @@ void test_shell_parse_edges() {
   // Channel suffix grammar.
   CHECK(f.run("port open in kbd"));
   CHECK(f.run("port open out synth"));
-  CHECK(!f.run("route kbd:0 -> synth"));    // channels are 1-based
-  CHECK(!f.run("route kbd:17 -> synth"));   // above 16
-  CHECK(!f.run("route kbd:x -> synth"));    // not a number
-  CHECK(f.run("route kbd -> synth:16"));    // boundary is valid
+  CHECK(!f.run("route kbd:0 -> synth"));   // channels are 1-based
+  CHECK(!f.run("route kbd:17 -> synth"));  // above 16
+  CHECK(!f.run("route kbd:x -> synth"));   // not a number
+  CHECK(f.run("route kbd -> synth:16"));   // boundary is valid
   // Numeric port references (indices work like names).
   CHECK(f.run("route 0 -> 0"));
   CHECK(!f.run("route 9 -> 0"));  // beyond kMaxPorts
@@ -209,8 +212,8 @@ void test_shell_track_commands() {
   CHECK(f.run("track new drum synth:10 drums"));
   CHECK(f.run("track length drum 4"));
   CHECK(f.run("track step bass 1 C2 100 120"));
-  CHECK(f.run("track step drum 1 36 110"));         // numeric note, default gate
-  CHECK(f.run("track step drum 3 F#1"));            // default vel+gate
+  CHECK(f.run("track step drum 1 36 110"));  // numeric note, default gate
+  CHECK(f.run("track step drum 3 F#1"));     // default vel+gate
   CHECK(f.run("track step drum 3 clear"));
   CHECK(f.run("track mute drum on"));
   CHECK(f.run("track solo bass on"));
@@ -226,10 +229,10 @@ void test_shell_track_commands() {
   CHECK(!f.run("track new x nowhere"));
   CHECK(!f.run("track new x synth:1 wizard"));
   CHECK(!f.run("track step ghost 1 C2"));
-  CHECK(!f.run("track step bass 0 C2"));    // steps are 1-based
-  CHECK(!f.run("track step bass 65 C2"));   // beyond kMaxStepsPerTrack
-  CHECK(!f.run("track step bass 1 H2"));    // no such note letter
-  CHECK(!f.run("track step bass 1 C2 0"));  // vel out of range
+  CHECK(!f.run("track step bass 0 C2"));        // steps are 1-based
+  CHECK(!f.run("track step bass 65 C2"));       // beyond kMaxStepsPerTrack
+  CHECK(!f.run("track step bass 1 H2"));        // no such note letter
+  CHECK(!f.run("track step bass 1 C2 0"));      // vel out of range
   CHECK(!f.run("track step bass 1 C2 100 0"));  // gate zero
   CHECK(!f.run("track length bass nope"));
   CHECK(!f.run("track mute bass maybe"));
@@ -251,11 +254,11 @@ void test_note_name_parsing() {
   CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 46);
   CHECK(f.run("track step t 1 F#3"));
   CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 54);
-  CHECK(!f.run("track step t 1 G#9"));  // above 127
+  CHECK(!f.run("track step t 1 G#9"));   // above 127
   CHECK(!f.run("track step t 1 Cb-1"));  // below 0
   CHECK(f.run("track step t 1 C"));      // octave optional: defaults to 4
   CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 60);
-  CHECK(!f.run("track step t 1 128"));   // numeric out of range
+  CHECK(!f.run("track step t 1 128"));  // numeric out of range
 }
 
 void test_shell_chord_commands() {
@@ -266,8 +269,11 @@ void test_shell_chord_commands() {
   CHECK(!f.shell.prefer_flats());
   CHECK(f.run("play D"));  // Dm7: chord event + 4 note-ons
   int chords = 0;
-  for (const OutEvent& o : f.events)
-    if (o.kind == OutEvent::Kind::kChord) ++chords;
+  for (const OutEvent& o : f.events) {
+    if (o.kind == OutEvent::Kind::kChord) {
+      ++chords;
+    }
+  }
   CHECK(chords == 1 && f.midi_count() == 4);
   CHECK(f.run("chord play G 7 90"));  // explicit quality + velocity
   CHECK(f.run("chord stop"));
@@ -298,7 +304,7 @@ void test_shell_chord_modes_cli() {
   CHECK(f.run("play F#"));  // chromatic allowed in absolute mode
   CHECK(f.midi_count() == 3);
   CHECK(f.run("chord mode shell"));
-  CHECK(f.run("play C E Bb"));  // multi-note completion
+  CHECK(f.run("play C E Bb"));     // multi-note completion
   CHECK(f.run("play D F C5 80"));  // trailing velocity after notes
   CHECK(f.run("chord mode diatonic"));
   CHECK(!f.run("chord mode wizard"));
@@ -335,23 +341,23 @@ void test_jsonl_section_rendering() {
 
 void test_jsonl_chord_rendering() {
   // ii in C major: D4 input, min7 -> {"in":"D4","out":"Dm7","deg":"ii"}.
-  const OutEvent ev = OutEvent::chord(0, 1, static_cast<std::uint8_t>(ChordQuality::kMin7),
-                                      62, 4, 100, 0);
+  const OutEvent ev =
+      OutEvent::chord(0, 1, static_cast<std::uint8_t>(ChordQuality::kMin7), 62, 4, 100, 0);
   CHECK(to_jsonl(ev) == R"({"ev":"chord","in":"D4","out":"Dm7","deg":"ii","@":0})");
   // Flat spelling: Bb root.
-  const OutEvent bb = OutEvent::chord(0, 0, static_cast<std::uint8_t>(ChordQuality::kMaj7),
-                                      70, 4, 100, 5);
+  const OutEvent bb =
+      OutEvent::chord(0, 0, static_cast<std::uint8_t>(ChordQuality::kMaj7), 70, 4, 100, 5);
   CHECK(to_jsonl(bb, true) == R"({"ev":"chord","in":"Bb4","out":"Bbmaj7","deg":"I","@":5})");
   CHECK(to_jsonl(bb, false) == R"({"ev":"chord","in":"A#4","out":"A#maj7","deg":"I","@":5})");
   // Half-diminished renders lowercase with m7b5, dominant uppercase.
-  const OutEvent halfdim = OutEvent::chord(
-      0, 6, static_cast<std::uint8_t>(ChordQuality::kHalfDim7), 71, 4, 100, 0);
+  const OutEvent halfdim =
+      OutEvent::chord(0, 6, static_cast<std::uint8_t>(ChordQuality::kHalfDim7), 71, 4, 100, 0);
   CHECK(to_jsonl(halfdim) == R"({"ev":"chord","in":"B4","out":"Bm7b5","deg":"viim7b5","@":0})");
   const std::string human = to_human(ev);
   CHECK(human.find("chord Dm7 (ii)") != std::string::npos);
   // Keyless modes render degree "-".
-  const OutEvent keyless = OutEvent::chord(
-      0, kNoDegree, static_cast<std::uint8_t>(ChordQuality::kMaj), 66, 3, 100, 0);
+  const OutEvent keyless =
+      OutEvent::chord(0, kNoDegree, static_cast<std::uint8_t>(ChordQuality::kMaj), 66, 3, 100, 0);
   CHECK(to_jsonl(keyless) == R"({"ev":"chord","in":"F#4","out":"F#","deg":"-","@":0})");
 }
 
@@ -418,7 +424,9 @@ void test_line_editor() {
   LineEditor ed;
   auto type = [&](const char* text) {
     LineEditor::Result last;
-    for (const char* c = text; *c; ++c) last = ed.feed(static_cast<std::uint8_t>(*c));
+    for (const char* c = text; *c; ++c) {
+      last = ed.feed(static_cast<std::uint8_t>(*c));
+    }
     return last;
   };
   // Plain typing + Enter completes a line.
@@ -535,6 +543,8 @@ int main() {
   test_line_editor();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
-  if (arrangrr::test::failures() == 0) std::printf("test_host: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_host: all OK\n");
+  }
   return arrangrr::test::failures();
 }

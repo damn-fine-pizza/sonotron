@@ -17,48 +17,54 @@ class ChordSequencer {
  public:
   // Fired chord during playback: resolved against the sequence key.
   // root_note anchors the voicing in octave 4 (C4=60 .. B4=71).
-  using FireFn = FunctionRef<void(std::uint8_t root_note, ChordQuality quality,
-                                  std::uint8_t degree, std::uint8_t velocity)>;
+  using FireFn = FunctionRef<void(std::uint8_t root_note, ChordQuality quality, std::uint8_t degree,
+                                  std::uint8_t velocity)>;
   using ReleaseFn = FunctionRef<void()>;
 
   // ---- pool ----------------------------------------------------------------
   int add_sequence(const Key& reference) noexcept {
     ChordSequence seq;
     seq.key = reference;
-    if (!pool_.push_back(seq)) return -1;
-    current_ = pool_.size() - 1;
-    return static_cast<int>(current_);
+    if (!m_pool.push_back(seq)) {
+      return -1;
+    }
+    m_current = m_pool.size() - 1;
+    return static_cast<int>(m_current);
   }
   bool use(std::size_t idx) noexcept {
-    if (idx >= pool_.size()) return false;
-    current_ = idx;
+    if (idx >= m_pool.size()) {
+      return false;
+    }
+    m_current = idx;
     return true;
   }
-  ChordSequence* current() noexcept {
-    return pool_.empty() ? nullptr : &pool_[current_];
-  }
+  ChordSequence* current() noexcept { return m_pool.empty() ? nullptr : &m_pool[m_current]; }
   const ChordSequence* current() const noexcept {
-    return pool_.empty() ? nullptr : &pool_[current_];
+    return m_pool.empty() ? nullptr : &m_pool[m_current];
   }
-  std::size_t count() const noexcept { return pool_.size(); }
+  std::size_t count() const noexcept { return m_pool.size(); }
 
   // ---- recording (D13: the recorded half) ----------------------------------
   bool start_record(Tick now) noexcept {
-    if (pool_.empty() || playing_) return false;
-    recording_ = true;
-    record_base_ = now;
+    if (m_pool.empty() || m_playing) {
+      return false;
+    }
+    m_recording = true;
+    m_record_base = now;
     current()->clear();
     return true;
   }
-  bool recording() const noexcept { return recording_; }
+  bool recording() const noexcept { return m_recording; }
 
   // Called for every live chord play while recording: closes the previous
   // step and opens a new one at the current stream tick.
   void capture(Tick now, std::int8_t degree, std::int8_t quality_ovr,
                std::uint8_t velocity) noexcept {
-    if (!recording_) return;
+    if (!m_recording) {
+      return;
+    }
     ChordSequence* seq = current();
-    const Tick rel = now - record_base_;
+    const Tick rel = now - m_record_base;
     if (ChordStep* prev = seq->last(); prev != nullptr && prev->duration == 0) {
       prev->duration = rel - prev->start;
     }
@@ -67,12 +73,16 @@ class ChordSequencer {
 
   // Stops recording; the open step is closed at `now`, then quantize-after.
   bool stop_record(Tick now, Tick grid = kTicksPerBar) noexcept {
-    if (!recording_) return false;
-    recording_ = false;
+    if (!m_recording) {
+      return false;
+    }
+    m_recording = false;
     ChordSequence* seq = current();
     if (ChordStep* prev = seq->last(); prev != nullptr && prev->duration == 0) {
-      prev->duration = now - record_base_ - prev->start;
-      if (prev->duration == 0) prev->duration = grid;
+      prev->duration = now - m_record_base - prev->start;
+      if (prev->duration == 0) {
+        prev->duration = grid;
+      }
     }
     seq->quantize(grid);
     return true;
@@ -80,58 +90,68 @@ class ChordSequencer {
 
   // ---- playback -------------------------------------------------------------
   bool play(Tick transport_tick) noexcept {
-    if (pool_.empty() || current()->count() == 0) return false;
-    playing_ = true;
-    base_ = transport_tick;
-    next_step_ = 0;
+    if (m_pool.empty() || current()->count() == 0) {
+      return false;
+    }
+    m_playing = true;
+    m_base = transport_tick;
+    m_next_step = 0;
     return true;
   }
   void stop_playback(ReleaseFn release) noexcept {
-    if (playing_) release();
-    playing_ = false;
+    if (m_playing) {
+      release();
+    }
+    m_playing = false;
   }
-  bool playing() const noexcept { return playing_; }
+  bool playing() const noexcept { return m_playing; }
 
   // Call once per transport tick while the transport runs (and once with the
   // start tick right after transport start).
   void on_tick(Tick transport_tick, FireFn fire, ReleaseFn release) {
-    if (!playing_ || transport_tick < base_) return;
+    if (!m_playing || transport_tick < m_base) {
+      return;
+    }
     ChordSequence* seq = current();
     const Tick len = seq->length();
-    Tick pos = transport_tick - base_;
+    Tick pos = transport_tick - m_base;
     if (pos >= len) {
       if (!seq->loop) {
-        if (pos == len) stop_playback(release);  // sequence over: silence
+        if (pos == len) {
+          stop_playback(release);  // sequence over: silence
+        }
         return;
       }
       pos %= len;
     }
-    if (next_step_ >= seq->count() || pos == 0) next_step_ = 0;
+    if (m_next_step >= seq->count() || pos == 0) {
+      m_next_step = 0;
+    }
     // Fire the step that starts exactly on this position.
     for (std::size_t i = 0; i < seq->count(); ++i) {
       const ChordStep& s = seq->step(i);
-      if (s.start != pos) continue;
+      if (s.start != pos) {
+        continue;
+      }
       const theory::Scale scale = theory::scale_of(seq->key.mode);
       const std::uint8_t root_pc = static_cast<std::uint8_t>(
           (seq->key.root_pc + scale.steps[static_cast<std::uint8_t>(s.degree)]) % 12);
-      const ChordQuality q =
-          s.quality_ovr >= 0
-              ? static_cast<ChordQuality>(s.quality_ovr)
-              : theory::smart_quality(seq->key.mode, s.degree);
-      fire(static_cast<std::uint8_t>(60 + root_pc), q,
-           static_cast<std::uint8_t>(s.degree), s.velocity);
+      const ChordQuality q = s.quality_ovr >= 0 ? static_cast<ChordQuality>(s.quality_ovr)
+                                                : theory::smart_quality(seq->key.mode, s.degree);
+      fire(static_cast<std::uint8_t>(60 + root_pc), q, static_cast<std::uint8_t>(s.degree),
+           s.velocity);
       break;
     }
   }
 
  private:
-  StaticVector<ChordSequence, kMaxChordSequences> pool_;
-  std::size_t current_ = 0;
-  bool recording_ = false;
-  bool playing_ = false;
-  Tick record_base_ = 0;
-  Tick base_ = 0;
-  std::size_t next_step_ = 0;
+  StaticVector<ChordSequence, kMaxChordSequences> m_pool;
+  std::size_t m_current = 0;
+  bool m_recording = false;
+  bool m_playing = false;
+  Tick m_record_base = 0;
+  Tick m_base = 0;
+  std::size_t m_next_step = 0;
 };
 
 }  // namespace arrangrr

@@ -16,7 +16,9 @@ using Msgs = StaticVector<MidiMessage, 64>;
 Msgs parse(std::initializer_list<std::uint8_t> bytes) {
   MidiParser p;
   Msgs out;
-  for (std::uint8_t b : bytes) p.feed(b, [&](const MidiMessage& m) { CHECK(out.push_back(m)); });
+  for (std::uint8_t b : bytes) {
+    p.feed(b, [&](const MidiMessage& m) { CHECK(out.push_back(m)); });
+  }
   return out;
 }
 
@@ -70,7 +72,7 @@ void test_scheduler_total_order() {
   CHECK(s.schedule(0, 10, MidiMessage::cc(0, 7, 100)));
   CHECK(s.schedule(0, 10, MidiMessage::note_off(0, 55)));
   CHECK(s.schedule(0, 10, MidiMessage::realtime(midi::kClock)));
-  CHECK(s.schedule(0, 5, MidiMessage::note_on(0, 40, 1)));  // earlier tick wins overall
+  CHECK(s.schedule(0, 5, MidiMessage::note_on(0, 40, 1)));     // earlier tick wins overall
   CHECK(s.schedule(0, 10, MidiMessage::note_on(0, 61, 100)));  // same class: seq order
 
   StaticVector<MidiMessage, 8> out;
@@ -97,8 +99,8 @@ void test_scheduler_due_only() {
 
 void test_router_filters_and_remap() {
   Router r;
-  CHECK(r.add(Route{.in_port = 0, .in_channel = 0, .out_port = 1, .out_channel = 4,
-                    .pass = route_pass::kNotes}));
+  CHECK(r.add(Route{
+      .in_port = 0, .in_channel = 0, .out_port = 1, .out_channel = 4, .pass = route_pass::kNotes}));
   int hits = 0;
   MidiMessage got{};
   std::uint8_t got_port = 0;
@@ -183,8 +185,9 @@ void test_scheduler_clear_and_refill() {
   s.pop_due(100, [&](const ScheduledEvent&) { ++fired; });
   CHECK(fired == 0);
   // Refill in reverse tick order to exercise deeper sift paths.
-  for (std::uint32_t t = 8; t > 0; --t)
+  for (std::uint32_t t = 8; t > 0; --t) {
     CHECK(s.schedule(0, t, MidiMessage::note_on(0, static_cast<std::uint8_t>(t), 1)));
+  }
   CHECK(!s.schedule(0, 9, MidiMessage::note_on(0, 9, 1)));  // full
   Tick last = 0;
   s.pop_due(100, [&](const ScheduledEvent& ev) {
@@ -258,10 +261,18 @@ void test_scheduler_heap_permutations() {
       const std::uint8_t kind = static_cast<std::uint8_t>(next() % 4);
       MidiMessage msg;
       switch (kind) {
-        case 0: msg = MidiMessage::realtime(midi::kClock); break;
-        case 1: msg = MidiMessage::note_off(0, 60); break;
-        case 2: msg = MidiMessage::cc(0, 7, 1); break;
-        default: msg = MidiMessage::note_on(0, 60, 1); break;
+        case 0:
+          msg = MidiMessage::realtime(midi::kClock);
+          break;
+        case 1:
+          msg = MidiMessage::note_off(0, 60);
+          break;
+        case 2:
+          msg = MidiMessage::cc(0, 7, 1);
+          break;
+        default:
+          msg = MidiMessage::note_on(0, 60, 1);
+          break;
       }
       CHECK(s.schedule(0, tick, msg));
     }
@@ -273,10 +284,9 @@ void test_scheduler_heap_permutations() {
     bool first = true;
     auto check_order = [&](const ScheduledEvent& ev) {
       if (!first) {
-        const bool ordered =
-            ev.tick > last_tick ||
-            (ev.tick == last_tick &&
-             (ev.cls > last_cls || (ev.cls == last_cls && ev.seq > last_seq)));
+        const bool ordered = ev.tick > last_tick ||
+                             (ev.tick == last_tick &&
+                              (ev.cls > last_cls || (ev.cls == last_cls && ev.seq > last_seq)));
         CHECK(ordered);
       }
       first = false;
@@ -311,7 +321,9 @@ void test_scheduler_interleaved_stress() {
     std::uint32_t last_seq = 0;
     bool first = true;
     s.pop_due(now, [&](const ScheduledEvent& ev) {
-      if (!first) CHECK(ev.tick > last || (ev.tick == last && ev.seq > last_seq));
+      if (!first) {
+        CHECK(ev.tick > last || (ev.tick == last && ev.seq > last_seq));
+      }
       first = false;
       last = ev.tick;
       last_seq = ev.seq;
@@ -323,9 +335,12 @@ void test_scheduler_interleaved_stress() {
 
 void test_router_realtime_and_system() {
   Router r;
-  CHECK(r.add(Route{.in_port = 0, .in_channel = -1, .out_port = 0, .out_channel = -1,
-                    .pass = static_cast<std::uint8_t>(route_pass::kRealtime |
-                                                      route_pass::kSystem)}));
+  CHECK(
+      r.add(Route{.in_port = 0,
+                  .in_channel = -1,
+                  .out_port = 0,
+                  .out_channel = -1,
+                  .pass = static_cast<std::uint8_t>(route_pass::kRealtime | route_pass::kSystem)}));
   int hits = 0;
   auto sink = [&](std::uint8_t, const MidiMessage&) { ++hits; };
   r.route(0, MidiMessage::realtime(midi::kClock), sink);
@@ -336,9 +351,12 @@ void test_router_realtime_and_system() {
   CHECK(hits == 2);
   // Pitch bend and program classes.
   Router r2;
-  CHECK(r2.add(Route{.in_port = 0, .in_channel = -1, .out_port = 0, .out_channel = -1,
-                     .pass = static_cast<std::uint8_t>(route_pass::kPitchBend |
-                                                       route_pass::kProgram)}));
+  CHECK(r2.add(
+      Route{.in_port = 0,
+            .in_channel = -1,
+            .out_port = 0,
+            .out_channel = -1,
+            .pass = static_cast<std::uint8_t>(route_pass::kPitchBend | route_pass::kProgram)}));
   hits = 0;
   r2.route(0, MidiMessage{0xE0, 0, 0x40}, sink);
   r2.route(0, MidiMessage{0xC0, 5, 0}, sink);
@@ -379,6 +397,8 @@ int main() {
   test_note_tracker_panic_with_sustain();
   test_note_tracker_high_notes_and_bounds();
   test_note_tracker_pedal_release_clears();
-  if (arrangrr::test::failures() == 0) std::printf("test_midi: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_midi: all OK\n");
+  }
   return arrangrr::test::failures();
 }

@@ -38,13 +38,13 @@ inline constexpr std::uint8_t kCcAllNotesOff = 123;
 constexpr bool is_status(std::uint8_t b) noexcept { return (b & 0x80u) != 0; }
 constexpr bool is_realtime(std::uint8_t b) noexcept { return b >= 0xF8u; }
 constexpr bool is_system(std::uint8_t b) noexcept { return (b & 0xF0u) == 0xF0u; }
-constexpr bool is_channel_voice(std::uint8_t b) noexcept {
-  return is_status(b) && !is_system(b);
-}
+constexpr bool is_channel_voice(std::uint8_t b) noexcept { return is_status(b) && !is_system(b); }
 
 // Number of data bytes for a status byte; -1 for variable (SysEx).
 constexpr int data_length(std::uint8_t status) noexcept {
-  if (is_realtime(status)) return 0;
+  if (is_realtime(status)) {
+    return 0;
+  }
   switch (status & 0xF0u) {
     case kNoteOff:
     case kNoteOn:

@@ -23,8 +23,12 @@ inline constexpr std::uint8_t kAll = 0xFF;
 }  // namespace route_pass
 
 constexpr std::uint8_t route_class_bit(const MidiMessage& msg) noexcept {
-  if (midi::is_realtime(msg.status)) return route_pass::kRealtime;
-  if (midi::is_system(msg.status)) return route_pass::kSystem;
+  if (midi::is_realtime(msg.status)) {
+    return route_pass::kRealtime;
+  }
+  if (midi::is_system(msg.status)) {
+    return route_pass::kSystem;
+  }
   switch (msg.type()) {
     case midi::kNoteOff:
     case midi::kNoteOn:
@@ -49,11 +53,11 @@ struct Route {
 class Router {
  public:
   [[nodiscard]] constexpr bool add(const Route& route) noexcept {
-    return routes_.push_back(route);
+    return m_routes.push_back(route);
   }
-  constexpr void clear() noexcept { routes_.clear(); }
-  constexpr std::size_t count() const noexcept { return routes_.size(); }
-  constexpr Span<const Route> routes() const noexcept { return routes_.span(); }
+  constexpr void clear() noexcept { m_routes.clear(); }
+  constexpr std::size_t count() const noexcept { return m_routes.size(); }
+  constexpr Span<const Route> routes() const noexcept { return m_routes.span(); }
 
   // Fans the message out to every matching route.
   // Sink signature: void(uint8_t out_port, const MidiMessage&).
@@ -61,10 +65,16 @@ class Router {
   constexpr void route(std::uint8_t in_port, const MidiMessage& msg, Sink&& sink) const {
     const std::uint8_t bit = route_class_bit(msg);
     const bool has_channel = midi::is_channel_voice(msg.status);
-    for (const Route& r : routes_) {
-      if (r.in_port != in_port) continue;
-      if ((r.pass & bit) == 0) continue;
-      if (has_channel && r.in_channel >= 0 && msg.channel() != r.in_channel) continue;
+    for (const Route& r : m_routes) {
+      if (r.in_port != in_port) {
+        continue;
+      }
+      if ((r.pass & bit) == 0) {
+        continue;
+      }
+      if (has_channel && r.in_channel >= 0 && msg.channel() != r.in_channel) {
+        continue;
+      }
       MidiMessage out = msg;
       if (has_channel && r.out_channel >= 0) {
         out.status = static_cast<std::uint8_t>((msg.status & 0xF0u) | (r.out_channel & 0x0Fu));
@@ -74,7 +84,7 @@ class Router {
   }
 
  private:
-  StaticVector<Route, kMaxRoutes> routes_;
+  StaticVector<Route, kMaxRoutes> m_routes;
 };
 
 }  // namespace arrangrr

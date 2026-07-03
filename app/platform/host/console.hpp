@@ -26,19 +26,19 @@ class LineEditor {
 
   Result feed(std::uint8_t byte);
 
-  const std::string& buffer() const { return buffer_; }
-  std::size_t cursor() const { return cursor_; }
+  const std::string& buffer() const { return m_buffer; }
+  std::size_t cursor() const { return m_cursor; }
 
  private:
   void history_load(std::size_t index);
 
-  std::string buffer_;
-  std::size_t cursor_ = 0;
-  std::vector<std::string> history_;
-  std::size_t history_pos_ = 0;  // == history_.size() when editing a fresh line
-  std::string stash_;            // fresh line saved while browsing history
-  enum class Esc { kNone, kEsc, kCsi } esc_ = Esc::kNone;
-  std::string csi_;
+  std::string m_buffer;
+  std::size_t m_cursor = 0;
+  std::vector<std::string> m_history;
+  std::size_t m_history_pos = 0;  // == history_.size() when editing a fresh line
+  std::string m_stash;            // fresh line saved while browsing history
+  enum class Esc { kNone, kEsc, kCsi } m_esc = Esc::kNone;
+  std::string m_csi;
 };
 
 // Terminal renderer. Layout (H rows): rows 1..H-2 scroll region (output
@@ -57,10 +57,10 @@ class Console {
   void refresh_geometry();
   void write_raw(const std::string& s);
 
-  bool active_ = false;
-  int rows_ = 24;
-  int cols_ = 80;
-  std::string status_;
+  bool m_active = false;
+  int m_rows = 24;
+  int m_cols = 80;
+  std::string m_status;
 };
 
 }  // namespace arrangrr::host

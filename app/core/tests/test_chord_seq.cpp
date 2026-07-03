@@ -62,8 +62,8 @@ struct SeqFixture {
   Engine e;
   Events ev;
 
-  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0,
-           Op op = Op::kDo, std::uint16_t idx = 0) {
+  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo,
+           std::uint16_t idx = 0) {
     Command command;
     command.op = op;
     command.param = p;
@@ -81,8 +81,11 @@ struct SeqFixture {
   }
   StaticVector<std::uint16_t, 32> chords() const {
     StaticVector<std::uint16_t, 32> out;
-    for (const OutEvent& o : ev)
-      if (o.kind == OutEvent::Kind::kChord) CHECK(out.push_back(o.code));
+    for (const OutEvent& o : ev) {
+      if (o.kind == OutEvent::Kind::kChord) {
+        CHECK(out.push_back(o.code));
+      }
+    }
     return out;
   }
   static std::uint8_t degree(std::uint16_t code) { return code & 0xFF; }
@@ -118,9 +121,15 @@ void test_no_loop_stops_and_releases() {
   // The voicing was released at the sequence end.
   int ons = 0, offs = 0;
   for (const OutEvent& o : f.ev) {
-    if (o.kind != OutEvent::Kind::kMidi) continue;
-    if (o.msg.type() == midi::kNoteOn) ++ons;
-    if (o.msg.type() == midi::kNoteOff) ++offs;
+    if (o.kind != OutEvent::Kind::kMidi) {
+      continue;
+    }
+    if (o.msg.type() == midi::kNoteOn) {
+      ++ons;
+    }
+    if (o.msg.type() == midi::kNoteOff) {
+      ++offs;
+    }
   }
   CHECK(ons == 4 && offs == 4);
 }
@@ -140,8 +149,11 @@ void test_transpose_to_g_replays_rederived() {
   f.advance(2 * kTicksPerBar);
   // Roots: Dm7(62..) G7 | Am7 D7 — check the note-on roots per chord event order.
   StaticVector<std::uint8_t, 16> roots;
-  for (const OutEvent& o : f.ev)
-    if (o.kind == OutEvent::Kind::kChord) CHECK(roots.push_back(o.msg.status));
+  for (const OutEvent& o : f.ev) {
+    if (o.kind == OutEvent::Kind::kChord) {
+      CHECK(roots.push_back(o.msg.status));
+    }
+  }
   CHECK(roots.size() == 4);
   CHECK(roots[0] == 62 && roots[1] == 67);  // C major: D, G
   CHECK(roots[2] == 69 && roots[3] == 62);  // G major: ii=A, V=D
@@ -170,14 +182,17 @@ void test_seq_more_engine_paths() {
   f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
   f.cmd(Param::kSeqNew);
   // Bad seq-add arguments.
-  f.cmd(Param::kSeqAdd, 60, (0) | (100 << 8), 0);        // zero duration
-  f.cmd(Param::kSeqAdd, -1, (0) | (100 << 8), 100);      // bad note
-  f.cmd(Param::kSeqAdd, 60, (0) | (0 << 8), 100);        // zero velocity
-  f.cmd(Param::kSeqAdd, 60, (99) | (100 << 8), 100);     // bogus quality
-  f.cmd(Param::kSeqDel, 5);                              // no such step
+  f.cmd(Param::kSeqAdd, 60, (0) | (100 << 8), 0);     // zero duration
+  f.cmd(Param::kSeqAdd, -1, (0) | (100 << 8), 100);   // bad note
+  f.cmd(Param::kSeqAdd, 60, (0) | (0 << 8), 100);     // zero velocity
+  f.cmd(Param::kSeqAdd, 60, (99) | (100 << 8), 100);  // bogus quality
+  f.cmd(Param::kSeqDel, 5);                           // no such step
   int warns = 0;
-  for (const OutEvent& o : f.ev)
-    if (o.kind == OutEvent::Kind::kWarn) ++warns;
+  for (const OutEvent& o : f.ev) {
+    if (o.kind == OutEvent::Kind::kWarn) {
+      ++warns;
+    }
+  }
   CHECK(warns == 5);
   f.ev.clear();
   // Transpose bad args.
@@ -189,8 +204,7 @@ void test_seq_more_engine_paths() {
   f.cmd(Param::kSeqLoop, 0, 0, 0, Op::kSet);
   f.cmd(Param::kSeqPlay);
   f.cmd(Param::kSeqRec);  // playing -> refused
-  CHECK(f.ev.size() == 1 &&
-        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
+  CHECK(f.ev.size() == 1 && f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
   f.ev.clear();
   f.cmd(Param::kSeqStop);  // stop playback
   CHECK(!f.e.sequences().playing());
@@ -207,8 +221,11 @@ void test_seq_more_engine_paths() {
   f.ev.clear();
   f.cmd(Param::kTransportStop);
   int offs = 0;
-  for (const OutEvent& o : f.ev)
-    if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == midi::kNoteOff) ++offs;
+  for (const OutEvent& o : f.ev) {
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == midi::kNoteOff) {
+      ++offs;
+    }
+  }
   CHECK(offs == 4);
 }
 
@@ -222,13 +239,13 @@ void test_seq_warns() {
   f.ev.clear();
   f.cmd(Param::kSeqNew);
   f.cmd(Param::kSeqAdd, 61, 0 | (100 << 8), kTicksPerBar);  // C# chromatic
-  CHECK(f.ev.size() == 1 &&
-        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kNotInKey));
+  CHECK(f.ev.size() == 1 && f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kNotInKey));
   f.ev.clear();
-  for (std::size_t i = 1; i < kMaxChordSequences; ++i) f.cmd(Param::kSeqNew);
+  for (std::size_t i = 1; i < kMaxChordSequences; ++i) {
+    f.cmd(Param::kSeqNew);
+  }
   f.cmd(Param::kSeqNew);
-  CHECK(f.ev.size() == 1 &&
-        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqTableFull));
+  CHECK(f.ev.size() == 1 && f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqTableFull));
   f.ev.clear();
   f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 99);
   CHECK(f.ev.size() == 1 && f.ev[0].kind == OutEvent::Kind::kWarn);
@@ -246,6 +263,8 @@ int main() {
   test_record_quantize_playback();
   test_seq_more_engine_paths();
   test_seq_warns();
-  if (arrangrr::test::failures() == 0) std::printf("test_chord_seq: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_chord_seq: all OK\n");
+  }
   return arrangrr::test::failures();
 }

@@ -57,7 +57,9 @@ int run_script(const char* path, bool human) {
       std::fprintf(stderr, "%s:%d: %s\n", path, line_no, error.c_str());
       return 1;
     }
-    if (shell.quit_requested()) break;
+    if (shell.quit_requested()) {
+      break;
+    }
   }
   return 0;
 }
@@ -94,7 +96,9 @@ int run_live(bool human, const char* init_path) {
 
   Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
-    if (ev.kind == OutEvent::Kind::kMidi) alsa.send(ev.port, ev.msg);
+    if (ev.kind == OutEvent::Kind::kMidi) {
+      alsa.send(ev.port, ev.msg);
+    }
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
     const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
     if (tui) {
@@ -106,7 +110,9 @@ int run_live(bool human, const char* init_path) {
   shell_ref = &shell;
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
-    if (!alsa.create_port(def, port_error)) std::fprintf(stderr, "%s\n", port_error.c_str());
+    if (!alsa.create_port(def, port_error)) {
+      std::fprintf(stderr, "%s\n", port_error.c_str());
+    }
   });
 
   // Default setup: one in, one out, wired thru — instantly useful.
@@ -167,7 +173,9 @@ int run_live(bool human, const char* init_path) {
     ++n;
     n += alsa.fill_poll_fds(&fds[n], 16 - n);
 
-    if (poll(fds, static_cast<nfds_t>(n), 100) < 0) break;
+    if (poll(fds, static_cast<nfds_t>(n), 100) < 0) {
+      break;
+    }
 
     // Clock: harvest elapsed time into whole ticks.
     if (fds[1].revents & POLLIN) {
@@ -206,7 +214,9 @@ int run_live(bool human, const char* init_path) {
           }
           if (r.line) {
             console.emit("> " + *r.line);
-            if (!shell.exec_line(*r.line, error)) console.emit("error: " + error);
+            if (!shell.exec_line(*r.line, error)) {
+              console.emit("error: " + error);
+            }
             if (shell.quit_requested()) {
               running = false;
               break;
@@ -220,8 +230,12 @@ int run_live(bool human, const char* init_path) {
         while ((nl = stdin_acc.find('\n')) != std::string::npos) {
           const std::string line = stdin_acc.substr(0, nl);
           stdin_acc.erase(0, nl + 1);
-          if (!shell.exec_line(line, error)) std::printf("error: %s\n", error.c_str());
-          if (shell.quit_requested()) break;
+          if (!shell.exec_line(line, error)) {
+            std::printf("error: %s\n", error.c_str());
+          }
+          if (shell.quit_requested()) {
+            break;
+          }
         }
         std::printf("arrangrr> ");
         std::fflush(stdout);
@@ -259,8 +273,7 @@ int main(int argc, char** argv) {
       human = std::strcmp(argv[++i], "human") == 0;
       events_set = true;
     } else if (std::strcmp(argv[i], "--help") == 0) {
-      std::printf(
-          "usage: arrangrr [--script FILE|-] [--init FILE] [--events jsonl|human]\n");
+      std::printf("usage: arrangrr [--script FILE|-] [--init FILE] [--events jsonl|human]\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -268,6 +281,8 @@ int main(int argc, char** argv) {
     }
   }
   // Script mode defaults to canonical JSONL (golden format); live to human.
-  if (script) return run_script(script, human);
+  if (script) {
+    return run_script(script, human);
+  }
   return run_live(events_set ? human : true, init);
 }

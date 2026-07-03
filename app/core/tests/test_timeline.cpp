@@ -10,8 +10,7 @@ using namespace arrangrr;
 
 using Events = StaticVector<OutEvent, 256>;
 
-Command track_new(std::uint8_t port, std::uint8_t channel,
-                  TrackRole role = TrackRole::kLead) {
+Command track_new(std::uint8_t port, std::uint8_t channel, TrackRole role = TrackRole::kLead) {
   Command c;
   c.param = Param::kTrackNew;
   c.a = static_cast<std::int32_t>(role);
@@ -19,8 +18,8 @@ Command track_new(std::uint8_t port, std::uint8_t channel,
   return c;
 }
 
-Command track_step(std::uint16_t track, std::int32_t step, std::uint8_t note,
-                   std::uint8_t vel, std::uint16_t gate) {
+Command track_step(std::uint16_t track, std::int32_t step, std::uint8_t note, std::uint8_t vel,
+                   std::uint16_t gate) {
   Command c;
   c.param = Param::kTrackStep;
   c.idx = track;
@@ -60,7 +59,9 @@ void test_timeline_model() {
 
 void test_timeline_pool_bounded() {
   Timeline tl;
-  for (std::size_t i = 0; i < kMaxTracks; ++i) CHECK(tl.add_track(TrackRole::kLead, 0, 0) >= 0);
+  for (std::size_t i = 0; i < kMaxTracks; ++i) {
+    CHECK(tl.add_track(TrackRole::kLead, 0, 0) >= 0);
+  }
   CHECK(tl.add_track(TrackRole::kLead, 0, 0) == -1);
 }
 
@@ -79,7 +80,9 @@ struct Player {
   int count(std::uint8_t type, std::uint8_t note) const {
     int n = 0;
     for (const OutEvent& o : ev) {
-      if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == type && o.msg.d1 == note) ++n;
+      if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == type && o.msg.d1 == note) {
+        ++n;
+      }
     }
     return n;
   }
@@ -150,24 +153,28 @@ void test_mute_and_solo() {
 
 void test_track_command_warns() {
   Player p;
-  p.cmd(track_new(9, 0));  // bad port
+  p.cmd(track_new(9, 0));   // bad port
   p.cmd(track_new(0, 16));  // bad channel
   Command bad_role = track_new(0, 0);
   bad_role.a = 99;
   p.cmd(bad_role);
-  p.cmd(track_step(7, 0, 60, 100, 120));                 // no such track
-  p.cmd(track_set(Param::kTrackLength, 7, 8));           // no such track
-  p.cmd(track_set(Param::kTrackMute, 7, 1));             // no such track
+  p.cmd(track_step(7, 0, 60, 100, 120));        // no such track
+  p.cmd(track_set(Param::kTrackLength, 7, 8));  // no such track
+  p.cmd(track_set(Param::kTrackMute, 7, 1));    // no such track
   int warns = 0;
-  for (const OutEvent& o : p.ev)
-    if (o.kind == OutEvent::Kind::kWarn) ++warns;
+  for (const OutEvent& o : p.ev) {
+    if (o.kind == OutEvent::Kind::kWarn) {
+      ++warns;
+    }
+  }
   CHECK(warns == 6);
   // Fill the pool -> kTrackTableFull.
-  for (std::size_t i = 0; i < kMaxTracks; ++i) p.cmd(track_new(0, 0));
+  for (std::size_t i = 0; i < kMaxTracks; ++i) {
+    p.cmd(track_new(0, 0));
+  }
   p.ev.clear();
   p.cmd(track_new(0, 0));
-  CHECK(p.ev.size() == 1 &&
-        p.ev[0].code == static_cast<std::uint16_t>(WarnCode::kTrackTableFull));
+  CHECK(p.ev.size() == 1 && p.ev[0].code == static_cast<std::uint16_t>(WarnCode::kTrackTableFull));
 }
 
 void test_clear_step_silences() {
@@ -192,6 +199,8 @@ int main() {
   test_mute_and_solo();
   test_track_command_warns();
   test_clear_step_silences();
-  if (arrangrr::test::failures() == 0) std::printf("test_timeline: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_timeline: all OK\n");
+  }
   return arrangrr::test::failures();
 }

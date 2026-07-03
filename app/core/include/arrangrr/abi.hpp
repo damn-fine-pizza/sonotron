@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "arrangrr/midi/message.hpp"
 #include "arrangrr/common/time.hpp"
+#include "arrangrr/midi/message.hpp"
 
 // Core binary ABI (D26): the core never parses JSON or strings. The host
 // resolves L1 string paths to these POD commands; the core emits POD events.
@@ -123,9 +123,9 @@ struct OutEvent {
     e.tick = t;
     return e;
   }
-  static constexpr OutEvent chord(std::uint8_t port, std::uint8_t degree,
-                                  std::uint8_t quality, std::uint8_t root_note,
-                                  std::uint8_t count, std::uint8_t vel, Tick t) noexcept {
+  static constexpr OutEvent chord(std::uint8_t port, std::uint8_t degree, std::uint8_t quality,
+                                  std::uint8_t root_note, std::uint8_t count, std::uint8_t vel,
+                                  Tick t) noexcept {
     OutEvent e;
     e.kind = Kind::kChord;
     e.port = port;

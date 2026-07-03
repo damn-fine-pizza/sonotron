@@ -14,8 +14,10 @@ namespace arrangrr {
 class NoteTracker {
  public:
   constexpr void observe(std::uint8_t port, const MidiMessage& msg) noexcept {
-    if (port >= kMaxPorts || !midi::is_channel_voice(msg.status)) return;
-    Channel& ch = state_[port][msg.channel()];
+    if (port >= kMaxPorts || !midi::is_channel_voice(msg.status)) {
+      return;
+    }
+    Channel& ch = m_state[port][msg.channel()];
     switch (msg.type()) {
       case midi::kNoteOn:
         set_bit(ch.on, msg.d1);
@@ -24,7 +26,9 @@ class NoteTracker {
         break;
       case midi::kNoteOff:
         if (ch.sustain) {
-          if (test_bit(ch.on, msg.d1)) set_bit(ch.sustained, msg.d1);
+          if (test_bit(ch.on, msg.d1)) {
+            set_bit(ch.sustained, msg.d1);
+          }
         }
         clear_bit(ch.on, msg.d1);
         ch.used = true;
@@ -52,8 +56,10 @@ class NoteTracker {
   constexpr void panic(Sink&& sink) {
     for (std::uint8_t port = 0; port < kMaxPorts; ++port) {
       for (std::uint8_t c = 0; c < 16; ++c) {
-        Channel& ch = state_[port][c];
-        if (!ch.used) continue;
+        Channel& ch = m_state[port][c];
+        if (!ch.used) {
+          continue;
+        }
         for (int word = 0; word < 2; ++word) {
           const std::uint64_t sounding = ch.on[word] | ch.sustained[word];
           for (int bit = 0; bit < 64; ++bit) {
@@ -71,8 +77,10 @@ class NoteTracker {
   }
 
   constexpr bool any_sounding(std::uint8_t port, std::uint8_t channel) const noexcept {
-    if (port >= kMaxPorts || channel >= 16) return false;
-    const Channel& ch = state_[port][channel];
+    if (port >= kMaxPorts || channel >= 16) {
+      return false;
+    }
+    const Channel& ch = m_state[port][channel];
     return (ch.on[0] | ch.on[1] | ch.sustained[0] | ch.sustained[1]) != 0;
   }
 
@@ -94,7 +102,7 @@ class NoteTracker {
     return (bits[note >> 6] & (1ull << (note & 63u))) != 0;
   }
 
-  Channel state_[kMaxPorts][16]{};
+  Channel m_state[kMaxPorts][16]{};
 };
 
 }  // namespace arrangrr

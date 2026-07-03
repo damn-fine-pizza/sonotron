@@ -13,8 +13,8 @@
 namespace arrangrr {
 
 enum class Mode : std::uint8_t {
-  kMajor = 0,       // ionian
-  kMinor = 1,       // aeolian
+  kMajor = 0,  // ionian
+  kMinor = 1,  // aeolian
   kDorian = 2,
   kPhrygian = 3,
   kLydian = 4,
@@ -81,7 +81,9 @@ constexpr int degree_of(const Key& key, std::uint8_t pc) noexcept {
   const Scale s = scale_of(key.mode);
   const std::uint8_t rel = static_cast<std::uint8_t>((pc + 12 - key.root_pc) % 12);
   for (int i = 0; i < 7; ++i) {
-    if (s.steps[i] == rel) return i;
+    if (s.steps[i] == rel) {
+      return i;
+    }
   }
   return -1;
 }
@@ -89,17 +91,28 @@ constexpr int degree_of(const Key& key, std::uint8_t pc) noexcept {
 // Chord tones for an explicit quality.
 constexpr ChordShape shape_of(ChordQuality q) noexcept {
   switch (q) {
-    case ChordQuality::kMaj:      return {3, {0, 4, 7, 0}};
-    case ChordQuality::kMin:      return {3, {0, 3, 7, 0}};
-    case ChordQuality::kDim:      return {3, {0, 3, 6, 0}};
-    case ChordQuality::kAug:      return {3, {0, 4, 8, 0}};
-    case ChordQuality::kMaj7:     return {4, {0, 4, 7, 11}};
-    case ChordQuality::kMin7:     return {4, {0, 3, 7, 10}};
-    case ChordQuality::kDom7:     return {4, {0, 4, 7, 10}};
-    case ChordQuality::kHalfDim7: return {4, {0, 3, 6, 10}};
-    case ChordQuality::kDim7:     return {4, {0, 3, 6, 9}};
-    case ChordQuality::kSus2:     return {3, {0, 2, 7, 0}};
-    case ChordQuality::kSus4:     return {3, {0, 5, 7, 0}};
+    case ChordQuality::kMaj:
+      return {3, {0, 4, 7, 0}};
+    case ChordQuality::kMin:
+      return {3, {0, 3, 7, 0}};
+    case ChordQuality::kDim:
+      return {3, {0, 3, 6, 0}};
+    case ChordQuality::kAug:
+      return {3, {0, 4, 8, 0}};
+    case ChordQuality::kMaj7:
+      return {4, {0, 4, 7, 11}};
+    case ChordQuality::kMin7:
+      return {4, {0, 3, 7, 10}};
+    case ChordQuality::kDom7:
+      return {4, {0, 4, 7, 10}};
+    case ChordQuality::kHalfDim7:
+      return {4, {0, 3, 6, 10}};
+    case ChordQuality::kDim7:
+      return {4, {0, 3, 6, 9}};
+    case ChordQuality::kSus2:
+      return {3, {0, 2, 7, 0}};
+    case ChordQuality::kSus4:
+      return {3, {0, 5, 7, 0}};
   }
   return {};
 }
@@ -117,14 +130,28 @@ constexpr ChordQuality smart_quality(Mode mode, int degree) noexcept {
   const std::uint8_t seventh = static_cast<std::uint8_t>((tone(degree + 6) + 12 - root) % 12);
 
   // Harmonic-minor exception: V of the minor mode becomes dominant.
-  if (mode == Mode::kMinor && degree == 4) return ChordQuality::kDom7;
+  if (mode == Mode::kMinor && degree == 4) {
+    return ChordQuality::kDom7;
+  }
 
-  if (third == 4 && fifth == 7 && seventh == 11) return ChordQuality::kMaj7;
-  if (third == 3 && fifth == 7 && seventh == 10) return ChordQuality::kMin7;
-  if (third == 4 && fifth == 7 && seventh == 10) return ChordQuality::kDom7;
-  if (third == 3 && fifth == 6 && seventh == 10) return ChordQuality::kHalfDim7;
-  if (third == 3 && fifth == 6 && seventh == 9) return ChordQuality::kDim7;
-  if (third == 4 && fifth == 8) return ChordQuality::kAug;
+  if (third == 4 && fifth == 7 && seventh == 11) {
+    return ChordQuality::kMaj7;
+  }
+  if (third == 3 && fifth == 7 && seventh == 10) {
+    return ChordQuality::kMin7;
+  }
+  if (third == 4 && fifth == 7 && seventh == 10) {
+    return ChordQuality::kDom7;
+  }
+  if (third == 3 && fifth == 6 && seventh == 10) {
+    return ChordQuality::kHalfDim7;
+  }
+  if (third == 3 && fifth == 6 && seventh == 9) {
+    return ChordQuality::kDim7;
+  }
+  if (third == 4 && fifth == 8) {
+    return ChordQuality::kAug;
+  }
   return third == 3 ? ChordQuality::kMin7 : ChordQuality::kMaj7;
 }
 
@@ -137,38 +164,78 @@ constexpr ChordQuality complete_shell(const std::uint8_t (&iv)[3], std::uint8_t 
   bool min7 = false, maj7 = false, sus4 = false, sus2 = false;
   for (std::uint8_t i = 0; i < n; ++i) {
     switch (iv[i]) {
-      case 4: maj3 = true; break;
-      case 3: min3 = true; break;
-      case 6: dim5 = true; break;
-      case 8: aug5 = true; break;
-      case 10: min7 = true; break;
-      case 11: maj7 = true; break;
-      case 5: sus4 = true; break;
-      case 2: sus2 = true; break;
-      default: break;  // perfect fifth (7) adds no color
+      case 4:
+        maj3 = true;
+        break;
+      case 3:
+        min3 = true;
+        break;
+      case 6:
+        dim5 = true;
+        break;
+      case 8:
+        aug5 = true;
+        break;
+      case 10:
+        min7 = true;
+        break;
+      case 11:
+        maj7 = true;
+        break;
+      case 5:
+        sus4 = true;
+        break;
+      case 2:
+        sus2 = true;
+        break;
+      default:
+        break;  // perfect fifth (7) adds no color
     }
   }
-  if (min3 && dim5) return min7 ? ChordQuality::kHalfDim7 : ChordQuality::kDim;
-  if (maj3 && aug5) return ChordQuality::kAug;
-  if (min7) return min3 ? ChordQuality::kMin7 : ChordQuality::kDom7;
-  if (maj7) return ChordQuality::kMaj7;  // maj or min third: closest is maj7
-  if (min3) return ChordQuality::kMin;
-  if (maj3) return ChordQuality::kMaj;
-  if (sus4) return ChordQuality::kSus4;
-  if (sus2) return ChordQuality::kSus2;
+  if (min3 && dim5) {
+    return min7 ? ChordQuality::kHalfDim7 : ChordQuality::kDim;
+  }
+  if (maj3 && aug5) {
+    return ChordQuality::kAug;
+  }
+  if (min7) {
+    return min3 ? ChordQuality::kMin7 : ChordQuality::kDom7;
+  }
+  if (maj7) {
+    return ChordQuality::kMaj7;  // maj or min third: closest is maj7
+  }
+  if (min3) {
+    return ChordQuality::kMin;
+  }
+  if (maj3) {
+    return ChordQuality::kMaj;
+  }
+  if (sus4) {
+    return ChordQuality::kSus4;
+  }
+  if (sus2) {
+    return ChordQuality::kSus2;
+  }
   return ChordQuality::kMaj;  // bare root / bare fifth: major
 }
 
 // dim7 needs the diminished seventh (9), folded in here to keep the tree flat.
-constexpr ChordQuality complete_shell_full(const std::uint8_t (&iv)[3],
-                                           std::uint8_t n) noexcept {
+constexpr ChordQuality complete_shell_full(const std::uint8_t (&iv)[3], std::uint8_t n) noexcept {
   bool min3 = false, dim5 = false, bb7 = false;
   for (std::uint8_t i = 0; i < n; ++i) {
-    if (iv[i] == 3) min3 = true;
-    if (iv[i] == 6) dim5 = true;
-    if (iv[i] == 9) bb7 = true;
+    if (iv[i] == 3) {
+      min3 = true;
+    }
+    if (iv[i] == 6) {
+      dim5 = true;
+    }
+    if (iv[i] == 9) {
+      bb7 = true;
+    }
   }
-  if (min3 && dim5 && bb7) return ChordQuality::kDim7;
+  if (min3 && dim5 && bb7) {
+    return ChordQuality::kDim7;
+  }
   return complete_shell(iv, n);
 }
 

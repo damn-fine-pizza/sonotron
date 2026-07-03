@@ -34,22 +34,24 @@ class Engine {
   // template bloat in flash; the callable is owned by the caller.
   using EventSink = FunctionRef<void(const OutEvent&)>;
 
-  constexpr Tick now() const noexcept { return now_; }
-  constexpr const Transport& transport() const noexcept { return transport_; }
-  const Timeline& timeline() const noexcept { return timeline_; }
-  const ChordEngine& chords() const noexcept { return chords_; }
-  const ChordSequencer& sequences() const noexcept { return seq_; }
-  const Arranger& arranger() const noexcept { return arranger_; }
+  constexpr Tick now() const noexcept { return m_now; }
+  constexpr const Transport& transport() const noexcept { return m_transport; }
+  const Timeline& timeline() const noexcept { return m_timeline; }
+  const ChordEngine& chords() const noexcept { return m_chords; }
+  const ChordSequencer& sequences() const noexcept { return m_seq; }
+  const Arranger& arranger() const noexcept { return m_arranger; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
   // end of the batch.
   void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
-    if (port >= kMaxPorts) return;
+    if (port >= kMaxPorts) {
+      return;
+    }
     for (std::uint8_t byte : bytes) {
-      parsers_[port].feed(byte, [&](const MidiMessage& msg) {
-        router_.route(port, msg, [&](std::uint8_t out_port, const MidiMessage& routed) {
-          schedule_or_warn(out_port, now_, routed, sink);
+      m_parsers[port].feed(byte, [&](const MidiMessage& msg) {
+        m_router.route(port, msg, [&](std::uint8_t out_port, const MidiMessage& routed) {
+          schedule_or_warn(out_port, m_now, routed, sink);
         });
       });
     }
@@ -60,42 +62,45 @@ class Engine {
   void push_command(const Command& cmd, EventSink sink) {
     switch (cmd.param) {
       case Param::kTransportTempo:
-        if (!transport_.set_bpm(static_cast<BpmX100>(cmd.a)))
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        if (!m_transport.set_bpm(static_cast<BpmX100>(cmd.a))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        }
         break;
       case Param::kTransportStart:
-        transport_.start();
+        m_transport.start();
         emit_realtime(midi::kStart, sink);
         // MIDI convention: the first F8 follows FA immediately — the slave's
         // beat zero is this clock, not one period later.
         emit_realtime(midi::kClock, sink);
-        if (seq_.playing()) (void)seq_.play(0);  // rebase to the new tick 0
-        arranger_.on_transport_start();
+        if (m_seq.playing()) {
+          (void)m_seq.play(0);  // rebase to the new tick 0
+        }
+        m_arranger.on_transport_start();
         fire_timeline(0, sink);  // grid step 0 plays on start, like the F8
         fire_chord_seq(0, sink);
         fire_arranger(0, sink);
         flush(sink);
-        sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
+        sink(OutEvent::transport(static_cast<std::uint16_t>(m_transport.state()), m_now));
         break;
       case Param::kTransportStop:
-        transport_.stop();
-        if (seq_.playing()) {
-          chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
-            schedule_or_warn(port, now_, msg, sink);
+        m_transport.stop();
+        if (m_seq.playing()) {
+          m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+            schedule_or_warn(port, m_now, msg, sink);
           });
           flush(sink);
         }
         emit_realtime(midi::kStop, sink);
-        sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
+        sink(OutEvent::transport(static_cast<std::uint16_t>(m_transport.state()), m_now));
         break;
       case Param::kTransportContinue:
-        transport_.resume();
+        m_transport.resume();
         emit_realtime(midi::kContinue, sink);
-        sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
+        sink(OutEvent::transport(static_cast<std::uint16_t>(m_transport.state()), m_now));
         break;
       case Param::kPanic:
-        tracker_.panic([&](std::uint8_t port, const MidiMessage& msg) {
-          schedule_or_warn(port, now_, msg, sink);
+        m_tracker.panic([&](std::uint8_t port, const MidiMessage& msg) {
+          schedule_or_warn(port, m_now, msg, sink);
         });
         flush(sink);
         break;
@@ -108,101 +113,103 @@ class Engine {
             .pass = static_cast<std::uint8_t>(cmd.c & 0xFF),
         };
         if (route.in_port >= kMaxPorts || route.out_port >= kMaxPorts) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
-        } else if (!router_.add(route)) {
-          sink(OutEvent::warn(WarnCode::kRouteTableFull, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        } else if (!m_router.add(route)) {
+          sink(OutEvent::warn(WarnCode::kRouteTableFull, m_now));
         }
         break;
       }
       case Param::kRouteClear:
-        router_.clear();
+        m_router.clear();
         break;
       case Param::kClockOutMask:
-        clock_out_mask_ = static_cast<std::uint8_t>(cmd.a & 0xFF);
+        m_clock_out_mask = static_cast<std::uint8_t>(cmd.a & 0xFF);
         break;
       case Param::kSeqNew:
-        if (seq_.add_sequence(chords_.key()) < 0) {
-          sink(OutEvent::warn(WarnCode::kSeqTableFull, now_));
+        if (m_seq.add_sequence(m_chords.key()) < 0) {
+          sink(OutEvent::warn(WarnCode::kSeqTableFull, m_now));
         }
         break;
       case Param::kSeqUse:
-        if (!seq_.use(cmd.idx)) sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        if (!m_seq.use(cmd.idx)) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        }
         break;
       case Param::kSeqRec:
-        if (!seq_.start_record(now_)) sink(OutEvent::warn(WarnCode::kSeqEmpty, now_));
+        if (!m_seq.start_record(m_now)) {
+          sink(OutEvent::warn(WarnCode::kSeqEmpty, m_now));
+        }
         break;
       case Param::kSeqStop:
-        if (seq_.recording()) {
-          (void)seq_.stop_record(now_, cmd.a > 0 ? static_cast<Tick>(cmd.a) : kTicksPerBar);
+        if (m_seq.recording()) {
+          (void)m_seq.stop_record(m_now, cmd.a > 0 ? static_cast<Tick>(cmd.a) : kTicksPerBar);
         } else {
-          seq_.stop_playback([&] {
-            chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
-              schedule_or_warn(port, now_, msg, sink);
+          m_seq.stop_playback([&] {
+            m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+              schedule_or_warn(port, m_now, msg, sink);
             });
           });
           flush(sink);
         }
         break;
       case Param::kSeqAdd: {
-        ChordSequence* seq = seq_.current();
+        ChordSequence* seq = m_seq.current();
         const auto note = static_cast<std::uint8_t>(cmd.a & 0x7F);
         const std::int8_t quality_ovr = static_cast<std::int8_t>((cmd.b & 0xFF) - 1);
         const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0x7F);
         if (seq == nullptr || cmd.a < 0 || cmd.a > 127 || cmd.c <= 0 || vel == 0 ||
             quality_ovr >= static_cast<std::int8_t>(kQualityCount)) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
           break;
         }
-        const int degree =
-            theory::degree_of(seq->key, static_cast<std::uint8_t>(note % 12));
+        const int degree = theory::degree_of(seq->key, static_cast<std::uint8_t>(note % 12));
         if (degree < 0) {
-          sink(OutEvent::warn(WarnCode::kNotInKey, now_));
+          sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
         } else if (!seq->append(static_cast<std::int8_t>(degree), quality_ovr, vel,
                                 static_cast<Tick>(cmd.c))) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       }
       case Param::kSeqLoop:
-        if (ChordSequence* seq = seq_.current(); seq != nullptr) {
+        if (ChordSequence* seq = m_seq.current(); seq != nullptr) {
           seq->loop = cmd.a != 0;
         } else {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       case Param::kSeqPlay:
-        if (!seq_.play(transport_.tick())) {
-          sink(OutEvent::warn(WarnCode::kSeqEmpty, now_));
-        } else if (transport_.playing()) {
-          fire_chord_seq(transport_.tick(), sink);
+        if (!m_seq.play(m_transport.tick())) {
+          sink(OutEvent::warn(WarnCode::kSeqEmpty, m_now));
+        } else if (m_transport.playing()) {
+          fire_chord_seq(m_transport.tick(), sink);
           flush(sink);
         }
         break;
       case Param::kSeqTranspose:
-        if (ChordSequence* seq = seq_.current(); seq == nullptr) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        if (ChordSequence* seq = m_seq.current(); seq == nullptr) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         } else if (cmd.a >= 0) {
           if (cmd.a > 11 || cmd.b >= kModeCount) {
-            sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+            sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
           } else {
-            seq->transpose_to(static_cast<std::uint8_t>(cmd.a),
-                              static_cast<std::int8_t>(cmd.b));
+            seq->transpose_to(static_cast<std::uint8_t>(cmd.a), static_cast<std::int8_t>(cmd.b));
           }
         } else {
           seq->transpose_by(static_cast<std::int8_t>(cmd.c));
         }
         break;
       case Param::kSeqDel:
-        if (ChordSequence* seq = seq_.current();
+        if (ChordSequence* seq = m_seq.current();
             seq == nullptr || !seq->remove(static_cast<std::size_t>(cmd.a))) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       case Param::kSeqClear:
-        if (ChordSequence* seq = seq_.current(); seq != nullptr) {
+        if (ChordSequence* seq = m_seq.current(); seq != nullptr) {
           seq->clear();
         } else {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       case Param::kTrackNew: {
@@ -210,72 +217,72 @@ class Engine {
         const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
         if (port >= kMaxPorts || channel > 15 ||
             cmd.a > static_cast<std::int32_t>(TrackRole::kCc)) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
-        } else if (timeline_.add_track(static_cast<TrackRole>(cmd.a), port, channel) < 0) {
-          sink(OutEvent::warn(WarnCode::kTrackTableFull, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        } else if (m_timeline.add_track(static_cast<TrackRole>(cmd.a), port, channel) < 0) {
+          sink(OutEvent::warn(WarnCode::kTrackTableFull, m_now));
         }
         break;
       }
       case Param::kTrackStep: {
         const auto note = static_cast<std::uint8_t>(cmd.b & 0xFF);
         const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
-        if (!timeline_.set_step(cmd.idx, static_cast<std::size_t>(cmd.a), note, vel,
-                                static_cast<std::uint16_t>(cmd.c))) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        if (!m_timeline.set_step(cmd.idx, static_cast<std::size_t>(cmd.a), note, vel,
+                                 static_cast<std::uint16_t>(cmd.c))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       }
       case Param::kTrackLength:
-        if (!timeline_.set_length(cmd.idx, static_cast<std::size_t>(cmd.a))) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        if (!m_timeline.set_length(cmd.idx, static_cast<std::size_t>(cmd.a))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       case Param::kKeySet:
         if (cmd.a < 0 || cmd.a > 11 || cmd.b < 0 || cmd.b >= kModeCount) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         } else {
-          chords_.set_key(Key{static_cast<std::uint8_t>(cmd.a), static_cast<Mode>(cmd.b)});
+          m_chords.set_key(Key{static_cast<std::uint8_t>(cmd.a), static_cast<Mode>(cmd.b)});
         }
         break;
       case Param::kChordOut: {
         const auto port = static_cast<std::uint8_t>(cmd.a & 0xFF);
         const auto channel = static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF);
         if (port >= kMaxPorts || channel > 15) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         } else {
-          chords_.set_output(port, channel);
+          m_chords.set_output(port, channel);
         }
         break;
       }
       case Param::kChordHold:
-        chords_.set_hold(cmd.a != 0);
+        m_chords.set_hold(cmd.a != 0);
         break;
       case Param::kChordMode:
         if (cmd.a < 0 || cmd.a >= kChordModeCount) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         } else {
-          chords_.set_mode(static_cast<ChordMode>(cmd.a));
+          m_chords.set_mode(static_cast<ChordMode>(cmd.a));
         }
         break;
       case Param::kStyleLoad:
-        if (cmd.a < 0 || !arranger_.load(static_cast<std::uint8_t>(cmd.a))) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        if (cmd.a < 0 || !m_arranger.load(static_cast<std::uint8_t>(cmd.a))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       case Param::kStyleSection:
         if (cmd.a < 0 || cmd.a >= kSectionTypeCount ||
-            !arranger_.request(static_cast<SectionType>(cmd.a), !transport_.playing())) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
-        } else if (!transport_.playing()) {
-          sink(OutEvent::section(static_cast<std::uint16_t>(arranger_.current()), now_));
+            !m_arranger.request(static_cast<SectionType>(cmd.a), !m_transport.playing())) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        } else if (!m_transport.playing()) {
+          sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
         }
         break;
       case Param::kStyleRoute: {
         const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
         const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
         if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) ||
-            !arranger_.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+            !m_arranger.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         }
         break;
       }
@@ -286,7 +293,9 @@ class Engine {
         std::uint8_t note_count = 0;
         for (int i = 0; i < 4; ++i) {
           const auto n = static_cast<std::uint8_t>((cmd.a >> (8 * i)) & 0xFF);
-          if (n == 0) break;
+          if (n == 0) {
+            break;
+          }
           if (n > 127) {
             note_count = 0;
             break;
@@ -294,66 +303,64 @@ class Engine {
           notes[note_count++] = n;
         }
         if (note_count == 0 || vel == 0 || vel > 127 || cmd.b >= kQualityCount) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
           break;
         }
         const auto schedule = [&](std::uint8_t port, const MidiMessage& msg) {
-          schedule_or_warn(port, now_, msg, sink);
+          schedule_or_warn(port, m_now, msg, sink);
         };
         ChordResult r;
-        switch (chords_.mode()) {
+        switch (m_chords.mode()) {
           case ChordMode::kSingle:
-            r = chords_.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel,
-                                    schedule);
+            r = m_chords.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule);
             break;
           case ChordMode::kShell:
-            r = chords_.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b),
-                                   vel, schedule);
+            r = m_chords.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b), vel,
+                                    schedule);
             break;
           case ChordMode::kDiatonic:
           default:
-            r = chords_.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule);
+            r = m_chords.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule);
             break;
         }
         if (r.degree < 0) {
-          sink(OutEvent::warn(WarnCode::kNotInKey, now_));
+          sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
           break;
         }
         // Recording captures only diatonic degrees (D28 functional storage);
         // keyless modes record when the root happens to fit the seq key.
-        if (seq_.recording()) {
-          const int deg =
-              r.degree == static_cast<std::int8_t>(kNoDegree)
-                  ? theory::degree_of(seq_.current()->key,
-                                      static_cast<std::uint8_t>(r.root_note % 12))
-                  : r.degree;
+        if (m_seq.recording()) {
+          const int deg = r.degree == static_cast<std::int8_t>(kNoDegree)
+                              ? theory::degree_of(m_seq.current()->key,
+                                                  static_cast<std::uint8_t>(r.root_note % 12))
+                              : r.degree;
           if (deg >= 0) {
             const std::int8_t ovr =
                 r.degree == static_cast<std::int8_t>(kNoDegree)
                     ? static_cast<std::int8_t>(r.quality)  // pin the resolved quality
                     : static_cast<std::int8_t>(cmd.b);
-            seq_.capture(now_, static_cast<std::int8_t>(deg), ovr, vel);
+            m_seq.capture(m_now, static_cast<std::int8_t>(deg), ovr, vel);
           } else {
-            sink(OutEvent::warn(WarnCode::kNotInKey, now_));
+            sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
           }
         }
-        sink(OutEvent::chord(chords_.out_port(), static_cast<std::uint8_t>(r.degree),
-                             static_cast<std::uint8_t>(r.quality), r.root_note,
-                             r.shape.count, vel, now_));
+        sink(OutEvent::chord(m_chords.out_port(), static_cast<std::uint8_t>(r.degree),
+                             static_cast<std::uint8_t>(r.quality), r.root_note, r.shape.count, vel,
+                             m_now));
         flush(sink);
         break;
       }
       case Param::kChordStop:
-        chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
-          schedule_or_warn(port, now_, msg, sink);
+        m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+          schedule_or_warn(port, m_now, msg, sink);
         });
         flush(sink);
         break;
       case Param::kTrackMute:
       case Param::kTrackSolo: {
-        Track* t = timeline_.track(cmd.idx);
+        Track* t = m_timeline.track(cmd.idx);
         if (t == nullptr) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
         } else if (cmd.param == Param::kTrackMute) {
           t->mute = cmd.a != 0;
         } else {
@@ -362,7 +369,7 @@ class Engine {
         break;
       }
       default:
-        sink(OutEvent::warn(WarnCode::kUnknownCommand, now_));
+        sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
         break;
     }
   }
@@ -377,19 +384,19 @@ class Engine {
   // Advances stream time by `n` ticks, firing due events in D29 total order.
   void advance_ticks(std::uint32_t n, EventSink sink) {
     for (std::uint32_t i = 0; i < n; ++i) {
-      ++now_;
-      if (transport_.playing()) {
-        transport_.advance_one();
-        if (clock_out_mask_ != 0 && Transport::is_midi_clock_tick(transport_.tick())) {
+      ++m_now;
+      if (m_transport.playing()) {
+        m_transport.advance_one();
+        if (m_clock_out_mask != 0 && Transport::is_midi_clock_tick(m_transport.tick())) {
           for (std::uint8_t p = 0; p < kMaxPorts; ++p) {
-            if (clock_out_mask_ & (1u << p)) {
-              schedule_or_warn(p, now_, MidiMessage::realtime(midi::kClock), sink);
+            if (m_clock_out_mask & (1u << p)) {
+              schedule_or_warn(p, m_now, MidiMessage::realtime(midi::kClock), sink);
             }
           }
         }
-        fire_timeline(transport_.tick(), sink);
-        fire_chord_seq(transport_.tick(), sink);
-        fire_arranger(transport_.tick(), sink);
+        fire_timeline(m_transport.tick(), sink);
+        fire_chord_seq(m_transport.tick(), sink);
+        fire_arranger(m_transport.tick(), sink);
       }
       flush(sink);
     }
@@ -397,87 +404,84 @@ class Engine {
 
  private:
   void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
-    if (!scheduler_.schedule(port, tick, msg)) {
-      sink(OutEvent::warn(WarnCode::kSchedulerFull, now_));
+    if (!m_scheduler.schedule(port, tick, msg)) {
+      sink(OutEvent::warn(WarnCode::kSchedulerFull, m_now));
     }
   }
 
   // Transport realtime bytes (FA/FB/FC) go out immediately on clock ports.
   void emit_realtime(std::uint8_t status, EventSink sink) {
     for (std::uint8_t p = 0; p < kMaxPorts; ++p) {
-      if (clock_out_mask_ & (1u << p)) {
-        schedule_or_warn(p, now_, MidiMessage::realtime(status), sink);
+      if (m_clock_out_mask & (1u << p)) {
+        schedule_or_warn(p, m_now, MidiMessage::realtime(status), sink);
       }
     }
     flush(sink);
   }
 
   void fire_timeline(Tick transport_tick, EventSink sink) {
-    timeline_.on_tick(transport_tick,
-                      [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
-                        schedule_or_warn(port, now_ + static_cast<Tick>(delay), msg, sink);
-                      });
+    m_timeline.on_tick(transport_tick,
+                       [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
+                         schedule_or_warn(port, m_now + static_cast<Tick>(delay), msg, sink);
+                       });
   }
 
   void fire_chord_seq(Tick transport_tick, EventSink sink) {
-    seq_.on_tick(
+    m_seq.on_tick(
         transport_tick,
-        [&](std::uint8_t root_note, ChordQuality quality, std::uint8_t degree,
-            std::uint8_t vel) {
-          chords_.sound(root_note, quality, vel,
-                        [&](std::uint8_t port, const MidiMessage& msg) {
-                          schedule_or_warn(port, now_, msg, sink);
-                        });
-          sink(OutEvent::chord(chords_.out_port(), degree,
-                               static_cast<std::uint8_t>(quality), root_note,
-                               theory::shape_of(quality).count, vel, now_));
+        [&](std::uint8_t root_note, ChordQuality quality, std::uint8_t degree, std::uint8_t vel) {
+          m_chords.sound(root_note, quality, vel, [&](std::uint8_t port, const MidiMessage& msg) {
+            schedule_or_warn(port, m_now, msg, sink);
+          });
+          sink(OutEvent::chord(m_chords.out_port(), degree, static_cast<std::uint8_t>(quality),
+                               root_note, theory::shape_of(quality).count, vel, m_now));
         },
         [&] {
-          chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
-            schedule_or_warn(port, now_, msg, sink);
+          m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+            schedule_or_warn(port, m_now, msg, sink);
           });
         });
   }
 
   void fire_arranger(Tick transport_tick, EventSink sink) {
-    const Arranger::TickResult r = arranger_.on_tick(
-        transport_tick, chords_.state(),
-        [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
-          schedule_or_warn(port, now_ + static_cast<Tick>(delay), msg, sink);
-        });
+    const Arranger::TickResult r =
+        m_arranger.on_tick(transport_tick, m_chords.state(),
+                           [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
+                             schedule_or_warn(port, m_now + static_cast<Tick>(delay), msg, sink);
+                           });
     if (r.section_changed) {
-      sink(OutEvent::section(static_cast<std::uint16_t>(r.section), now_));
+      sink(OutEvent::section(static_cast<std::uint16_t>(r.section), m_now));
     }
     if (r.stop_transport) {
-      transport_.stop();
-      if (seq_.playing()) {
-        chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
-          schedule_or_warn(port, now_, msg, sink);
+      m_transport.stop();
+      if (m_seq.playing()) {
+        m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+          schedule_or_warn(port, m_now, msg, sink);
         });
       }
       emit_realtime(midi::kStop, sink);
-      sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
+      sink(OutEvent::transport(static_cast<std::uint16_t>(m_transport.state()), m_now));
     }
   }
 
   void flush(EventSink sink) {
-    scheduler_.pop_due(now_, [&](const ScheduledEvent& ev) {
-      tracker_.observe(ev.port, ev.msg);
+    m_scheduler.pop_due(m_now, [&](const ScheduledEvent& ev) {
+      m_tracker.observe(ev.port, ev.msg);
       sink(OutEvent::midi(ev.port, ev.msg, ev.tick));
     });
   }
 
-  Tick now_ = 0;
-  Transport transport_;
-  MidiParser parsers_[kMaxPorts];
-  Router router_;
-  Timeline timeline_;
-  ChordEngine chords_;
-  ChordSequencer seq_;
-  Arranger arranger_;
-  NoteTracker tracker_;
-  OutScheduler<kSchedulerCapacity> scheduler_;
-  std::uint8_t clock_out_mask_ = 0;  // off by default; enabled via kClockOutMask
+  Tick m_now = 0;
+  Transport m_transport;
+  MidiParser m_parsers[kMaxPorts];
+  Router m_router;
+  Timeline m_timeline;
+  ChordEngine m_chords;
+  ChordSequencer m_seq;
+  Arranger m_arranger;
+  NoteTracker m_tracker;
+  OutScheduler<kSchedulerCapacity> m_scheduler;
+  std::uint8_t m_clock_out_mask = 0;  // off by default; enabled via kClockOutMask
 };
 
 }  // namespace arrangrr

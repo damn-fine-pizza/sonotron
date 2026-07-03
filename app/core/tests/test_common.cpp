@@ -42,7 +42,9 @@ void test_span() {
 void test_ring_buffer() {
   SpscRingBuffer<int, 8> rb;  // usable capacity 7
   CHECK(rb.empty());
-  for (int i = 0; i < 7; ++i) CHECK(rb.push(i));
+  for (int i = 0; i < 7; ++i) {
+    CHECK(rb.push(i));
+  }
   CHECK(!rb.push(99));  // full
   CHECK(rb.size() == 7);
   int out = -1;
@@ -53,7 +55,9 @@ void test_ring_buffer() {
   CHECK(!rb.pop(out));  // empty
   // Wraparound: interleave push/pop past the physical end.
   for (int round = 0; round < 5; ++round) {
-    for (int i = 0; i < 5; ++i) CHECK(rb.push(round * 10 + i));
+    for (int i = 0; i < 5; ++i) {
+      CHECK(rb.push(round * 10 + i));
+    }
     for (int i = 0; i < 5; ++i) {
       CHECK(rb.pop(out));
       CHECK(out == round * 10 + i);
@@ -81,7 +85,9 @@ void test_time() {
   TickAccumulator ms;
   ms.set_bpm(12345);  // awkward tempo on purpose
   std::uint32_t total = 0;
-  for (int i = 0; i < 1000; ++i) total += ms.advance_us(1000);
+  for (int i = 0; i < 1000; ++i) {
+    total += ms.advance_us(1000);
+  }
   TickAccumulator once;
   once.set_bpm(12345);
   const std::uint32_t whole = once.advance_us(1'000'000);
@@ -107,6 +113,8 @@ int main() {
   test_result();
   test_time();
   test_crc();
-  if (arrangrr::test::failures() == 0) std::printf("test_common: all OK (%s)\n", arrangrr::version_string());
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_common: all OK (%s)\n", arrangrr::version_string());
+  }
   return arrangrr::test::failures();
 }

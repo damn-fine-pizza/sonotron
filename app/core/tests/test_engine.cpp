@@ -86,7 +86,9 @@ void test_transport_clock_emission() {
   e.advance_ticks(80, sink);  // two clock periods (40 ticks each)
   int clocks = 0;
   for (const OutEvent& o : ev) {
-    if (o.kind == OutEvent::Kind::kMidi && o.msg.status == midi::kClock) ++clocks;
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.status == midi::kClock) {
+      ++clocks;
+    }
   }
   CHECK(clocks == 2);
 
@@ -127,7 +129,9 @@ void test_transport_position_and_bounds() {
   CHECK(!t.set_bpm(100));    // below 20.00 BPM
   CHECK(!t.set_bpm(99999));  // above 400.00 BPM
   t.start();
-  for (int i = 0; i < static_cast<int>(kTicksPerBar + kTicksPerBeat + 5); ++i) t.advance_one();
+  for (int i = 0; i < static_cast<int>(kTicksPerBar + kTicksPerBeat + 5); ++i) {
+    t.advance_one();
+  }
   const Position p = t.position();  // bar 2, beat 2, tick 5
   CHECK(p.bar == 2 && p.beat == 2 && p.tick == 5);
   t.locate(0);
@@ -157,8 +161,9 @@ void test_route_table_full_warns() {
   Engine e;
   Events ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
-  for (std::size_t i = 0; i < kMaxRoutes; ++i)
+  for (std::size_t i = 0; i < kMaxRoutes; ++i) {
     e.push_command(route_add(0, -1, 0, -1, route_pass::kAll), sink);
+  }
   CHECK(ev.empty());
   e.push_command(route_add(0, -1, 0, -1, route_pass::kAll), sink);
   CHECK(ev.size() == 1 && ev[0].code == static_cast<std::uint16_t>(WarnCode::kRouteTableFull));
@@ -186,16 +191,25 @@ void test_clock_on_two_ports_and_continue() {
   // Continue: FB on both ports (no immediate F8 — that is Start-only).
   int fb = 0, f8 = 0;
   for (const OutEvent& o : ev) {
-    if (o.kind != OutEvent::Kind::kMidi) continue;
-    if (o.msg.status == midi::kContinue) ++fb;
-    if (o.msg.status == midi::kClock) ++f8;
+    if (o.kind != OutEvent::Kind::kMidi) {
+      continue;
+    }
+    if (o.msg.status == midi::kContinue) {
+      ++fb;
+    }
+    if (o.msg.status == midi::kClock) {
+      ++f8;
+    }
   }
   CHECK(fb == 2 && f8 == 0);
   ev.clear();
   e.advance_ticks(40, sink);
   f8 = 0;
-  for (const OutEvent& o : ev)
-    if (o.kind == OutEvent::Kind::kMidi && o.msg.status == midi::kClock) ++f8;
+  for (const OutEvent& o : ev) {
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.status == midi::kClock) {
+      ++f8;
+    }
+  }
   CHECK(f8 == 2);  // tick 40 on both ports
 }
 
@@ -244,6 +258,8 @@ int main() {
   test_input_port_out_of_range_ignored();
   test_schedule_at_already_due();
   test_warn_on_unknown_command();
-  if (arrangrr::test::failures() == 0) std::printf("test_engine: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_engine: all OK\n");
+  }
   return arrangrr::test::failures();
 }

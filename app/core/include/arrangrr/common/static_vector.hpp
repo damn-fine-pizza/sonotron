@@ -23,57 +23,61 @@ class StaticVector {
   constexpr StaticVector() = default;
 
   static constexpr std::size_t capacity() noexcept { return N; }
-  constexpr std::size_t size() const noexcept { return size_; }
-  constexpr bool empty() const noexcept { return size_ == 0; }
-  constexpr bool full() const noexcept { return size_ == N; }
+  constexpr std::size_t size() const noexcept { return m_size; }
+  constexpr bool empty() const noexcept { return m_size == 0; }
+  constexpr bool full() const noexcept { return m_size == N; }
 
   // Returns false (does not trap) when full: overflow is a runtime condition
   // the caller must handle gracefully (DESIGN.md §20 graceful degradation).
   [[nodiscard]] constexpr bool push_back(const T& value) noexcept {
-    if (full()) return false;
-    data_[size_++] = value;
+    if (full()) {
+      return false;
+    }
+    m_data[m_size++] = value;
     return true;
   }
 
   constexpr void pop_back() noexcept {
     ARR_ASSERT(!empty());
-    --size_;
+    --m_size;
   }
 
-  constexpr void clear() noexcept { size_ = 0; }
+  constexpr void clear() noexcept { m_size = 0; }
 
   // Removes the element at `i`, shifting the tail left (stable order).
   constexpr void erase(std::size_t i) noexcept {
-    ARR_ASSERT(i < size_);
-    for (std::size_t k = i + 1; k < size_; ++k) data_[k - 1] = data_[k];
-    --size_;
+    ARR_ASSERT(i < m_size);
+    for (std::size_t k = i + 1; k < m_size; ++k) {
+      m_data[k - 1] = m_data[k];
+    }
+    --m_size;
   }
 
   constexpr T& operator[](std::size_t i) noexcept {
-    ARR_ASSERT(i < size_);
-    return data_[i];
+    ARR_ASSERT(i < m_size);
+    return m_data[i];
   }
   constexpr const T& operator[](std::size_t i) const noexcept {
-    ARR_ASSERT(i < size_);
-    return data_[i];
+    ARR_ASSERT(i < m_size);
+    return m_data[i];
   }
 
   constexpr T& front() noexcept { return (*this)[0]; }
-  constexpr T& back() noexcept { return (*this)[size_ - 1]; }
+  constexpr T& back() noexcept { return (*this)[m_size - 1]; }
   constexpr const T& front() const noexcept { return (*this)[0]; }
-  constexpr const T& back() const noexcept { return (*this)[size_ - 1]; }
+  constexpr const T& back() const noexcept { return (*this)[m_size - 1]; }
 
-  constexpr T* begin() noexcept { return data_; }
-  constexpr T* end() noexcept { return data_ + size_; }
-  constexpr const T* begin() const noexcept { return data_; }
-  constexpr const T* end() const noexcept { return data_ + size_; }
+  constexpr T* begin() noexcept { return m_data; }
+  constexpr T* end() noexcept { return m_data + m_size; }
+  constexpr const T* begin() const noexcept { return m_data; }
+  constexpr const T* end() const noexcept { return m_data + m_size; }
 
-  constexpr Span<T> span() noexcept { return Span<T>(data_, size_); }
-  constexpr Span<const T> span() const noexcept { return Span<const T>(data_, size_); }
+  constexpr Span<T> span() noexcept { return Span<T>(m_data, m_size); }
+  constexpr Span<const T> span() const noexcept { return Span<const T>(m_data, m_size); }
 
  private:
-  T data_[N]{};
-  std::size_t size_ = 0;
+  T m_data[N]{};
+  std::size_t m_size = 0;
 };
 
 }  // namespace arrangrr

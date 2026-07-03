@@ -53,8 +53,7 @@ struct Track {
 class Timeline {
  public:
   // Schedules msg on `port` at `delay` ticks after the current stream tick.
-  using ScheduleFn = FunctionRef<void(std::uint8_t port, TickOffset delay,
-                                      const MidiMessage& msg)>;
+  using ScheduleFn = FunctionRef<void(std::uint8_t port, TickOffset delay, const MidiMessage& msg)>;
 
   // Returns the new track index, or -1 when the pool is full.
   int add_track(TrackRole role, std::uint8_t port, std::uint8_t channel) noexcept {
@@ -62,57 +61,71 @@ class Timeline {
     t.role = role;
     t.port = port;
     t.channel = static_cast<std::uint8_t>(channel & 0x0F);
-    if (!tracks_.push_back(t)) return -1;
-    return static_cast<int>(tracks_.size() - 1);
+    if (!m_tracks.push_back(t)) {
+      return -1;
+    }
+    return static_cast<int>(m_tracks.size() - 1);
   }
 
   Track* track(std::size_t idx) noexcept {
-    return idx < tracks_.size() ? &tracks_[idx] : nullptr;
+    return idx < m_tracks.size() ? &m_tracks[idx] : nullptr;
   }
   const Track* track(std::size_t idx) const noexcept {
-    return idx < tracks_.size() ? &tracks_[idx] : nullptr;
+    return idx < m_tracks.size() ? &m_tracks[idx] : nullptr;
   }
-  std::size_t track_count() const noexcept { return tracks_.size(); }
+  std::size_t track_count() const noexcept { return m_tracks.size(); }
 
   bool set_step(std::size_t idx, std::size_t step, std::uint8_t note, std::uint8_t vel,
                 std::uint16_t gate) noexcept {
     Track* t = track(idx);
-    if (t == nullptr || step >= kMaxStepsPerTrack || note > 127 || vel > 127) return false;
+    if (t == nullptr || step >= kMaxStepsPerTrack || note > 127 || vel > 127) {
+      return false;
+    }
     t->steps[step] = Step{note, vel, gate};
     return true;
   }
 
   bool set_length(std::size_t idx, std::size_t steps) noexcept {
     Track* t = track(idx);
-    if (t == nullptr || steps == 0 || steps > kMaxStepsPerTrack) return false;
+    if (t == nullptr || steps == 0 || steps > kMaxStepsPerTrack) {
+      return false;
+    }
     t->length = static_cast<std::uint8_t>(steps);
     return true;
   }
 
   bool any_solo() const noexcept {
-    for (const Track& t : tracks_)
-      if (t.solo) return true;
+    for (const Track& t : m_tracks) {
+      if (t.solo) {
+        return true;
+      }
+    }
     return false;
   }
 
   // Fires the grid slots that fall on `transport_tick` (call once per tick
   // while the transport plays; also with tick 0 right after start).
   void on_tick(Tick transport_tick, ScheduleFn schedule) {
-    if (transport_tick % kTicksPerStep != 0) return;
+    if (transport_tick % kTicksPerStep != 0) {
+      return;
+    }
     const std::uint32_t global_step = transport_tick / kTicksPerStep;
     const bool solo_active = any_solo();
-    for (const Track& t : tracks_) {
-      if (t.mute || (solo_active && !t.solo)) continue;
+    for (const Track& t : m_tracks) {
+      if (t.mute || (solo_active && !t.solo)) {
+        continue;
+      }
       const Step& s = t.steps[global_step % t.length];
-      if (s.vel == 0) continue;
+      if (s.vel == 0) {
+        continue;
+      }
       schedule(t.port, 0, MidiMessage::note_on(t.channel, s.note, s.vel));
-      schedule(t.port, static_cast<TickOffset>(s.gate),
-               MidiMessage::note_off(t.channel, s.note));
+      schedule(t.port, static_cast<TickOffset>(s.gate), MidiMessage::note_off(t.channel, s.note));
     }
   }
 
  private:
-  StaticVector<Track, kMaxTracks> tracks_;
+  StaticVector<Track, kMaxTracks> m_tracks;
 };
 
 }  // namespace arrangrr

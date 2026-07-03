@@ -27,8 +27,8 @@ using TickOffset = std::int32_t;
 // Tempo as beats-per-minute x100: 12000 = 120.00 BPM (D3/D27).
 using BpmX100 = std::uint32_t;
 inline constexpr BpmX100 kDefaultBpm = 12000;
-inline constexpr BpmX100 kMinBpm = 2000;    // 20.00 BPM
-inline constexpr BpmX100 kMaxBpm = 40000;   // 400.00 BPM
+inline constexpr BpmX100 kMinBpm = 2000;   // 20.00 BPM
+inline constexpr BpmX100 kMaxBpm = 40000;  // 400.00 BPM
 
 // Exact rational tick accumulation (no drift, u64-safe — no __int128, which
 // 32-bit arm lacks):
@@ -40,22 +40,22 @@ inline constexpr std::uint64_t kTickDenominator = 6'000'000'000ull;  // 60e6 us 
 // Numerator per call stays tiny (elapsed_us * bpm * ppqn), far below u64 range.
 class TickAccumulator {
  public:
-  constexpr void set_bpm(BpmX100 bpm) noexcept { bpm_ = bpm; }
-  constexpr BpmX100 bpm() const noexcept { return bpm_; }
+  constexpr void set_bpm(BpmX100 bpm) noexcept { m_bpm = bpm; }
+  constexpr BpmX100 bpm() const noexcept { return m_bpm; }
 
   // Returns the number of whole ticks that elapsed in `elapsed_us`.
   constexpr std::uint32_t advance_us(std::uint64_t elapsed_us) noexcept {
-    acc_ += elapsed_us * static_cast<std::uint64_t>(bpm_) * kPpqn;
-    const std::uint64_t ticks = acc_ / kTickDenominator;
-    acc_ -= ticks * kTickDenominator;
+    m_acc += elapsed_us * static_cast<std::uint64_t>(m_bpm) * kPpqn;
+    const std::uint64_t ticks = m_acc / kTickDenominator;
+    m_acc -= ticks * kTickDenominator;
     return static_cast<std::uint32_t>(ticks);
   }
 
-  constexpr void reset() noexcept { acc_ = 0; }
+  constexpr void reset() noexcept { m_acc = 0; }
 
  private:
-  std::uint64_t acc_ = 0;
-  BpmX100 bpm_ = kDefaultBpm;
+  std::uint64_t m_acc = 0;
+  BpmX100 m_bpm = kDefaultBpm;
 };
 
 }  // namespace arrangrr

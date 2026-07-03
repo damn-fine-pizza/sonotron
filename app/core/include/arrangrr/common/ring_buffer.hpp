@@ -20,39 +20,43 @@ class SpscRingBuffer {
 
   // Producer side only.
   [[nodiscard]] bool push(const T& value) noexcept {
-    const std::size_t head = head_.load(std::memory_order_relaxed);
+    const std::size_t head = m_head.load(std::memory_order_relaxed);
     const std::size_t next = (head + 1) & kMask;
-    if (next == tail_.load(std::memory_order_acquire)) return false;  // full
-    buf_[head] = value;
-    head_.store(next, std::memory_order_release);
+    if (next == m_tail.load(std::memory_order_acquire)) {
+      return false;  // full
+    }
+    m_buf[head] = value;
+    m_head.store(next, std::memory_order_release);
     return true;
   }
 
   // Consumer side only.
   [[nodiscard]] bool pop(T& out) noexcept {
-    const std::size_t tail = tail_.load(std::memory_order_relaxed);
-    if (tail == head_.load(std::memory_order_acquire)) return false;  // empty
-    out = buf_[tail];
-    tail_.store((tail + 1) & kMask, std::memory_order_release);
+    const std::size_t tail = m_tail.load(std::memory_order_relaxed);
+    if (tail == m_head.load(std::memory_order_acquire)) {
+      return false;  // empty
+    }
+    out = m_buf[tail];
+    m_tail.store((tail + 1) & kMask, std::memory_order_release);
     return true;
   }
 
   bool empty() const noexcept {
-    return tail_.load(std::memory_order_acquire) == head_.load(std::memory_order_acquire);
+    return m_tail.load(std::memory_order_acquire) == m_head.load(std::memory_order_acquire);
   }
 
   // Approximate under concurrency; exact when quiescent.
   std::size_t size() const noexcept {
-    const std::size_t head = head_.load(std::memory_order_acquire);
-    const std::size_t tail = tail_.load(std::memory_order_acquire);
+    const std::size_t head = m_head.load(std::memory_order_acquire);
+    const std::size_t tail = m_tail.load(std::memory_order_acquire);
     return (head - tail) & kMask;
   }
 
  private:
   static constexpr std::size_t kMask = N - 1;
-  std::atomic<std::size_t> head_{0};
-  std::atomic<std::size_t> tail_{0};
-  T buf_[N]{};
+  std::atomic<std::size_t> m_head{0};
+  std::atomic<std::size_t> m_tail{0};
+  T m_buf[N]{};
 };
 
 }  // namespace arrangrr

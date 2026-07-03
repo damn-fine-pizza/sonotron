@@ -14,8 +14,11 @@ void test_theory_scales_and_degrees() {
   for (std::uint8_t m = 0; m < kModeCount; ++m) {
     const Key key{0, static_cast<Mode>(m)};
     int in_scale = 0;
-    for (std::uint8_t pc = 0; pc < 12; ++pc)
-      if (theory::degree_of(key, pc) >= 0) ++in_scale;
+    for (std::uint8_t pc = 0; pc < 12; ++pc) {
+      if (theory::degree_of(key, pc) >= 0) {
+        ++in_scale;
+      }
+    }
     CHECK(in_scale == 7);
   }
   // G major: F# in scale, F natural out.
@@ -30,10 +33,12 @@ void test_theory_scales_and_degrees() {
 void test_theory_smart_qualities_all_degrees_major() {
   using theory::smart_quality;
   const ChordQuality expected[7] = {
-      ChordQuality::kMaj7, ChordQuality::kMin7, ChordQuality::kMin7, ChordQuality::kMaj7,
+      ChordQuality::kMaj7, ChordQuality::kMin7, ChordQuality::kMin7,     ChordQuality::kMaj7,
       ChordQuality::kDom7, ChordQuality::kMin7, ChordQuality::kHalfDim7,
   };
-  for (int d = 0; d < 7; ++d) CHECK(smart_quality(Mode::kMajor, d) == expected[d]);
+  for (int d = 0; d < 7; ++d) {
+    CHECK(smart_quality(Mode::kMajor, d) == expected[d]);
+  }
 }
 
 void test_theory_minor_harmonic_v() {
@@ -48,8 +53,7 @@ struct ChordFixture {
   Engine e;
   Events ev;
 
-  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0,
-           Op op = Op::kDo) {
+  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {
     Command command;
     command.op = op;
     command.param = p;
@@ -63,8 +67,11 @@ struct ChordFixture {
   }
   StaticVector<std::uint8_t, 8> notes_of(std::uint8_t type) const {
     StaticVector<std::uint8_t, 8> out;
-    for (const OutEvent& o : ev)
-      if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == type) CHECK(out.push_back(o.msg.d1));
+    for (const OutEvent& o : ev) {
+      if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == type) {
+        CHECK(out.push_back(o.msg.d1));
+      }
+    }
     return out;
   }
 };
@@ -91,9 +98,15 @@ void test_chord_change_releases_previous_first() {
   // Same tick: all four NoteOffs (previous chord) precede the NoteOns (D29).
   int seen_on = 0, offs_after_on = 0;
   for (const OutEvent& o : f.ev) {
-    if (o.kind != OutEvent::Kind::kMidi) continue;
-    if (o.msg.type() == midi::kNoteOn) ++seen_on;
-    if (o.msg.type() == midi::kNoteOff && seen_on > 0) ++offs_after_on;
+    if (o.kind != OutEvent::Kind::kMidi) {
+      continue;
+    }
+    if (o.msg.type() == midi::kNoteOn) {
+      ++seen_on;
+    }
+    if (o.msg.type() == midi::kNoteOff && seen_on > 0) {
+      ++offs_after_on;
+    }
   }
   CHECK(offs_after_on == 0);
   const auto ons = f.notes_of(midi::kNoteOn);
@@ -122,8 +135,11 @@ void test_quality_override_and_output_channel() {
   f.play(60, static_cast<std::int8_t>(ChordQuality::kSus4));
   const auto ons = f.notes_of(midi::kNoteOn);
   CHECK(ons.size() == 3 && ons[0] == 60 && ons[1] == 65 && ons[2] == 67);
-  for (const OutEvent& o : f.ev)
-    if (o.kind == OutEvent::Kind::kMidi) CHECK(o.port == 1 && o.msg.channel() == 4);
+  for (const OutEvent& o : f.ev) {
+    if (o.kind == OutEvent::Kind::kMidi) {
+      CHECK(o.port == 1 && o.msg.channel() == 4);
+    }
+  }
 }
 
 void test_minor_key_v_is_dominant() {
@@ -196,8 +212,7 @@ void test_mode_switch_and_bad_mode() {
   f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
   f.ev.clear();
   f.play(61);  // chromatic again rejected in diatonic mode
-  CHECK(f.ev.size() == 1 &&
-        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kNotInKey));
+  CHECK(f.ev.size() == 1 && f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kNotInKey));
   f.ev.clear();
   f.cmd(Param::kChordMode, 9, 0, 0, Op::kSet);
   CHECK(f.ev.size() == 1 && f.ev[0].kind == OutEvent::Kind::kWarn);
@@ -228,6 +243,8 @@ int main() {
   test_shell_mode_completion();
   test_mode_switch_and_bad_mode();
   test_panic_covers_chord_notes();
-  if (arrangrr::test::failures() == 0) std::printf("test_chord: all OK\n");
+  if (arrangrr::test::failures() == 0) {
+    std::printf("test_chord: all OK\n");
+  }
   return arrangrr::test::failures();
 }
