@@ -38,6 +38,7 @@ class Shell {
   void set_port_hook(PortHook hook) { port_hook_ = std::move(hook); }
 
   Engine& engine() { return engine_; }
+  const Engine& engine() const { return engine_; }
   const std::vector<PortDef>& ports() const { return ports_; }
 
   // Executes one line (L2 sugar). Returns false on parse error; the error

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "alsa_midi.hpp"
+#include "console.hpp"
 #include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/transport/transport.hpp"
 #include "jsonl.hpp"
@@ -413,6 +414,65 @@ void test_shell_seq_commands() {
   CHECK(!f.run("seq"));
 }
 
+void test_line_editor() {
+  LineEditor ed;
+  auto type = [&](const char* text) {
+    LineEditor::Result last;
+    for (const char* c = text; *c; ++c) last = ed.feed(static_cast<std::uint8_t>(*c));
+    return last;
+  };
+  // Plain typing + Enter completes a line.
+  LineEditor::Result r = type("play D\r");
+  CHECK(r.line && *r.line == "play D");
+  CHECK(ed.buffer().empty());
+  // Arrows: left + insert in the middle.
+  type("ply");
+  type("\x1b[D");  // left
+  type("a");
+  CHECK(ed.buffer() == "play");
+  CHECK(ed.cursor() == 3);
+  type("\x1b[C");  // right
+  CHECK(ed.cursor() == 4);
+  // Backspace.
+  type("\x7f");
+  CHECK(ed.buffer() == "pla");
+  // Home/End.
+  type("\x1b[H");
+  CHECK(ed.cursor() == 0);
+  type("\x1b[F");
+  CHECK(ed.cursor() == 3);
+  // Delete key (CSI 3~) at home removes the first char.
+  type("\x1b[H");
+  type("\x1b[3~");
+  CHECK(ed.buffer() == "la");
+  // Ctrl-U clears.
+  type("\x15");
+  CHECK(ed.buffer().empty());
+  // History: up recalls, down comes back to the stashed fresh line.
+  type("second\r");
+  type("thi");
+  type("\x1b[A");  // up -> "second"
+  CHECK(ed.buffer() == "second");
+  type("\x1b[A");  // up -> "play D"
+  CHECK(ed.buffer() == "play D");
+  type("\x1b[B");  // down -> "second"
+  CHECK(ed.buffer() == "second");
+  type("\x1b[B");  // down -> fresh "thi"
+  CHECK(ed.buffer() == "thi");
+  // Ctrl-C clears a non-empty line; on empty -> quit. Ctrl-D quits on empty.
+  r = type("\x03");
+  CHECK(!r.quit && ed.buffer().empty());
+  r = type("\x03");
+  CHECK(r.quit);
+  r = type("\x04");
+  CHECK(r.quit);
+  // Empty Enter completes an empty line without polluting history.
+  r = type("\r");
+  CHECK(r.line && r.line->empty());
+  type("\x1b[A");
+  CHECK(ed.buffer() == "second");
+}
+
 void test_help_command() {
   ShellFixture f;
   CHECK(f.run("help"));
@@ -472,6 +532,7 @@ int main() {
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
   test_help_command();
+  test_line_editor();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
   if (arrangrr::test::failures() == 0) std::printf("test_host: all OK\n");

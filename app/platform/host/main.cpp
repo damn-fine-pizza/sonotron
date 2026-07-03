@@ -21,6 +21,7 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/common/time.hpp"
+#include "console.hpp"
 #include "jsonl.hpp"
 #include "shell.hpp"
 
@@ -68,6 +69,16 @@ std::uint64_t monotonic_us() {
          static_cast<std::uint64_t>(ts.tv_nsec) / 1000u;
 }
 
+std::string status_line(const Shell& shell) {
+  const Engine& e = shell.engine();
+  const Position pos = e.transport().position();
+  char buf[128];
+  std::snprintf(buf, sizeof(buf), "%s  bar %u.%u  tempo %u.%02u  tick %u",
+                e.transport().playing() ? "PLAYING" : "stopped", pos.bar, pos.beat,
+                e.transport().bpm() / 100, e.transport().bpm() % 100, e.now());
+  return buf;
+}
+
 int run_live(bool human, const char* init_path) {
   AlsaMidi alsa;
   std::string error;
@@ -76,11 +87,21 @@ int run_live(bool human, const char* init_path) {
     return 2;
   }
 
+  // Pane UI when we own a terminal; flat output for pipes and tests.
+  Console console;
+  const bool tui = console.init();
+  LineEditor editor;
+
   Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
     if (ev.kind == OutEvent::Kind::kMidi) alsa.send(ev.port, ev.msg);
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
-    std::puts((human ? to_human(ev, flats) : to_jsonl(ev, flats)).c_str());
+    const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
+    if (tui) {
+      console.emit(line);
+    } else {
+      std::puts(line.c_str());
+    }
   });
   shell_ref = &shell;
   shell.set_port_hook([&](const PortDef& def) {
@@ -125,10 +146,15 @@ int run_live(bool human, const char* init_path) {
   TickAccumulator acc;
   std::uint64_t last_us = monotonic_us();
 
-  std::printf("arrangrr> ");
-  std::fflush(stdout);
+  if (!tui) {
+    std::printf("arrangrr> ");
+    std::fflush(stdout);
+  } else {
+    console.render_input(editor);
+  }
 
-  std::string stdin_acc;  // partial-line accumulator for the raw REPL reader
+  std::string stdin_acc;  // partial-line accumulator (flat mode)
+  std::uint64_t last_status_us = 0;
   bool running = true;
   while (running && !shell.quit_requested()) {
     struct pollfd fds[16];
@@ -171,6 +197,23 @@ int run_live(bool human, const char* init_path) {
       const ssize_t got = read(STDIN_FILENO, buf, sizeof(buf));
       if (got <= 0) {
         running = false;
+      } else if (tui) {
+        for (ssize_t i = 0; i < got; ++i) {
+          const LineEditor::Result r = editor.feed(static_cast<std::uint8_t>(buf[i]));
+          if (r.quit) {
+            running = false;
+            break;
+          }
+          if (r.line) {
+            console.emit("> " + *r.line);
+            if (!shell.exec_line(*r.line, error)) console.emit("error: " + error);
+            if (shell.quit_requested()) {
+              running = false;
+              break;
+            }
+          }
+        }
+        console.render_input(editor);
       } else {
         stdin_acc.append(buf, static_cast<std::size_t>(got));
         std::size_t nl;
@@ -184,8 +227,19 @@ int run_live(bool human, const char* init_path) {
         std::fflush(stdout);
       }
     }
+
+    // Status bar + input cursor upkeep (throttled to ~10 Hz).
+    if (tui) {
+      const std::uint64_t now_us = monotonic_us();
+      if (now_us - last_status_us > 100'000) {
+        last_status_us = now_us;
+        console.set_status(status_line(shell));
+        console.render_input(editor);
+      }
+    }
   }
   close(tfd);
+  console.shutdown();
   return 0;
 }
 

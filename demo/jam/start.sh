@@ -100,13 +100,8 @@ cat <<'BANNER'
 ------------------------------------------------------------------
 BANNER
 
-# Line editing: rlwrap gives the REPL history and arrow keys.
+# The REPL has its own pane UI with native line editing on a terminal.
 REPL=("$CLI" --events human --init "$SETUP")
-if command -v rlwrap >/dev/null 2>&1; then
-  REPL=(rlwrap -a "${REPL[@]}")
-else
-  echo "(tip: 'sudo dnf install rlwrap' enables arrow keys and history)"
-fi
 
 # The REPL runs as a child and we wait on it: `wait` is interruptible, so
 # INT/TERM reach the trap immediately (a foreground child would defer it) and

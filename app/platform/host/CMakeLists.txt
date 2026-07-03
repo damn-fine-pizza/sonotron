@@ -5,6 +5,7 @@ add_library(arrangrr_host STATIC
   shell.cpp
   jsonl.cpp
   alsa_midi.cpp
+  console.cpp
 )
 target_include_directories(arrangrr_host PUBLIC .)
 target_link_libraries(arrangrr_host PUBLIC arrangrr_core ALSA::ALSA)
