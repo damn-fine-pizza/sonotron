@@ -1,6 +1,7 @@
 // Host-layer unit tests: JSONL/human encoders (every branch) and the shell
 // (command parsing, @tick queue, error paths). Links arrangrr_host.
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -489,10 +490,22 @@ void test_help_command() {
   CHECK(f.run("help style"));
   CHECK(f.run("help track"));
   CHECK(f.run("help midi"));
+  CHECK(f.run("help panel"));
+  CHECK(f.run("help piano"));
+  CHECK(f.run("help notes"));
   CHECK(f.run("help nonsense"));  // unknown topic falls back to the overview
-  CHECK(f.run("help close"));     // no-ops without a panel UI
-  CHECK(f.run("help open"));
-  CHECK(f.events.empty());        // help never touches the engine
+  CHECK(!f.run("help close"));    // lifecycle moved: migration hint errors out
+  CHECK(!f.run("help open"));
+  CHECK(f.events.empty());  // help never touches the engine
+}
+
+bool block_contains(const std::vector<std::string>& lines, const std::string& needle) {
+  for (const std::string& line : lines) {
+    if (line.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void test_help_panel_hook() {
@@ -504,29 +517,315 @@ void test_help_panel_hook() {
     ++calls;
     return true;
   });
-  // help <topic> opens the panel with that topic.
+  // help <topic> fills and opens the help panel; the hook receives the
+  // combined block: title rule first, topic content after it.
   CHECK(f.run("help chord"));
-  CHECK(calls == 1 && !panel.empty() && panel[0] == "help: chord");
-  // help close closes it (empty vector).
-  CHECK(f.run("help close"));
+  CHECK(calls == 1 && panel.size() >= 2);
+  CHECK(panel[0] == "-- help --");
+  CHECK(panel[1] == "help: chord");
+  // Lifecycle now lives under `panel ...`.
+  CHECK(f.run("panel close help"));
   CHECK(calls == 2 && panel.empty());
-  // help open reopens the LAST panel that was shown.
-  CHECK(f.run("help open"));
-  CHECK(calls == 3 && !panel.empty() && panel[0] == "help: chord");
-  // A different topic replaces the remembered panel.
+  CHECK(f.run("panel open help"));
+  CHECK(calls == 3 && block_contains(panel, "help: chord"));  // content survives close
+  // A different topic replaces the content.
   CHECK(f.run("help midi"));
-  CHECK(f.run("help close"));
-  CHECK(f.run("help open"));
-  CHECK(panel[0] == "help: midi");
-  // help open before any help ever shown -> overview.
+  CHECK(block_contains(panel, "help: midi"));
+  // Opening the help panel before any topic was shown -> overview.
   ShellFixture fresh;
   std::vector<std::string> fresh_panel;
   fresh.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
     fresh_panel = lines;
     return true;
   });
-  CHECK(fresh.run("help open"));
-  CHECK(!fresh_panel.empty() && fresh_panel[0].find("help") == 0);
+  CHECK(fresh.run("panel open help"));
+  CHECK(block_contains(fresh_panel, "help  (help <topic>"));
+}
+
+void test_panel_commands() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+
+  // Coexistence: help and piano stack in one combined block, help first.
+  CHECK(f.run("panel open piano"));
+  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(f.run("help chord"));
+  CHECK(block_contains(panel, "-- help --") && block_contains(panel, "-- piano --"));
+  const auto help_pos =
+      std::find(panel.begin(), panel.end(), std::string("-- help --")) - panel.begin();
+  const auto piano_pos =
+      std::find(panel.begin(), panel.end(), std::string("-- piano --")) - panel.begin();
+  CHECK(help_pos < piano_pos);
+
+  // toggle / close all.
+  CHECK(f.run("panel toggle piano"));
+  CHECK(!block_contains(panel, "-- piano --"));
+  CHECK(f.run("panel toggle piano"));
+  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(f.run("panel close all"));
+  CHECK(panel.empty());
+
+  // Focus: focusing opens, the title carries the '*' marker, repl clears it.
+  CHECK(f.run("panel focus piano"));
+  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(f.run("panel focus repl"));
+  CHECK(block_contains(panel, "-- piano --") && !block_contains(panel, "-- piano* --"));
+  CHECK(f.run("panel focus next"));
+  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(f.run("panel focus next"));  // past the last visible -> back to repl
+  CHECK(!block_contains(panel, "-- piano* --"));
+
+  // Errors: unknown panel / unknown subcommand / missing argument.
+  CHECK(!f.run("panel open nonsense"));
+  CHECK(!f.run("panel nonsense"));
+  CHECK(!f.run("panel open"));
+  CHECK(!f.run("panel"));
+
+  // panel list / status are informational and never touch the engine.
+  CHECK(f.run("panel list"));
+  CHECK(f.run("panel status"));
+  CHECK(f.run("panel help"));
+  CHECK(f.events.empty());
+}
+
+void test_piano_commands() {
+  ShellFixture f;
+
+  // Octave: absolute, relative, clamped range.
+  CHECK(f.run("piano octave 3"));
+  CHECK(f.shell.piano_state().base_octave == 3);
+  CHECK(f.run("piano octave up"));
+  CHECK(f.shell.piano_state().base_octave == 4);
+  CHECK(f.run("piano octave down"));
+  CHECK(f.shell.piano_state().base_octave == 3);
+  CHECK(!f.run("piano octave 10"));  // out of -1..9
+  CHECK(!f.run("piano octave -2"));
+  CHECK(!f.run("piano octave nonsense"));
+  CHECK(f.run("piano octave 9"));
+  CHECK(!f.run("piano octave up"));  // clamp rejects loudly at the edge
+  CHECK(f.run("piano octave -1"));
+  CHECK(!f.run("piano octave down"));
+
+  // Channel: user-facing 1-based, internal 0-based.
+  CHECK(f.run("piano channel 2"));
+  CHECK(f.shell.piano_state().channel == 1);
+  CHECK(!f.run("piano channel 0"));
+  CHECK(!f.run("piano channel 17"));
+
+  // Velocity.
+  CHECK(f.run("piano velocity 100"));
+  CHECK(f.shell.piano_state().velocity == 100);
+  CHECK(!f.run("piano velocity 0"));
+  CHECK(!f.run("piano velocity 128"));
+
+  // Keymap and views.
+  CHECK(f.run("piano keymap default"));
+  CHECK(!f.run("piano keymap qwertz"));
+  CHECK(f.run("piano view active-notes"));
+  CHECK(f.shell.piano_state().view == PianoView::kActiveNotes);
+  CHECK(f.run("piano view event-log"));
+  CHECK(f.run("piano view keyboard"));
+  CHECK(!f.run("piano view nonsense"));
+
+  // No piano command may touch the engine's MIDI output.
+  CHECK(f.midi_count() == 0);
+}
+
+void test_notes_names_commands() {
+  ShellFixture f;
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kCde);
+  CHECK(f.run("notes names doremi"));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kDoReMi);
+  CHECK(f.run("notes names cde"));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kCde);
+  CHECK(f.run("notes names toggle"));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kDoReMi);
+  CHECK(!f.run("notes names nonsense"));
+  CHECK(!f.run("notes"));
+}
+
+void test_filter_view_commands() {
+  ShellFixture f;
+
+  CHECK(f.run("filter channel 2"));
+  CHECK(f.run("filter port 0"));
+  CHECK(f.run("filter event note-on"));
+  CHECK(f.run("filter event note-off"));
+  CHECK(f.run("filter clear"));
+  CHECK(!f.run("filter channel 17"));
+  CHECK(!f.run("filter port 99"));
+  CHECK(!f.run("filter event nonsense"));
+  CHECK(!f.run("filter"));
+
+  CHECK(f.run("view show note-names off"));
+  CHECK(f.run("view show note-numbers off"));
+  CHECK(f.run("view show velocity off"));
+  CHECK(f.run("view show channel on"));
+  CHECK(f.run("view show port on"));
+  CHECK(f.run("view show-octaves boundary"));
+  CHECK(f.run("view show-octaves all"));
+  CHECK(f.run("view show-octaves none"));
+  CHECK(f.run("view clear"));
+  CHECK(!f.run("view show nonsense on"));
+  CHECK(!f.run("view show velocity maybe"));
+  CHECK(!f.run("view"));
+}
+
+// A fixture with the default thru wiring, so piano input becomes visible
+// output (in0 -> router -> out0), exactly like the live default setup.
+struct PianoFixture : ShellFixture {
+  PianoFixture() {
+    CHECK(run("port open in in0"));
+    CHECK(run("port open out out0"));
+    CHECK(run("thru in0 out0"));
+    CHECK(run("panel focus piano"));
+    events.clear();
+  }
+
+  int note_ons() const {
+    int n = 0;
+    for (const OutEvent& e : events) {
+      if (e.kind == OutEvent::Kind::kMidi && e.msg.type() == midi::kNoteOn && e.msg.d2 > 0) {
+        ++n;
+      }
+    }
+    return n;
+  }
+  int note_offs() const {
+    int n = 0;
+    for (const OutEvent& e : events) {
+      if (e.kind == OutEvent::Kind::kMidi &&
+          (e.msg.type() == midi::kNoteOff || (e.msg.type() == midi::kNoteOn && e.msg.d2 == 0))) {
+        ++n;
+      }
+    }
+    return n;
+  }
+};
+
+void test_piano_key_dispatch() {
+  PianoFixture f;
+
+  // 'a' (case-insensitive) = C of octave 4 = MIDI 60, through the normal path.
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.events.back().msg.type() == midi::kNoteOn);
+
+  // Toggle policy: same key again = note-off for the same note.
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_offs() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+
+  // Black key 'w' = C#4 = 61; velocity/channel follow the piano state.
+  CHECK(f.run("piano channel 2"));
+  CHECK(f.run("piano velocity 100"));
+  CHECK(f.shell.handle_ui_key('w'));
+  CHECK(f.events.back().msg.d1 == 61);
+  CHECK(f.events.back().msg.channel() == 1);  // wire 0-based for user channel 2
+  CHECK(f.events.back().msg.d2 == 100);
+  CHECK(f.shell.handle_ui_key('w'));  // release before the next checks
+
+  // Active notes reach the monitor via the wrapped sink.
+  CHECK(f.shell.handle_ui_key('h'));  // A4
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.run("piano panic"));
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // Out-of-range: octave 9, ' = +17 semitones -> 137 -> rejected, no event.
+  CHECK(f.run("piano octave 9"));
+  const int before = f.note_ons();
+  CHECK(f.shell.handle_ui_key('\''));
+  CHECK(f.note_ons() == before);
+
+  // 'P' closes the piano panel and returns focus to the REPL.
+  CHECK(f.shell.handle_ui_key('p'));
+  CHECK(!f.shell.panels().visible(PanelId::kPiano));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+
+  // With REPL focus nothing is intercepted anymore.
+  CHECK(!f.shell.handle_ui_key('a'));
+  CHECK(!f.shell.handle_ui_key('\t'));
+}
+
+void test_piano_focus_shortcuts() {
+  PianoFixture f;
+
+  // N toggles note naming, V cycles views, C clears the monitor.
+  CHECK(f.shell.handle_ui_key('n'));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kDoReMi);
+  CHECK(f.shell.handle_ui_key('v'));
+  CHECK(f.shell.piano_state().view == PianoView::kActiveNotes);
+  CHECK(f.shell.handle_ui_key('v'));
+  CHECK(f.shell.piano_state().view == PianoView::kEventLog);
+  CHECK(f.shell.handle_ui_key('v'));
+  CHECK(f.shell.piano_state().view == PianoView::kKeyboard);
+
+  // [ ] change octave.
+  CHECK(f.shell.handle_ui_key('['));
+  CHECK(f.shell.piano_state().base_octave == 3);
+  CHECK(f.shell.handle_ui_key(']'));
+  CHECK(f.shell.piano_state().base_octave == 4);
+
+  // C clears monitor buffers.
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.shell.handle_ui_key('c'));
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // TAB cycles focus among visible panels and back to the REPL.
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+
+  // Stray keys are swallowed under piano focus, never leak to the editor.
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key('q'));
+  CHECK(f.shell.handle_ui_key('1'));
+}
+
+void test_panel_manager_state() {
+  PanelManager pm;
+  CHECK(!pm.any_visible());
+  CHECK(pm.focus_kind() == PanelFocus::kRepl);
+
+  // Open + content + stacking.
+  pm.set_content(PanelId::kHelp, {"h1", "h2"});
+  pm.open(PanelId::kHelp);
+  pm.open(PanelId::kPiano);
+  pm.set_content(PanelId::kPiano, {"p1"});
+  CHECK(pm.visible(PanelId::kHelp) && pm.visible(PanelId::kPiano));
+  std::vector<std::string> combined = pm.combined_lines();
+  CHECK(combined.size() == 2 + 2 + 1);  // two titles + help(2) + piano(1)
+
+  // An oversized panel is truncated with an honest marker; the panel below
+  // stays visible (fairness cap).
+  const std::vector<std::string> big(40, "x");
+  pm.set_content(PanelId::kHelp, big);
+  combined = pm.combined_lines();
+  CHECK(block_contains(combined, "more lines)"));
+  std::size_t help_lines = 0;
+  for (const std::string& line : combined) {
+    if (line == "x") {
+      ++help_lines;
+    }
+  }
+  CHECK(help_lines < big.size());
+  CHECK(block_contains(combined, "-- piano --"));
+
+  // Closing the focused panel returns focus to the REPL.
+  pm.focus(PanelId::kPiano);
+  CHECK(pm.focus_kind() == PanelFocus::kPanel && pm.focused_panel() == PanelId::kPiano);
+  pm.close(PanelId::kPiano);
+  CHECK(pm.focus_kind() == PanelFocus::kRepl);
+
+  // Name round-trip.
+  PanelId id{};
+  CHECK(parse_panel_name("filter", id) && id == PanelId::kFilter);
+  CHECK(!parse_panel_name("bogus", id));
 }
 
 void test_warn_names_complete() {
@@ -609,6 +908,13 @@ int main() {
   test_jsonl_chord_rendering();
   test_help_command();
   test_help_panel_hook();
+  test_panel_commands();
+  test_panel_manager_state();
+  test_piano_commands();
+  test_notes_names_commands();
+  test_filter_view_commands();
+  test_piano_key_dispatch();
+  test_piano_focus_shortcuts();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
   test_line_editor();

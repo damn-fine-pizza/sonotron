@@ -147,6 +147,10 @@ void LineEditor::history_load(std::size_t index) {
 
 // --- Console -----------------------------------------------------------------
 
+Console::Console() = default;
+
+Console::~Console() { shutdown(); }
+
 bool Console::init() {
   if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
     return false;
@@ -266,11 +270,17 @@ void Console::set_status(const std::string& text) {
   refresh_geometry();
   if (m_rows != prev_rows || m_cols != prev_cols) {
     apply_layout();  // terminal resized: rebuild regions and repaint
+
+    // Panel content is regenerated from state at the new geometry (H1
+    // resize contract): the hook re-renders and re-pushes the panels.
+    if (m_resize_hook) {
+      m_resize_hook();
+    }
     return;
   }
   std::string out;
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", m_rows - 1);
+  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", status_row());
   out += buf;
   out += "\x1b[7m";  // inverse video
   std::string padded = " " + m_status;
@@ -286,12 +296,12 @@ void Console::render_input(const LineEditor& ed) {
   }
   std::string out;
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", m_rows);
+  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", input_row());
   out += buf;
   out += kPrompt;
   out += ed.buffer();
   const std::size_t col = std::string(kPrompt).size() + ed.cursor() + 1;
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;%zuH", m_rows, col);
+  std::snprintf(buf, sizeof(buf), "\x1b[%d;%zuH", input_row(), col);
   out += buf;
   write_raw(out);
 }

@@ -108,21 +108,6 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     }
   });
   shell_ref = &shell;
-  // --motd FILE: guidance shown in the persistent panel from the start
-  // (recallable later with `help open`). A printed banner would be wiped by
-  // the pane UI's initial clear-screen.
-  if (tui && motd_path != nullptr) {
-    std::ifstream motd(motd_path);
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(motd, line)) {
-      lines.push_back(line);
-    }
-    if (!lines.empty()) {
-      console.set_panel(lines);
-      shell.remember_panel(lines);
-    }
-  }
   shell.set_panel_hook([&](const std::vector<std::string>& lines) {
     if (!tui) {
       return false;  // plain mode prints help inline as before
@@ -131,6 +116,26 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     console.render_input(editor);
     return true;
   });
+  if (tui) {
+    shell.set_print_hook([&](const std::string& line) { console.emit(line); });
+    shell.set_width_provider([&]() { return console.columns(); });
+    // Resize contract (H1): geometry changed -> panels re-render from state.
+    console.set_resize_hook([&]() { shell.refresh_panels(); });
+  }
+
+  // --motd FILE: guidance seeded into the help panel from the start. A
+  // printed banner would be wiped by the pane UI's initial clear-screen.
+  if (tui && motd_path != nullptr) {
+    std::ifstream motd(motd_path);
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(motd, line)) {
+      lines.push_back(line);
+    }
+    if (!lines.empty()) {
+      shell.show_motd(lines);
+    }
+  }
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
     if (!alsa.create_port(def, port_error)) {
@@ -230,6 +235,12 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
         running = false;
       } else if (tui) {
         for (ssize_t i = 0; i < got; ++i) {
+          // UI key dispatch runs before the line editor (H2): with panel
+          // focus the byte drives panels/piano; with REPL focus it falls
+          // through and typing behaves exactly as before.
+          if (shell.handle_ui_key(static_cast<std::uint8_t>(buf[i]))) {
+            continue;
+          }
           const LineEditor::Result r = editor.feed(static_cast<std::uint8_t>(buf[i]));
           if (r.quit) {
             running = false;

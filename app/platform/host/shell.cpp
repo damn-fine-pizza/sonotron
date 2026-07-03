@@ -1,6 +1,7 @@
 #include "shell.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 
@@ -288,7 +289,48 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
   return true;
 }
 
+// Panel width used when no live terminal is attached (script/flat mode).
+constexpr int kDefaultPanelColumns = 80;
+
+// The simulated piano feeds the same input port real hardware uses (in0).
+constexpr std::uint8_t kPianoInputPort = 0;
+constexpr std::uint8_t kPianoReleaseVelocity = 64;
+
+// Piano policy limits (docs/TUI_SPEC.md §4) and MIDI wire ranges.
+constexpr int kPianoMinOctave = -1;
+constexpr int kPianoMaxOctave = 9;
+constexpr int kSemitonesPerOctave = 12;
+constexpr int kMidiNoteMax = 127;
+constexpr int kMidiChannels = 16;
+constexpr int kMidiVelocityMin = 1;
+constexpr int kMidiVelocityMax = 127;
+
+bool parse_int(const std::string& s, int& out) {
+  if (s.empty()) {
+    return false;
+  }
+
+  char* end = nullptr;
+  const long v = std::strtol(s.c_str(), &end, 10);
+  if (end == nullptr || *end != '\0') {
+    return false;
+  }
+
+  out = static_cast<int>(v);
+  return true;
+}
+
 }  // namespace
+
+Shell::Shell(EventSink sink)
+    // Every host-visible OutEvent flows through the monitor before the user
+    // sink: the MIDI monitor observes exactly what the host emits (H2).
+    : m_sink([this, user = std::move(sink)](const OutEvent& ev) {
+        m_monitor.observe(ev, m_pending_source_key);
+        user(ev);
+      }) {
+  m_panels.set_content(PanelId::kFilter, {"filter: channel|port|event|clear (help filter)"});
+}
 
 std::vector<std::string> Shell::build_help(const std::string& topic) const {
   if (topic == "chord") {
@@ -342,17 +384,575 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  panic                            all notes off everywhere",
     };
   }
+  if (topic == "panel") {
+    return {
+        "help: panel",
+        "  panel list                       panels and their state",
+        "  panel open|close|toggle <p>      p: help piano filter",
+        "  panel close all",
+        "  panel focus <p>|repl|next        focus bookkeeping (key dispatch: H2)",
+        "  panel status | panel help",
+        "  help <topic> fills and opens the help panel",
+    };
+  }
+  if (topic == "piano") {
+    return {
+        "help: piano",
+        "  panel open piano | panel focus piano   focus grabs the keyboard",
+        "  white: A S D F G H J K L ; '           black: W E T Y U O",
+        "  press = note-on, same key again = note-off (no key-release in ttys)",
+        "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
+        "  piano view keyboard|active-notes|event-log | piano panic",
+        "  focus keys: TAB next | P close | N names | V view | C clear | [ ] oct",
+    };
+  }
+  if (topic == "notes") {
+    return {
+        "help: notes",
+        "  notes names cde|doremi|toggle",
+        "  CDE (C D E ...) or DoReMi (Do Re Mi ...), applies to piano views",
+        "  scientific octaves, C4 = 60; sharps default, flats follow the key",
+    };
+  }
+  if (topic == "filter") {
+    return {
+        "help: filter",
+        "  filter channel <1..16>           only that channel in the event log",
+        "  filter port <N>                  only that port",
+        "  filter event note-on|note-off    only that event kind",
+        "  filter clear                     pass everything again",
+    };
+  }
+  if (topic == "view") {
+    return {
+        "help: view",
+        "  view show note-names|note-numbers|velocity|channel|port on|off",
+        "  view show-octaves boundary|all|none    keyboard octave markers",
+        "  view clear                             clear monitor buffers",
+    };
+  }
   return {
-      "help  (help <topic> opens the panel; help close / help open)",
+      "help  (help <topic> fills and opens the help panel)",
       "  transport start|stop|continue|tempo <bpm>",
       "  chord  - key, modes, play          (help chord)",
       "  seq    - chord progressions        (help seq)",
       "  style  - the arranger band         (help style)",
       "  track  - step sequencer            (help track)",
       "  midi   - ports, routing, panic     (help midi)",
+      "  panel  - help/piano/filter panels  (help panel)",
+      "  piano  - simulated keyboard        (help piano)",
       "  advance <N>[bars] | @<tick> <cmd> | quit",
       "  notes: C4=60, octave optional (D = D4), sharps/flats (F#3, Bb)",
   };
+}
+
+void Shell::print_lines(const std::vector<std::string>& lines) {
+  for (const std::string& line : lines) {
+    if (m_print_hook) {
+      m_print_hook(line);
+    } else {
+      std::printf("%s\n", line.c_str());
+    }
+  }
+}
+
+int Shell::panel_columns() const {
+  if (m_width_provider) {
+    return m_width_provider();
+  }
+  return kDefaultPanelColumns;
+}
+
+void Shell::refresh_piano_content() {
+  m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, panel_columns(), m_monitor,
+                                                           m_filter, m_view_options));
+}
+
+bool Shell::push_panels() {
+  // Width-dependent content is regenerated from state on every push, so a
+  // resize can never leave a stale layout behind (H1 resize contract).
+  if (m_panels.visible(PanelId::kPiano)) {
+    refresh_piano_content();
+  }
+
+  return m_panel_hook && m_panel_hook(m_panels.combined_lines());
+}
+
+void Shell::refresh_panels() { (void)push_panels(); }
+
+void Shell::show_motd(const std::vector<std::string>& lines) {
+  m_panels.set_content(PanelId::kHelp, lines);
+  m_panels.open(PanelId::kHelp);
+
+  if (!push_panels()) {
+    print_lines(lines);
+  }
+}
+
+void Shell::open_help_topic(const std::string& topic) {
+  const std::vector<std::string> lines = build_help(topic);
+  m_panels.set_content(PanelId::kHelp, lines);
+  m_panels.open(PanelId::kHelp);
+
+  if (!push_panels()) {
+    print_lines(lines);
+  }
+}
+
+bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage =
+      "panel list | open|close|toggle <p> | close all | focus <p>|repl|next | status | help";
+
+  if (t.size() < 2) {
+    error = kUsage;
+    return false;
+  }
+  const std::string& sub = t[1];
+
+  if (sub == "list") {
+    print_lines(m_panels.list_lines());
+    return true;
+  }
+  if (sub == "status") {
+    print_lines(m_panels.status_lines());
+    return true;
+  }
+  if (sub == "help") {
+    open_help_topic("panel");
+    return true;
+  }
+
+  if (sub == "open" || sub == "close" || sub == "toggle" || sub == "focus") {
+    if (t.size() < 3) {
+      error = "panel " + sub + ": missing panel name";
+      return false;
+    }
+    const std::string& target = t[2];
+
+    if (sub == "close" && target == "all") {
+      m_panels.close_all();
+      (void)push_panels();
+      return true;
+    }
+    if (sub == "focus" && (target == "repl" || target == "next")) {
+      if (target == "repl") {
+        m_panels.focus_repl();
+      } else {
+        m_panels.focus_next();
+      }
+      (void)push_panels();
+      return true;
+    }
+
+    PanelId id{};
+    if (!parse_panel_name(target, id)) {
+      error = "unknown panel '" + target + "' (help, piano, filter)";
+      return false;
+    }
+
+    if (sub == "open") {
+      m_panels.open(id);
+    } else if (sub == "close") {
+      m_panels.close(id);
+    } else if (sub == "toggle") {
+      m_panels.toggle(id);
+    } else {
+      m_panels.focus(id);
+    }
+
+    // A help panel opened before any `help <topic>` shows the overview.
+    if (m_panels.visible(PanelId::kHelp) && m_panels.content(PanelId::kHelp).empty()) {
+      m_panels.set_content(PanelId::kHelp, build_help(""));
+    }
+
+    const bool consumed = push_panels();
+    if (!consumed && m_panels.visible(id)) {
+      print_lines(m_panels.content(id));  // flat/script mode: show what opened
+    }
+    return true;
+  }
+
+  error = kUsage;
+  return false;
+}
+
+void Shell::print_line(const std::string& line) { print_lines({line}); }
+
+void Shell::toggle_piano_key(char key, int semitone_from_base) {
+  // Toggle note-off policy (H2): terminals deliver no key-release events,
+  // so pressing the same key again releases the note.
+  const int note = (m_piano.base_octave + 1) * kSemitonesPerOctave + semitone_from_base;
+
+  if (note < 0 || note > kMidiNoteMax) {
+    print_line("piano: note out of MIDI range (octave " + std::to_string(m_piano.base_octave) +
+               ")");
+    return;
+  }
+  const std::uint8_t midi_note = static_cast<std::uint8_t>(note);
+
+  bool held = false;
+  for (std::size_t i = 0; i < m_piano_held.size(); ++i) {
+    const ActiveNote& n = m_piano_held.notes()[i];
+    if (n.note == midi_note && n.channel == m_piano.channel) {
+      held = true;
+      break;
+    }
+  }
+
+  std::uint8_t bytes[3];
+  if (held) {
+    bytes[0] = static_cast<std::uint8_t>(midi::kNoteOff | m_piano.channel);
+    bytes[1] = midi_note;
+    bytes[2] = kPianoReleaseVelocity;
+    m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
+  } else {
+    bytes[0] = static_cast<std::uint8_t>(midi::kNoteOn | m_piano.channel);
+    bytes[1] = midi_note;
+    bytes[2] = m_piano.velocity;
+    if (!m_piano_held.note_on(
+            {kPianoInputPort, m_piano.channel, midi_note, m_piano.velocity, key, 0})) {
+      print_line("piano: too many held notes");
+      return;
+    }
+  }
+
+  m_pending_source_key = key;
+  feed_midi(kPianoInputPort, Span<const std::uint8_t>(bytes, sizeof(bytes)));
+  m_pending_source_key = 0;
+
+  (void)push_panels();
+}
+
+void Shell::piano_all_notes_off() {
+  // Release everything the piano is holding through the normal input path.
+  while (m_piano_held.size() > 0) {
+    const ActiveNote n = m_piano_held.notes()[0];
+
+    std::uint8_t bytes[3] = {static_cast<std::uint8_t>(midi::kNoteOff | n.channel), n.note,
+                             kPianoReleaseVelocity};
+    m_piano_held.note_off(n.port, n.channel, n.note);
+    feed_midi(kPianoInputPort, Span<const std::uint8_t>(bytes, sizeof(bytes)));
+  }
+
+  (void)push_panels();
+}
+
+bool Shell::cmd_piano(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage =
+      "piano octave <N>|up|down | channel <1..16> | velocity <1..127> | "
+      "keymap default | view keyboard|active-notes|event-log | panic";
+
+  if (t.size() < 2) {
+    error = kUsage;
+    return false;
+  }
+  const std::string& sub = t[1];
+
+  if (sub == "octave") {
+    if (t.size() < 3) {
+      error = "piano octave <N>|up|down";
+      return false;
+    }
+
+    int octave = m_piano.base_octave;
+    if (t[2] == "up") {
+      octave += 1;
+    } else if (t[2] == "down") {
+      octave -= 1;
+    } else {
+      char* end = nullptr;
+      octave = static_cast<int>(std::strtol(t[2].c_str(), &end, 10));
+      if (end == nullptr || *end != '\0') {
+        error = "piano octave: not a number: " + t[2];
+        return false;
+      }
+    }
+
+    if (octave < kPianoMinOctave || octave > kPianoMaxOctave) {
+      error = "piano octave: out of range " + std::to_string(kPianoMinOctave) + ".." +
+              std::to_string(kPianoMaxOctave);
+      return false;
+    }
+
+    m_piano.base_octave = octave;
+    (void)push_panels();
+    return true;
+  }
+
+  if (sub == "channel") {
+    int ch = 0;
+    if (t.size() < 3 || !parse_int(t[2], ch) || ch < 1 || ch > kMidiChannels) {
+      error = "piano channel <1..16>";
+      return false;
+    }
+    m_piano.channel = static_cast<std::uint8_t>(ch - 1);  // user 1-based, wire 0-based
+    (void)push_panels();
+    return true;
+  }
+
+  if (sub == "velocity") {
+    int vel = 0;
+    if (t.size() < 3 || !parse_int(t[2], vel) || vel < kMidiVelocityMin || vel > kMidiVelocityMax) {
+      error = "piano velocity <1..127>";
+      return false;
+    }
+    m_piano.velocity = static_cast<std::uint8_t>(vel);
+    (void)push_panels();
+    return true;
+  }
+
+  if (sub == "keymap") {
+    if (t.size() < 3 || t[2] != "default") {
+      error = "piano keymap default (the only keymap in H2)";
+      return false;
+    }
+    return true;
+  }
+
+  if (sub == "view") {
+    if (t.size() < 3) {
+      error = "piano view keyboard|active-notes|event-log";
+      return false;
+    }
+    if (t[2] == "keyboard") {
+      m_piano.view = PianoView::kKeyboard;
+    } else if (t[2] == "active-notes") {
+      m_piano.view = PianoView::kActiveNotes;
+    } else if (t[2] == "event-log") {
+      m_piano.view = PianoView::kEventLog;
+    } else {
+      error = "piano view: unknown view: " + t[2];
+      return false;
+    }
+    (void)push_panels();
+    return true;
+  }
+
+  if (sub == "panic") {
+    piano_all_notes_off();
+    return true;
+  }
+
+  error = kUsage;
+  return false;
+}
+
+bool Shell::cmd_notes(const std::vector<std::string>& t, std::string& error) {
+  if (t.size() < 3 || t[1] != "names") {
+    error = "notes names cde|doremi|toggle";
+    return false;
+  }
+
+  if (t[2] == "cde") {
+    m_piano.note_naming = NoteNaming::kCde;
+  } else if (t[2] == "doremi") {
+    m_piano.note_naming = NoteNaming::kDoReMi;
+  } else if (t[2] == "toggle") {
+    m_piano.note_naming =
+        m_piano.note_naming == NoteNaming::kCde ? NoteNaming::kDoReMi : NoteNaming::kCde;
+  } else {
+    error = "notes names cde|doremi|toggle";
+    return false;
+  }
+
+  (void)push_panels();
+  return true;
+}
+
+bool Shell::cmd_filter(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage = "filter channel <1..16> | port <N> | event note-on|note-off | clear";
+
+  if (t.size() < 2) {
+    error = kUsage;
+    return false;
+  }
+
+  if (t[1] == "clear") {
+    m_filter = MidiEventFilter{};
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "channel") {
+    int ch = 0;
+    if (t.size() < 3 || !parse_int(t[2], ch) || ch < 1 || ch > kMidiChannels) {
+      error = "filter channel <1..16>";
+      return false;
+    }
+    m_filter.channel = static_cast<std::uint8_t>(ch - 1);
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "port") {
+    int port = 0;
+    if (t.size() < 3 || !parse_int(t[2], port) || port < 0 || port >= static_cast<int>(kMaxPorts)) {
+      error = "filter port <0.." + std::to_string(kMaxPorts - 1) + ">";
+      return false;
+    }
+    m_filter.port = static_cast<std::uint8_t>(port);
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "event") {
+    if (t.size() < 3) {
+      error = "filter event note-on|note-off";
+      return false;
+    }
+    if (t[2] == "note-on") {
+      m_filter.event_kind = MidiEventKindFilter::kNoteOn;
+    } else if (t[2] == "note-off") {
+      m_filter.event_kind = MidiEventKindFilter::kNoteOff;
+    } else {
+      error = "filter event note-on|note-off";
+      return false;
+    }
+    (void)push_panels();
+    return true;
+  }
+
+  error = kUsage;
+  return false;
+}
+
+bool Shell::cmd_view(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage =
+      "view show note-names|note-numbers|velocity|channel|port on|off | "
+      "view show-octaves boundary|all|none | view clear";
+
+  if (t.size() < 2) {
+    error = kUsage;
+    return false;
+  }
+
+  if (t[1] == "clear") {
+    // Clears the visible monitor buffers (the C shortcut does the same).
+    m_monitor.clear();
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "show-octaves") {
+    if (t.size() < 3) {
+      error = "view show-octaves boundary|all|none";
+      return false;
+    }
+    if (t[2] == "boundary") {
+      m_piano.octave_display = OctaveDisplayMode::kBoundary;
+    } else if (t[2] == "all") {
+      m_piano.octave_display = OctaveDisplayMode::kAll;
+    } else if (t[2] == "none") {
+      m_piano.octave_display = OctaveDisplayMode::kNone;
+    } else {
+      error = "view show-octaves boundary|all|none";
+      return false;
+    }
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "show" && t.size() >= 4) {
+    const bool on = t[3] == "on";
+    if (!on && t[3] != "off") {
+      error = "view show " + t[2] + " on|off";
+      return false;
+    }
+
+    if (t[2] == "note-names") {
+      m_view_options.show_note_names = on;
+    } else if (t[2] == "note-numbers") {
+      m_view_options.show_note_numbers = on;
+    } else if (t[2] == "velocity") {
+      m_view_options.show_velocity = on;
+    } else if (t[2] == "channel") {
+      m_view_options.show_channel = on;
+    } else if (t[2] == "port") {
+      m_view_options.show_port = on;
+    } else {
+      error = "view show: unknown option: " + t[2];
+      return false;
+    }
+    (void)push_panels();
+    return true;
+  }
+
+  error = kUsage;
+  return false;
+}
+
+bool Shell::handle_ui_key(std::uint8_t byte) {
+  // REPL focus: never intercept — typing must stay exactly as before.
+  if (m_panels.focus_kind() != PanelFocus::kPanel) {
+    return false;
+  }
+
+  if (byte == '\t') {
+    m_panels.focus_next();
+    (void)push_panels();
+    return true;
+  }
+
+  if (m_panels.focused_panel() != PanelId::kPiano) {
+    return false;  // help/filter focus: keys fall through to the editor
+  }
+
+  const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
+
+  // Piano-focus shortcuts take priority over musical keys (none collide).
+  switch (upper) {
+    case 'P':
+      m_panels.close(PanelId::kPiano);
+      (void)push_panels();
+      return true;
+    case 'N': {
+      std::string ignored;
+      (void)cmd_notes({"notes", "names", "toggle"}, ignored);
+      return true;
+    }
+    case 'V': {
+      const PianoView next = m_piano.view == PianoView::kKeyboard      ? PianoView::kActiveNotes
+                             : m_piano.view == PianoView::kActiveNotes ? PianoView::kEventLog
+                                                                       : PianoView::kKeyboard;
+      m_piano.view = next;
+      (void)push_panels();
+      return true;
+    }
+    case 'C':
+      m_monitor.clear();
+      (void)push_panels();
+      return true;
+    case '[': {
+      std::string ignored;
+      (void)cmd_piano({"piano", "octave", "down"}, ignored);
+      return true;
+    }
+    case ']': {
+      std::string ignored;
+      (void)cmd_piano({"piano", "octave", "up"}, ignored);
+      return true;
+    }
+    default:
+      break;
+  }
+
+  // Musical keys (case-insensitive; ';' and '\'' have no upper form).
+  for (const PianoKeyBinding& binding : default_keymap_white()) {
+    if (binding.key == upper || binding.key == static_cast<char>(byte)) {
+      toggle_piano_key(binding.key, binding.semitone_from_base);
+      return true;
+    }
+  }
+  for (const PianoKeyBinding& binding : default_keymap_black()) {
+    if (binding.key == upper) {
+      toggle_piano_key(binding.key, binding.semitone_from_base);
+      return true;
+    }
+  }
+
+  // Piano focus swallows everything else so stray keys never leak into a
+  // half-typed REPL command.
+  return true;
 }
 
 int Shell::find_seq(const std::string& name) const {
@@ -465,29 +1065,36 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
   }
 
   if (cmd == "help") {
-    const std::string sub = t.size() >= 2 ? t[1] : "";
-    if (sub == "close") {
-      if (m_panel_hook) {
-        (void)m_panel_hook({});
-      }
-      return true;
+    const std::string topic = t.size() >= 2 ? t[1] : "";
+
+    // Lifecycle moved under `panel ...` (H1): keep a migration hint alive.
+    if (topic == "open" || topic == "close") {
+      error = "help " + topic + " was removed: use panel open help / panel close help";
+      return false;
     }
-    if (sub == "open") {
-      const std::vector<std::string> lines =
-          m_last_help.empty() ? build_help("") : m_last_help;
-      if (m_panel_hook && m_panel_hook(lines)) {
-        return true;
-      }
-    }
-    const std::vector<std::string> lines = build_help(sub == "open" ? "" : sub);
-    m_last_help = lines;
-    if (m_panel_hook && m_panel_hook(lines)) {
-      return true;
-    }
-    for (const std::string& line : lines) {
-      std::printf("%s\n", line.c_str());
-    }
+
+    open_help_topic(topic);
     return true;
+  }
+
+  if (cmd == "panel") {
+    return cmd_panel(t, error);
+  }
+
+  if (cmd == "piano") {
+    return cmd_piano(t, error);
+  }
+
+  if (cmd == "notes") {
+    return cmd_notes(t, error);
+  }
+
+  if (cmd == "filter") {
+    return cmd_filter(t, error);
+  }
+
+  if (cmd == "view") {
+    return cmd_view(t, error);
   }
 
   if (cmd == "port" && t.size() >= 3 && t[1] == "open") {
