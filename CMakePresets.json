@@ -19,6 +19,18 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
+      "name": "coverage",
+      "displayName": "Host (unit-test coverage, gcov instrumented)",
+      "inherits": "host",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "--coverage",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_CXX_COMPILER_LAUNCHER": ""
+      }
+    },
+    {
       "name": "arm",
       "displayName": "STM32 anchor (Cortex-M7 cross)",
       "generator": "Ninja",
@@ -33,12 +45,18 @@
   "buildPresets": [
     { "name": "host", "configurePreset": "host" },
     { "name": "host-release", "configurePreset": "host-release" },
+    { "name": "coverage", "configurePreset": "coverage" },
     { "name": "arm", "configurePreset": "arm" }
   ],
   "testPresets": [
     {
       "name": "host",
       "configurePreset": "host",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
       "output": { "outputOnFailure": true }
     }
   ]
