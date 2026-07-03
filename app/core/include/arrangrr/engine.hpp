@@ -4,6 +4,7 @@
 
 #include "arrangrr/abi.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
+#include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/common/time.hpp"
@@ -36,6 +37,7 @@ class Engine {
   constexpr const Transport& transport() const noexcept { return transport_; }
   const Timeline& timeline() const noexcept { return timeline_; }
   const ChordEngine& chords() const noexcept { return chords_; }
+  const ChordSequencer& sequences() const noexcept { return seq_; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -65,12 +67,20 @@ class Engine {
         // MIDI convention: the first F8 follows FA immediately — the slave's
         // beat zero is this clock, not one period later.
         emit_realtime(midi::kClock, sink);
+        if (seq_.playing()) (void)seq_.play(0);  // rebase to the new tick 0
         fire_timeline(0, sink);  // grid step 0 plays on start, like the F8
+        fire_chord_seq(0, sink);
         flush(sink);
         sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
         break;
       case Param::kTransportStop:
         transport_.stop();
+        if (seq_.playing()) {
+          chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
+            schedule_or_warn(port, now_, msg, sink);
+          });
+          flush(sink);
+        }
         emit_realtime(midi::kStop, sink);
         sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
         break;
@@ -105,6 +115,91 @@ class Engine {
         break;
       case Param::kClockOutMask:
         clock_out_mask_ = static_cast<std::uint8_t>(cmd.a & 0xFF);
+        break;
+      case Param::kSeqNew:
+        if (seq_.add_sequence(chords_.key()) < 0) {
+          sink(OutEvent::warn(WarnCode::kSeqTableFull, now_));
+        }
+        break;
+      case Param::kSeqUse:
+        if (!seq_.use(cmd.idx)) sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        break;
+      case Param::kSeqRec:
+        if (!seq_.start_record(now_)) sink(OutEvent::warn(WarnCode::kSeqEmpty, now_));
+        break;
+      case Param::kSeqStop:
+        if (seq_.recording()) {
+          (void)seq_.stop_record(now_, cmd.a > 0 ? static_cast<Tick>(cmd.a) : kTicksPerBar);
+        } else {
+          seq_.stop_playback([&] {
+            chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
+              schedule_or_warn(port, now_, msg, sink);
+            });
+          });
+          flush(sink);
+        }
+        break;
+      case Param::kSeqAdd: {
+        ChordSequence* seq = seq_.current();
+        const auto note = static_cast<std::uint8_t>(cmd.a & 0x7F);
+        const std::int8_t quality_ovr = static_cast<std::int8_t>((cmd.b & 0xFF) - 1);
+        const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0x7F);
+        if (seq == nullptr || cmd.a < 0 || cmd.a > 127 || cmd.c <= 0 || vel == 0 ||
+            quality_ovr >= static_cast<std::int8_t>(kQualityCount)) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          break;
+        }
+        const int degree =
+            theory::degree_of(seq->key, static_cast<std::uint8_t>(note % 12));
+        if (degree < 0) {
+          sink(OutEvent::warn(WarnCode::kNotInKey, now_));
+        } else if (!seq->append(static_cast<std::int8_t>(degree), quality_ovr, vel,
+                                static_cast<Tick>(cmd.c))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      }
+      case Param::kSeqLoop:
+        if (ChordSequence* seq = seq_.current(); seq != nullptr) {
+          seq->loop = cmd.a != 0;
+        } else {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      case Param::kSeqPlay:
+        if (!seq_.play(transport_.tick())) {
+          sink(OutEvent::warn(WarnCode::kSeqEmpty, now_));
+        } else if (transport_.playing()) {
+          fire_chord_seq(transport_.tick(), sink);
+          flush(sink);
+        }
+        break;
+      case Param::kSeqTranspose:
+        if (ChordSequence* seq = seq_.current(); seq == nullptr) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else if (cmd.a >= 0) {
+          if (cmd.a > 11 || cmd.b >= kModeCount) {
+            sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          } else {
+            seq->transpose_to(static_cast<std::uint8_t>(cmd.a),
+                              static_cast<std::int8_t>(cmd.b));
+          }
+        } else {
+          seq->transpose_by(static_cast<std::int8_t>(cmd.c));
+        }
+        break;
+      case Param::kSeqDel:
+        if (ChordSequence* seq = seq_.current();
+            seq == nullptr || !seq->remove(static_cast<std::size_t>(cmd.a))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      case Param::kSeqClear:
+        if (ChordSequence* seq = seq_.current(); seq != nullptr) {
+          seq->clear();
+        } else {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
         break;
       case Param::kTrackNew: {
         const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
@@ -166,6 +261,7 @@ class Engine {
         if (r.degree < 0) {
           sink(OutEvent::warn(WarnCode::kNotInKey, now_));
         } else {
+          seq_.capture(now_, r.degree, static_cast<std::int8_t>(cmd.b), vel);
           sink(OutEvent::chord(chords_.out_port(), static_cast<std::uint8_t>(r.degree),
                                static_cast<std::uint8_t>(r.quality), r.root_note,
                                r.shape.count, vel, now_));
@@ -218,6 +314,7 @@ class Engine {
           }
         }
         fire_timeline(transport_.tick(), sink);
+        fire_chord_seq(transport_.tick(), sink);
       }
       flush(sink);
     }
@@ -247,6 +344,26 @@ class Engine {
                       });
   }
 
+  void fire_chord_seq(Tick transport_tick, EventSink sink) {
+    seq_.on_tick(
+        transport_tick,
+        [&](std::uint8_t root_note, ChordQuality quality, std::uint8_t degree,
+            std::uint8_t vel) {
+          chords_.sound(root_note, quality, vel,
+                        [&](std::uint8_t port, const MidiMessage& msg) {
+                          schedule_or_warn(port, now_, msg, sink);
+                        });
+          sink(OutEvent::chord(chords_.out_port(), degree,
+                               static_cast<std::uint8_t>(quality), root_note,
+                               theory::shape_of(quality).count, vel, now_));
+        },
+        [&] {
+          chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
+            schedule_or_warn(port, now_, msg, sink);
+          });
+        });
+  }
+
   void flush(EventSink sink) {
     scheduler_.pop_due(now_, [&](const ScheduledEvent& ev) {
       tracker_.observe(ev.port, ev.msg);
@@ -260,6 +377,7 @@ class Engine {
   Router router_;
   Timeline timeline_;
   ChordEngine chords_;
+  ChordSequencer seq_;
   NoteTracker tracker_;
   OutScheduler<kSchedulerCapacity> scheduler_;
   std::uint8_t clock_out_mask_ = 0;  // off by default; enabled via kClockOutMask
