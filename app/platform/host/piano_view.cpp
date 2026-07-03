@@ -1,6 +1,8 @@
 #include "piano_view.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <string>
 
 namespace arrangrr::host {
 
@@ -13,8 +15,14 @@ constexpr std::uint8_t kDefaultVelocity = 96;
 
 constexpr int kSemitonesPerOctave = 12;
 constexpr int kMaxMidiNote = 127;
+constexpr std::size_t kMidiNoteCount = 128;
+constexpr unsigned kMidiChannelCount = 16;
 
 }  // namespace piano_keys
+
+// A key is "active" when a note it maps to is currently held; the marker set is
+// indexed by MIDI note number so the check is a flat lookup.
+using ActiveNoteMask = std::array<bool, piano_keys::kMidiNoteCount>;
 
 // The named constants are the source of truth for the struct defaults.
 static_assert(PianoViewState{}.base_octave == piano_keys::kDefaultOctave);
@@ -36,6 +44,17 @@ constexpr std::size_t kWideGap = 4;
 constexpr std::size_t kCompactGap = 2;
 
 }  // namespace piano_layout
+
+namespace monitor_view {
+
+// Keyboard events strip: cosmetic, fixed-length activity bar (no animation).
+constexpr std::size_t kBarDashes = 7;          // active bar: "-------*"
+constexpr std::size_t kBarReleasedDashes = 3;  // released bar: "---o    "
+
+// Event-log view: most-recent lines that pass the filter.
+constexpr std::size_t kEventLogRows = 8;
+
+}  // namespace monitor_view
 
 namespace {
 
@@ -152,9 +171,21 @@ std::size_t max_label_width(const std::array<std::string, kWhiteKeyCount>& white
   return width;
 }
 
+// Wraps a computer-key glyph as "*A*" when its note is currently held.
+std::string key_glyph(char key, bool active) {
+  std::string glyph(1, key);
+  if (active) {
+    glyph = "*" + glyph + "*";
+  }
+
+  return glyph;
+}
+
 // Builds the four keyboard rows (black keys, black labels, white keys, white
-// labels) for the wide/compact tiers. `gap` is the only tier-dependent input.
-std::vector<std::string> render_grid(const PianoViewState& state, std::size_t gap) {
+// labels) for the wide/compact tiers. `gap` is the only tier-dependent input;
+// `active` marks which MIDI notes are currently held.
+std::vector<std::string> render_grid_keys(const PianoViewState& state, std::size_t gap,
+                                          const ActiveNoteMask& active) {
   std::array<std::string, kWhiteKeyCount> white_labels;
   std::array<std::string, kBlackKeyCount> black_labels;
   std::array<std::uint8_t, kWhiteKeyCount> white_midi;
@@ -181,7 +212,8 @@ std::vector<std::string> render_grid(const PianoViewState& state, std::size_t ga
   TextRow white_keys_row;
   TextRow white_labels_row;
   for (std::size_t i = 0; i < kWhiteKeyCount; ++i) {
-    white_keys_row.put_centered(white_center[i], std::string(1, kWhiteKeys[i].key));
+    white_keys_row.put_centered(white_center[i],
+                                key_glyph(kWhiteKeys[i].key, active[white_midi[i]]));
     white_labels_row.put_centered(white_center[i], white_labels[i]);
   }
 
@@ -202,16 +234,17 @@ std::vector<std::string> render_grid(const PianoViewState& state, std::size_t ga
     }
 
     const std::size_t center = (white_center[right - 1] + white_center[right]) / 2;
-    black_keys_row.put_centered(center, std::string(1, kBlackKeys[b].key));
+    black_keys_row.put_centered(center, key_glyph(kBlackKeys[b].key, active[black_midi[b]]));
     black_labels_row.put_centered(center, black_labels[b]);
   }
 
-  return {header_line(state), black_keys_row.text, black_labels_row.text, white_keys_row.text,
-          white_labels_row.text};
+  return {black_keys_row.text, black_labels_row.text, white_keys_row.text, white_labels_row.text};
 }
 
-// The narrow-but-usable fallback: keys grouped on labelled text lines.
-std::vector<std::string> render_minimal(const PianoViewState& state, int terminal_columns) {
+// The narrow-but-usable fallback: keys grouped on labelled text lines. An
+// active entry is wrapped whole ("*A/C 4*") so the marker never splits a label.
+std::vector<std::string> render_minimal_keys(const PianoViewState& state, int terminal_columns,
+                                             const ActiveNoteMask& active) {
   // Entries are atomic ("W/C#4"): wrap onto a continuation row instead of
   // cutting a label mid-way when the terminal is narrow.
   const std::size_t width = static_cast<std::size_t>(terminal_columns);
@@ -227,6 +260,9 @@ std::vector<std::string> render_minimal(const PianoViewState& state, int termina
       std::string entry(1, keys[i].key);
       entry += '/';
       entry += key_label(state, midi, mode);
+      if (active[midi]) {
+        entry = "*" + entry + "*";
+      }
 
       const bool row_has_entries = row.size() > kIndent;
       const std::size_t needed = row.size() + (row_has_entries ? kEntryGap : 0) + entry.size();
@@ -244,7 +280,7 @@ std::vector<std::string> render_minimal(const PianoViewState& state, int termina
     return rows;
   };
 
-  std::vector<std::string> lines{header_line(state)};
+  std::vector<std::string> lines;
 
   const std::vector<std::string> black =
       group("black:", KeyboardNoteLabelMode::kBlackKey, kBlackKeys, kBlackKeyCount);
@@ -265,6 +301,217 @@ void truncate_lines(std::vector<std::string>& lines, int terminal_columns) {
       line.resize(width);
     }
   }
+}
+
+// Note name with octave and no internal spacing ("C4", "Do4").
+std::string compact_note_name(std::uint8_t midi_note, NoteNaming naming) {
+  return note_name(midi_note, NoteNameOptions{naming, false, true});
+}
+
+// Which computer-keyboard keys are lit right now, indexed by MIDI note.
+ActiveNoteMask active_note_mask(const MidiMonitor& monitor) {
+  ActiveNoteMask mask{};
+
+  const ActiveNoteTracker& tracker = monitor.active_notes();
+  for (std::size_t i = 0; i < tracker.size(); ++i) {
+    const std::uint8_t note = tracker.notes()[i].note;
+    if (note < piano_keys::kMidiNoteCount) {
+      mask[note] = true;
+    }
+  }
+
+  return mask;
+}
+
+std::string simple_header(const char* view_name, const PianoViewState& state) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "Piano | %s | names:%s", view_name,
+                naming_word(state.note_naming));
+
+  return std::string(buf);
+}
+
+// One line of the keyboard-view events strip. `source_key` 0 means external, so
+// we print the port/channel origin instead of a computer key.
+std::string format_event_line(const PianoViewState& state, const PianoVisualEvent& event,
+                              const MidiViewOptions& options) {
+  std::string source;
+  if (event.source_key != 0) {
+    source = std::string(1, event.source_key);
+  } else {
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "p%uch%u", static_cast<unsigned>(event.port),
+                  static_cast<unsigned>(event.channel) + 1U);
+    source = buf;
+  }
+
+  std::string bar;
+  if (event.active) {
+    bar = std::string(monitor_view::kBarDashes, '-') + '*';
+  } else {
+    bar = std::string(monitor_view::kBarReleasedDashes, '-') + 'o' +
+          std::string(monitor_view::kBarDashes - monitor_view::kBarReleasedDashes, ' ');
+  }
+
+  std::string tail;
+  if (event.active) {
+    if (options.show_velocity) {
+      char buf[8];
+      std::snprintf(buf, sizeof(buf), "v%u", static_cast<unsigned>(event.velocity));
+      tail = buf;
+    }
+  } else {
+    tail = format_duration_ticks(event.end_tick - event.start_tick);
+  }
+
+  std::string line = "  ";
+  line += source;
+  line += ':';
+  line += compact_note_name(event.note, state.note_naming);
+  line += "  ";
+  line += bar;
+  line += ' ';
+  line += event.active ? "on " : "off";
+  if (!tail.empty()) {
+    line += "  ";
+    line += tail;
+  }
+
+  return line;
+}
+
+std::vector<std::string> render_keyboard(const PianoViewState& state, int terminal_columns,
+                                         const MidiMonitor& monitor,
+                                         const MidiViewOptions& options) {
+  std::vector<std::string> lines{header_line(state)};
+
+  // Recent-events strip: the newest monitor_limits::kVisualEventRows, newest
+  // last, between the header and the keys.
+  const std::vector<PianoVisualEvent> recent = monitor.visual_events().recent_events();
+  const std::size_t shown = std::min(recent.size(), monitor_limits::kVisualEventRows);
+  for (std::size_t i = recent.size() - shown; i < recent.size(); ++i) {
+    lines.push_back(format_event_line(state, recent[i], options));
+  }
+
+  const ActiveNoteMask active = active_note_mask(monitor);
+
+  std::vector<std::string> keys;
+  if (terminal_columns >= piano_layout::kWideMinColumns) {
+    keys = render_grid_keys(state, piano_layout::kWideGap, active);
+  } else if (terminal_columns >= piano_layout::kCompactMinColumns) {
+    keys = render_grid_keys(state, piano_layout::kCompactGap, active);
+  } else {
+    keys = render_minimal_keys(state, terminal_columns, active);
+  }
+
+  lines.insert(lines.end(), keys.begin(), keys.end());
+
+  return lines;
+}
+
+std::vector<std::string> render_active_notes(const PianoViewState& state,
+                                             const MidiMonitor& monitor) {
+  std::vector<std::string> lines{simple_header("active-notes", state)};
+
+  const ActiveNoteTracker& tracker = monitor.active_notes();
+  if (tracker.size() == 0) {
+    lines.push_back("  (no active notes)");
+    return lines;
+  }
+
+  // Channels ascending; notes ascending within a channel; port is not shown.
+  for (unsigned channel = 0; channel < piano_keys::kMidiChannelCount; ++channel) {
+    std::vector<std::uint8_t> notes;
+    for (std::size_t i = 0; i < tracker.size(); ++i) {
+      const ActiveNote& note = tracker.notes()[i];
+      if (note.channel == channel) {
+        notes.push_back(note.note);
+      }
+    }
+    if (notes.empty()) {
+      continue;
+    }
+
+    std::sort(notes.begin(), notes.end());
+
+    std::string line = "ch" + std::to_string(channel + 1) + ":";
+    for (const std::uint8_t note : notes) {
+      line += ' ';
+      line += compact_note_name(note, state.note_naming);
+    }
+    lines.push_back(line);
+  }
+
+  return lines;
+}
+
+// A note-log entry names its kind; anything that is not a note is generic.
+const char* log_kind(const MidiMessage& msg) {
+  if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
+    return "note-on ";
+  }
+  if (msg.type() == midi::kNoteOff || (msg.type() == midi::kNoteOn && msg.d2 == 0)) {
+    return "note-off";
+  }
+
+  return "other   ";
+}
+
+std::string format_log_line(const PianoViewState& state, const MidiLogEvent& event, bool show_index,
+                            const MidiViewOptions& options) {
+  std::string line = "@" + std::to_string(event.tick);
+  if (show_index) {
+    line += "#" + std::to_string(event.same_tick_index);
+  }
+  line += "  ";
+
+  if (options.show_port) {
+    line += "p" + std::to_string(event.port) + " ";
+  }
+  if (options.show_channel) {
+    line += "ch" + std::to_string(static_cast<unsigned>(event.msg.channel()) + 1U) + "  ";
+  }
+
+  line += log_kind(event.msg);
+
+  if (options.show_note_numbers) {
+    line += "  " + std::to_string(static_cast<unsigned>(event.msg.d1));
+  }
+  if (options.show_note_names) {
+    line += ' ';
+    line += compact_note_name(event.msg.d1, state.note_naming);
+  }
+  if (options.show_velocity) {
+    line += "  vel " + std::to_string(static_cast<unsigned>(event.msg.d2));
+  }
+
+  return line;
+}
+
+std::vector<std::string> render_event_log(const PianoViewState& state, const MidiMonitor& monitor,
+                                          const MidiEventFilter& filter,
+                                          const MidiViewOptions& options) {
+  std::vector<std::string> lines{simple_header("event-log", state)};
+
+  const std::vector<MidiLogEvent> events = monitor.log_events(filter);
+  const std::size_t shown = std::min(events.size(), monitor_view::kEventLogRows);
+  const std::size_t first = events.size() - shown;
+
+  for (std::size_t i = first; i < events.size(); ++i) {
+    const MidiLogEvent& event = events[i];
+
+    // "#i" only when this event is one of several visible on the same tick.
+    bool share = event.same_tick_index > 0;
+    for (std::size_t j = first; !share && j < events.size(); ++j) {
+      if (j != i && events[j].tick == event.tick) {
+        share = true;
+      }
+    }
+
+    lines.push_back(format_log_line(state, event, share, options));
+  }
+
+  return lines;
 }
 
 }  // namespace
@@ -289,23 +536,41 @@ std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming
   return label;
 }
 
-std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns) {
+std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
+                                            const MidiMonitor& monitor,
+                                            const MidiEventFilter& filter,
+                                            const MidiViewOptions& options) {
   if (terminal_columns < piano_layout::kMinimalMinColumns) {
     return {kTooNarrowMessage};
   }
 
   std::vector<std::string> lines;
-  if (terminal_columns >= piano_layout::kWideMinColumns) {
-    lines = render_grid(state, piano_layout::kWideGap);
-  } else if (terminal_columns >= piano_layout::kCompactMinColumns) {
-    lines = render_grid(state, piano_layout::kCompactGap);
-  } else {
-    lines = render_minimal(state, terminal_columns);
+  switch (state.view) {
+    case PianoView::kKeyboard:
+      lines = render_keyboard(state, terminal_columns, monitor, options);
+      break;
+    case PianoView::kActiveNotes:
+      lines = render_active_notes(state, monitor);
+      break;
+    case PianoView::kEventLog:
+      lines = render_event_log(state, monitor, filter, options);
+      break;
   }
 
   truncate_lines(lines, terminal_columns);
 
   return lines;
+}
+
+std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns) {
+  // Host is single-threaded (D-host): a function-local static const empty
+  // monitor is a cheap, allocation-free stand-in for callers that do not
+  // observe the output stream.
+  static const MidiMonitor kEmpty;
+  static const MidiEventFilter kNoFilter;
+  static const MidiViewOptions kDefaultOptions;
+
+  return render_piano_panel(state, terminal_columns, kEmpty, kNoFilter, kDefaultOptions);
 }
 
 }  // namespace arrangrr::host

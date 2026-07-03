@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "arrangrr/engine.hpp"
+#include "midi_monitor.hpp"
 #include "panel_manager.hpp"
 #include "piano_view.hpp"
 
@@ -60,6 +61,12 @@ class Shell {
 
   const PanelManager& panels() const { return m_panels; }
   const PianoViewState& piano_state() const { return m_piano; }
+  const MidiMonitor& monitor() const { return m_monitor; }
+
+  // Live TUI key dispatch (H2): consumes the byte when a panel has focus.
+  // Returns false with REPL focus so typing stays exactly as before —
+  // panel focus is entered only via `panel focus ...` commands.
+  bool handle_ui_key(std::uint8_t byte);
 
   Engine& engine() { return m_engine; }
   const Engine& engine() const { return m_engine; }
@@ -92,11 +99,18 @@ class Shell {
   std::vector<std::string> build_help(const std::string& topic) const;
 
   bool cmd_panel(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_piano(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_notes(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_filter(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_view(const std::vector<std::string>& tokens, std::string& error);
   void open_help_topic(const std::string& topic);
   void refresh_piano_content();
   bool push_panels();
   void print_lines(const std::vector<std::string>& lines);
+  void print_line(const std::string& line);
   int panel_columns() const;
+  void toggle_piano_key(char key, int semitone_from_base);
+  void piano_all_notes_off();
 
   Engine m_engine;
   EventSink m_sink;
@@ -106,6 +120,11 @@ class Shell {
   WidthProvider m_width_provider;
   PanelManager m_panels;
   PianoViewState m_piano;
+  MidiMonitor m_monitor;
+  MidiEventFilter m_filter;
+  MidiViewOptions m_view_options;
+  ActiveNoteTracker m_piano_held;  // toggle policy: press = on, again = off
+  char m_pending_source_key = 0;   // annotates monitor events while feeding
   std::vector<PortDef> m_ports;
   std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)
   std::vector<std::string> m_seqs;

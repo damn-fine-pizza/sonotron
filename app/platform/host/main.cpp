@@ -235,6 +235,12 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
         running = false;
       } else if (tui) {
         for (ssize_t i = 0; i < got; ++i) {
+          // UI key dispatch runs before the line editor (H2): with panel
+          // focus the byte drives panels/piano; with REPL focus it falls
+          // through and typing behaves exactly as before.
+          if (shell.handle_ui_key(static_cast<std::uint8_t>(buf[i]))) {
+            continue;
+          }
           const LineEditor::Result r = editor.feed(static_cast<std::uint8_t>(buf[i]));
           if (r.quit) {
             running = false;

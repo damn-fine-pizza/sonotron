@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "midi_monitor.hpp"
 #include "note_names.hpp"
 
 // Pure ASCII piano renderer, host side only: NO ANSI, NO terminal access, NO
@@ -14,7 +15,7 @@
 
 namespace arrangrr::host {
 
-enum class PianoView { kKeyboard };
+enum class PianoView { kKeyboard, kActiveNotes, kEventLog };
 
 enum class OctaveDisplayMode { kBoundary, kAll, kNone };
 
@@ -50,7 +51,17 @@ std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming
                                        KeyboardNoteLabelMode mode);
 
 // Renders the panel for the given terminal width. Never emits a line longer
-// than terminal_columns (defensive truncation at the end).
+// than terminal_columns (defensive truncation at the end). This overload
+// renders the keyboard against an empty static monitor (no active notes, no
+// events) — kept for callers that do not observe the output stream.
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns);
+
+// Monitor-aware rendering (H2): the keyboard marks active keys and shows a
+// recent-events strip, and the active-notes / event-log views draw from the
+// monitor's models and the caller's filter/display options.
+std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
+                                            const MidiMonitor& monitor,
+                                            const MidiEventFilter& filter,
+                                            const MidiViewOptions& options);
 
 }  // namespace arrangrr::host

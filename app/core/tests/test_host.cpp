@@ -592,6 +592,201 @@ void test_panel_commands() {
   CHECK(f.events.empty());
 }
 
+void test_piano_commands() {
+  ShellFixture f;
+
+  // Octave: absolute, relative, clamped range.
+  CHECK(f.run("piano octave 3"));
+  CHECK(f.shell.piano_state().base_octave == 3);
+  CHECK(f.run("piano octave up"));
+  CHECK(f.shell.piano_state().base_octave == 4);
+  CHECK(f.run("piano octave down"));
+  CHECK(f.shell.piano_state().base_octave == 3);
+  CHECK(!f.run("piano octave 10"));  // out of -1..9
+  CHECK(!f.run("piano octave -2"));
+  CHECK(!f.run("piano octave nonsense"));
+  CHECK(f.run("piano octave 9"));
+  CHECK(!f.run("piano octave up"));  // clamp rejects loudly at the edge
+  CHECK(f.run("piano octave -1"));
+  CHECK(!f.run("piano octave down"));
+
+  // Channel: user-facing 1-based, internal 0-based.
+  CHECK(f.run("piano channel 2"));
+  CHECK(f.shell.piano_state().channel == 1);
+  CHECK(!f.run("piano channel 0"));
+  CHECK(!f.run("piano channel 17"));
+
+  // Velocity.
+  CHECK(f.run("piano velocity 100"));
+  CHECK(f.shell.piano_state().velocity == 100);
+  CHECK(!f.run("piano velocity 0"));
+  CHECK(!f.run("piano velocity 128"));
+
+  // Keymap and views.
+  CHECK(f.run("piano keymap default"));
+  CHECK(!f.run("piano keymap qwertz"));
+  CHECK(f.run("piano view active-notes"));
+  CHECK(f.shell.piano_state().view == PianoView::kActiveNotes);
+  CHECK(f.run("piano view event-log"));
+  CHECK(f.run("piano view keyboard"));
+  CHECK(!f.run("piano view nonsense"));
+
+  // No piano command may touch the engine's MIDI output.
+  CHECK(f.midi_count() == 0);
+}
+
+void test_notes_names_commands() {
+  ShellFixture f;
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kCde);
+  CHECK(f.run("notes names doremi"));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kDoReMi);
+  CHECK(f.run("notes names cde"));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kCde);
+  CHECK(f.run("notes names toggle"));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kDoReMi);
+  CHECK(!f.run("notes names nonsense"));
+  CHECK(!f.run("notes"));
+}
+
+void test_filter_view_commands() {
+  ShellFixture f;
+
+  CHECK(f.run("filter channel 2"));
+  CHECK(f.run("filter port 0"));
+  CHECK(f.run("filter event note-on"));
+  CHECK(f.run("filter event note-off"));
+  CHECK(f.run("filter clear"));
+  CHECK(!f.run("filter channel 17"));
+  CHECK(!f.run("filter port 99"));
+  CHECK(!f.run("filter event nonsense"));
+  CHECK(!f.run("filter"));
+
+  CHECK(f.run("view show note-names off"));
+  CHECK(f.run("view show note-numbers off"));
+  CHECK(f.run("view show velocity off"));
+  CHECK(f.run("view show channel on"));
+  CHECK(f.run("view show port on"));
+  CHECK(f.run("view show-octaves boundary"));
+  CHECK(f.run("view show-octaves all"));
+  CHECK(f.run("view show-octaves none"));
+  CHECK(f.run("view clear"));
+  CHECK(!f.run("view show nonsense on"));
+  CHECK(!f.run("view show velocity maybe"));
+  CHECK(!f.run("view"));
+}
+
+// A fixture with the default thru wiring, so piano input becomes visible
+// output (in0 -> router -> out0), exactly like the live default setup.
+struct PianoFixture : ShellFixture {
+  PianoFixture() {
+    CHECK(run("port open in in0"));
+    CHECK(run("port open out out0"));
+    CHECK(run("thru in0 out0"));
+    CHECK(run("panel focus piano"));
+    events.clear();
+  }
+
+  int note_ons() const {
+    int n = 0;
+    for (const OutEvent& e : events) {
+      if (e.kind == OutEvent::Kind::kMidi && e.msg.type() == midi::kNoteOn && e.msg.d2 > 0) {
+        ++n;
+      }
+    }
+    return n;
+  }
+  int note_offs() const {
+    int n = 0;
+    for (const OutEvent& e : events) {
+      if (e.kind == OutEvent::Kind::kMidi &&
+          (e.msg.type() == midi::kNoteOff || (e.msg.type() == midi::kNoteOn && e.msg.d2 == 0))) {
+        ++n;
+      }
+    }
+    return n;
+  }
+};
+
+void test_piano_key_dispatch() {
+  PianoFixture f;
+
+  // 'a' (case-insensitive) = C of octave 4 = MIDI 60, through the normal path.
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.events.back().msg.type() == midi::kNoteOn);
+
+  // Toggle policy: same key again = note-off for the same note.
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_offs() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+
+  // Black key 'w' = C#4 = 61; velocity/channel follow the piano state.
+  CHECK(f.run("piano channel 2"));
+  CHECK(f.run("piano velocity 100"));
+  CHECK(f.shell.handle_ui_key('w'));
+  CHECK(f.events.back().msg.d1 == 61);
+  CHECK(f.events.back().msg.channel() == 1);  // wire 0-based for user channel 2
+  CHECK(f.events.back().msg.d2 == 100);
+  CHECK(f.shell.handle_ui_key('w'));  // release before the next checks
+
+  // Active notes reach the monitor via the wrapped sink.
+  CHECK(f.shell.handle_ui_key('h'));  // A4
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.run("piano panic"));
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // Out-of-range: octave 9, ' = +17 semitones -> 137 -> rejected, no event.
+  CHECK(f.run("piano octave 9"));
+  const int before = f.note_ons();
+  CHECK(f.shell.handle_ui_key('\''));
+  CHECK(f.note_ons() == before);
+
+  // 'P' closes the piano panel and returns focus to the REPL.
+  CHECK(f.shell.handle_ui_key('p'));
+  CHECK(!f.shell.panels().visible(PanelId::kPiano));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+
+  // With REPL focus nothing is intercepted anymore.
+  CHECK(!f.shell.handle_ui_key('a'));
+  CHECK(!f.shell.handle_ui_key('\t'));
+}
+
+void test_piano_focus_shortcuts() {
+  PianoFixture f;
+
+  // N toggles note naming, V cycles views, C clears the monitor.
+  CHECK(f.shell.handle_ui_key('n'));
+  CHECK(f.shell.piano_state().note_naming == NoteNaming::kDoReMi);
+  CHECK(f.shell.handle_ui_key('v'));
+  CHECK(f.shell.piano_state().view == PianoView::kActiveNotes);
+  CHECK(f.shell.handle_ui_key('v'));
+  CHECK(f.shell.piano_state().view == PianoView::kEventLog);
+  CHECK(f.shell.handle_ui_key('v'));
+  CHECK(f.shell.piano_state().view == PianoView::kKeyboard);
+
+  // [ ] change octave.
+  CHECK(f.shell.handle_ui_key('['));
+  CHECK(f.shell.piano_state().base_octave == 3);
+  CHECK(f.shell.handle_ui_key(']'));
+  CHECK(f.shell.piano_state().base_octave == 4);
+
+  // C clears monitor buffers.
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.shell.handle_ui_key('c'));
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // TAB cycles focus among visible panels and back to the REPL.
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+
+  // Stray keys are swallowed under piano focus, never leak to the editor.
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key('q'));
+  CHECK(f.shell.handle_ui_key('1'));
+}
+
 void test_panel_manager_state() {
   PanelManager pm;
   CHECK(!pm.any_visible());
@@ -715,6 +910,11 @@ int main() {
   test_help_panel_hook();
   test_panel_commands();
   test_panel_manager_state();
+  test_piano_commands();
+  test_notes_names_commands();
+  test_filter_view_commands();
+  test_piano_key_dispatch();
+  test_piano_focus_shortcuts();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
   test_line_editor();

@@ -9,6 +9,7 @@ add_library(arrangrr_host STATIC
   note_names.cpp
   panel_manager.cpp
   piano_view.cpp
+  midi_monitor.cpp
 )
 target_include_directories(arrangrr_host PUBLIC .)
 target_link_libraries(arrangrr_host PUBLIC arrangrr_core ALSA::ALSA)
