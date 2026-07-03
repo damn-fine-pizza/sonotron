@@ -102,6 +102,13 @@ launch_jam() {
     echo "FluidSynth's ALSA port never appeared."
     exit 1
   fi
+  # Warm the audio path: the first note after FluidSynth starts crackles
+  # while PipeWire opens the stream — swallow that with an inaudible note
+  # (velocity 1 on channel 16) sent straight to the synth.
+  if command -v aseqsend >/dev/null 2>&1; then
+    aseqsend -p "FLUID Synth:0" 9F 00 01 8F 00 40 2>/dev/null || true
+  fi
+
   (
     for i in $(seq 1 50); do
       if aconnect -l 2>/dev/null | grep -q "arrangrr"; then
