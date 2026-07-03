@@ -1,11 +1,16 @@
 find_package(ALSA REQUIRED)
 
-add_executable(arrangrr_cli
-  main.cpp
+# Host layer as a library so unit tests can link shell/jsonl directly.
+add_library(arrangrr_host STATIC
   shell.cpp
   jsonl.cpp
   alsa_midi.cpp
 )
+target_include_directories(arrangrr_host PUBLIC .)
+target_link_libraries(arrangrr_host PUBLIC arrangrr_core ALSA::ALSA)
+target_compile_options(arrangrr_host PRIVATE -Wall -Wextra -Werror)
+
+add_executable(arrangrr_cli main.cpp)
 set_target_properties(arrangrr_cli PROPERTIES OUTPUT_NAME arrangrr)
-target_link_libraries(arrangrr_cli PRIVATE arrangrr_core ALSA::ALSA)
+target_link_libraries(arrangrr_cli PRIVATE arrangrr_host)
 target_compile_options(arrangrr_cli PRIVATE -Wall -Wextra -Werror)

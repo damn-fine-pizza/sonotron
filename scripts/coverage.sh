@@ -15,10 +15,11 @@ if ! command -v gcovr >/dev/null 2>&1; then
   fi
 fi
 
+# Full clean: stale .gcno/.gcda from previous source layouts confuse gcovr's
+# merge; a coverage run is about correctness, not speed.
+rm -rf build/coverage
 cmake --preset coverage
 cmake --build --preset coverage
-# Reset counters from previous runs, then execute the suite.
-find build/coverage -name '*.gcda' -delete
 ctest --preset coverage
 
 mkdir -p build/coverage/report

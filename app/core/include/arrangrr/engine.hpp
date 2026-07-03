@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/abi.hpp"
+#include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/config.hpp"
@@ -25,14 +26,17 @@ namespace arrangrr {
 
 class Engine {
  public:
+  // Monomorphic sink at the ABI boundary (D26): one instantiation, no
+  // template bloat in flash; the callable is owned by the caller.
+  using EventSink = FunctionRef<void(const OutEvent&)>;
+
   constexpr Tick now() const noexcept { return now_; }
   constexpr const Transport& transport() const noexcept { return transport_; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
-  // end of the batch. Sink signature: void(const OutEvent&).
-  template <typename Sink>
-  void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, Sink&& sink) {
+  // end of the batch.
+  void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
     if (port >= kMaxPorts) return;
     for (std::uint8_t byte : bytes) {
       parsers_[port].feed(byte, [&](const MidiMessage& msg) {
@@ -45,8 +49,7 @@ class Engine {
   }
 
   // Applies one binary command (D26). Sink receives any resulting events.
-  template <typename Sink>
-  void push_command(const Command& cmd, Sink&& sink) {
+  void push_command(const Command& cmd, EventSink sink) {
     switch (cmd.param) {
       case Param::kTransportTempo:
         if (!transport_.set_bpm(static_cast<BpmX100>(cmd.a)))
@@ -105,15 +108,13 @@ class Engine {
 
   // Schedules a message on the stream timeline at an absolute tick (used by
   // the host for @tick-scheduled script lines).
-  template <typename Sink>
-  void schedule_at(std::uint8_t port, Tick tick, const MidiMessage& msg, Sink&& sink) {
+  void schedule_at(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
     schedule_or_warn(port, tick, msg, sink);
     flush(sink);  // fire immediately if already due
   }
 
   // Advances stream time by `n` ticks, firing due events in D29 total order.
-  template <typename Sink>
-  void advance_ticks(std::uint32_t n, Sink&& sink) {
+  void advance_ticks(std::uint32_t n, EventSink sink) {
     for (std::uint32_t i = 0; i < n; ++i) {
       ++now_;
       if (transport_.playing()) {
@@ -131,16 +132,14 @@ class Engine {
   }
 
  private:
-  template <typename Sink>
-  void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, Sink&& sink) {
+  void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
     if (!scheduler_.schedule(port, tick, msg)) {
       sink(OutEvent::warn(WarnCode::kSchedulerFull, now_));
     }
   }
 
   // Transport realtime bytes (FA/FB/FC) go out immediately on clock ports.
-  template <typename Sink>
-  void emit_realtime(std::uint8_t status, Sink&& sink) {
+  void emit_realtime(std::uint8_t status, EventSink sink) {
     for (std::uint8_t p = 0; p < kMaxPorts; ++p) {
       if (clock_out_mask_ & (1u << p)) {
         schedule_or_warn(p, now_, MidiMessage::realtime(status), sink);
@@ -149,8 +148,7 @@ class Engine {
     flush(sink);
   }
 
-  template <typename Sink>
-  void flush(Sink&& sink) {
+  void flush(EventSink sink) {
     scheduler_.pop_due(now_, [&](const ScheduledEvent& ev) {
       tracker_.observe(ev.port, ev.msg);
       sink(OutEvent::midi(ev.port, ev.msg, ev.tick));

@@ -121,6 +121,102 @@ void test_panic_via_engine() {
   CHECK(ev[3].msg.d1 == midi::kCcResetAllControllers);
 }
 
+void test_transport_position_and_bounds() {
+  Transport t;
+  CHECK(t.set_bpm(12000));
+  CHECK(!t.set_bpm(100));    // below 20.00 BPM
+  CHECK(!t.set_bpm(99999));  // above 400.00 BPM
+  t.start();
+  for (int i = 0; i < static_cast<int>(kTicksPerBar + kTicksPerBeat + 5); ++i) t.advance_one();
+  const Position p = t.position();  // bar 2, beat 2, tick 5
+  CHECK(p.bar == 2 && p.beat == 2 && p.tick == 5);
+  t.locate(0);
+  CHECK(t.position().bar == 1 && t.position().beat == 1 && t.position().tick == 0);
+  t.stop();
+  CHECK(t.state() == TransportState::kStopped);
+  t.resume();
+  CHECK(t.playing());
+}
+
+void test_warn_on_bad_tempo_and_route() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  Command tempo;
+  tempo.op = Op::kSet;
+  tempo.param = Param::kTransportTempo;
+  tempo.a = 1;  // absurd bpm_x100
+  e.push_command(tempo, sink);
+  CHECK(ev.size() == 1 && ev[0].code == static_cast<std::uint16_t>(WarnCode::kBadArgument));
+  ev.clear();
+  e.push_command(route_add(9, -1, 0, -1, route_pass::kAll), sink);  // bad in port
+  CHECK(ev.size() == 1 && ev[0].code == static_cast<std::uint16_t>(WarnCode::kBadArgument));
+}
+
+void test_route_table_full_warns() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  for (std::size_t i = 0; i < kMaxRoutes; ++i)
+    e.push_command(route_add(0, -1, 0, -1, route_pass::kAll), sink);
+  CHECK(ev.empty());
+  e.push_command(route_add(0, -1, 0, -1, route_pass::kAll), sink);
+  CHECK(ev.size() == 1 && ev[0].code == static_cast<std::uint16_t>(WarnCode::kRouteTableFull));
+  // Route clear frees the table again.
+  ev.clear();
+  Command clear;
+  clear.param = Param::kRouteClear;
+  e.push_command(clear, sink);
+  e.push_command(route_add(0, -1, 0, -1, route_pass::kAll), sink);
+  CHECK(ev.empty());
+}
+
+void test_clock_on_two_ports_and_continue() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  Command mask;
+  mask.op = Op::kSet;
+  mask.param = Param::kClockOutMask;
+  mask.a = 0b0011;  // ports 0 and 1
+  e.push_command(mask, sink);
+  Command cont;
+  cont.param = Param::kTransportContinue;
+  e.push_command(cont, sink);
+  // Continue: FB on both ports (no immediate F8 — that is Start-only).
+  int fb = 0, f8 = 0;
+  for (const OutEvent& o : ev) {
+    if (o.kind != OutEvent::Kind::kMidi) continue;
+    if (o.msg.status == midi::kContinue) ++fb;
+    if (o.msg.status == midi::kClock) ++f8;
+  }
+  CHECK(fb == 2 && f8 == 0);
+  ev.clear();
+  e.advance_ticks(40, sink);
+  f8 = 0;
+  for (const OutEvent& o : ev)
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.status == midi::kClock) ++f8;
+  CHECK(f8 == 2);  // tick 40 on both ports
+}
+
+void test_input_port_out_of_range_ignored() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  const std::uint8_t bytes[] = {0x90, 60, 100};
+  e.push_midi_in(9, Span<const std::uint8_t>(bytes), sink);
+  CHECK(ev.empty());
+}
+
+void test_schedule_at_already_due() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  e.advance_ticks(5, sink);
+  e.schedule_at(0, 5, MidiMessage::note_on(0, 60, 1), sink);  // due now
+  CHECK(ev.size() == 1 && ev[0].tick == 5);
+}
+
 void test_warn_on_unknown_command() {
   Engine e;
   Events ev;
@@ -141,6 +237,12 @@ int main() {
   test_events_fire_with_stopped_transport();
   test_transport_clock_emission();
   test_panic_via_engine();
+  test_transport_position_and_bounds();
+  test_warn_on_bad_tempo_and_route();
+  test_route_table_full_warns();
+  test_clock_on_two_ports_and_continue();
+  test_input_port_out_of_range_ignored();
+  test_schedule_at_already_due();
   test_warn_on_unknown_command();
   if (arrangrr::test::failures() == 0) std::printf("test_engine: all OK\n");
   return arrangrr::test::failures();

@@ -157,11 +157,13 @@ int run_live(bool human) {
 int main(int argc, char** argv) {
   const char* script = nullptr;
   bool human = false;
+  bool events_set = false;
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--script") == 0 && i + 1 < argc) {
       script = argv[++i];
     } else if (std::strcmp(argv[i], "--events") == 0 && i + 1 < argc) {
       human = std::strcmp(argv[++i], "human") == 0;
+      events_set = true;
     } else if (std::strcmp(argv[i], "--help") == 0) {
       std::printf("usage: arrangrr [--script FILE|-] [--events jsonl|human]\n");
       return 0;
@@ -171,5 +173,6 @@ int main(int argc, char** argv) {
     }
   }
   // Script mode defaults to canonical JSONL (golden format); live to human.
-  return script ? run_script(script, human) : run_live(!human ? true : human);
+  if (script) return run_script(script, human);
+  return run_live(events_set ? human : true);
 }

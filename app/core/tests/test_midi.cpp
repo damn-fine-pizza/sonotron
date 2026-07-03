@@ -140,6 +140,76 @@ void test_note_tracker_panic_with_sustain() {
   CHECK(!t.any_sounding(0, 2) && !t.any_sounding(0, 5));
 }
 
+void test_parser_system_common() {
+  // Song Position (F2, 2 data), Song Select (F3, 1 data), Tune Request (F6).
+  const Msgs m = parse({0xF2, 0x10, 0x02, 0xF3, 5, 0xF6});
+  CHECK(m.size() == 3);
+  CHECK(m[0].status == midi::kSongPosition && m[0].d1 == 0x10 && m[0].d2 == 0x02);
+  CHECK(m[1].status == midi::kSongSelect && m[1].d1 == 5);
+  CHECK(m[2].status == midi::kTuneRequest);
+  // System common must clear running status: the dangling data byte is orphan.
+  const Msgs n = parse({0x90, 60, 100, 0xF6, 61});
+  CHECK(n.size() == 2);  // NoteOn + TuneRequest, orphan 61 dropped
+}
+
+void test_parser_one_data_byte_messages() {
+  const Msgs m = parse({0xC3, 42, 0xD2, 100});
+  CHECK(m.size() == 2);
+  CHECK(m[0].type() == midi::kProgramChange && m[0].channel() == 3 && m[0].d1 == 42);
+  CHECK(m[1].type() == midi::kChannelPressure && m[1].channel() == 2 && m[1].d1 == 100);
+}
+
+void test_parser_reset() {
+  MidiParser p;
+  Msgs out;
+  auto sink = [&](const MidiMessage& m) { CHECK(out.push_back(m)); };
+  p.feed(0x90, sink);
+  p.feed(60, sink);  // half a message
+  p.reset();
+  p.feed(100, sink);  // orphan after reset: dropped
+  CHECK(out.empty());
+  const std::uint8_t rest[] = {0x80, 60, 0};
+  p.feed(rest, 3, sink);
+  CHECK(out.size() == 1 && out[0].type() == midi::kNoteOff);
+}
+
+void test_scheduler_clear_and_refill() {
+  OutScheduler<8> s;
+  CHECK(s.schedule(0, 1, MidiMessage::note_on(0, 60, 1)));
+  CHECK(s.schedule(0, 2, MidiMessage::note_on(0, 61, 1)));
+  s.clear();
+  CHECK(s.empty());
+  int fired = 0;
+  s.pop_due(100, [&](const ScheduledEvent&) { ++fired; });
+  CHECK(fired == 0);
+  // Refill in reverse tick order to exercise deeper sift paths.
+  for (std::uint32_t t = 8; t > 0; --t)
+    CHECK(s.schedule(0, t, MidiMessage::note_on(0, static_cast<std::uint8_t>(t), 1)));
+  CHECK(!s.schedule(0, 9, MidiMessage::note_on(0, 9, 1)));  // full
+  Tick last = 0;
+  s.pop_due(100, [&](const ScheduledEvent& ev) {
+    CHECK(ev.tick >= last);
+    last = ev.tick;
+  });
+  CHECK(last == 8);
+}
+
+void test_note_tracker_high_notes_and_bounds() {
+  NoteTracker t;
+  t.observe(0, MidiMessage::note_on(0, 100, 90));  // second bitmap word
+  t.observe(0, MidiMessage::note_on(0, 5, 90));
+  CHECK(t.any_sounding(0, 0));
+  // Out-of-range port/channel are ignored gracefully.
+  t.observe(7, MidiMessage::note_on(0, 60, 90));
+  CHECK(!t.any_sounding(7, 0));
+  CHECK(!t.any_sounding(0, 16));
+
+  StaticVector<MidiMessage, 8> out;
+  t.panic([&](std::uint8_t, const MidiMessage& m) { CHECK(out.push_back(m)); });
+  CHECK(out.size() == 5);  // NoteOff 5, NoteOff 100, then 3 CCs
+  CHECK(out[0].d1 == 5 && out[1].d1 == 100);
+}
+
 void test_note_tracker_pedal_release_clears() {
   NoteTracker t;
   t.observe(0, MidiMessage::note_on(0, 60, 100));
@@ -158,10 +228,15 @@ int main() {
   test_parser_realtime_interleaved_preserves_running_status();
   test_parser_sysex_skipped_safely();
   test_parser_orphan_data_dropped();
+  test_parser_system_common();
+  test_parser_one_data_byte_messages();
+  test_parser_reset();
   test_scheduler_total_order();
   test_scheduler_due_only();
+  test_scheduler_clear_and_refill();
   test_router_filters_and_remap();
   test_note_tracker_panic_with_sustain();
+  test_note_tracker_high_notes_and_bounds();
   test_note_tracker_pedal_release_clears();
   if (arrangrr::test::failures() == 0) std::printf("test_midi: all OK\n");
   return arrangrr::test::failures();
