@@ -1,0 +1,6 @@
+{"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":60,"vel":100,"@":0}
+{"ev":"transport","state":"playing","@":0}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":60,"vel":64,"@":60}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":60,"vel":100,"@":960}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":60,"vel":64,"@":1020}
+{"ev":"transport","state":"stopped","@":1919}

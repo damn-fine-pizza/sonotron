@@ -1,0 +1,16 @@
+# Golden G-M1-1: two-track polymeter (write gesture).
+# drum: 4 steps (one hit on step 1) -> fires every 960 ticks.
+# bass: 3 steps (hits on steps 1 and 3) -> wraps every 720 ticks.
+# Two beats (1920 ticks) show the phase drift; NoteOffs pair each hit.
+port open out synth
+track new drum synth:10 drums
+track new bass synth:3 bass
+track length drum 4
+track length bass 3
+track step drum 1 C2 100 120
+track step bass 1 C1 90 120
+track step bass 3 G1 80 120
+transport start
+advance 1919
+transport stop
+quit

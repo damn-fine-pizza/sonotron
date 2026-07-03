@@ -1,0 +1,18 @@
+# Golden G-M1-2: mute and solo masks over one pattern cycle.
+# Both tracks hit step 1. First beat: b muted -> only a sounds.
+# Then solo a while unmuting b -> still only a sounds.
+port open out synth
+track new a synth:1
+track new b synth:2
+track length a 4
+track length b 4
+track step a 1 C4 100 60
+track step b 1 E4 100 60
+track mute b on
+transport start
+advance 959
+track solo a on
+track mute b off
+advance 960
+transport stop
+quit

@@ -103,6 +103,7 @@ int run_live(bool human) {
   std::printf("arrangrr> ");
   std::fflush(stdout);
 
+  std::string stdin_acc;  // partial-line accumulator for the raw REPL reader
   bool running = true;
   while (running && !shell.quit_requested()) {
     struct pollfd fds[16];
@@ -136,16 +137,27 @@ int run_live(bool human) {
       shell.feed_midi(port, Span<const std::uint8_t>(bytes, len));
     });
 
-    // REPL input.
-    if (fds[0].revents & POLLIN) {
-      std::string line;
-      if (!std::getline(std::cin, line)) {
+    // REPL input. Raw read(2), never iostream: cin's stdio-synced buffer
+    // hides pending lines from both poll() and in_avail(), stranding every
+    // line after the first of a multi-line write until the NEXT write
+    // arrives (a permanent one-behind pipeline).
+    if (fds[0].revents & (POLLIN | POLLHUP)) {
+      char buf[512];
+      const ssize_t got = read(STDIN_FILENO, buf, sizeof(buf));
+      if (got <= 0) {
         running = false;
-      } else if (!shell.exec_line(line, error)) {
-        std::printf("error: %s\n", error.c_str());
+      } else {
+        stdin_acc.append(buf, static_cast<std::size_t>(got));
+        std::size_t nl;
+        while ((nl = stdin_acc.find('\n')) != std::string::npos) {
+          const std::string line = stdin_acc.substr(0, nl);
+          stdin_acc.erase(0, nl + 1);
+          if (!shell.exec_line(line, error)) std::printf("error: %s\n", error.c_str());
+          if (shell.quit_requested()) break;
+        }
+        std::printf("arrangrr> ");
+        std::fflush(stdout);
       }
-      std::printf("arrangrr> ");
-      std::fflush(stdout);
     }
   }
   close(tfd);

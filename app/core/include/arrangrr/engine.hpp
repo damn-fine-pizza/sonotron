@@ -11,6 +11,7 @@
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
 #include "arrangrr/scheduler/out_scheduler.hpp"
+#include "arrangrr/timeline/timeline.hpp"
 #include "arrangrr/transport/transport.hpp"
 
 // The engine: wires parser → router → scheduler → tracker behind the binary
@@ -32,6 +33,7 @@ class Engine {
 
   constexpr Tick now() const noexcept { return now_; }
   constexpr const Transport& transport() const noexcept { return transport_; }
+  const Timeline& timeline() const noexcept { return timeline_; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -61,6 +63,8 @@ class Engine {
         // MIDI convention: the first F8 follows FA immediately — the slave's
         // beat zero is this clock, not one period later.
         emit_realtime(midi::kClock, sink);
+        fire_timeline(0, sink);  // grid step 0 plays on start, like the F8
+        flush(sink);
         sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
         break;
       case Param::kTransportStop:
@@ -100,6 +104,43 @@ class Engine {
       case Param::kClockOutMask:
         clock_out_mask_ = static_cast<std::uint8_t>(cmd.a & 0xFF);
         break;
+      case Param::kTrackNew: {
+        const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
+        const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
+        if (port >= kMaxPorts || channel > 15 ||
+            cmd.a > static_cast<std::int32_t>(TrackRole::kCc)) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else if (timeline_.add_track(static_cast<TrackRole>(cmd.a), port, channel) < 0) {
+          sink(OutEvent::warn(WarnCode::kTrackTableFull, now_));
+        }
+        break;
+      }
+      case Param::kTrackStep: {
+        const auto note = static_cast<std::uint8_t>(cmd.b & 0xFF);
+        const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
+        if (!timeline_.set_step(cmd.idx, static_cast<std::size_t>(cmd.a), note, vel,
+                                static_cast<std::uint16_t>(cmd.c))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      }
+      case Param::kTrackLength:
+        if (!timeline_.set_length(cmd.idx, static_cast<std::size_t>(cmd.a))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      case Param::kTrackMute:
+      case Param::kTrackSolo: {
+        Track* t = timeline_.track(cmd.idx);
+        if (t == nullptr) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else if (cmd.param == Param::kTrackMute) {
+          t->mute = cmd.a != 0;
+        } else {
+          t->solo = cmd.a != 0;
+        }
+        break;
+      }
       default:
         sink(OutEvent::warn(WarnCode::kUnknownCommand, now_));
         break;
@@ -126,6 +167,7 @@ class Engine {
             }
           }
         }
+        fire_timeline(transport_.tick(), sink);
       }
       flush(sink);
     }
@@ -148,6 +190,13 @@ class Engine {
     flush(sink);
   }
 
+  void fire_timeline(Tick transport_tick, EventSink sink) {
+    timeline_.on_tick(transport_tick,
+                      [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
+                        schedule_or_warn(port, now_ + static_cast<Tick>(delay), msg, sink);
+                      });
+  }
+
   void flush(EventSink sink) {
     scheduler_.pop_due(now_, [&](const ScheduledEvent& ev) {
       tracker_.observe(ev.port, ev.msg);
@@ -159,6 +208,7 @@ class Engine {
   Transport transport_;
   MidiParser parsers_[kMaxPorts];
   Router router_;
+  Timeline timeline_;
   NoteTracker tracker_;
   OutScheduler<kSchedulerCapacity> scheduler_;
   std::uint8_t clock_out_mask_ = 0;  // off by default; enabled via kClockOutMask
