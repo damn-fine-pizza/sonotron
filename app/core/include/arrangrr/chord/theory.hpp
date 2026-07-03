@@ -128,6 +128,50 @@ constexpr ChordQuality smart_quality(Mode mode, int degree) noexcept {
   return third == 3 ? ChordQuality::kMin7 : ChordQuality::kMaj7;
 }
 
+// Mode C (D12): complete a shell/partial voicing. `intervals` are the pitch
+// classes above the root (mod 12, root excluded, zero-terminated array of up
+// to 3). Decision tree over third/fifth/seventh/sus flags; unmatched combos
+// fall back to the closest family.
+constexpr ChordQuality complete_shell(const std::uint8_t (&iv)[3], std::uint8_t n) noexcept {
+  bool maj3 = false, min3 = false, dim5 = false, aug5 = false;
+  bool min7 = false, maj7 = false, sus4 = false, sus2 = false;
+  for (std::uint8_t i = 0; i < n; ++i) {
+    switch (iv[i]) {
+      case 4: maj3 = true; break;
+      case 3: min3 = true; break;
+      case 6: dim5 = true; break;
+      case 8: aug5 = true; break;
+      case 10: min7 = true; break;
+      case 11: maj7 = true; break;
+      case 5: sus4 = true; break;
+      case 2: sus2 = true; break;
+      default: break;  // perfect fifth (7) adds no color
+    }
+  }
+  if (min3 && dim5) return min7 ? ChordQuality::kHalfDim7 : ChordQuality::kDim;
+  if (maj3 && aug5) return ChordQuality::kAug;
+  if (min7) return min3 ? ChordQuality::kMin7 : ChordQuality::kDom7;
+  if (maj7) return ChordQuality::kMaj7;  // maj or min third: closest is maj7
+  if (min3) return ChordQuality::kMin;
+  if (maj3) return ChordQuality::kMaj;
+  if (sus4) return ChordQuality::kSus4;
+  if (sus2) return ChordQuality::kSus2;
+  return ChordQuality::kMaj;  // bare root / bare fifth: major
+}
+
+// dim7 needs the diminished seventh (9), folded in here to keep the tree flat.
+constexpr ChordQuality complete_shell_full(const std::uint8_t (&iv)[3],
+                                           std::uint8_t n) noexcept {
+  bool min3 = false, dim5 = false, bb7 = false;
+  for (std::uint8_t i = 0; i < n; ++i) {
+    if (iv[i] == 3) min3 = true;
+    if (iv[i] == 6) dim5 = true;
+    if (iv[i] == 9) bb7 = true;
+  }
+  if (min3 && dim5 && bb7) return ChordQuality::kDim7;
+  return complete_shell(iv, n);
+}
+
 // --- compile-time self-tests (D32) ----------------------------------------
 namespace selftest {
 constexpr Key kCMajor{0, Mode::kMajor};
@@ -149,6 +193,15 @@ static_assert(smart_quality(Mode::kMinor, 4) == ChordQuality::kDom7);
 static_assert(smart_quality(Mode::kMinor, 6) == ChordQuality::kDom7);
 // A natural minor scale root check: E (pc 4) is the V of A minor.
 static_assert(degree_of(kAMinor, 4) == 4);
+// Shell completion (mode C) spot checks.
+constexpr std::uint8_t kIv1[3] = {4, 0, 0};
+static_assert(complete_shell_full(kIv1, 1) == ChordQuality::kMaj);
+constexpr std::uint8_t kIv2[3] = {3, 10, 0};
+static_assert(complete_shell_full(kIv2, 2) == ChordQuality::kMin7);
+constexpr std::uint8_t kIv3[3] = {10, 0, 0};
+static_assert(complete_shell_full(kIv3, 1) == ChordQuality::kDom7);
+constexpr std::uint8_t kIv4[3] = {3, 6, 9};
+static_assert(complete_shell_full(kIv4, 3) == ChordQuality::kDim7);
 }  // namespace selftest
 
 }  // namespace theory

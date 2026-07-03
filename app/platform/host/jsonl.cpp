@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/transport/transport.hpp"
 
@@ -88,6 +89,7 @@ const char* quality_suffix(ChordQuality q) {
 std::string roman_degree(std::uint8_t degree, ChordQuality q) {
   static constexpr const char* kUpper[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
   static constexpr const char* kLower[7] = {"i", "ii", "iii", "iv", "v", "vi", "vii"};
+  if (degree == kNoDegree) return "-";  // keyless modes (single/shell)
   if (degree > 6) return "?";
   const bool minor_family = q == ChordQuality::kMin || q == ChordQuality::kMin7 ||
                             q == ChordQuality::kDim || q == ChordQuality::kDim7 ||

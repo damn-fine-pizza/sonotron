@@ -448,14 +448,26 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
   if ((cmd == "play" && t.size() >= 2) ||
       (cmd == "chord" && t.size() >= 3 && t[1] == "play")) {
     const std::size_t base = cmd == "play" ? 1 : 2;
+    // Up to 4 note tokens (shell mode voicings), then [quality] [velocity].
+    std::int32_t packed = 0;
+    int note_count = 0;
+    std::size_t next = base;
     std::uint8_t note = 0;
-    if (!parse_note(t[base], note)) {
+    while (next < t.size() && note_count < 4 && parse_note(t[next], note)) {
+      if (note == 0) {
+        error = "note 0 (C-1) cannot be packed; use 1..127";
+        return false;
+      }
+      packed |= static_cast<std::int32_t>(note) << (8 * note_count);
+      ++note_count;
+      ++next;
+    }
+    if (note_count == 0) {
       error = "bad note: " + t[base];
       return false;
     }
     std::int8_t quality = -1;
     std::uint64_t vel = 100;
-    std::size_t next = base + 1;
     if (next < t.size() && parse_quality(t[next], quality)) ++next;
     if (next < t.size() && (!parse_u64(t[next], vel) || vel < 1 || vel > 127)) {
       error = "bad velocity: " + t[next];
@@ -463,7 +475,7 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
     }
     Command c;
     c.param = Param::kChordPlay;
-    c.a = note;
+    c.a = packed;
     c.b = quality;
     c.c = static_cast<std::int32_t>(vel);
     engine_.push_command(c, sink_);
@@ -471,6 +483,22 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
   }
 
   if (cmd == "chord" && t.size() >= 2) {
+    if (t[1] == "mode" && t.size() >= 3) {
+      std::int32_t mode = -1;
+      if (t[2] == "diatonic") mode = 0;
+      else if (t[2] == "single") mode = 1;
+      else if (t[2] == "shell") mode = 2;
+      if (mode < 0) {
+        error = "chord mode diatonic|single|shell";
+        return false;
+      }
+      Command c;
+      c.op = Op::kSet;
+      c.param = Param::kChordMode;
+      c.a = mode;
+      engine_.push_command(c, sink_);
+      return true;
+    }
     if (t[1] == "stop") {
       Command c;
       c.param = Param::kChordStop;
