@@ -288,6 +288,21 @@ void test_shell_chord_commands() {
   CHECK(!f.run("chord flip"));
 }
 
+void test_shell_chord_modes_cli() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("chord out synth"));
+  CHECK(f.run("chord mode single"));
+  CHECK(f.run("play F#"));  // chromatic allowed in absolute mode
+  CHECK(f.midi_count() == 3);
+  CHECK(f.run("chord mode shell"));
+  CHECK(f.run("play C E Bb"));  // multi-note completion
+  CHECK(f.run("play D F C5 80"));  // trailing velocity after notes
+  CHECK(f.run("chord mode diatonic"));
+  CHECK(!f.run("chord mode wizard"));
+  CHECK(!f.run("play C-1"));  // note 0 cannot be packed
+}
+
 void test_jsonl_chord_rendering() {
   // ii in C major: D4 input, min7 -> {"in":"D4","out":"Dm7","deg":"ii"}.
   const OutEvent ev = OutEvent::chord(0, 1, static_cast<std::uint8_t>(ChordQuality::kMin7),
@@ -304,6 +319,10 @@ void test_jsonl_chord_rendering() {
   CHECK(to_jsonl(halfdim) == R"({"ev":"chord","in":"B4","out":"Bm7b5","deg":"viim7b5","@":0})");
   const std::string human = to_human(ev);
   CHECK(human.find("chord Dm7 (ii)") != std::string::npos);
+  // Keyless modes render degree "-".
+  const OutEvent keyless = OutEvent::chord(
+      0, kNoDegree, static_cast<std::uint8_t>(ChordQuality::kMaj), 66, 3, 100, 0);
+  CHECK(to_jsonl(keyless) == R"({"ev":"chord","in":"F#4","out":"F#","deg":"-","@":0})");
 }
 
 void test_shell_seq_commands() {
@@ -407,6 +426,7 @@ int main() {
   test_note_name_parsing();
   test_shell_chord_commands();
   test_shell_seq_commands();
+  test_shell_chord_modes_cli();
   test_jsonl_chord_rendering();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();

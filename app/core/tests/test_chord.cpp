@@ -153,6 +153,56 @@ void test_range_clamp_and_bad_args() {
   CHECK(f.ev.size() == 1 && f.ev[0].kind == OutEvent::Kind::kWarn);
 }
 
+void test_single_finger_mode() {
+  ChordFixture f;
+  f.cmd(Param::kChordMode, 1, 0, 0, Op::kSet);
+  f.play(66);  // F#4: chromatic anywhere, allowed in absolute mode
+  const OutEvent& chord = f.ev[0];
+  CHECK(chord.kind == OutEvent::Kind::kChord);
+  CHECK((chord.code & 0xFF) == kNoDegree);
+  CHECK((chord.code >> 8) == static_cast<std::uint16_t>(ChordQuality::kMaj));
+  const auto ons = f.notes_of(midi::kNoteOn);
+  CHECK(ons.size() == 3 && ons[0] == 66 && ons[1] == 70 && ons[2] == 73);
+  f.ev.clear();
+  f.play(60, static_cast<std::int8_t>(ChordQuality::kMin7));  // override still wins
+  const auto ons2 = f.notes_of(midi::kNoteOn);
+  CHECK(ons2.size() == 4 && ons2[1] == 63);
+}
+
+void test_shell_mode_completion() {
+  ChordFixture f;
+  f.cmd(Param::kChordMode, 2, 0, 0, Op::kSet);
+  // C4 + E4 + Bb4 packed -> C7 completed (60 64 67 70).
+  f.cmd(Param::kChordPlay, 60 | (64 << 8) | (70 << 16), -1, 100);
+  const OutEvent& chord = f.ev[0];
+  CHECK((chord.code >> 8) == static_cast<std::uint16_t>(ChordQuality::kDom7));
+  auto ons = f.notes_of(midi::kNoteOn);
+  CHECK(ons.size() == 4 && ons[0] == 60 && ons[1] == 64 && ons[2] == 67 && ons[3] == 70);
+  f.ev.clear();
+  // D4 + F4 -> Dm completed; lowest note wins as root even if unordered.
+  f.cmd(Param::kChordPlay, 65 | (62 << 8), -1, 100);
+  ons = f.notes_of(midi::kNoteOn);
+  CHECK(ons.size() == 3 && ons[0] == 62 && ons[1] == 65 && ons[2] == 69);
+  f.ev.clear();
+  // Bare note in shell mode falls back to major.
+  f.cmd(Param::kChordPlay, 60, -1, 100);
+  CHECK((f.ev[0].code >> 8) == static_cast<std::uint16_t>(ChordQuality::kMaj));
+}
+
+void test_mode_switch_and_bad_mode() {
+  ChordFixture f;
+  f.cmd(Param::kChordMode, 1, 0, 0, Op::kSet);
+  f.cmd(Param::kChordMode, 0, 0, 0, Op::kSet);  // back to diatonic
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.ev.clear();
+  f.play(61);  // chromatic again rejected in diatonic mode
+  CHECK(f.ev.size() == 1 &&
+        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kNotInKey));
+  f.ev.clear();
+  f.cmd(Param::kChordMode, 9, 0, 0, Op::kSet);
+  CHECK(f.ev.size() == 1 && f.ev[0].kind == OutEvent::Kind::kWarn);
+}
+
 void test_panic_covers_chord_notes() {
   ChordFixture f;
   f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
@@ -174,6 +224,9 @@ int main() {
   test_quality_override_and_output_channel();
   test_minor_key_v_is_dominant();
   test_range_clamp_and_bad_args();
+  test_single_finger_mode();
+  test_shell_mode_completion();
+  test_mode_switch_and_bad_mode();
   test_panic_covers_chord_notes();
   if (arrangrr::test::failures() == 0) std::printf("test_chord: all OK\n");
   return arrangrr::test::failures();

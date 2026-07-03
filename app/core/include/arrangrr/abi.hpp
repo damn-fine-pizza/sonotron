@@ -40,7 +40,8 @@ enum class Param : std::uint16_t {
   kTrackMute = 12,         // set: idx = track; a = 0/1
   kTrackSolo = 13,         // set: idx = track; a = 0/1
   kKeySet = 14,            // set: a = root pitch class (0..11), b = Mode
-  kChordPlay = 15,         // do: a = input note (0..127)
+  kChordPlay = 15,         // do: a = up to 4 packed notes, one per byte,
+                           //         zero-terminated (single note == low byte)
                            //     b = quality override (-1 = smart/D19)
                            //     c = velocity (1..127)
   kChordStop = 16,         // do
@@ -61,6 +62,7 @@ enum class Param : std::uint16_t {
                            //     c = relative semitones
   kSeqDel = 27,            // do: a = step index (0-based)
   kSeqClear = 28,          // do
+  kChordMode = 29,         // set: a = ChordMode (0 diatonic, 1 single, 2 shell)
 };
 
 struct Command {

@@ -1,0 +1,21 @@
+# Golden G-M4-1: the three interpretation modes (D12) side by side.
+# single: one note = absolute major, chromatic allowed, degree "-".
+# shell:  lowest note is the root, partners complete the chord.
+# diatonic: back to key-aware D19 smart quality.
+# Mode/key switches are @-scheduled like the plays: unprefixed lines run
+# immediately at parse time, before any pending line fires (D29).
+port open out virt as synth
+chord out synth
+chord mode single
+@0   play C
+@96  play F# 90
+@150 chord mode shell
+@192 play C E Bb
+@288 play D F C5
+@384 play C Eb
+@430 chord mode diatonic
+@430 key C major
+@480 play D
+@576 chord stop
+advance 672
+quit

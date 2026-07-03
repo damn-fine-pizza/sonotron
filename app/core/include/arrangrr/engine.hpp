@@ -246,27 +246,75 @@ class Engine {
       case Param::kChordHold:
         chords_.set_hold(cmd.a != 0);
         break;
+      case Param::kChordMode:
+        if (cmd.a < 0 || cmd.a >= kChordModeCount) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else {
+          chords_.set_mode(static_cast<ChordMode>(cmd.a));
+        }
+        break;
       case Param::kChordPlay: {
         const auto vel = static_cast<std::uint8_t>(cmd.c);
-        if (cmd.a < 0 || cmd.a > 127 || vel == 0 || vel > 127 ||
-            cmd.b >= kQualityCount) {
+        // Up to 4 packed notes, zero-terminated (one per byte).
+        std::uint8_t notes[4];
+        std::uint8_t note_count = 0;
+        for (int i = 0; i < 4; ++i) {
+          const auto n = static_cast<std::uint8_t>((cmd.a >> (8 * i)) & 0xFF);
+          if (n == 0) break;
+          if (n > 127) {
+            note_count = 0;
+            break;
+          }
+          notes[note_count++] = n;
+        }
+        if (note_count == 0 || vel == 0 || vel > 127 || cmd.b >= kQualityCount) {
           sink(OutEvent::warn(WarnCode::kBadArgument, now_));
           break;
         }
-        const ChordResult r = chords_.play(
-            static_cast<std::uint8_t>(cmd.a), static_cast<std::int8_t>(cmd.b), vel,
-            [&](std::uint8_t port, const MidiMessage& msg) {
-              schedule_or_warn(port, now_, msg, sink);
-            });
+        const auto schedule = [&](std::uint8_t port, const MidiMessage& msg) {
+          schedule_or_warn(port, now_, msg, sink);
+        };
+        ChordResult r;
+        switch (chords_.mode()) {
+          case ChordMode::kSingle:
+            r = chords_.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel,
+                                    schedule);
+            break;
+          case ChordMode::kShell:
+            r = chords_.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b),
+                                   vel, schedule);
+            break;
+          case ChordMode::kDiatonic:
+          default:
+            r = chords_.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule);
+            break;
+        }
         if (r.degree < 0) {
           sink(OutEvent::warn(WarnCode::kNotInKey, now_));
-        } else {
-          seq_.capture(now_, r.degree, static_cast<std::int8_t>(cmd.b), vel);
-          sink(OutEvent::chord(chords_.out_port(), static_cast<std::uint8_t>(r.degree),
-                               static_cast<std::uint8_t>(r.quality), r.root_note,
-                               r.shape.count, vel, now_));
-          flush(sink);
+          break;
         }
+        // Recording captures only diatonic degrees (D28 functional storage);
+        // keyless modes record when the root happens to fit the seq key.
+        if (seq_.recording()) {
+          const int deg =
+              r.degree == static_cast<std::int8_t>(kNoDegree)
+                  ? theory::degree_of(seq_.current()->key,
+                                      static_cast<std::uint8_t>(r.root_note % 12))
+                  : r.degree;
+          if (deg >= 0) {
+            const std::int8_t ovr =
+                r.degree == static_cast<std::int8_t>(kNoDegree)
+                    ? static_cast<std::int8_t>(r.quality)  // pin the resolved quality
+                    : static_cast<std::int8_t>(cmd.b);
+            seq_.capture(now_, static_cast<std::int8_t>(deg), ovr, vel);
+          } else {
+            sink(OutEvent::warn(WarnCode::kNotInKey, now_));
+          }
+        }
+        sink(OutEvent::chord(chords_.out_port(), static_cast<std::uint8_t>(r.degree),
+                             static_cast<std::uint8_t>(r.quality), r.root_note,
+                             r.shape.count, vel, now_));
+        flush(sink);
         break;
       }
       case Param::kChordStop:
