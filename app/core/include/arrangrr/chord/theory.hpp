@@ -121,9 +121,7 @@ constexpr ChordShape shape_of(ChordQuality q) noexcept {
 // resulting third/fifth/seventh to a seventh-chord quality.
 constexpr ChordQuality smart_quality(Mode mode, int degree) noexcept {
   const Scale s = scale_of(mode);
-  const auto tone = [&](int d) {
-    return static_cast<std::uint8_t>((s.steps[d % 7] + (d >= 7 ? 12 : 0)) % 12);
-  };
+  const auto tone = [&](int d) { return s.steps[d % 7]; };
   const std::uint8_t root = s.steps[degree];
   const std::uint8_t third = static_cast<std::uint8_t>((tone(degree + 2) + 12 - root) % 12);
   const std::uint8_t fifth = static_cast<std::uint8_t>((tone(degree + 4) + 12 - root) % 12);

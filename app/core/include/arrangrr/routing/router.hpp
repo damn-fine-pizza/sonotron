@@ -77,7 +77,8 @@ class Router {
       }
       MidiMessage out = msg;
       if (has_channel && r.out_channel >= 0) {
-        out.status = static_cast<std::uint8_t>((msg.status & 0xF0u) | (r.out_channel & 0x0Fu));
+        out.status = static_cast<std::uint8_t>((msg.status & 0xF0u) |
+                                               (static_cast<std::uint8_t>(r.out_channel) & 0x0Fu));
       }
       sink(r.out_port, out);
     }

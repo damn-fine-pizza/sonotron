@@ -529,6 +529,38 @@ void test_help_panel_hook() {
   CHECK(!fresh_panel.empty() && fresh_panel[0].find("help") == 0);
 }
 
+void test_warn_names_complete() {
+  // Every WarnCode has a wire name (the jsonl table static_asserts the
+  // count; this pins the spellings of the once-forgotten half).
+  CHECK(to_jsonl(OutEvent::warn(WarnCode::kNotInKey, 0)) ==
+        R"({"ev":"warn","code":"not_in_key","@":0})");
+  CHECK(to_jsonl(OutEvent::warn(WarnCode::kTrackTableFull, 0)) ==
+        R"({"ev":"warn","code":"track_table_full","@":0})");
+  CHECK(to_jsonl(OutEvent::warn(WarnCode::kSeqTableFull, 0)) ==
+        R"({"ev":"warn","code":"seq_table_full","@":0})");
+  CHECK(to_jsonl(OutEvent::warn(WarnCode::kSeqEmpty, 0)) ==
+        R"({"ev":"warn","code":"seq_empty","@":0})");
+  CHECK(to_jsonl(OutEvent::warn(WarnCode::kUnsupported, 0)) ==
+        R"({"ev":"warn","code":"unsupported","@":0})");
+}
+
+void test_shell_name_tables_never_diverge() {
+  // The 17th track must fail in the SHELL, before a name is registered for
+  // an index the core refused.
+  ShellFixture f;
+  CHECK(f.run("port open out s"));
+  for (int i = 0; i < static_cast<int>(kMaxTracks); ++i) {
+    CHECK(f.run(("track new t" + std::to_string(i) + " s:1").c_str()));
+  }
+  CHECK(!f.run("track new overflow s:1"));
+  CHECK(!f.run("track step overflow 1 C4"));  // the name was never registered
+  for (int i = 0; i < static_cast<int>(kMaxChordSequences); ++i) {
+    CHECK(f.run(("seq new q" + std::to_string(i)).c_str()));
+  }
+  CHECK(!f.run("seq new overflow"));
+  CHECK(!f.run("seq use overflow"));
+}
+
 void test_alsa_null_state_is_safe() {
   // Without open(): every entry point must be a graceful no-op. Covers the
   // guard branches without needing a sequencer device.
@@ -577,6 +609,8 @@ int main() {
   test_jsonl_chord_rendering();
   test_help_command();
   test_help_panel_hook();
+  test_warn_names_complete();
+  test_shell_name_tables_never_diverge();
   test_line_editor();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();

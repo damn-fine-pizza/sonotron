@@ -233,6 +233,16 @@ void test_parser_more_edges() {
   CHECK(e.size() == 1 && e[0].type() == midi::kControlChange && e[0].d2 == 0);
 }
 
+void test_parser_eox_terminates_and_kills_running_status() {
+  // EOX (F7) is System Common: it aborts the message being assembled...
+  const Msgs a = parse({0x90, 60, 0xF7, 64});
+  CHECK(a.size() == 0);  // no phantom NoteOn assembled across the F7
+  // ...and clears running status: data after it is orphan, not a new note.
+  const Msgs b = parse({0x90, 60, 100, 0xF7, 62, 100});
+  CHECK(b.size() == 1);
+  CHECK(b[0].type() == midi::kNoteOn && b[0].d1 == 60);
+}
+
 void test_message_wire_lengths() {
   CHECK(MidiMessage::note_on(0, 60, 1).wire_length() == 3);
   CHECK((MidiMessage{0xC0, 1, 0}.wire_length() == 2));
@@ -386,6 +396,7 @@ int main() {
   test_parser_one_data_byte_messages();
   test_parser_reset();
   test_parser_more_edges();
+  test_parser_eox_terminates_and_kills_running_status();
   test_message_wire_lengths();
   test_scheduler_total_order();
   test_scheduler_due_only();

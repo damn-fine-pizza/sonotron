@@ -186,6 +186,50 @@ void test_style_warns() {
   CHECK(warns == 6);
 }
 
+namespace twobar {
+// A 2-bar section: the review found bars 2..N were unreachable because the
+// section clock restarted at every bar boundary.
+constexpr StyleEvent kDrums[] = {
+    {0, 38, 0, 90, 120},    // bar 1, step 0
+    {16, 36, 0, 100, 120},  // bar 2, step 16 — must actually play
+};
+constexpr StylePattern kPatterns[] = {
+    {TrackRole::kDrums, RolePolicy::kFixed, Span<const StyleEvent>(kDrums)},
+};
+constexpr StyleSection kSections[] = {
+    {SectionType::kVarA, 2, Span<const StylePattern>(kPatterns)},
+};
+constexpr Style kStyle{"twobar", Span<const StyleSection>(kSections)};
+}  // namespace twobar
+
+void test_multibar_section_plays_bar_two() {
+  Arranger a;
+  CHECK(a.load_style(&twobar::kStyle));
+  CHECK(a.set_route(TrackRole::kDrums, 0, 9));
+  a.on_transport_start();
+  const ChordState no_chord{};
+  StaticVector<std::uint32_t, 8> hits36, hits38;
+  for (Tick t = 0; t < 4 * kTicksPerBar; ++t) {
+    a.on_tick(t, no_chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
+                if (msg.type() != midi::kNoteOn || delay != 0) {
+                  return;
+                }
+                if (msg.d1 == 36) {
+                  CHECK(hits36.push_back(t));
+                }
+                if (msg.d1 == 38) {
+                  CHECK(hits38.push_back(t));
+                }
+              });
+  }
+  // Two full cycles of a 2-bar section over 4 bars.
+  CHECK(hits38.size() == 2 && hits38[0] == 0 && hits38[1] == 2 * kTicksPerBar);
+  CHECK(hits36.size() == 2);
+  CHECK(hits36[0] == kTicksPerBar);          // bar 2 fires
+  CHECK(hits36[1] == 3 * kTicksPerBar);      // and again on the wrap
+}
+
 void test_immediate_switch_when_stopped() {
   Band b;
   b.setup_basic();
@@ -207,6 +251,7 @@ int main() {
   test_ending_stops_transport();
   test_triad_wrap_and_route_gating();
   test_style_warns();
+  test_multibar_section_plays_bar_two();
   test_immediate_switch_when_stopped();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_arranger: all OK\n");

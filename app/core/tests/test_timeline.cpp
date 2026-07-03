@@ -177,6 +177,49 @@ void test_track_command_warns() {
   CHECK(p.ev.size() == 1 && p.ev[0].code == static_cast<std::uint16_t>(WarnCode::kTrackTableFull));
 }
 
+void test_gate_zero_rejected_at_the_abi() {
+  // gate 0 + the D29 off-before-on order = guaranteed stuck note; the core
+  // must refuse it (the ABI is the product boundary, D26 — not the shell).
+  Timeline tl;
+  CHECK(tl.add_track(TrackRole::kLead, 0, 0) == 0);
+  CHECK(!tl.set_step(0, 0, 60, 100, 0));
+  CHECK(tl.set_step(0, 0, 60, 0, 0));  // clearing a slot stays legal
+  Player p;
+  p.cmd(track_new(0, 0));
+  p.cmd(track_step(0, 0, 60, 100, 0));
+  CHECK(p.ev.size() == 1 && p.ev[0].kind == OutEvent::Kind::kWarn);
+}
+
+void test_retrigger_not_truncated_by_stale_off() {
+  // §9.B: step 1 = C4 with a gate LONGER than the step, step 2 = C4 again.
+  // The re-fired note must get an off-before-on on its own tick, and the
+  // stale off (which would truncate it) must be swallowed.
+  Player p;
+  p.cmd(track_new(0, 0));
+  p.cmd(track_step(0, 0, 60, 100, 300));  // off would land at 300
+  p.cmd(track_step(0, 1, 60, 100, 100));  // next hit at 240, off at 340
+  Command start;
+  start.param = Param::kTransportStart;
+  p.cmd(start);
+  p.advance(2 * kTicksPerStep);  // through tick 480
+  StaticVector<std::uint32_t, 8> ons, offs;
+  for (const OutEvent& o : p.ev) {
+    if (o.kind != OutEvent::Kind::kMidi || o.msg.d1 != 60) {
+      continue;
+    }
+    if (o.msg.type() == midi::kNoteOn) {
+      CHECK(ons.push_back(o.tick));
+    }
+    if (o.msg.type() == midi::kNoteOff) {
+      CHECK(offs.push_back(o.tick));
+    }
+  }
+  CHECK(ons.size() == 2 && ons[0] == 0 && ons[1] == 240);
+  CHECK(offs.size() == 2);
+  CHECK(offs[0] == 240);  // forced release, sorted before the new on (D29)
+  CHECK(offs[1] == 340);  // the new note's own gate — nothing at 300
+}
+
 void test_clear_step_silences() {
   Player p;
   p.cmd(track_new(0, 0));
@@ -198,6 +241,8 @@ int main() {
   test_polymeter_wrap();
   test_mute_and_solo();
   test_track_command_warns();
+  test_gate_zero_rejected_at_the_abi();
+  test_retrigger_not_truncated_by_stale_off();
   test_clear_step_silences();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_timeline: all OK\n");

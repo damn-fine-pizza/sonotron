@@ -17,17 +17,17 @@ cleanup() {
   trap - EXIT INT TERM HUP
   set +e  # teardown must run to completion even when a kill target is gone
   if [ -n "$CLI_PID" ]; then
-    kill "$CLI_PID" 2>/dev/null
+    kill "$CLI_PID" 2>/dev/null || true
   fi
   if [ -n "$WAITER_PID" ]; then
-    kill "$WAITER_PID" 2>/dev/null
+    kill "$WAITER_PID" 2>/dev/null || true
   fi
   if [ -n "$SYNTH_PID" ]; then
-    kill "$SYNTH_PID" 2>/dev/null
+    kill "$SYNTH_PID" 2>/dev/null || true
   fi
   # Belt and braces: nothing this script spawned may survive it.
-  pkill -P $$ 2>/dev/null
-  wait 2>/dev/null
+  pkill -P $$ 2>/dev/null || true
+  wait 2>/dev/null || true
   return 0
 }
 trap cleanup EXIT INT TERM HUP

@@ -89,7 +89,9 @@ enum class WarnCode : std::uint16_t {
   kNotInKey = 6,  // chord input note is chromatic to the key (D20: strict)
   kSeqTableFull = 7,
   kSeqEmpty = 8,  // play/record on a sequence with no usable content
+  kUnsupported = 9,  // parameter reserved by the ABI but not implemented yet
 };
+inline constexpr std::uint16_t kWarnCodeCount = 10;
 
 // Event from core to host.
 struct OutEvent {

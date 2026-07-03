@@ -55,9 +55,6 @@ class ChordEngine {
   }
   constexpr std::uint8_t out_port() const noexcept { return m_out_port; }
 
-  constexpr void set_hold(bool hold) noexcept { m_hold = hold; }
-  constexpr bool hold() const noexcept { return m_hold; }
-
   constexpr void set_mode(ChordMode mode) noexcept { m_mode = mode; }
   constexpr ChordMode mode() const noexcept { return m_mode; }
 
@@ -154,7 +151,6 @@ class ChordEngine {
   ChordMode m_mode = ChordMode::kDiatonic;
   std::uint8_t m_out_port = 0;
   std::uint8_t m_out_channel = 0;
-  bool m_hold = true;  // stored for the live-keyboard gestures of M5
   std::uint8_t m_sounding[4] = {0, 0, 0, 0};
   std::uint8_t m_sounding_count = 0;
   ChordState m_state{};

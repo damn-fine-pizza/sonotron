@@ -3,6 +3,7 @@
 #  - data members are m_snake_case (never a trailing underscore)
 #  - every control-flow body is braced
 Checks: '-*,readability-identifier-naming,readability-braces-around-statements'
+HeaderFilterRegex: 'app/'
 WarningsAsErrors: '*'
 CheckOptions:
   readability-identifier-naming.PrivateMemberCase: lower_case

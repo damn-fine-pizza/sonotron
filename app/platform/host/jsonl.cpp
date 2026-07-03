@@ -12,18 +12,16 @@ namespace arrangrr::host {
 namespace {
 
 const char* warn_name(std::uint16_t code) {
-  switch (static_cast<WarnCode>(code)) {
-    case WarnCode::kSchedulerFull:
-      return "scheduler_full";
-    case WarnCode::kRouteTableFull:
-      return "route_table_full";
-    case WarnCode::kUnknownCommand:
-      return "unknown_command";
-    case WarnCode::kBadArgument:
-      return "bad_argument";
-    default:
-      return "unknown";
-  }
+  // One entry per WarnCode: the static_assert refuses to compile a new warn
+  // until it has a wire name.
+  static constexpr const char* kNames[] = {
+      "none",           "scheduler_full", "route_table_full", "unknown_command",
+      "bad_argument",   "track_table_full", "not_in_key",     "seq_table_full",
+      "seq_empty",      "unsupported",
+  };
+  static_assert(sizeof(kNames) / sizeof(kNames[0]) == kWarnCodeCount,
+                "every WarnCode needs a wire name");
+  return code < kWarnCodeCount ? kNames[code] : "unknown";
 }
 
 const char* transport_name(std::uint16_t state) {

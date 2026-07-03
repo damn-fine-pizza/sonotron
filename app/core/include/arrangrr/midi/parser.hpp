@@ -34,7 +34,12 @@ class MidiParser {
         return;
       }
       if (byte == midi::kSysExEnd) {
+        // EOX is System Common: besides closing the SysEx it terminates any
+        // message being assembled and clears running status (MIDI 1.0).
         m_in_sysex = false;
+        m_status = 0;
+        m_running = 0;
+        m_have = 0;
         return;
       }
       m_in_sysex = false;  // any status terminates a dangling SysEx

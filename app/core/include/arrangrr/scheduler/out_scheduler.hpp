@@ -69,7 +69,8 @@ class OutScheduler {
     return true;
   }
 
-  // Pops every event due at or before `now`, in total order.
+  // Pops every event due at or before `now`, in total order. Tombstoned
+  // entries (status 0, see cancel_note_off) are dropped silently.
   // Sink signature: void(const ScheduledEvent&).
   template <typename Sink>
   constexpr void pop_due(Tick now, Sink&& sink) {
@@ -79,8 +80,34 @@ class OutScheduler {
       if (m_size > 0) {
         sift_down(0);
       }
-      sink(ev);
+      if (ev.msg.status != 0) {
+        sink(ev);
+      }
     }
+  }
+
+  // Retrigger support (§9.B: no duplicate note without an intervening off):
+  // tombstones the EARLIEST pending NoteOff for (port, channel, note) so a
+  // re-fired note is not truncated by the previous one's scheduled release.
+  // Returns true when one was found — the caller emits the off "now" instead.
+  constexpr bool cancel_note_off(std::uint8_t port, std::uint8_t channel,
+                                 std::uint8_t note) noexcept {
+    int best = -1;
+    for (std::size_t i = 0; i < m_size; ++i) {
+      const ScheduledEvent& e = m_heap[i];
+      if (e.port != port || e.msg.status == 0 || e.msg.type() != midi::kNoteOff ||
+          e.msg.channel() != channel || e.msg.d1 != note) {
+        continue;
+      }
+      if (best < 0 || e.tick < m_heap[static_cast<std::size_t>(best)].tick) {
+        best = static_cast<int>(i);
+      }
+    }
+    if (best < 0) {
+      return false;
+    }
+    m_heap[static_cast<std::size_t>(best)].msg.status = 0;  // tombstone
+    return true;
   }
 
   constexpr void clear() noexcept { m_size = 0; }

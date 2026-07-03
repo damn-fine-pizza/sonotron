@@ -92,12 +92,11 @@ class ChordSequencer {
   // Arming an EMPTY sequence is legal: it plays silence until steps are added
   // (the demo -i workflow pre-arms, the user only types `seq add ...`).
   bool play(Tick transport_tick) noexcept {
-    if (m_pool.empty()) {
-      return false;
+    if (m_pool.empty() || m_recording) {
+      return false;  // record and playback are mutually exclusive states
     }
     m_playing = true;
     m_base = transport_tick;
-    m_next_step = 0;
     return true;
   }
   void stop_playback(ReleaseFn release) noexcept {
@@ -129,9 +128,6 @@ class ChordSequencer {
       }
       pos %= len;
     }
-    if (m_next_step >= seq->count() || pos == 0) {
-      m_next_step = 0;
-    }
     // Fire the step that starts exactly on this position.
     for (std::size_t i = 0; i < seq->count(); ++i) {
       const ChordStep& s = seq->step(i);
@@ -156,7 +152,6 @@ class ChordSequencer {
   bool m_playing = false;
   Tick m_record_base = 0;
   Tick m_base = 0;
-  std::size_t m_next_step = 0;
 };
 
 }  // namespace arrangrr

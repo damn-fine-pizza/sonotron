@@ -24,32 +24,32 @@ class [[nodiscard]] Result {
 
   constexpr T& value() noexcept {
     ARR_ASSERT(m_ok);
-    return val_;
+    return m_val;
   }
   constexpr const T& value() const noexcept {
     ARR_ASSERT(m_ok);
-    return val_;
+    return m_val;
   }
   constexpr E& error() noexcept {
     ARR_ASSERT(!m_ok);
-    return err_;
+    return m_err;
   }
   constexpr const E& error() const noexcept {
     ARR_ASSERT(!m_ok);
-    return err_;
+    return m_err;
   }
 
-  constexpr T value_or(T fallback) const noexcept { return m_ok ? val_ : fallback; }
+  constexpr T value_or(T fallback) const noexcept { return m_ok ? m_val : fallback; }
 
  private:
   struct OkTag {};
   struct ErrTag {};
-  constexpr Result(T v, OkTag) noexcept : val_(v), m_ok(true) {}
-  constexpr Result(E e, ErrTag) noexcept : err_(e), m_ok(false) {}
+  constexpr Result(T v, OkTag) noexcept : m_val(v), m_ok(true) {}
+  constexpr Result(E e, ErrTag) noexcept : m_err(e), m_ok(false) {}
 
   union {
-    T val_;
-    E err_;
+    T m_val;
+    E m_err;
   };
   bool m_ok;
 };

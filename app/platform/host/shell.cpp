@@ -800,6 +800,12 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
     Command c;
 
     if (verb == "new" && t.size() >= 3) {
+      // The name table must never diverge from the core pool: check the
+      // bound BEFORE registering (the core would warn and drop it).
+      if (m_seqs.size() >= kMaxChordSequences) {
+        error = "sequence pool is full";
+        return false;
+      }
       c.param = Param::kSeqNew;
       m_engine.push_command(c, m_sink);
       m_seqs.push_back(t[2]);
@@ -930,6 +936,12 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
       TrackRole role = TrackRole::kLead;
       if (t.size() >= 5 && !parse_role(t[4], role)) {
         error = "unknown role: " + t[4];
+        return false;
+      }
+      // The name table must never diverge from the core pool: check the
+      // bound BEFORE registering (the core would warn and drop it).
+      if (m_tracks.size() >= kMaxTracks) {
+        error = "track pool is full";
         return false;
       }
       Command c;

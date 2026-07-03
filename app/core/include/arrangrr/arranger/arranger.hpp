@@ -32,15 +32,25 @@ class Arranger {
     if (builtin_index >= styles::kBuiltinCount) {
       return false;
     }
-    m_style = styles::kBuiltins[builtin_index];
+    return load_style(styles::kBuiltins[builtin_index]);
+  }
+  constexpr bool loaded() const noexcept { return m_style != nullptr; }
+  constexpr SectionType current() const noexcept { return m_current; }
+
+  // Loads a style by pointer (compiled user styles, tests). The pointee must
+  // outlive the arranger — builtin styles are constexpr, compiled ones live
+  // in flash-mapped storage (D33).
+  bool load_style(const Style* style) noexcept {
+    if (style == nullptr) {
+      return false;
+    }
+    m_style = style;
     m_current = SectionType::kVarA;
     m_return_to = SectionType::kVarA;
     m_pending_valid = false;
     m_section_start = 0;
     return true;
   }
-  constexpr bool loaded() const noexcept { return m_style != nullptr; }
-  constexpr SectionType current() const noexcept { return m_current; }
 
   bool set_route(TrackRole role, std::uint8_t port, std::uint8_t channel) noexcept {
     const auto idx = static_cast<std::uint8_t>(role);
@@ -109,19 +119,22 @@ class Arranger {
             return result;
           }
         }
-        if (bar_boundary || section_end) {
+        // The section clock restarts ONLY when the section wraps or actually
+        // changes: a mid-section bar boundary must not reset `pos`, or bars
+        // 2..N of a multi-bar section would never play.
+        if (section_end || next != m_current) {
           m_section_start = transport_tick;
-          if (next != m_current) {
-            m_current = next;
-            if (section_is_variation(next)) {
-              m_return_to = next;
-            }
-            result.section_changed = true;
-            result.section = next;
-            section = m_style->find(m_current);
-            if (section == nullptr) {
-              return result;
-            }
+        }
+        if (next != m_current) {
+          m_current = next;
+          if (section_is_variation(next)) {
+            m_return_to = next;
+          }
+          result.section_changed = true;
+          result.section = next;
+          section = m_style->find(m_current);
+          if (section == nullptr) {
+            return result;
           }
         }
       }

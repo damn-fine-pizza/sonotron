@@ -4,9 +4,19 @@
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/version.hpp"
 
+namespace arrangrr {
+bool engine_link_gate();  // engine_checks.cpp: instantiates the full Engine
+}
+
 int main() {
   arrangrr::TickAccumulator acc;
   acc.set_bpm(arrangrr::kDefaultBpm);
-  // Reference the library so the linker resolves core symbols for real.
-  return (arrangrr::version_string() != nullptr && acc.advance_us(1'000'000) == 1920) ? 0 : 1;
+  // Pull the WHOLE core through the freestanding linker, not just common/:
+  // the engine gate instantiates transport, parser, router, scheduler,
+  // chord engine, sequencer, arranger and timeline (D20).
+  const bool engine_ok = arrangrr::engine_link_gate();
+  return (engine_ok && arrangrr::version_string() != nullptr &&
+          acc.advance_us(1'000'000) == 1920)
+             ? 0
+             : 1;
 }

@@ -88,7 +88,7 @@ struct SeqFixture {
     }
     return out;
   }
-  static std::uint8_t degree(std::uint16_t code) { return code & 0xFF; }
+  static std::uint8_t degree(std::uint16_t code) { return static_cast<std::uint8_t>(code & 0xFF); }
   static ChordQuality quality(std::uint16_t code) { return static_cast<ChordQuality>(code >> 8); }
 };
 
@@ -209,6 +209,11 @@ void test_seq_more_engine_paths() {
   f.cmd(Param::kSeqStop);  // stop playback
   CHECK(!f.e.sequences().playing());
   f.cmd(Param::kSeqRec);
+  f.ev.clear();
+  f.cmd(Param::kSeqPlay);  // playback refused while recording (symmetric)
+  CHECK(f.ev.size() == 1 &&
+        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
+  f.ev.clear();
   f.cmd(Param::kChordPlay, 64, -1, 90);
   f.advance(100);
   f.cmd(Param::kSeqStop, kTicksPerBeat);  // explicit finer grid

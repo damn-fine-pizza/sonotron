@@ -198,7 +198,8 @@ void Console::apply_layout() {
   for (int i = 0; i < panel; ++i) {
     std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", bottom + 1 + i);
     out += buf;
-    std::string line = i < static_cast<int>(m_panel.size()) ? m_panel[i] : "";
+    std::string line =
+        i < static_cast<int>(m_panel.size()) ? m_panel[static_cast<std::size_t>(i)] : "";
     if (static_cast<int>(line.size()) > m_cols) {
       line.resize(static_cast<std::size_t>(m_cols));
     }

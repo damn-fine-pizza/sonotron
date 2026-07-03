@@ -81,6 +81,13 @@ class Timeline {
     if (t == nullptr || step >= kMaxStepsPerTrack || note > 127 || vel > 127) {
       return false;
     }
+    // gate 0 on an audible step would land the NoteOff on the NoteOn's own
+    // tick, and the D29 class order (off before on) turns that into a
+    // guaranteed stuck note. The binary ABI is the product boundary (D26):
+    // the invariant lives here, not in a host-side check.
+    if (vel > 0 && gate == 0) {
+      return false;
+    }
     t->steps[step] = Step{note, vel, gate};
     return true;
   }

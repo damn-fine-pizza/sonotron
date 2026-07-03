@@ -29,9 +29,7 @@ class AlsaMidi {
   template <typename Fn>
   void drain_input(Fn&& on_bytes) {
     if (!m_seq) {
-      {
-        return;
-      }
+      return;
     }
     snd_seq_event_t* ev = nullptr;
     while (snd_seq_event_input(m_seq, &ev) >= 0 && ev != nullptr) {
@@ -40,16 +38,12 @@ class AlsaMidi {
         std::uint8_t buf[16];
         const long n = snd_midi_event_decode(m_decoder, buf, sizeof(buf), ev);
         if (n > 0) {
-          {
-            on_bytes(static_cast<std::uint8_t>(core_port), buf, static_cast<std::size_t>(n));
-          }
+          on_bytes(static_cast<std::uint8_t>(core_port), buf, static_cast<std::size_t>(n));
         }
       }
       snd_seq_free_event(ev);
       if (snd_seq_event_input_pending(m_seq, 0) <= 0) {
-        {
-          break;
-        }
+        break;
       }
     }
   }

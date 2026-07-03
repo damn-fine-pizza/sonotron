@@ -218,6 +218,39 @@ void test_mode_switch_and_bad_mode() {
   CHECK(f.ev.size() == 1 && f.ev[0].kind == OutEvent::Kind::kWarn);
 }
 
+void test_output_switch_releases_old_port() {
+  // chord out while a chord sounds: the NoteOffs must go to the OLD port,
+  // or the old destination is left with four stuck notes.
+  ChordFixture f;
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.play(62);  // Dm7 on port 0
+  f.ev.clear();
+  f.cmd(Param::kChordOut, 1 | (0 << 8), 0, 0, Op::kSet);  // move to port 1
+  int offs_on_old = 0;
+  for (const OutEvent& o : f.ev) {
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == midi::kNoteOff && o.port == 0) {
+      ++offs_on_old;
+    }
+  }
+  CHECK(offs_on_old == 4);
+  CHECK(!f.e.chords().sounding());
+  f.ev.clear();
+  f.play(62);  // next chord sounds on the new port
+  for (const OutEvent& o : f.ev) {
+    if (o.kind == OutEvent::Kind::kMidi) {
+      CHECK(o.port == 1);
+    }
+  }
+}
+
+void test_chord_hold_is_honestly_unsupported() {
+  ChordFixture f;
+  f.cmd(Param::kChordHold, 1, 0, 0, Op::kSet);
+  CHECK(f.ev.size() == 1);
+  CHECK(f.ev[0].kind == OutEvent::Kind::kWarn);
+  CHECK(f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kUnsupported));
+}
+
 void test_panic_covers_chord_notes() {
   ChordFixture f;
   f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
@@ -242,6 +275,8 @@ int main() {
   test_single_finger_mode();
   test_shell_mode_completion();
   test_mode_switch_and_bad_mode();
+  test_output_switch_releases_old_port();
+  test_chord_hold_is_honestly_unsupported();
   test_panic_covers_chord_notes();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_chord: all OK\n");
