@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/abi.hpp"
+#include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/common/function_ref.hpp"
@@ -38,6 +39,7 @@ class Engine {
   const Timeline& timeline() const noexcept { return timeline_; }
   const ChordEngine& chords() const noexcept { return chords_; }
   const ChordSequencer& sequences() const noexcept { return seq_; }
+  const Arranger& arranger() const noexcept { return arranger_; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -68,8 +70,10 @@ class Engine {
         // beat zero is this clock, not one period later.
         emit_realtime(midi::kClock, sink);
         if (seq_.playing()) (void)seq_.play(0);  // rebase to the new tick 0
+        arranger_.on_transport_start();
         fire_timeline(0, sink);  // grid step 0 plays on start, like the F8
         fire_chord_seq(0, sink);
+        fire_arranger(0, sink);
         flush(sink);
         sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
         break;
@@ -253,6 +257,28 @@ class Engine {
           chords_.set_mode(static_cast<ChordMode>(cmd.a));
         }
         break;
+      case Param::kStyleLoad:
+        if (cmd.a < 0 || !arranger_.load(static_cast<std::uint8_t>(cmd.a))) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      case Param::kStyleSection:
+        if (cmd.a < 0 || cmd.a >= kSectionTypeCount ||
+            !arranger_.request(static_cast<SectionType>(cmd.a), !transport_.playing())) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else if (!transport_.playing()) {
+          sink(OutEvent::section(static_cast<std::uint16_t>(arranger_.current()), now_));
+        }
+        break;
+      case Param::kStyleRoute: {
+        const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
+        const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
+        if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) ||
+            !arranger_.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        }
+        break;
+      }
       case Param::kChordPlay: {
         const auto vel = static_cast<std::uint8_t>(cmd.c);
         // Up to 4 packed notes, zero-terminated (one per byte).
@@ -363,6 +389,7 @@ class Engine {
         }
         fire_timeline(transport_.tick(), sink);
         fire_chord_seq(transport_.tick(), sink);
+        fire_arranger(transport_.tick(), sink);
       }
       flush(sink);
     }
@@ -412,6 +439,27 @@ class Engine {
         });
   }
 
+  void fire_arranger(Tick transport_tick, EventSink sink) {
+    const Arranger::TickResult r = arranger_.on_tick(
+        transport_tick, chords_.state(),
+        [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
+          schedule_or_warn(port, now_ + static_cast<Tick>(delay), msg, sink);
+        });
+    if (r.section_changed) {
+      sink(OutEvent::section(static_cast<std::uint16_t>(r.section), now_));
+    }
+    if (r.stop_transport) {
+      transport_.stop();
+      if (seq_.playing()) {
+        chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
+          schedule_or_warn(port, now_, msg, sink);
+        });
+      }
+      emit_realtime(midi::kStop, sink);
+      sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
+    }
+  }
+
   void flush(EventSink sink) {
     scheduler_.pop_due(now_, [&](const ScheduledEvent& ev) {
       tracker_.observe(ev.port, ev.msg);
@@ -426,6 +474,7 @@ class Engine {
   Timeline timeline_;
   ChordEngine chords_;
   ChordSequencer seq_;
+  Arranger arranger_;
   NoteTracker tracker_;
   OutScheduler<kSchedulerCapacity> scheduler_;
   std::uint8_t clock_out_mask_ = 0;  // off by default; enabled via kClockOutMask

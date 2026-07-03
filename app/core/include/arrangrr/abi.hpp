@@ -63,6 +63,10 @@ enum class Param : std::uint16_t {
   kSeqDel = 27,            // do: a = step index (0-based)
   kSeqClear = 28,          // do
   kChordMode = 29,         // set: a = ChordMode (0 diatonic, 1 single, 2 shell)
+  kStyleLoad = 30,         // do: a = builtin style index
+  kStyleSection = 31,      // do: a = SectionType (quantized to the next bar
+                           //     while playing, immediate otherwise)
+  kStyleRoute = 32,        // set: a = TrackRole, b = port | (channel << 8)
 };
 
 struct Command {
@@ -95,6 +99,7 @@ struct OutEvent {
     kWarn = 2,       // code = WarnCode
     kChord = 3,      // code = degree | (ChordQuality << 8);
                      // msg = {input root note, chord tone count, velocity}
+    kSection = 4,    // code = SectionType (arranger section change)
   };
 
   Kind kind = Kind::kMidi;
@@ -127,6 +132,13 @@ struct OutEvent {
     e.msg = MidiMessage{root_note, count, vel};
     e.tick = t;
     e.code = static_cast<std::uint16_t>(degree | (quality << 8));
+    return e;
+  }
+  static constexpr OutEvent section(std::uint16_t type, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kSection;
+    e.code = type;
+    e.tick = t;
     return e;
   }
   static constexpr OutEvent warn(WarnCode code, Tick t) noexcept {

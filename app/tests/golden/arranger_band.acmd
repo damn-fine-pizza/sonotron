@@ -1,0 +1,22 @@
+# Golden G-M5-1: the second WOW — the chord sequence drives the band.
+# | C | F | looped feeds the arranger: drums fixed on ch10, bass and comp
+# follow the harmony (NTT). Bar 3 switches to varB (quantized), bar 4 is
+# fillA (one-shot, returns), then ending1 stops the transport by itself.
+key C major
+port open out virt as synth
+chord out synth:4
+style load basic
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+seq new verse
+seq add C 1bar
+seq add F 1bar
+seq loop on
+seq play
+transport start
+@7670  style section varB
+@11510 style section fillA
+@15350 style section ending1
+advance 23040
+quit

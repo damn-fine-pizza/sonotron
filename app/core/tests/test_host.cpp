@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "alsa_midi.hpp"
+#include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/transport/transport.hpp"
 #include "jsonl.hpp"
 #include "shell.hpp"
@@ -303,6 +304,34 @@ void test_shell_chord_modes_cli() {
   CHECK(!f.run("play C-1"));  // note 0 cannot be packed
 }
 
+void test_shell_style_commands() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("style load basic"));
+  CHECK(f.run("style route drums synth:10"));
+  CHECK(f.run("style route bass synth:2"));
+  CHECK(f.run("style section varB"));
+  CHECK(f.shell.engine().arranger().current() == SectionType::kVarB);
+  CHECK(f.run("style section fillA"));
+  CHECK(f.run("style section intro1"));
+  CHECK(f.run("style section ending1"));
+  // Errors.
+  CHECK(!f.run("style load funkytown"));
+  CHECK(!f.run("style route wizard synth:1"));
+  CHECK(!f.run("style route bass nowhere"));
+  CHECK(!f.run("style section chorus"));
+  CHECK(!f.run("style dance"));
+  CHECK(!f.run("style load"));
+}
+
+void test_jsonl_section_rendering() {
+  CHECK(to_jsonl(OutEvent::section(static_cast<std::uint16_t>(SectionType::kVarB), 7)) ==
+        R"({"ev":"section","name":"varB","@":7})");
+  CHECK(to_jsonl(OutEvent::section(99, 0)) == R"({"ev":"section","name":"?","@":0})");
+  CHECK(to_human(OutEvent::section(static_cast<std::uint16_t>(SectionType::kFillA), 7))
+            .find("section fillA") != std::string::npos);
+}
+
 void test_jsonl_chord_rendering() {
   // ii in C major: D4 input, min7 -> {"in":"D4","out":"Dm7","deg":"ii"}.
   const OutEvent ev = OutEvent::chord(0, 1, static_cast<std::uint8_t>(ChordQuality::kMin7),
@@ -427,6 +456,8 @@ int main() {
   test_shell_chord_commands();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
+  test_shell_style_commands();
+  test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();

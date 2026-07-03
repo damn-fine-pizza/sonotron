@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "arrangrr/arranger/style.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/transport/transport.hpp"
@@ -57,6 +58,14 @@ const char* realtime_name(std::uint8_t status) {
 
 std::string format(const char* fmt, auto... args);
 
+const char* section_name(std::uint16_t code) {
+  static constexpr const char* kNames[] = {
+      "intro1", "intro2", "varA", "varB", "varC", "varD", "fillA",
+      "fillB",  "fillC",  "fillD", "break", "ending1", "ending2",
+  };
+  return code < kSectionTypeCount ? kNames[code] : "?";
+}
+
 const char* pc_name(std::uint8_t pc, bool flats) {
   static constexpr const char* kSharp[12] = {"C", "C#", "D", "D#", "E", "F",
                                              "F#", "G", "G#", "A", "A#", "B"};
@@ -110,6 +119,8 @@ std::string format(const char* fmt, auto... args) {
 
 std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
   switch (ev.kind) {
+    case OutEvent::Kind::kSection:
+      return format(R"({"ev":"section","name":"%s","@":%u})", section_name(ev.code), ev.tick);
     case OutEvent::Kind::kChord: {
       const auto degree = static_cast<std::uint8_t>(ev.code & 0xFF);
       const auto quality = static_cast<ChordQuality>(ev.code >> 8);
@@ -156,6 +167,8 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
 
 std::string to_human(const OutEvent& ev, bool prefer_flats) {
   switch (ev.kind) {
+    case OutEvent::Kind::kSection:
+      return format("@%-8u section %s", ev.tick, section_name(ev.code));
     case OutEvent::Kind::kChord: {
       const auto quality = static_cast<ChordQuality>(ev.code >> 8);
       return format("@%-8u chord %s%s (%s)", ev.tick,

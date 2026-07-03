@@ -175,6 +175,22 @@ bool parse_duration(const std::string& s, std::uint64_t& out_ticks) {
          strip("beats", kTicksPerBeat) || strip("beat", kTicksPerBeat);
 }
 
+bool parse_section(const std::string& s, SectionType& out) {
+  struct Entry { const char* name; SectionType type; };
+  static constexpr Entry kSections[] = {
+      {"intro1", SectionType::kIntro1},   {"intro2", SectionType::kIntro2},
+      {"varA", SectionType::kVarA},       {"varB", SectionType::kVarB},
+      {"varC", SectionType::kVarC},       {"varD", SectionType::kVarD},
+      {"fillA", SectionType::kFillA},     {"fillB", SectionType::kFillB},
+      {"fillC", SectionType::kFillC},     {"fillD", SectionType::kFillD},
+      {"break", SectionType::kBreak},
+      {"ending1", SectionType::kEnding1}, {"ending2", SectionType::kEnding2},
+  };
+  for (const Entry& e : kSections)
+    if (s == e.name) { out = e.type; return true; }
+  return false;
+}
+
 bool parse_role(const std::string& s, TrackRole& out) {
   struct Entry {
     const char* name;
@@ -533,6 +549,61 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
       return true;
     }
     error = "chord play|stop|hold|out ...";
+    return false;
+  }
+
+  if (cmd == "style" && t.size() >= 2) {
+    const std::string& verb = t[1];
+    Command c;
+    if (verb == "load" && t.size() >= 3) {
+      // Built-in styles resolve by name host-side (D26).
+      std::int32_t index = -1;
+      if (t[2] == "basic") index = 0;
+      if (index < 0) {
+        error = "unknown style: " + t[2];
+        return false;
+      }
+      c.param = Param::kStyleLoad;
+      c.a = index;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "route" && t.size() >= 4) {
+      TrackRole role = TrackRole::kLead;
+      if (!parse_role(t[2], role)) {
+        error = "unknown role: " + t[2];
+        return false;
+      }
+      std::string port_name;
+      int channel = -1;
+      if (!split_port_channel(t[3], port_name, channel)) {
+        error = "bad destination: " + t[3];
+        return false;
+      }
+      const int port = find_port(port_name, false);
+      if (port < 0) {
+        error = "unknown output port: " + port_name;
+        return false;
+      }
+      c.op = Op::kSet;
+      c.param = Param::kStyleRoute;
+      c.a = static_cast<std::int32_t>(role);
+      c.b = port | ((channel < 0 ? 0 : channel) << 8);
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "section" && t.size() >= 3) {
+      SectionType type = SectionType::kVarA;
+      if (!parse_section(t[2], type)) {
+        error = "unknown section: " + t[2];
+        return false;
+      }
+      c.param = Param::kStyleSection;
+      c.a = static_cast<std::int32_t>(type);
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    error = "style load|route|section ...";
     return false;
   }
 
