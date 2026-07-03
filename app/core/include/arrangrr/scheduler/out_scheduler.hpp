@@ -1,0 +1,116 @@
+#pragma once
+
+#include <cstdint>
+
+#include "arrangrr/common/assert.hpp"
+#include "arrangrr/common/time.hpp"
+#include "arrangrr/midi/message.hpp"
+
+// Timestamped MIDI output queue with the D29 total order:
+//   (tick, class_priority, seq_no)
+// class_priority: realtime/clock < NoteOff < CC/other < NoteOn, so a NoteOff
+// always precedes a NoteOn scheduled on the same tick and clock always leads.
+// seq_no is a monotonic emission counter — the final tie-break that makes the
+// heap deterministic build-to-build (goldens depend on it).
+
+namespace arrangrr {
+
+enum class EventClass : std::uint8_t {
+  kRealtime = 0,
+  kNoteOff = 1,
+  kOther = 2,
+  kNoteOn = 3,
+};
+
+constexpr EventClass classify(const MidiMessage& msg) noexcept {
+  if (midi::is_realtime(msg.status)) return EventClass::kRealtime;
+  const std::uint8_t type = msg.type();
+  if (type == midi::kNoteOff) return EventClass::kNoteOff;
+  if (type == midi::kNoteOn) return EventClass::kNoteOn;
+  return EventClass::kOther;
+}
+
+struct ScheduledEvent {
+  Tick tick = 0;
+  std::uint32_t seq = 0;
+  MidiMessage msg{};
+  std::uint8_t port = 0;
+  std::uint8_t cls = 0;
+};
+
+template <std::size_t N>
+class OutScheduler {
+ public:
+  constexpr std::size_t size() const noexcept { return size_; }
+  constexpr bool empty() const noexcept { return size_ == 0; }
+  static constexpr std::size_t capacity() noexcept { return N; }
+
+  // False when full — the caller surfaces a warn event; clock/realtime must
+  // never be the class that gets dropped (graceful degradation, §9.C).
+  [[nodiscard]] constexpr bool schedule(std::uint8_t port, Tick tick,
+                                        const MidiMessage& msg) noexcept {
+    if (size_ == N) return false;
+    heap_[size_] = ScheduledEvent{
+        .tick = tick,
+        .seq = seq_++,
+        .msg = msg,
+        .port = port,
+        .cls = static_cast<std::uint8_t>(classify(msg)),
+    };
+    sift_up(size_++);
+    return true;
+  }
+
+  // Pops every event due at or before `now`, in total order.
+  // Sink signature: void(const ScheduledEvent&).
+  template <typename Sink>
+  constexpr void pop_due(Tick now, Sink&& sink) {
+    while (size_ > 0 && heap_[0].tick <= now) {
+      const ScheduledEvent ev = heap_[0];
+      heap_[0] = heap_[--size_];
+      if (size_ > 0) sift_down(0);
+      sink(ev);
+    }
+  }
+
+  constexpr void clear() noexcept { size_ = 0; }
+
+ private:
+  static constexpr bool before(const ScheduledEvent& a, const ScheduledEvent& b) noexcept {
+    if (a.tick != b.tick) return a.tick < b.tick;
+    if (a.cls != b.cls) return a.cls < b.cls;
+    return a.seq < b.seq;
+  }
+
+  constexpr void sift_up(std::size_t i) noexcept {
+    while (i > 0) {
+      const std::size_t parent = (i - 1) / 2;
+      if (!before(heap_[i], heap_[parent])) break;
+      const ScheduledEvent tmp = heap_[i];
+      heap_[i] = heap_[parent];
+      heap_[parent] = tmp;
+      i = parent;
+    }
+  }
+
+  constexpr void sift_down(std::size_t i) noexcept {
+    while (true) {
+      const std::size_t left = 2 * i + 1;
+      const std::size_t right = left + 1;
+      std::size_t smallest = i;
+      if (left < size_ && before(heap_[left], heap_[smallest])) smallest = left;
+      if (right < size_ && before(heap_[right], heap_[smallest])) smallest = right;
+      if (smallest == i) return;
+      const ScheduledEvent tmp = heap_[i];
+      heap_[i] = heap_[smallest];
+      heap_[smallest] = tmp;
+      i = smallest;
+    }
+  }
+
+  ScheduledEvent heap_[N]{};
+  std::size_t size_ = 0;
+  std::uint32_t seq_ = 0;
+};
+
+}  // namespace arrangrr

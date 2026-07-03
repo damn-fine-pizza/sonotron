@@ -1,0 +1,13 @@
+# Golden G-M0-3: parser compliance in one shot.
+# Running status (three NoteOns from one status byte), NoteOn velocity 0
+# normalized to a real NoteOff, and realtime F8 interleaved mid-message
+# without breaking message assembly (the all-pass route forwards F8 too,
+# and it must come out BEFORE the note completed around it).
+port open in kbd
+port open out synth
+route kbd -> synth:5
+@0 midi send kbd 90 3C 64 3E 5A 40 50
+@10 midi send kbd 90 3C 00
+@20 midi send kbd 90 F8 3D 42
+advance 48
+quit

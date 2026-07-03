@@ -1,0 +1,6 @@
+{"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":60,"vel":100,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":62,"vel":90,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":64,"vel":80,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":5,"note":60,"vel":0,"@":10}
+{"ev":"midi-out","port":0,"msg":"clock","@":20}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":61,"vel":66,"@":20}

@@ -1,0 +1,10 @@
+# Golden G-M0-1: soft-thru routing + panic (DESIGN.md §29.5 G3 shape).
+# A note enters kbd at tick 0, is routed to synth; panic at tick 10 silences
+# it with an explicit NoteOff plus the three channel-mode CCs.
+port open in kbd
+port open out synth
+thru kbd synth
+@0 midi send kbd 90 3C 64
+@10 panic
+advance 48
+quit

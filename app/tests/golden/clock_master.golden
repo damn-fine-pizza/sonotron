@@ -1,0 +1,7 @@
+{"ev":"midi-out","port":0,"msg":"start","@":0}
+{"ev":"midi-out","port":0,"msg":"clock","@":0}
+{"ev":"transport","state":"playing","@":0}
+{"ev":"midi-out","port":0,"msg":"clock","@":40}
+{"ev":"midi-out","port":0,"msg":"clock","@":80}
+{"ev":"midi-out","port":0,"msg":"stop","@":80}
+{"ev":"transport","state":"stopped","@":80}
