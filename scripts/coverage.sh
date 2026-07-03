@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Unit-test coverage: instrumented host build, full test suite (unit +
 # golden — golden runs exercise the CLI binary, so host code is measured
-# too), report via gcovr. Test code itself is excluded from the metric.
+# too), report via gcovr. Test code itself is excluded from the metric, as
+# are ARR_ASSERT trap branches (never taken by design).
+#
+# PROJECT GATE: every milestone must keep lines, functions AND branches
+# at >= 80% before merging to main.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,6 +34,8 @@ mkdir -p build/coverage/report
   --exclude 'app/core/tests/' \
   --exclude 'app/tests/' \
   --object-directory build/coverage \
+  --exclude-branches-by-pattern '.*ARR_ASSERT.*' \
+  --exclude-throw-branches \
   --print-summary \
   --sort uncovered-percent \
   --txt build/coverage/report/coverage.txt \

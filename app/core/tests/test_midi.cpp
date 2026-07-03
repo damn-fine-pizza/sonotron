@@ -210,6 +210,142 @@ void test_note_tracker_high_notes_and_bounds() {
   CHECK(out[0].d1 == 5 && out[1].d1 == 100);
 }
 
+void test_parser_more_edges() {
+  // Orphan SysEx end (no start): ignored.
+  const Msgs a = parse({0xF7, 0x90, 60, 100});
+  CHECK(a.size() == 1 && a[0].type() == midi::kNoteOn);
+  // Realtime inside a SysEx payload passes; payload still skipped.
+  const Msgs b = parse({0xF0, 1, 0xF8, 2, 0xF7});
+  CHECK(b.size() == 1 && b[0].status == midi::kClock);
+  // MTC quarter frame (F1, 1 data byte).
+  const Msgs c = parse({0xF1, 0x23});
+  CHECK(c.size() == 1 && c[0].status == midi::kMtcQuarterFrame && c[0].d1 == 0x23);
+  // Poly pressure and pitch bend (2 data bytes each).
+  const Msgs d = parse({0xA1, 60, 55, 0xE2, 0x00, 0x40});
+  CHECK(d.size() == 2);
+  CHECK(d[0].type() == midi::kPolyPressure && d[0].channel() == 1);
+  CHECK(d[1].type() == midi::kPitchBend && d[1].channel() == 2);
+  // CC with value 0 must NOT be normalized (only NoteOn v0 is).
+  const Msgs e = parse({0xB0, 64, 0});
+  CHECK(e.size() == 1 && e[0].type() == midi::kControlChange && e[0].d2 == 0);
+}
+
+void test_message_wire_lengths() {
+  CHECK(MidiMessage::note_on(0, 60, 1).wire_length() == 3);
+  CHECK((MidiMessage{0xC0, 1, 0}.wire_length() == 2));
+  CHECK((MidiMessage{0xD0, 1, 0}.wire_length() == 2));
+  CHECK((MidiMessage{0xE0, 0, 0x40}.wire_length() == 3));
+  CHECK((MidiMessage{midi::kSongPosition, 0, 0}.wire_length() == 3));
+  CHECK((MidiMessage{midi::kSongSelect, 0, 0}.wire_length() == 2));
+  CHECK((MidiMessage{midi::kMtcQuarterFrame, 0, 0}.wire_length() == 2));
+  CHECK((MidiMessage{midi::kTuneRequest, 0, 0}.wire_length() == 1));
+  CHECK(MidiMessage::realtime(midi::kClock).wire_length() == 1);
+  CHECK(midi::data_length(midi::kSysExStart) == -1);
+}
+
+void test_scheduler_heap_permutations() {
+  // Pseudo-random inserts (seeded LCG — deterministic) must always pop in
+  // total order; exercises every sift path in the binary heap.
+  OutScheduler<64> s;
+  std::uint32_t rng = 0xDECAFBAD;
+  auto next = [&rng]() {
+    rng = rng * 1664525u + 1013904223u;
+    return rng;
+  };
+  for (int round = 0; round < 4; ++round) {
+    for (int i = 0; i < 48; ++i) {
+      const Tick tick = next() % 16;
+      const std::uint8_t kind = static_cast<std::uint8_t>(next() % 4);
+      MidiMessage msg;
+      switch (kind) {
+        case 0: msg = MidiMessage::realtime(midi::kClock); break;
+        case 1: msg = MidiMessage::note_off(0, 60); break;
+        case 2: msg = MidiMessage::cc(0, 7, 1); break;
+        default: msg = MidiMessage::note_on(0, 60, 1); break;
+      }
+      CHECK(s.schedule(0, tick, msg));
+    }
+    // Pop half at a mid deadline, then the rest: partial pops + refill next
+    // round stress sift_down with both children on each side.
+    Tick last_tick = 0;
+    std::uint8_t last_cls = 0;
+    std::uint32_t last_seq = 0;
+    bool first = true;
+    auto check_order = [&](const ScheduledEvent& ev) {
+      if (!first) {
+        const bool ordered =
+            ev.tick > last_tick ||
+            (ev.tick == last_tick &&
+             (ev.cls > last_cls || (ev.cls == last_cls && ev.seq > last_seq)));
+        CHECK(ordered);
+      }
+      first = false;
+      last_tick = ev.tick;
+      last_cls = ev.cls;
+      last_seq = ev.seq;
+    };
+    s.pop_due(7, check_order);
+    s.pop_due(1000, check_order);
+    CHECK(s.empty());
+  }
+}
+
+void test_scheduler_interleaved_stress() {
+  // Small heap, tight interleaving of schedule/pop with heavy same-tick
+  // same-class ties: hammers sift_up/sift_down child-selection branches.
+  OutScheduler<8> s;
+  std::uint32_t rng = 0xC0FFEE42;
+  auto next = [&rng]() {
+    rng = rng * 1664525u + 1013904223u;
+    return rng;
+  };
+  Tick now = 0;
+  for (int step = 0; step < 200; ++step) {
+    const int burst = static_cast<int>(next() % 3) + 1;
+    for (int i = 0; i < burst; ++i) {
+      const Tick tick = now + next() % 4;
+      (void)s.schedule(0, tick, MidiMessage::note_on(0, static_cast<std::uint8_t>(next() % 4), 1));
+    }
+    now += next() % 3;
+    Tick last = 0;
+    std::uint32_t last_seq = 0;
+    bool first = true;
+    s.pop_due(now, [&](const ScheduledEvent& ev) {
+      if (!first) CHECK(ev.tick > last || (ev.tick == last && ev.seq > last_seq));
+      first = false;
+      last = ev.tick;
+      last_seq = ev.seq;
+    });
+  }
+  s.pop_due(now + 10, [](const ScheduledEvent&) {});
+  CHECK(s.empty());
+}
+
+void test_router_realtime_and_system() {
+  Router r;
+  CHECK(r.add(Route{.in_port = 0, .in_channel = -1, .out_port = 0, .out_channel = -1,
+                    .pass = static_cast<std::uint8_t>(route_pass::kRealtime |
+                                                      route_pass::kSystem)}));
+  int hits = 0;
+  auto sink = [&](std::uint8_t, const MidiMessage&) { ++hits; };
+  r.route(0, MidiMessage::realtime(midi::kClock), sink);
+  CHECK(hits == 1);
+  r.route(0, MidiMessage{midi::kSongPosition, 1, 2}, sink);
+  CHECK(hits == 2);
+  r.route(0, MidiMessage::note_on(0, 60, 1), sink);  // notes filtered out
+  CHECK(hits == 2);
+  // Pitch bend and program classes.
+  Router r2;
+  CHECK(r2.add(Route{.in_port = 0, .in_channel = -1, .out_port = 0, .out_channel = -1,
+                     .pass = static_cast<std::uint8_t>(route_pass::kPitchBend |
+                                                       route_pass::kProgram)}));
+  hits = 0;
+  r2.route(0, MidiMessage{0xE0, 0, 0x40}, sink);
+  r2.route(0, MidiMessage{0xC0, 5, 0}, sink);
+  r2.route(0, MidiMessage::cc(0, 7, 1), sink);  // CC filtered
+  CHECK(hits == 2);
+}
+
 void test_note_tracker_pedal_release_clears() {
   NoteTracker t;
   t.observe(0, MidiMessage::note_on(0, 60, 100));
@@ -231,10 +367,15 @@ int main() {
   test_parser_system_common();
   test_parser_one_data_byte_messages();
   test_parser_reset();
+  test_parser_more_edges();
+  test_message_wire_lengths();
   test_scheduler_total_order();
   test_scheduler_due_only();
   test_scheduler_clear_and_refill();
+  test_scheduler_heap_permutations();
+  test_scheduler_interleaved_stress();
   test_router_filters_and_remap();
+  test_router_realtime_and_system();
   test_note_tracker_panic_with_sustain();
   test_note_tracker_high_notes_and_bounds();
   test_note_tracker_pedal_release_clears();

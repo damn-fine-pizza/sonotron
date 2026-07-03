@@ -24,6 +24,12 @@ trap cleanup EXIT
 "$CLI" --help >/dev/null || { echo "--help failed"; exit 1; }
 "$CLI" --bogus 2>/dev/null && { echo "--bogus accepted"; exit 1; }
 "$CLI" --script /nonexistent 2>/dev/null && { echo "bad script accepted"; exit 1; }
+"$CLI" --script 2>/dev/null && { echo "dangling --script accepted"; exit 1; }
+"$CLI" --events 2>/dev/null && { echo "dangling --events accepted"; exit 1; }
+printf 'bogus_command\n' | "$CLI" --script - 2>/dev/null && { echo "bad script line accepted"; exit 1; }
+
+# --- live mode exits cleanly on stdin EOF ---------------------------------
+timeout 5 "$CLI" --events jsonl </dev/null >/dev/null 2>&1 || { echo "EOF exit failed"; exit 1; }
 
 # --- script mode from stdin, human events --------------------------------
 printf 'port open out s\nclock out s\ntransport start\nadvance 40\ntransport stop\nquit\n' \

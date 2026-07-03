@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "alsa_midi.hpp"
 #include "arrangrr/transport/transport.hpp"
 #include "jsonl.hpp"
 #include "shell.hpp"
@@ -172,6 +173,46 @@ void test_shell_error_paths() {
   CHECK(!f.run("port open in d"));
 }
 
+void test_shell_parse_edges() {
+  ShellFixture f;
+  // Tempo grammar corner cases.
+  CHECK(!f.run("transport tempo 120.505"));  // >2 fraction digits
+  CHECK(!f.run("transport tempo 120."));     // empty fraction
+  CHECK(!f.run("transport tempo .5"));       // empty whole part
+  CHECK(!f.run("transport tempo 12x.5"));    // junk in whole part
+  CHECK(f.run("transport tempo 98.5"));      // 1 fraction digit -> x10
+  CHECK(f.shell.engine().transport().bpm() == 9850);
+  // Channel suffix grammar.
+  CHECK(f.run("port open in kbd"));
+  CHECK(f.run("port open out synth"));
+  CHECK(!f.run("route kbd:0 -> synth"));    // channels are 1-based
+  CHECK(!f.run("route kbd:17 -> synth"));   // above 16
+  CHECK(!f.run("route kbd:x -> synth"));    // not a number
+  CHECK(f.run("route kbd -> synth:16"));    // boundary is valid
+  // Numeric port references (indices work like names).
+  CHECK(f.run("route 0 -> 0"));
+  CHECK(!f.run("route 9 -> 0"));  // beyond kMaxPorts
+  // Tokenizer: tabs and trailing comments.
+  CHECK(f.run("advance\t10\t# trailing comment"));
+  CHECK(f.shell.engine().now() == 10);
+  // midi send happy path via numeric port + single-digit hex.
+  CHECK(f.run("midi send 0 90 3C 7F"));
+  CHECK(f.run("midi send 0 80 3C 0"));
+}
+
+void test_alsa_null_state_is_safe() {
+  // Without open(): every entry point must be a graceful no-op. Covers the
+  // guard branches without needing a sequencer device.
+  AlsaMidi alsa;
+  CHECK(alsa.poll_fd_count() == 0);
+  struct pollfd fds[4];
+  CHECK(alsa.fill_poll_fds(fds, 4) == 0);
+  alsa.send(0, MidiMessage::note_on(0, 60, 100));  // no port map -> ignored
+  int called = 0;
+  alsa.drain_input([&](std::uint8_t, const std::uint8_t*, std::size_t) { ++called; });
+  CHECK(called == 0);
+}
+
 void test_shell_pending_order_same_tick() {
   // Two lines queued on the same tick run in insertion order.
   ShellFixture f;
@@ -196,6 +237,8 @@ int main() {
   test_shell_transport_and_clock();
   test_shell_route_channel_remap();
   test_shell_error_paths();
+  test_shell_parse_edges();
+  test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
   if (arrangrr::test::failures() == 0) std::printf("test_host: all OK\n");
   return arrangrr::test::failures();
