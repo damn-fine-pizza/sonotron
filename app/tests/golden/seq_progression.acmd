@@ -1,0 +1,17 @@
+# Golden G-M3-1: the first WOW — a functional progression, looped, then
+# transposed WHILE LOOPING. | ii V | in C major plays Dm7 G7; after
+# 'seq transpose to G' the SAME degrees re-derive (D28): Am7 D7.
+key C major
+port open out virt as synth
+chord out synth
+seq new verse
+seq add D 1bar
+seq add G 1bar
+seq loop on
+seq play
+transport start
+advance 7679
+seq transpose to G major
+advance 7680
+transport stop
+quit

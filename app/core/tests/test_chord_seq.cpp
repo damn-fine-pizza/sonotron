@@ -165,6 +165,53 @@ void test_record_quantize_playback() {
   CHECK(seq->step(0).degree == 1 && seq->step(1).degree == 4);
 }
 
+void test_seq_more_engine_paths() {
+  SeqFixture f;
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqNew);
+  // Bad seq-add arguments.
+  f.cmd(Param::kSeqAdd, 60, (0) | (100 << 8), 0);        // zero duration
+  f.cmd(Param::kSeqAdd, -1, (0) | (100 << 8), 100);      // bad note
+  f.cmd(Param::kSeqAdd, 60, (0) | (0 << 8), 100);        // zero velocity
+  f.cmd(Param::kSeqAdd, 60, (99) | (100 << 8), 100);     // bogus quality
+  f.cmd(Param::kSeqDel, 5);                              // no such step
+  int warns = 0;
+  for (const OutEvent& o : f.ev)
+    if (o.kind == OutEvent::Kind::kWarn) ++warns;
+  CHECK(warns == 5);
+  f.ev.clear();
+  // Transpose bad args.
+  f.cmd(Param::kSeqTranspose, 15, 0, 0, Op::kSet);
+  CHECK(f.ev.size() == 1 && f.ev[0].kind == OutEvent::Kind::kWarn);
+  f.ev.clear();
+  // Rec refused while playing; stop with explicit grid; loop toggle.
+  f.add(62, kTicksPerBar);
+  f.cmd(Param::kSeqLoop, 0, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqPlay);
+  f.cmd(Param::kSeqRec);  // playing -> refused
+  CHECK(f.ev.size() == 1 &&
+        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
+  f.ev.clear();
+  f.cmd(Param::kSeqStop);  // stop playback
+  CHECK(!f.e.sequences().playing());
+  f.cmd(Param::kSeqRec);
+  f.cmd(Param::kChordPlay, 64, -1, 90);
+  f.advance(100);
+  f.cmd(Param::kSeqStop, kTicksPerBeat);  // explicit finer grid
+  CHECK(f.e.sequences().current()->count() == 1);
+  CHECK(f.e.sequences().current()->step(0).duration == kTicksPerBeat);
+  // Transport stop releases the sequencer voicing.
+  f.cmd(Param::kSeqLoop, 1, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqPlay);
+  f.cmd(Param::kTransportStart);
+  f.ev.clear();
+  f.cmd(Param::kTransportStop);
+  int offs = 0;
+  for (const OutEvent& o : f.ev)
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == midi::kNoteOff) ++offs;
+  CHECK(offs == 4);
+}
+
 void test_seq_warns() {
   SeqFixture f;
   f.cmd(Param::kSeqPlay);  // nothing to play
@@ -197,6 +244,7 @@ int main() {
   test_no_loop_stops_and_releases();
   test_transpose_to_g_replays_rederived();
   test_record_quantize_playback();
+  test_seq_more_engine_paths();
   test_seq_warns();
   if (arrangrr::test::failures() == 0) std::printf("test_chord_seq: all OK\n");
   return arrangrr::test::failures();
