@@ -28,6 +28,13 @@ enum class ChordMode : std::uint8_t {
 inline constexpr std::uint8_t kChordModeCount = 3;
 inline constexpr std::uint8_t kNoDegree = 0x7F;  // event degree for keyless modes
 
+// The live harmonic context consumed by the arranger's NTT resolution (D24).
+struct ChordState {
+  std::uint8_t root_pc = 0;
+  ChordQuality quality = ChordQuality::kMaj;
+  bool valid = false;  // false until the first chord sounds
+};
+
 struct ChordResult {
   std::uint8_t root_note = 0;   // MIDI note of the chord root (= input)
   std::int8_t degree = -1;      // 0..6, or -1 when rejected
@@ -113,6 +120,7 @@ class ChordEngine {
   // previous voicing and stacks the shape from `root_note` upward.
   void sound(std::uint8_t root_note, ChordQuality quality, std::uint8_t velocity,
              ScheduleFn schedule) {
+    state_ = ChordState{static_cast<std::uint8_t>(root_note % 12), quality, true};
     const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
     for (std::uint8_t i = 0; i < shape.count; ++i) {
@@ -133,6 +141,7 @@ class ChordEngine {
   }
 
   constexpr bool sounding() const noexcept { return sounding_count_ > 0; }
+  constexpr const ChordState& state() const noexcept { return state_; }
 
  private:
   Key key_{};
@@ -142,6 +151,7 @@ class ChordEngine {
   bool hold_ = true;  // stored for the live-keyboard gestures of M5
   std::uint8_t sounding_[4] = {0, 0, 0, 0};
   std::uint8_t sounding_count_ = 0;
+  ChordState state_{};
 };
 
 }  // namespace arrangrr
