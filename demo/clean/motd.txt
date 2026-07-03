@@ -5,4 +5,4 @@ clean room — nothing is configured. A cookbook to build your session:
   style load basic            the band, then route its roles:
   style route drums out0:10 | style route bass out0:2 | style route chord1 out0:3
   transport start             nothing sounds until the clock runs
-help <topic> for grammar - help close hides this panel - help open recalls it
+help <topic> for grammar - panel close help hides this panel - panel open help recalls it

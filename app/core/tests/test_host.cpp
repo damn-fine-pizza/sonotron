@@ -1,6 +1,7 @@
 // Host-layer unit tests: JSONL/human encoders (every branch) and the shell
 // (command parsing, @tick queue, error paths). Links arrangrr_host.
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -489,10 +490,22 @@ void test_help_command() {
   CHECK(f.run("help style"));
   CHECK(f.run("help track"));
   CHECK(f.run("help midi"));
+  CHECK(f.run("help panel"));
+  CHECK(f.run("help piano"));
+  CHECK(f.run("help notes"));
   CHECK(f.run("help nonsense"));  // unknown topic falls back to the overview
-  CHECK(f.run("help close"));     // no-ops without a panel UI
-  CHECK(f.run("help open"));
-  CHECK(f.events.empty());        // help never touches the engine
+  CHECK(!f.run("help close"));    // lifecycle moved: migration hint errors out
+  CHECK(!f.run("help open"));
+  CHECK(f.events.empty());  // help never touches the engine
+}
+
+bool block_contains(const std::vector<std::string>& lines, const std::string& needle) {
+  for (const std::string& line : lines) {
+    if (line.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void test_help_panel_hook() {
@@ -504,29 +517,120 @@ void test_help_panel_hook() {
     ++calls;
     return true;
   });
-  // help <topic> opens the panel with that topic.
+  // help <topic> fills and opens the help panel; the hook receives the
+  // combined block: title rule first, topic content after it.
   CHECK(f.run("help chord"));
-  CHECK(calls == 1 && !panel.empty() && panel[0] == "help: chord");
-  // help close closes it (empty vector).
-  CHECK(f.run("help close"));
+  CHECK(calls == 1 && panel.size() >= 2);
+  CHECK(panel[0] == "-- help --");
+  CHECK(panel[1] == "help: chord");
+  // Lifecycle now lives under `panel ...`.
+  CHECK(f.run("panel close help"));
   CHECK(calls == 2 && panel.empty());
-  // help open reopens the LAST panel that was shown.
-  CHECK(f.run("help open"));
-  CHECK(calls == 3 && !panel.empty() && panel[0] == "help: chord");
-  // A different topic replaces the remembered panel.
+  CHECK(f.run("panel open help"));
+  CHECK(calls == 3 && block_contains(panel, "help: chord"));  // content survives close
+  // A different topic replaces the content.
   CHECK(f.run("help midi"));
-  CHECK(f.run("help close"));
-  CHECK(f.run("help open"));
-  CHECK(panel[0] == "help: midi");
-  // help open before any help ever shown -> overview.
+  CHECK(block_contains(panel, "help: midi"));
+  // Opening the help panel before any topic was shown -> overview.
   ShellFixture fresh;
   std::vector<std::string> fresh_panel;
   fresh.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
     fresh_panel = lines;
     return true;
   });
-  CHECK(fresh.run("help open"));
-  CHECK(!fresh_panel.empty() && fresh_panel[0].find("help") == 0);
+  CHECK(fresh.run("panel open help"));
+  CHECK(block_contains(fresh_panel, "help  (help <topic>"));
+}
+
+void test_panel_commands() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+
+  // Coexistence: help and piano stack in one combined block, help first.
+  CHECK(f.run("panel open piano"));
+  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(f.run("help chord"));
+  CHECK(block_contains(panel, "-- help --") && block_contains(panel, "-- piano --"));
+  const auto help_pos =
+      std::find(panel.begin(), panel.end(), std::string("-- help --")) - panel.begin();
+  const auto piano_pos =
+      std::find(panel.begin(), panel.end(), std::string("-- piano --")) - panel.begin();
+  CHECK(help_pos < piano_pos);
+
+  // toggle / close all.
+  CHECK(f.run("panel toggle piano"));
+  CHECK(!block_contains(panel, "-- piano --"));
+  CHECK(f.run("panel toggle piano"));
+  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(f.run("panel close all"));
+  CHECK(panel.empty());
+
+  // Focus: focusing opens, the title carries the '*' marker, repl clears it.
+  CHECK(f.run("panel focus piano"));
+  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(f.run("panel focus repl"));
+  CHECK(block_contains(panel, "-- piano --") && !block_contains(panel, "-- piano* --"));
+  CHECK(f.run("panel focus next"));
+  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(f.run("panel focus next"));  // past the last visible -> back to repl
+  CHECK(!block_contains(panel, "-- piano* --"));
+
+  // Errors: unknown panel / unknown subcommand / missing argument.
+  CHECK(!f.run("panel open nonsense"));
+  CHECK(!f.run("panel nonsense"));
+  CHECK(!f.run("panel open"));
+  CHECK(!f.run("panel"));
+
+  // panel list / status are informational and never touch the engine.
+  CHECK(f.run("panel list"));
+  CHECK(f.run("panel status"));
+  CHECK(f.run("panel help"));
+  CHECK(f.events.empty());
+}
+
+void test_panel_manager_state() {
+  PanelManager pm;
+  CHECK(!pm.any_visible());
+  CHECK(pm.focus_kind() == PanelFocus::kRepl);
+
+  // Open + content + stacking.
+  pm.set_content(PanelId::kHelp, {"h1", "h2"});
+  pm.open(PanelId::kHelp);
+  pm.open(PanelId::kPiano);
+  pm.set_content(PanelId::kPiano, {"p1"});
+  CHECK(pm.visible(PanelId::kHelp) && pm.visible(PanelId::kPiano));
+  std::vector<std::string> combined = pm.combined_lines();
+  CHECK(combined.size() == 2 + 2 + 1);  // two titles + help(2) + piano(1)
+
+  // An oversized panel is truncated with an honest marker; the panel below
+  // stays visible (fairness cap).
+  const std::vector<std::string> big(40, "x");
+  pm.set_content(PanelId::kHelp, big);
+  combined = pm.combined_lines();
+  CHECK(block_contains(combined, "more lines)"));
+  std::size_t help_lines = 0;
+  for (const std::string& line : combined) {
+    if (line == "x") {
+      ++help_lines;
+    }
+  }
+  CHECK(help_lines < big.size());
+  CHECK(block_contains(combined, "-- piano --"));
+
+  // Closing the focused panel returns focus to the REPL.
+  pm.focus(PanelId::kPiano);
+  CHECK(pm.focus_kind() == PanelFocus::kPanel && pm.focused_panel() == PanelId::kPiano);
+  pm.close(PanelId::kPiano);
+  CHECK(pm.focus_kind() == PanelFocus::kRepl);
+
+  // Name round-trip.
+  PanelId id{};
+  CHECK(parse_panel_name("filter", id) && id == PanelId::kFilter);
+  CHECK(!parse_panel_name("bogus", id));
 }
 
 void test_warn_names_complete() {
@@ -609,6 +713,8 @@ int main() {
   test_jsonl_chord_rendering();
   test_help_command();
   test_help_panel_hook();
+  test_panel_commands();
+  test_panel_manager_state();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
   test_line_editor();

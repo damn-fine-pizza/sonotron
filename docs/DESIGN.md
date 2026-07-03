@@ -594,6 +594,8 @@ Three executables/targets on top of the **same core**, distinguished only by the
 - **Binary serialization**: fixed layout, declared endianness (little-endian), `magic + version`, reserved fields for extension, **CRC32** over the whole blob. Versioning with migration *tool-side only* (the device reads its own version or refuses with a message).
 - **Graceful degradation**: if a buffer is full → drop CC before notes, never clock; if storage is absent → volatile mode; watchdog + crash-recovery (all-notes-off at boot).
 - **Determinism**: no `Date.now`/unseeded random; explicit PRNG.
+- **Open finding (2026-07-03): static core state lands in `.data`.** The ARM link gate shows the ~97 KB `Engine` in `.data` (flash copy at boot) because member defaults are non-zero (`Track.length`, default velocities). Future core task: zero defaults + explicit runtime init so large pools live in `.bss`.
+- **Open finding (2026-07-03): `sizeof(ScheduledEvent)` is 16 B, not the 12 B budgeted in D33** (scheduler pool 64 KB vs 48 KB). Either revise the budget or shrink the sequence counter to u16; `packed` is not acceptable on Cortex-M7 without an alignment/performance discussion.
 
 **HAL interfaces (draft):**
 ```cpp
@@ -829,7 +831,17 @@ Principles: every milestone has **exit criteria demonstrable via CLI + virtual M
 | **M12 — Laptop tools** | Style compiler (YAML→bin) + **limit validator** against overshoot, pattern/device editor, **SMF import/export**. | [tool] | compile a style from YAML validating the budgets; export/import SMF. |
 | **M13 — Real STM32 port** | STM32 HAL (USB-MIDI device + UART DIN + timer + storage), real budget validation, watchdog/crash-recovery; physical UI (pads/encoders/display) **if/when in scope**. | [hw] | runs on hardware with DIN+USB; panic and sync verified on the device. |
 
-**Path notes:** M0–M2 are the *shared backbone* (identical for any identity). M3 is the first showable "product" milestone. M5 closes the hero-gesture (arranger). From M6 onward the order is more flexible and can be reprioritized based on what you feel is missing "with the object in hand". The physical UI and the specific HW choice remain deliberately deferred (D7), without ever blocking the core.
+### Host UI track (interleaves with the core roadmap)
+
+A parallel host-only track (classification: host-live/host-tool, zero core impact — see docs/TUI_SPEC.md for the full specification):
+
+| Milestone | Goal (what lands) | Exit criteria |
+|---|---|---|
+| **H1 — TUI foundation** | Multi-panel manager (help/piano/filter, focus, vertical stack, per-panel caps), canonical `panel ...` command family (lifecycle moves out of `help open/close`), note-name utilities (CDE + DoReMi, C4=60) extracted from the JSONL encoder, static two-row piano renderer (wide/compact/minimal by named width thresholds, octave on every key), resize robustness (state-as-data, regenerate on geometry change). | panels coexist and survive resize; goldens byte-identical; ARM ELF untouched; coverage gate ≥80%×3. |
+| **H2 — Piano/monitor MVP** | `piano` behavior commands (octave/channel/velocity/view/panic), `notes names cde\|doremi\|toggle`, live key dispatch before the line editor (piano focus only; TAB/P/N/V/C/[/]), MIDI through `Shell::feed_midi` with the documented toggle note-off policy, bounded ActiveNoteTracker + visual event ring (32/5 rows), duration formatter (`dur=240t 1/16`), minimal MidiLogEvent monitor + channel/port/event filters and `view show ...` options as data. | keys sound through the normal input path; REPL typing untouched; all buffers bounded; script/non-TTY unchanged. |
+| **H3 — Presentation layer** | Colors + themes (semantic UiRole roles, `--theme`, runtime `colors`/`theme` commands), unicode with ASCII fallback, side-by-side layout with narrow fallback, GM drum names, richer views/filters, host benchmarks (scheduler high-water, per-port DIN bandwidth accounting). | deferred until H2 is stable. |
+
+**Path notes:** M0–M2 are the *shared backbone* (identical for any identity). M3 is the first showable "product" milestone. M5 closes the hero-gesture (arranger). From M6 onward the order is more flexible and can be reprioritized based on what you feel is missing "with the object in hand". The physical UI and the specific HW choice remain deliberately deferred (D7), without ever blocking the core. The full host-TUI plan now lives in the Host UI track above and docs/TUI_SPEC.md.
 - Plan for `app/core/device/` (DeviceProfile/Program) and `app/core/performance/` already present.
 
 ---
@@ -957,6 +969,17 @@ map list | map del <path>
 ```
 help [topic] | echo <text> | wait <ms|Nt> | seed <N> | quit
 ```
+
+**panel / piano / notes / view / filter (Host UI track — see docs/TUI_SPEC.md)**
+```
+panel list | open <p> | close <p> | toggle <p> | close all
+panel focus <p>|repl|next | panel status | panel help
+piano octave <N>|up|down | piano channel <1..16> | piano velocity <1..127>
+piano view keyboard|active-notes|event-log | piano panic       (H2)
+notes names cde|doremi|toggle                                   (H2)
+view show ... | filter channel|port|event|clear                 (H2)
+```
+Panel lifecycle lives ONLY under `panel ...` (the earlier `help open`/`help close` forms are removed); `help <topic>` remains — it sets help content and opens the help panel.
 
 ### 28.4 Event stream (←)
 Each event is a line `ev <type> <fields…>` (or JSON with `--format jsonl`), filterable with `monitor`:

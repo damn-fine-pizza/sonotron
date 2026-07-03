@@ -6,6 +6,7 @@
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/transport/transport.hpp"
+#include "note_names.hpp"
 
 namespace arrangrr::host {
 
@@ -15,9 +16,9 @@ const char* warn_name(std::uint16_t code) {
   // One entry per WarnCode: the static_assert refuses to compile a new warn
   // until it has a wire name.
   static constexpr const char* kNames[] = {
-      "none",           "scheduler_full", "route_table_full", "unknown_command",
-      "bad_argument",   "track_table_full", "not_in_key",     "seq_table_full",
-      "seq_empty",      "unsupported",
+      "none",         "scheduler_full",   "route_table_full", "unknown_command",
+      "bad_argument", "track_table_full", "not_in_key",       "seq_table_full",
+      "seq_empty",    "unsupported",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == kWarnCodeCount,
                 "every WarnCode needs a wire name");
@@ -62,18 +63,6 @@ const char* section_name(std::uint16_t code) {
       "fillB",  "fillC",  "fillD", "break", "ending1", "ending2",
   };
   return code < kSectionTypeCount ? kNames[code] : "?";
-}
-
-const char* pc_name(std::uint8_t pc, bool flats) {
-  static constexpr const char* kSharp[12] = {"C",  "C#", "D",  "D#", "E",  "F",
-                                             "F#", "G",  "G#", "A",  "A#", "B"};
-  static constexpr const char* kFlat[12] = {"C",  "Db", "D",  "Eb", "E",  "F",
-                                            "Gb", "G",  "Ab", "A",  "Bb", "B"};
-  return (flats ? kFlat : kSharp)[pc % 12];
-}
-
-std::string note_name(std::uint8_t note, bool flats) {
-  return format("%s%d", pc_name(note % 12, flats), note / 12 - 1);
 }
 
 const char* quality_suffix(ChordQuality q) {
@@ -140,10 +129,11 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
     case OutEvent::Kind::kChord: {
       const auto degree = static_cast<std::uint8_t>(ev.code & 0xFF);
       const auto quality = static_cast<ChordQuality>(ev.code >> 8);
-      return format(R"({"ev":"chord","in":"%s","out":"%s%s","deg":"%s","@":%u})",
-                    note_name(ev.msg.status, prefer_flats).c_str(),
-                    pc_name(ev.msg.status % 12, prefer_flats), quality_suffix(quality),
-                    roman_degree(degree, quality).c_str(), ev.tick);
+      return format(
+          R"({"ev":"chord","in":"%s","out":"%s%s","deg":"%s","@":%u})",
+          note_name(ev.msg.status, {NoteNaming::kCde, prefer_flats, true}).c_str(),
+          pitch_class_name(ev.msg.status, {NoteNaming::kCde, prefer_flats, false}).c_str(),
+          quality_suffix(quality), roman_degree(degree, quality).c_str(), ev.tick);
     }
     case OutEvent::Kind::kMidi: {
       const MidiMessage& m = ev.msg;
@@ -191,9 +181,11 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
       return format("@%-8u section %s", ev.tick, section_name(ev.code));
     case OutEvent::Kind::kChord: {
       const auto quality = static_cast<ChordQuality>(ev.code >> 8);
-      return format("@%-8u chord %s%s (%s)", ev.tick, pc_name(ev.msg.status % 12, prefer_flats),
-                    quality_suffix(quality),
-                    roman_degree(static_cast<std::uint8_t>(ev.code & 0xFF), quality).c_str());
+      return format(
+          "@%-8u chord %s%s (%s)", ev.tick,
+          pitch_class_name(ev.msg.status, {NoteNaming::kCde, prefer_flats, false}).c_str(),
+          quality_suffix(quality),
+          roman_degree(static_cast<std::uint8_t>(ev.code & 0xFF), quality).c_str());
     }
     case OutEvent::Kind::kMidi: {
       const MidiMessage& m = ev.msg;

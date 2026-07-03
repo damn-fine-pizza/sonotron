@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "arrangrr/engine.hpp"
+#include "panel_manager.hpp"
+#include "piano_view.hpp"
 
 // Host shell: resolves L2/L1 text lines into binary core commands (D26) and
 // owns everything the core must not know about — port names, pending
@@ -29,19 +31,35 @@ class Shell {
   // Called when a `port open` line runs, so a live backend can create the
   // OS-level port. May be empty (script/null backend).
   using PortHook = std::function<void(const PortDef&)>;
-  // Receives help-panel content (empty vector = close). Returns true when a
-  // panel UI consumed it; false falls back to plain printing.
+  // Receives the composed block of all visible panels (empty vector = none
+  // visible). Returns true when a panel UI consumed it; false falls back to
+  // plain printing.
   using PanelHook = std::function<bool(const std::vector<std::string>&)>;
+  // Prints one informational line (`panel list` output and friends). The live
+  // TUI wires this to the log pane; unset falls back to stdout.
+  using PrintHook = std::function<void(const std::string&)>;
+  // Supplies the current terminal width so panel renderers can adapt.
+  using WidthProvider = std::function<int()>;
   // Sends raw bytes into the engine input path (used by the live backend).
   void feed_midi(std::uint8_t port, Span<const std::uint8_t> bytes) {
     m_engine.push_midi_in(port, bytes, m_sink);
   }
 
-  explicit Shell(EventSink sink) : m_sink(std::move(sink)) {}
+  explicit Shell(EventSink sink);
   void set_port_hook(PortHook hook) { m_port_hook = std::move(hook); }
   void set_panel_hook(PanelHook hook) { m_panel_hook = std::move(hook); }
-  // Seeds the panel `help open` recalls (e.g. a demo's startup guidance).
-  void remember_panel(const std::vector<std::string>& lines) { m_last_help = lines; }
+  void set_print_hook(PrintHook hook) { m_print_hook = std::move(hook); }
+  void set_width_provider(WidthProvider provider) { m_width_provider = std::move(provider); }
+
+  // Seeds the help panel with startup guidance (e.g. a demo motd) and opens it.
+  void show_motd(const std::vector<std::string>& lines);
+
+  // Re-renders width-dependent panels from state and re-pushes the composed
+  // block — the terminal resize hook lands here (H1 resize contract).
+  void refresh_panels();
+
+  const PanelManager& panels() const { return m_panels; }
+  const PianoViewState& piano_state() const { return m_piano; }
 
   Engine& engine() { return m_engine; }
   const Engine& engine() const { return m_engine; }
@@ -73,11 +91,21 @@ class Shell {
   int find_seq(const std::string& name) const;
   std::vector<std::string> build_help(const std::string& topic) const;
 
+  bool cmd_panel(const std::vector<std::string>& tokens, std::string& error);
+  void open_help_topic(const std::string& topic);
+  void refresh_piano_content();
+  bool push_panels();
+  void print_lines(const std::vector<std::string>& lines);
+  int panel_columns() const;
+
   Engine m_engine;
   EventSink m_sink;
   PortHook m_port_hook;
   PanelHook m_panel_hook;
-  std::vector<std::string> m_last_help;
+  PrintHook m_print_hook;
+  WidthProvider m_width_provider;
+  PanelManager m_panels;
+  PianoViewState m_piano;
   std::vector<PortDef> m_ports;
   std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)
   std::vector<std::string> m_seqs;

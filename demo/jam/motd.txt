@@ -6,4 +6,4 @@ jam — the band is configured, the clock is yours.
   play D  /  play E min7    solo chords on channel 4
   style section ending1     outro, stops by itself
   panic = red button - quit leaves (synth shuts down too)
-help <topic> for grammar - help close hides this panel - help open recalls it
+help <topic> for grammar - panel close help hides this panel - panel open help recalls it

@@ -288,7 +288,15 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
   return true;
 }
 
+// Panel width used when no live terminal is attached (script/flat mode).
+constexpr int kDefaultPanelColumns = 80;
+
 }  // namespace
+
+Shell::Shell(EventSink sink) : m_sink(std::move(sink)) {
+  // The filter panel exists in the grammar but has no behavior before H2.
+  m_panels.set_content(PanelId::kFilter, {"filter: (not yet implemented -- H2)"});
+}
 
 std::vector<std::string> Shell::build_help(const std::string& topic) const {
   if (topic == "chord") {
@@ -342,17 +350,177 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  panic                            all notes off everywhere",
     };
   }
+  if (topic == "panel") {
+    return {
+        "help: panel",
+        "  panel list                       panels and their state",
+        "  panel open|close|toggle <p>      p: help piano filter",
+        "  panel close all",
+        "  panel focus <p>|repl|next        focus bookkeeping (key dispatch: H2)",
+        "  panel status | panel help",
+        "  help <topic> fills and opens the help panel",
+    };
+  }
+  if (topic == "piano") {
+    return {
+        "help: piano",
+        "  panel open piano                 static keyboard map (H1)",
+        "  white keys: A S D F G H J K L ; '    black keys: W E T Y U O",
+        "  P is reserved (will close piano focus in H2, never musical)",
+        "  not yet implemented (H2): piano octave|channel|velocity|view|panic,",
+        "  live key input through the normal MIDI path",
+    };
+  }
+  if (topic == "notes") {
+    return {
+        "help: notes",
+        "  note names: CDE (C D E ...) or DoReMi (Do Re Mi ...)",
+        "  scientific octaves, C4 = 60; sharps default, flats follow the key",
+        "  not yet implemented (H2): notes names cde|doremi|toggle",
+    };
+  }
   return {
-      "help  (help <topic> opens the panel; help close / help open)",
+      "help  (help <topic> fills and opens the help panel)",
       "  transport start|stop|continue|tempo <bpm>",
       "  chord  - key, modes, play          (help chord)",
       "  seq    - chord progressions        (help seq)",
       "  style  - the arranger band         (help style)",
       "  track  - step sequencer            (help track)",
       "  midi   - ports, routing, panic     (help midi)",
+      "  panel  - help/piano/filter panels  (help panel)",
+      "  piano  - simulated keyboard        (help piano)",
       "  advance <N>[bars] | @<tick> <cmd> | quit",
       "  notes: C4=60, octave optional (D = D4), sharps/flats (F#3, Bb)",
   };
+}
+
+void Shell::print_lines(const std::vector<std::string>& lines) {
+  for (const std::string& line : lines) {
+    if (m_print_hook) {
+      m_print_hook(line);
+    } else {
+      std::printf("%s\n", line.c_str());
+    }
+  }
+}
+
+int Shell::panel_columns() const {
+  if (m_width_provider) {
+    return m_width_provider();
+  }
+  return kDefaultPanelColumns;
+}
+
+void Shell::refresh_piano_content() {
+  m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, panel_columns()));
+}
+
+bool Shell::push_panels() {
+  // Width-dependent content is regenerated from state on every push, so a
+  // resize can never leave a stale layout behind (H1 resize contract).
+  if (m_panels.visible(PanelId::kPiano)) {
+    refresh_piano_content();
+  }
+
+  return m_panel_hook && m_panel_hook(m_panels.combined_lines());
+}
+
+void Shell::refresh_panels() { (void)push_panels(); }
+
+void Shell::show_motd(const std::vector<std::string>& lines) {
+  m_panels.set_content(PanelId::kHelp, lines);
+  m_panels.open(PanelId::kHelp);
+
+  if (!push_panels()) {
+    print_lines(lines);
+  }
+}
+
+void Shell::open_help_topic(const std::string& topic) {
+  const std::vector<std::string> lines = build_help(topic);
+  m_panels.set_content(PanelId::kHelp, lines);
+  m_panels.open(PanelId::kHelp);
+
+  if (!push_panels()) {
+    print_lines(lines);
+  }
+}
+
+bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage =
+      "panel list | open|close|toggle <p> | close all | focus <p>|repl|next | status | help";
+
+  if (t.size() < 2) {
+    error = kUsage;
+    return false;
+  }
+  const std::string& sub = t[1];
+
+  if (sub == "list") {
+    print_lines(m_panels.list_lines());
+    return true;
+  }
+  if (sub == "status") {
+    print_lines(m_panels.status_lines());
+    return true;
+  }
+  if (sub == "help") {
+    open_help_topic("panel");
+    return true;
+  }
+
+  if (sub == "open" || sub == "close" || sub == "toggle" || sub == "focus") {
+    if (t.size() < 3) {
+      error = "panel " + sub + ": missing panel name";
+      return false;
+    }
+    const std::string& target = t[2];
+
+    if (sub == "close" && target == "all") {
+      m_panels.close_all();
+      (void)push_panels();
+      return true;
+    }
+    if (sub == "focus" && (target == "repl" || target == "next")) {
+      if (target == "repl") {
+        m_panels.focus_repl();
+      } else {
+        m_panels.focus_next();
+      }
+      (void)push_panels();
+      return true;
+    }
+
+    PanelId id{};
+    if (!parse_panel_name(target, id)) {
+      error = "unknown panel '" + target + "' (help, piano, filter)";
+      return false;
+    }
+
+    if (sub == "open") {
+      m_panels.open(id);
+    } else if (sub == "close") {
+      m_panels.close(id);
+    } else if (sub == "toggle") {
+      m_panels.toggle(id);
+    } else {
+      m_panels.focus(id);
+    }
+
+    // A help panel opened before any `help <topic>` shows the overview.
+    if (m_panels.visible(PanelId::kHelp) && m_panels.content(PanelId::kHelp).empty()) {
+      m_panels.set_content(PanelId::kHelp, build_help(""));
+    }
+
+    const bool consumed = push_panels();
+    if (!consumed && m_panels.visible(id)) {
+      print_lines(m_panels.content(id));  // flat/script mode: show what opened
+    }
+    return true;
+  }
+
+  error = kUsage;
+  return false;
 }
 
 int Shell::find_seq(const std::string& name) const {
@@ -465,29 +633,20 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
   }
 
   if (cmd == "help") {
-    const std::string sub = t.size() >= 2 ? t[1] : "";
-    if (sub == "close") {
-      if (m_panel_hook) {
-        (void)m_panel_hook({});
-      }
-      return true;
+    const std::string topic = t.size() >= 2 ? t[1] : "";
+
+    // Lifecycle moved under `panel ...` (H1): keep a migration hint alive.
+    if (topic == "open" || topic == "close") {
+      error = "help " + topic + " was removed: use panel open help / panel close help";
+      return false;
     }
-    if (sub == "open") {
-      const std::vector<std::string> lines =
-          m_last_help.empty() ? build_help("") : m_last_help;
-      if (m_panel_hook && m_panel_hook(lines)) {
-        return true;
-      }
-    }
-    const std::vector<std::string> lines = build_help(sub == "open" ? "" : sub);
-    m_last_help = lines;
-    if (m_panel_hook && m_panel_hook(lines)) {
-      return true;
-    }
-    for (const std::string& line : lines) {
-      std::printf("%s\n", line.c_str());
-    }
+
+    open_help_topic(topic);
     return true;
+  }
+
+  if (cmd == "panel") {
+    return cmd_panel(t, error);
   }
 
   if (cmd == "port" && t.size() >= 3 && t[1] == "open") {

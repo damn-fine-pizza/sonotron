@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -45,9 +46,14 @@ class LineEditor {
 // pane), row H-1 status bar (inverse video), row H input line.
 class Console {
  public:
+  Console();
+  ~Console();
+
+  Console(const Console&) = delete;
+  Console& operator=(const Console&) = delete;
+
   bool init();      // enters raw mode + scroll region; false if not a tty
   void shutdown();  // restores everything (idempotent)
-  ~Console() { shutdown(); }
 
   void emit(const std::string& line);        // print into the output pane
   void set_status(const std::string& text);  // repaint the status bar (and
@@ -59,10 +65,17 @@ class Console {
   // screen: overlong panels are truncated.
   void set_panel(const std::vector<std::string>& lines);
 
+  // Current terminal width; panel renderers regenerate content from state
+  // through the resize hook, which fires after every geometry change.
+  int columns() const { return m_cols; }
+  void set_resize_hook(std::function<void()> hook) { m_resize_hook = std::move(hook); }
+
  private:
   void refresh_geometry();
   void apply_layout();  // scroll region + panel + status repaint
   int log_bottom() const;
+  int status_row() const { return m_rows - 1; }
+  int input_row() const { return m_rows; }
   void write_raw(const std::string& s);
 
   bool m_active = false;
@@ -70,6 +83,7 @@ class Console {
   int m_cols = 80;
   std::string m_status;
   std::vector<std::string> m_panel;
+  std::function<void()> m_resize_hook;
 };
 
 }  // namespace arrangrr::host

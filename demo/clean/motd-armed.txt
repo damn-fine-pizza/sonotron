@@ -3,4 +3,4 @@ armed (-i): the empty sequence 'verse' is looping and armed at 96 BPM.
   transport start                                   ...and it plays
   style load basic + style route <role> out0:<ch>   add the band
   play <note>                                       solo chords on top
-help <topic> for grammar - help close hides this panel - help open recalls it
+help <topic> for grammar - panel close help hides this panel - panel open help recalls it

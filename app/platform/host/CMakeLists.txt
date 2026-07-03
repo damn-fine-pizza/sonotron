@@ -6,6 +6,9 @@ add_library(arrangrr_host STATIC
   jsonl.cpp
   alsa_midi.cpp
   console.cpp
+  note_names.cpp
+  panel_manager.cpp
+  piano_view.cpp
 )
 target_include_directories(arrangrr_host PUBLIC .)
 target_link_libraries(arrangrr_host PUBLIC arrangrr_core ALSA::ALSA)
