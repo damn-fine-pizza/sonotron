@@ -32,16 +32,24 @@ enum class Param : std::uint16_t {
                            //     c = pass mask (route_pass::*)
   kRouteClear = 7,         // do
   kClockOutMask = 8,       // set: a = bitmask of ports that receive F8/FA/FB/FC
+  kTrackNew = 9,           // do: a = role, b = port | (channel_0based << 8)
+  kTrackStep = 10,         // do: idx = track; a = step index (0-based)
+                           //     b = note | (vel << 8)  (vel 0 clears the slot)
+                           //     c = gate in scheduler ticks
+  kTrackLength = 11,       // set: idx = track; a = steps (1..kMaxStepsPerTrack)
+  kTrackMute = 12,         // set: idx = track; a = 0/1
+  kTrackSolo = 13,         // set: idx = track; a = 0/1
 };
 
 struct Command {
   Op op = Op::kDo;
   Param param = Param::kNone;
+  std::uint16_t idx = 0;  // collection index (D26): track, route, ... target
   std::int32_t a = 0;
   std::int32_t b = 0;
   std::int32_t c = 0;
 };
-static_assert(sizeof(Command) <= 16);
+static_assert(sizeof(Command) <= 20);
 
 enum class WarnCode : std::uint16_t {
   kNone = 0,
@@ -49,6 +57,7 @@ enum class WarnCode : std::uint16_t {
   kRouteTableFull = 2,
   kUnknownCommand = 3,
   kBadArgument = 4,
+  kTrackTableFull = 5,
 };
 
 // Event from core to host.
