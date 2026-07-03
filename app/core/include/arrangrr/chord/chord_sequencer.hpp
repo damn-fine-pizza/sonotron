@@ -89,8 +89,10 @@ class ChordSequencer {
   }
 
   // ---- playback -------------------------------------------------------------
+  // Arming an EMPTY sequence is legal: it plays silence until steps are added
+  // (the demo -i workflow pre-arms, the user only types `seq add ...`).
   bool play(Tick transport_tick) noexcept {
-    if (m_pool.empty() || current()->count() == 0) {
+    if (m_pool.empty()) {
       return false;
     }
     m_playing = true;
@@ -114,6 +116,9 @@ class ChordSequencer {
     }
     ChordSequence* seq = current();
     const Tick len = seq->length();
+    if (len == 0) {
+      return;  // armed but still empty: silence (and no modulo by zero)
+    }
     Tick pos = transport_tick - m_base;
     if (pos >= len) {
       if (!seq->loop) {

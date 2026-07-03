@@ -1,0 +1,8 @@
+clean room — nothing is configured. A cookbook to build your session:
+  key C major                 pick a key (help chord for modes)
+  play D                      hear a smart chord (out0 ch1 by default)
+  seq new verse | seq add C | seq add F 2bars | seq loop on | seq play
+  style load basic            the band, then route its roles:
+  style route drums out0:10 | style route bass out0:2 | style route chord1 out0:3
+  transport start             nothing sounds until the clock runs
+help <topic> for grammar - help close hides this panel - help open recalls it

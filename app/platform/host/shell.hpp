@@ -40,6 +40,8 @@ class Shell {
   explicit Shell(EventSink sink) : m_sink(std::move(sink)) {}
   void set_port_hook(PortHook hook) { m_port_hook = std::move(hook); }
   void set_panel_hook(PanelHook hook) { m_panel_hook = std::move(hook); }
+  // Seeds the panel `help open` recalls (e.g. a demo's startup guidance).
+  void remember_panel(const std::vector<std::string>& lines) { m_last_help = lines; }
 
   Engine& engine() { return m_engine; }
   const Engine& engine() const { return m_engine; }

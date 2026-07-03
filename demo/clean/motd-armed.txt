@@ -1,0 +1,6 @@
+armed (-i): the empty sequence 'verse' is looping and armed at 96 BPM.
+  seq add C | seq add A | seq add F | seq add G     write your progression
+  transport start                                   ...and it plays
+  style load basic + style route <role> out0:<ch>   add the band
+  play <note>                                       solo chords on top
+help <topic> for grammar - help close hides this panel - help open recalls it

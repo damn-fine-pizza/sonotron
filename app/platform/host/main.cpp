@@ -81,7 +81,7 @@ std::string status_line(const Shell& shell) {
   return buf;
 }
 
-int run_live(bool human, const char* init_path) {
+int run_live(bool human, const char* init_path, const char* motd_path) {
   AlsaMidi alsa;
   std::string error;
   if (!alsa.open("arrangrr", error)) {
@@ -108,6 +108,21 @@ int run_live(bool human, const char* init_path) {
     }
   });
   shell_ref = &shell;
+  // --motd FILE: guidance shown in the persistent panel from the start
+  // (recallable later with `help open`). A printed banner would be wiped by
+  // the pane UI's initial clear-screen.
+  if (tui && motd_path != nullptr) {
+    std::ifstream motd(motd_path);
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(motd, line)) {
+      lines.push_back(line);
+    }
+    if (!lines.empty()) {
+      console.set_panel(lines);
+      shell.remember_panel(lines);
+    }
+  }
   shell.set_panel_hook([&](const std::vector<std::string>& lines) {
     if (!tui) {
       return false;  // plain mode prints help inline as before
@@ -270,6 +285,7 @@ int run_live(bool human, const char* init_path) {
 int main(int argc, char** argv) {
   const char* script = nullptr;
   const char* init = nullptr;
+  const char* motd = nullptr;
   bool human = false;
   bool events_set = false;
   for (int i = 1; i < argc; ++i) {
@@ -277,11 +293,15 @@ int main(int argc, char** argv) {
       script = argv[++i];
     } else if (std::strcmp(argv[i], "--init") == 0 && i + 1 < argc) {
       init = argv[++i];
+    } else if (std::strcmp(argv[i], "--motd") == 0 && i + 1 < argc) {
+      motd = argv[++i];
     } else if (std::strcmp(argv[i], "--events") == 0 && i + 1 < argc) {
       human = std::strcmp(argv[++i], "human") == 0;
       events_set = true;
     } else if (std::strcmp(argv[i], "--help") == 0) {
-      std::printf("usage: arrangrr [--script FILE|-] [--init FILE] [--events jsonl|human]\n");
+      std::printf(
+          "usage: arrangrr [--script FILE|-] [--init FILE] [--motd FILE] "
+          "[--events jsonl|human]\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -292,5 +312,5 @@ int main(int argc, char** argv) {
   if (script) {
     return run_script(script, human);
   }
-  return run_live(events_set ? human : true, init);
+  return run_live(events_set ? human : true, init, motd);
 }

@@ -1,0 +1,3 @@
+# Clean room — nothing is configured here. This file is YOURS: everything
+# you add runs at startup (same grammar as the REPL; try `help`).
+# Tip: start.sh -i pre-arms an empty looping sequence instead (see armed.acmd).

@@ -1,0 +1,9 @@
+jam — the band is configured, the clock is yours.
+  transport start           the band comes in on | C Am F G |
+  style section varB        busier groove (lands on the bar)
+  style section fillA       one-bar fill, then back
+  seq transpose to G        whole progression re-derives in G
+  play D  /  play E min7    solo chords on channel 4
+  style section ending1     outro, stops by itself
+  panic = red button - quit leaves (synth shuts down too)
+help <topic> for grammar - help close hides this panel - help open recalls it

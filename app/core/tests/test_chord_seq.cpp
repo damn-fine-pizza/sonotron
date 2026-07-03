@@ -229,9 +229,32 @@ void test_seq_more_engine_paths() {
   CHECK(offs == 4);
 }
 
+void test_armed_empty_sequence() {
+  // The demo -i workflow: arm an empty looping sequence, add chords later,
+  // then start the transport — the progression must sound from tick 0.
+  SeqFixture f;
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqNew);
+  f.cmd(Param::kSeqLoop, 1, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqPlay);  // empty: legal, plays silence
+  CHECK(f.ev.empty());     // no warn
+  CHECK(f.e.sequences().playing());
+  f.cmd(Param::kTransportStart);
+  f.advance(10);           // still silent, and no crash on the empty length
+  CHECK(f.chords().size() == 0);
+  f.cmd(Param::kTransportStop);
+  f.add(60, kTicksPerBar);  // now write the progression
+  f.add(65, kTicksPerBar);
+  f.ev.clear();
+  f.cmd(Param::kTransportStart);
+  f.advance(kTicksPerBar);
+  const auto ch = f.chords();
+  CHECK(ch.size() == 2);  // Cmaj7 at 0, Fmaj7 at bar 2 start
+}
+
 void test_seq_warns() {
   SeqFixture f;
-  f.cmd(Param::kSeqPlay);  // nothing to play
+  f.cmd(Param::kSeqPlay);  // no sequence exists at all
   CHECK(f.ev.size() == 1 && f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
   f.ev.clear();
   f.cmd(Param::kSeqAdd, 60, 1 | (100 << 8), 100);  // no sequence yet
@@ -262,6 +285,7 @@ int main() {
   test_transpose_to_g_replays_rederived();
   test_record_quantize_playback();
   test_seq_more_engine_paths();
+  test_armed_empty_sequence();
   test_seq_warns();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_chord_seq: all OK\n");

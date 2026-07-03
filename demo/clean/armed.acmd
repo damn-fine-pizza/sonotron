@@ -1,0 +1,6 @@
+# start.sh -i: an empty sequence armed and looping at 96 BPM.
+# You only add chords: `seq add C`, `seq add F 2bars`... then `transport start`.
+seq new verse
+seq loop on
+seq play
+transport tempo 96
