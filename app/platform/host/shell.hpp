@@ -58,10 +58,13 @@ class Shell {
   bool advance_to(std::uint64_t target_tick, std::string& error);
   int find_port(const std::string& name, bool input) const;
 
+  int find_track(const std::string& name) const;
+
   Engine engine_;
   EventSink sink_;
   PortHook port_hook_;
   std::vector<PortDef> ports_;
+  std::vector<std::string> tracks_;  // name -> index (D26: names live host-side)
   std::uint8_t next_in_ = 0, next_out_ = 0;
 
   struct Pending {

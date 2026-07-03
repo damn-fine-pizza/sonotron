@@ -200,6 +200,61 @@ void test_shell_parse_edges() {
   CHECK(f.run("midi send 0 80 3C 0"));
 }
 
+void test_shell_track_commands() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("track new bass synth:3 bass"));
+  CHECK(f.run("track new drum synth:10 drums"));
+  CHECK(f.run("track length drum 4"));
+  CHECK(f.run("track step bass 1 C2 100 120"));
+  CHECK(f.run("track step drum 1 36 110"));         // numeric note, default gate
+  CHECK(f.run("track step drum 3 F#1"));            // default vel+gate
+  CHECK(f.run("track step drum 3 clear"));
+  CHECK(f.run("track mute drum on"));
+  CHECK(f.run("track solo bass on"));
+  CHECK(f.run("track solo bass off"));
+  CHECK(f.run("track mute drum off"));
+  CHECK(f.run("transport start"));
+  // bass C2=36 on ch3, drum 36 on ch10 both fire at step 0.
+  CHECK(f.midi_count() == 2);
+  const Track* bass = f.shell.engine().timeline().track(0);
+  CHECK(bass != nullptr && bass->channel == 2 && bass->role == TrackRole::kBass);
+
+  // Error paths.
+  CHECK(!f.run("track new x nowhere"));
+  CHECK(!f.run("track new x synth:1 wizard"));
+  CHECK(!f.run("track step ghost 1 C2"));
+  CHECK(!f.run("track step bass 0 C2"));    // steps are 1-based
+  CHECK(!f.run("track step bass 65 C2"));   // beyond kMaxStepsPerTrack
+  CHECK(!f.run("track step bass 1 H2"));    // no such note letter
+  CHECK(!f.run("track step bass 1 C2 0"));  // vel out of range
+  CHECK(!f.run("track step bass 1 C2 100 0"));  // gate zero
+  CHECK(!f.run("track length bass nope"));
+  CHECK(!f.run("track mute bass maybe"));
+  CHECK(!f.run("track fly bass 1"));
+}
+
+void test_note_name_parsing() {
+  ShellFixture f;
+  CHECK(f.run("port open out s"));
+  CHECK(f.run("track new t s:1"));
+  // C4 = 60 (scientific pitch), C-1 = 0, G9 = 127, flats and sharps.
+  CHECK(f.run("track step t 1 C4"));
+  CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 60);
+  CHECK(f.run("track step t 1 C-1"));
+  CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 0);
+  CHECK(f.run("track step t 1 G9"));
+  CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 127);
+  CHECK(f.run("track step t 1 Bb2"));
+  CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 46);
+  CHECK(f.run("track step t 1 F#3"));
+  CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 54);
+  CHECK(!f.run("track step t 1 G#9"));  // above 127
+  CHECK(!f.run("track step t 1 Cb-1"));  // below 0
+  CHECK(!f.run("track step t 1 C"));     // missing octave
+  CHECK(!f.run("track step t 1 128"));   // numeric out of range
+}
+
 void test_alsa_null_state_is_safe() {
   // Without open(): every entry point must be a graceful no-op. Covers the
   // guard branches without needing a sequencer device.
@@ -238,6 +293,8 @@ int main() {
   test_shell_route_channel_remap();
   test_shell_error_paths();
   test_shell_parse_edges();
+  test_shell_track_commands();
+  test_note_name_parsing();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
   if (arrangrr::test::failures() == 0) std::printf("test_host: all OK\n");

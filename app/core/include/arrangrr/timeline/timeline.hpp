@@ -69,6 +69,9 @@ class Timeline {
   Track* track(std::size_t idx) noexcept {
     return idx < tracks_.size() ? &tracks_[idx] : nullptr;
   }
+  const Track* track(std::size_t idx) const noexcept {
+    return idx < tracks_.size() ? &tracks_[idx] : nullptr;
+  }
   std::size_t track_count() const noexcept { return tracks_.size(); }
 
   bool set_step(std::size_t idx, std::size_t step, std::uint8_t note, std::uint8_t vel,

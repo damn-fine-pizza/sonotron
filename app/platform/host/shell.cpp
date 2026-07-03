@@ -11,7 +11,9 @@ std::vector<std::string> tokenize(const std::string& line) {
   std::vector<std::string> out;
   std::string cur;
   for (char c : line) {
-    if (c == '#') break;  // comment to end of line
+    // '#' opens a comment only at the start of a token — mid-token it is a
+    // sharp (F#3). A comment therefore needs whitespace before it.
+    if (c == '#' && cur.empty()) break;
     if (c == ' ' || c == '\t') {
       if (!cur.empty()) out.push_back(std::move(cur)), cur.clear();
     } else {
@@ -60,6 +62,65 @@ bool split_port_channel(const std::string& s, std::string& name, int& channel) {
   return true;
 }
 
+// Note name in scientific pitch notation (C4 = 60): letter, optional #/b,
+// octave -1..9. Plain MIDI numbers are accepted too.
+bool parse_note(const std::string& s, std::uint8_t& out) {
+  std::uint64_t raw = 0;
+  if (parse_u64(s, raw)) {
+    if (raw > 127) return false;
+    out = static_cast<std::uint8_t>(raw);
+    return true;
+  }
+  if (s.size() < 2) return false;
+  static constexpr int kSemis[7] = {9, 11, 0, 2, 4, 5, 7};  // A B C D E F G
+  const char letter = s[0];
+  if (letter < 'A' || letter > 'G') return false;
+  int semi = kSemis[letter - 'A'];
+  std::size_t pos = 1;
+  if (s[pos] == '#') {
+    ++semi;
+    ++pos;
+  } else if (s[pos] == 'b') {
+    --semi;
+    ++pos;
+  }
+  if (pos >= s.size()) return false;
+  bool negative = false;
+  if (s[pos] == '-') {
+    negative = true;
+    ++pos;
+  }
+  std::uint64_t octave = 0;
+  if (!parse_u64(s.substr(pos), octave) || octave > 9) return false;
+  const int oct = negative ? -static_cast<int>(octave) : static_cast<int>(octave);
+  if (oct < -1) return false;
+  const int note = (oct + 1) * 12 + semi;
+  if (note < 0 || note > 127) return false;
+  out = static_cast<std::uint8_t>(note);
+  return true;
+}
+
+bool parse_role(const std::string& s, TrackRole& out) {
+  struct Entry {
+    const char* name;
+    TrackRole role;
+  };
+  static constexpr Entry kRoles[] = {
+      {"drums", TrackRole::kDrums},   {"perc", TrackRole::kPerc},
+      {"bass", TrackRole::kBass},     {"chord1", TrackRole::kChord1},
+      {"chord2", TrackRole::kChord2}, {"pad", TrackRole::kPad},
+      {"arp", TrackRole::kArp},       {"phrase", TrackRole::kPhrase},
+      {"lead", TrackRole::kLead},     {"cc", TrackRole::kCc},
+  };
+  for (const Entry& e : kRoles) {
+    if (s == e.name) {
+      out = e.role;
+      return true;
+    }
+  }
+  return false;
+}
+
 bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
   if (s.empty() || s.size() > 2) return false;
   char* end = nullptr;
@@ -70,6 +131,15 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
 }
 
 }  // namespace
+
+int Shell::find_track(const std::string& name) const {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i] == name) return static_cast<int>(i);
+  }
+  std::uint64_t idx = 0;
+  if (parse_u64(name, idx) && idx < tracks_.size()) return static_cast<int>(idx);
+  return -1;
+}
 
 int Shell::find_port(const std::string& name, bool input) const {
   for (const PortDef& p : ports_) {
@@ -268,6 +338,111 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
     engine_.push_midi_in(static_cast<std::uint8_t>(port),
                          Span<const std::uint8_t>(bytes.data(), bytes.size()), sink_);
     return true;
+  }
+
+  if (cmd == "track" && t.size() >= 3) {
+    const std::string& verb = t[1];
+
+    if (verb == "new" && t.size() >= 4) {
+      // track new <name> <out-port>[:ch] [role]
+      std::string port_name;
+      int channel = -1;
+      if (!split_port_channel(t[3], port_name, channel)) {
+        error = "bad track destination: " + t[3];
+        return false;
+      }
+      const int port = find_port(port_name, false);
+      if (port < 0) {
+        error = "unknown output port: " + port_name;
+        return false;
+      }
+      TrackRole role = TrackRole::kLead;
+      if (t.size() >= 5 && !parse_role(t[4], role)) {
+        error = "unknown role: " + t[4];
+        return false;
+      }
+      Command c;
+      c.param = Param::kTrackNew;
+      c.a = static_cast<std::int32_t>(role);
+      c.b = port | ((channel < 0 ? 0 : channel) << 8);
+      engine_.push_command(c, sink_);
+      tracks_.push_back(t[2]);
+      return true;
+    }
+
+    const int track = find_track(t[2]);
+    if (track < 0) {
+      error = "unknown track: " + t[2];
+      return false;
+    }
+
+    if (verb == "step" && t.size() >= 5) {
+      // track step <name> <step#> <note|clear> [vel] [gate]
+      std::uint64_t step = 0;
+      if (!parse_u64(t[3], step) || step < 1 || step > kMaxStepsPerTrack) {
+        error = "bad step number: " + t[3];
+        return false;
+      }
+      Command c;
+      c.param = Param::kTrackStep;
+      c.idx = static_cast<std::uint16_t>(track);
+      c.a = static_cast<std::int32_t>(step - 1);  // CLI is 1-based
+      if (t[4] == "clear") {
+        c.b = 0;
+        c.c = 0;
+      } else {
+        std::uint8_t note = 0;
+        std::uint64_t vel = 100, gate = kTicksPerStep / 2;
+        if (!parse_note(t[4], note)) {
+          error = "bad note: " + t[4];
+          return false;
+        }
+        if (t.size() >= 6 && (!parse_u64(t[5], vel) || vel < 1 || vel > 127)) {
+          error = "bad velocity: " + t[5];
+          return false;
+        }
+        if (t.size() >= 7 && (!parse_u64(t[6], gate) || gate == 0 || gate > 0xFFFF)) {
+          error = "bad gate: " + t[6];
+          return false;
+        }
+        c.b = note | (static_cast<std::int32_t>(vel) << 8);
+        c.c = static_cast<std::int32_t>(gate);
+      }
+      engine_.push_command(c, sink_);
+      return true;
+    }
+
+    if (verb == "length" && t.size() >= 4) {
+      std::uint64_t steps = 0;
+      if (!parse_u64(t[3], steps)) {
+        error = "bad length: " + t[3];
+        return false;
+      }
+      Command c;
+      c.op = Op::kSet;
+      c.param = Param::kTrackLength;
+      c.idx = static_cast<std::uint16_t>(track);
+      c.a = static_cast<std::int32_t>(steps);
+      engine_.push_command(c, sink_);
+      return true;
+    }
+
+    if ((verb == "mute" || verb == "solo") && t.size() >= 4) {
+      if (t[3] != "on" && t[3] != "off") {
+        error = "track mute|solo <name> on|off";
+        return false;
+      }
+      Command c;
+      c.op = Op::kSet;
+      c.param = verb == "mute" ? Param::kTrackMute : Param::kTrackSolo;
+      c.idx = static_cast<std::uint16_t>(track);
+      c.a = t[3] == "on" ? 1 : 0;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+
+    error = "track new|step|length|mute|solo ...";
+    return false;
   }
 
   if (cmd == "panic") {
