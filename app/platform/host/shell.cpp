@@ -71,20 +71,25 @@ bool parse_note(const std::string& s, std::uint8_t& out) {
     out = static_cast<std::uint8_t>(raw);
     return true;
   }
-  if (s.size() < 2) return false;
+  if (s.empty()) return false;
   static constexpr int kSemis[7] = {9, 11, 0, 2, 4, 5, 7};  // A B C D E F G
   const char letter = s[0];
   if (letter < 'A' || letter > 'G') return false;
   int semi = kSemis[letter - 'A'];
   std::size_t pos = 1;
-  if (s[pos] == '#') {
+  if (pos < s.size() && s[pos] == '#') {
     ++semi;
     ++pos;
-  } else if (s[pos] == 'b') {
+  } else if (pos < s.size() && s[pos] == 'b') {
     --semi;
     ++pos;
   }
-  if (pos >= s.size()) return false;
+  if (pos >= s.size()) {
+    const int dflt = (4 + 1) * 12 + semi;  // no octave -> octave 4 (C4 = 60)
+    if (dflt < 0 || dflt > 127) return false;
+    out = static_cast<std::uint8_t>(dflt);
+    return true;
+  }
   bool negative = false;
   if (s[pos] == '-') {
     negative = true;
@@ -98,6 +103,62 @@ bool parse_note(const std::string& s, std::uint8_t& out) {
   if (note < 0 || note > 127) return false;
   out = static_cast<std::uint8_t>(note);
   return true;
+}
+
+// Pitch class only (key roots): letter + optional #/b.
+bool parse_pc(const std::string& s, std::uint8_t& out) {
+  if (s.empty()) return false;
+  static constexpr int kSemis[7] = {9, 11, 0, 2, 4, 5, 7};
+  if (s[0] < 'A' || s[0] > 'G') return false;
+  int semi = kSemis[s[0] - 'A'];
+  if (s.size() == 2) {
+    if (s[1] == '#') ++semi;
+    else if (s[1] == 'b') --semi;
+    else return false;
+  } else if (s.size() > 2) {
+    return false;
+  }
+  out = static_cast<std::uint8_t>((semi + 12) % 12);
+  return true;
+}
+
+bool parse_mode(const std::string& s, Mode& out) {
+  struct Entry { const char* name; Mode mode; };
+  static constexpr Entry kModes[] = {
+      {"major", Mode::kMajor},     {"minor", Mode::kMinor},
+      {"dorian", Mode::kDorian},   {"phrygian", Mode::kPhrygian},
+      {"lydian", Mode::kLydian},   {"mixolydian", Mode::kMixolydian},
+      {"locrian", Mode::kLocrian},
+  };
+  for (const Entry& e : kModes)
+    if (s == e.name) { out = e.mode; return true; }
+  return false;
+}
+
+bool parse_quality(const std::string& s, std::int8_t& out) {
+  struct Entry { const char* name; ChordQuality q; };
+  static constexpr Entry kQ[] = {
+      {"maj", ChordQuality::kMaj},       {"min", ChordQuality::kMin},
+      {"dim", ChordQuality::kDim},       {"aug", ChordQuality::kAug},
+      {"maj7", ChordQuality::kMaj7},     {"min7", ChordQuality::kMin7},
+      {"m7", ChordQuality::kMin7},       {"7", ChordQuality::kDom7},
+      {"dom7", ChordQuality::kDom7},     {"m7b5", ChordQuality::kHalfDim7},
+      {"halfdim", ChordQuality::kHalfDim7}, {"dim7", ChordQuality::kDim7},
+      {"sus2", ChordQuality::kSus2},     {"sus4", ChordQuality::kSus4},
+  };
+  for (const Entry& e : kQ)
+    if (s == e.name) { out = static_cast<std::int8_t>(e.q); return true; }
+  return false;
+}
+
+// Flat-side keys spell with flats (Bb, Eb, ...): true when the parent major
+// signature has flats. Parent major root = key root minus the mode's offset.
+bool key_prefers_flats(std::uint8_t root_pc, Mode mode) {
+  static constexpr std::uint8_t kOffset[7] = {0, 9, 2, 4, 5, 7, 11};
+  const std::uint8_t parent =
+      static_cast<std::uint8_t>((root_pc + 12 - kOffset[static_cast<int>(mode)]) % 12);
+  return parent == 5 || parent == 10 || parent == 3 || parent == 8 || parent == 1 ||
+         parent == 6;
 }
 
 bool parse_role(const std::string& s, TrackRole& out) {
@@ -338,6 +399,90 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
     engine_.push_midi_in(static_cast<std::uint8_t>(port),
                          Span<const std::uint8_t>(bytes.data(), bytes.size()), sink_);
     return true;
+  }
+
+  if (cmd == "key" && t.size() >= 3) {
+    std::uint8_t root = 0;
+    Mode mode = Mode::kMajor;
+    if (!parse_pc(t[1], root)) {
+      error = "bad key root: " + t[1];
+      return false;
+    }
+    if (!parse_mode(t[2], mode)) {
+      error = "bad mode: " + t[2];
+      return false;
+    }
+    prefer_flats_ = key_prefers_flats(root, mode);
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kKeySet;
+    c.a = root;
+    c.b = static_cast<std::int32_t>(mode);
+    engine_.push_command(c, sink_);
+    return true;
+  }
+
+  if ((cmd == "play" && t.size() >= 2) ||
+      (cmd == "chord" && t.size() >= 3 && t[1] == "play")) {
+    const std::size_t base = cmd == "play" ? 1 : 2;
+    std::uint8_t note = 0;
+    if (!parse_note(t[base], note)) {
+      error = "bad note: " + t[base];
+      return false;
+    }
+    std::int8_t quality = -1;
+    std::uint64_t vel = 100;
+    std::size_t next = base + 1;
+    if (next < t.size() && parse_quality(t[next], quality)) ++next;
+    if (next < t.size() && (!parse_u64(t[next], vel) || vel < 1 || vel > 127)) {
+      error = "bad velocity: " + t[next];
+      return false;
+    }
+    Command c;
+    c.param = Param::kChordPlay;
+    c.a = note;
+    c.b = quality;
+    c.c = static_cast<std::int32_t>(vel);
+    engine_.push_command(c, sink_);
+    return true;
+  }
+
+  if (cmd == "chord" && t.size() >= 2) {
+    if (t[1] == "stop") {
+      Command c;
+      c.param = Param::kChordStop;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (t[1] == "hold" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
+      Command c;
+      c.op = Op::kSet;
+      c.param = Param::kChordHold;
+      c.a = t[2] == "on" ? 1 : 0;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (t[1] == "out" && t.size() >= 3) {
+      std::string port_name;
+      int channel = -1;
+      if (!split_port_channel(t[2], port_name, channel)) {
+        error = "bad chord destination: " + t[2];
+        return false;
+      }
+      const int port = find_port(port_name, false);
+      if (port < 0) {
+        error = "unknown output port: " + port_name;
+        return false;
+      }
+      Command c;
+      c.op = Op::kSet;
+      c.param = Param::kChordOut;
+      c.a = port | ((channel < 0 ? 0 : channel) << 8);
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    error = "chord play|stop|hold|out ...";
+    return false;
   }
 
   if (cmd == "track" && t.size() >= 3) {

@@ -1,0 +1,155 @@
+#pragma once
+
+#include <cstdint>
+
+// Diatonic chord theory, fully constexpr (D32): mode scales, degree lookup,
+// and the "smart per degree" chord quality of D19 — qualities are DERIVED by
+// stacking thirds on the mode's scale (so every mode is automatically
+// correct), with one deliberate musical exception: in the minor (aeolian)
+// mode the V degree is raised to a dominant 7th (harmonic-minor practice,
+// resolving the DESIGN §29.6 open point). Overrides are always possible
+// (D19/D20) via explicit qualities.
+
+namespace arrangrr {
+
+enum class Mode : std::uint8_t {
+  kMajor = 0,       // ionian
+  kMinor = 1,       // aeolian
+  kDorian = 2,
+  kPhrygian = 3,
+  kLydian = 4,
+  kMixolydian = 5,
+  kLocrian = 6,
+};
+inline constexpr std::uint8_t kModeCount = 7;
+
+struct Key {
+  std::uint8_t root_pc = 0;  // 0 = C
+  Mode mode = Mode::kMajor;
+};
+
+enum class ChordQuality : std::uint8_t {
+  kMaj = 0,
+  kMin = 1,
+  kDim = 2,
+  kAug = 3,
+  kMaj7 = 4,
+  kMin7 = 5,
+  kDom7 = 6,
+  kHalfDim7 = 7,
+  kDim7 = 8,
+  kSus2 = 9,
+  kSus4 = 10,
+};
+inline constexpr std::uint8_t kQualityCount = 11;
+
+// Up to 4 chord tones as semitone offsets from the chord root.
+struct ChordShape {
+  std::uint8_t count = 0;
+  std::uint8_t offsets[4] = {0, 0, 0, 0};
+};
+
+namespace theory {
+
+// Scale intervals per mode (rotations of the major scale).
+struct Scale {
+  std::uint8_t steps[7];
+};
+
+constexpr Scale scale_of(Mode mode) noexcept {
+  constexpr std::uint8_t kMajorScale[7] = {0, 2, 4, 5, 7, 9, 11};
+  constexpr std::uint8_t kRotation[kModeCount] = {
+      0,  // major   = ionian
+      5,  // minor   = aeolian (6th rotation)
+      1,  // dorian
+      2,  // phrygian
+      3,  // lydian
+      4,  // mixolydian
+      6,  // locrian
+  };
+  const std::uint8_t r = kRotation[static_cast<std::uint8_t>(mode)];
+  Scale s{};
+  const std::uint8_t base = kMajorScale[r];
+  for (int i = 0; i < 7; ++i) {
+    s.steps[i] = static_cast<std::uint8_t>((kMajorScale[(r + i) % 7] + 12 - base) % 12);
+  }
+  return s;
+}
+
+// Degree (0..6) of a pitch class within the key's scale; -1 if chromatic.
+constexpr int degree_of(const Key& key, std::uint8_t pc) noexcept {
+  const Scale s = scale_of(key.mode);
+  const std::uint8_t rel = static_cast<std::uint8_t>((pc + 12 - key.root_pc) % 12);
+  for (int i = 0; i < 7; ++i) {
+    if (s.steps[i] == rel) return i;
+  }
+  return -1;
+}
+
+// Chord tones for an explicit quality.
+constexpr ChordShape shape_of(ChordQuality q) noexcept {
+  switch (q) {
+    case ChordQuality::kMaj:      return {3, {0, 4, 7, 0}};
+    case ChordQuality::kMin:      return {3, {0, 3, 7, 0}};
+    case ChordQuality::kDim:      return {3, {0, 3, 6, 0}};
+    case ChordQuality::kAug:      return {3, {0, 4, 8, 0}};
+    case ChordQuality::kMaj7:     return {4, {0, 4, 7, 11}};
+    case ChordQuality::kMin7:     return {4, {0, 3, 7, 10}};
+    case ChordQuality::kDom7:     return {4, {0, 4, 7, 10}};
+    case ChordQuality::kHalfDim7: return {4, {0, 3, 6, 10}};
+    case ChordQuality::kDim7:     return {4, {0, 3, 6, 9}};
+    case ChordQuality::kSus2:     return {3, {0, 2, 7, 0}};
+    case ChordQuality::kSus4:     return {3, {0, 5, 7, 0}};
+  }
+  return {};
+}
+
+// Smart quality (D19): stack thirds on the scale at `degree`, then map the
+// resulting third/fifth/seventh to a seventh-chord quality.
+constexpr ChordQuality smart_quality(Mode mode, int degree) noexcept {
+  const Scale s = scale_of(mode);
+  const auto tone = [&](int d) {
+    return static_cast<std::uint8_t>((s.steps[d % 7] + (d >= 7 ? 12 : 0)) % 12);
+  };
+  const std::uint8_t root = s.steps[degree];
+  const std::uint8_t third = static_cast<std::uint8_t>((tone(degree + 2) + 12 - root) % 12);
+  const std::uint8_t fifth = static_cast<std::uint8_t>((tone(degree + 4) + 12 - root) % 12);
+  const std::uint8_t seventh = static_cast<std::uint8_t>((tone(degree + 6) + 12 - root) % 12);
+
+  // Harmonic-minor exception: V of the minor mode becomes dominant.
+  if (mode == Mode::kMinor && degree == 4) return ChordQuality::kDom7;
+
+  if (third == 4 && fifth == 7 && seventh == 11) return ChordQuality::kMaj7;
+  if (third == 3 && fifth == 7 && seventh == 10) return ChordQuality::kMin7;
+  if (third == 4 && fifth == 7 && seventh == 10) return ChordQuality::kDom7;
+  if (third == 3 && fifth == 6 && seventh == 10) return ChordQuality::kHalfDim7;
+  if (third == 3 && fifth == 6 && seventh == 9) return ChordQuality::kDim7;
+  if (third == 4 && fifth == 8) return ChordQuality::kAug;
+  return third == 3 ? ChordQuality::kMin7 : ChordQuality::kMaj7;
+}
+
+// --- compile-time self-tests (D32) ----------------------------------------
+namespace selftest {
+constexpr Key kCMajor{0, Mode::kMajor};
+constexpr Key kAMinor{9, Mode::kMinor};
+// C major degrees: D is the ii, B the vii.
+static_assert(degree_of(kCMajor, 2) == 1);
+static_assert(degree_of(kCMajor, 11) == 6);
+static_assert(degree_of(kCMajor, 1) == -1);  // C# is chromatic in C major
+// D19 smart qualities in major: I maj7, ii min7, V dom7, vii ø7.
+static_assert(smart_quality(Mode::kMajor, 0) == ChordQuality::kMaj7);
+static_assert(smart_quality(Mode::kMajor, 1) == ChordQuality::kMin7);
+static_assert(smart_quality(Mode::kMajor, 3) == ChordQuality::kMaj7);
+static_assert(smart_quality(Mode::kMajor, 4) == ChordQuality::kDom7);
+static_assert(smart_quality(Mode::kMajor, 6) == ChordQuality::kHalfDim7);
+// Minor: i min7, III maj7, V dominant by the harmonic exception, VII dom7.
+static_assert(smart_quality(Mode::kMinor, 0) == ChordQuality::kMin7);
+static_assert(smart_quality(Mode::kMinor, 2) == ChordQuality::kMaj7);
+static_assert(smart_quality(Mode::kMinor, 4) == ChordQuality::kDom7);
+static_assert(smart_quality(Mode::kMinor, 6) == ChordQuality::kDom7);
+// A natural minor scale root check: E (pc 4) is the V of A minor.
+static_assert(degree_of(kAMinor, 4) == 4);
+}  // namespace selftest
+
+}  // namespace theory
+}  // namespace arrangrr

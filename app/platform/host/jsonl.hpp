@@ -9,10 +9,11 @@
 
 namespace arrangrr::host {
 
-// One event -> one JSON line (no trailing newline).
-std::string to_jsonl(const OutEvent& ev);
+// One event -> one JSON line (no trailing newline). `prefer_flats` selects
+// enharmonic spelling for chord events (derived from the current key).
+std::string to_jsonl(const OutEvent& ev, bool prefer_flats = false);
 
 // Human-readable one-liner for the interactive monitor.
-std::string to_human(const OutEvent& ev);
+std::string to_human(const OutEvent& ev, bool prefer_flats = false);
 
 }  // namespace arrangrr::host

@@ -53,6 +53,10 @@ class Shell {
   // True after a `quit` line.
   bool quit_requested() const { return quit_; }
 
+  // Enharmonic spelling for event rendering, derived from the current key
+  // (flat-side keys print Bb, sharp-side keys print A#). §29.7 nit.
+  bool prefer_flats() const { return prefer_flats_; }
+
  private:
   bool exec_now(const std::vector<std::string>& tokens, std::string& error);
   bool advance_to(std::uint64_t target_tick, std::string& error);
@@ -66,6 +70,7 @@ class Shell {
   std::vector<PortDef> ports_;
   std::vector<std::string> tracks_;  // name -> index (D26: names live host-side)
   std::uint8_t next_in_ = 0, next_out_ = 0;
+  bool prefer_flats_ = false;
 
   struct Pending {
     std::uint64_t tick;

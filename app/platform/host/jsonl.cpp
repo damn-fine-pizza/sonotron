@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "arrangrr/chord/theory.hpp"
 #include "arrangrr/transport/transport.hpp"
 
 namespace arrangrr::host {
@@ -53,6 +54,50 @@ const char* realtime_name(std::uint8_t status) {
   }
 }
 
+std::string format(const char* fmt, auto... args);
+
+const char* pc_name(std::uint8_t pc, bool flats) {
+  static constexpr const char* kSharp[12] = {"C", "C#", "D", "D#", "E", "F",
+                                             "F#", "G", "G#", "A", "A#", "B"};
+  static constexpr const char* kFlat[12] = {"C", "Db", "D", "Eb", "E", "F",
+                                            "Gb", "G", "Ab", "A", "Bb", "B"};
+  return (flats ? kFlat : kSharp)[pc % 12];
+}
+
+std::string note_name(std::uint8_t note, bool flats) {
+  return format("%s%d", pc_name(note % 12, flats), note / 12 - 1);
+}
+
+const char* quality_suffix(ChordQuality q) {
+  switch (q) {
+    case ChordQuality::kMaj: return "";
+    case ChordQuality::kMin: return "m";
+    case ChordQuality::kDim: return "dim";
+    case ChordQuality::kAug: return "aug";
+    case ChordQuality::kMaj7: return "maj7";
+    case ChordQuality::kMin7: return "m7";
+    case ChordQuality::kDom7: return "7";
+    case ChordQuality::kHalfDim7: return "m7b5";
+    case ChordQuality::kDim7: return "dim7";
+    case ChordQuality::kSus2: return "sus2";
+    case ChordQuality::kSus4: return "sus4";
+  }
+  return "";
+}
+
+std::string roman_degree(std::uint8_t degree, ChordQuality q) {
+  static constexpr const char* kUpper[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
+  static constexpr const char* kLower[7] = {"i", "ii", "iii", "iv", "v", "vi", "vii"};
+  if (degree > 6) return "?";
+  const bool minor_family = q == ChordQuality::kMin || q == ChordQuality::kMin7 ||
+                            q == ChordQuality::kDim || q == ChordQuality::kDim7 ||
+                            q == ChordQuality::kHalfDim7;
+  std::string out = (minor_family ? kLower : kUpper)[degree];
+  if (q == ChordQuality::kHalfDim7) out += "m7b5";
+  else if (q == ChordQuality::kDim || q == ChordQuality::kDim7) out += "dim";
+  return out;
+}
+
 std::string format(const char* fmt, auto... args) {
   char buf[192];
   std::snprintf(buf, sizeof(buf), fmt, args...);
@@ -61,8 +106,16 @@ std::string format(const char* fmt, auto... args) {
 
 }  // namespace
 
-std::string to_jsonl(const OutEvent& ev) {
+std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
   switch (ev.kind) {
+    case OutEvent::Kind::kChord: {
+      const auto degree = static_cast<std::uint8_t>(ev.code & 0xFF);
+      const auto quality = static_cast<ChordQuality>(ev.code >> 8);
+      return format(R"({"ev":"chord","in":"%s","out":"%s%s","deg":"%s","@":%u})",
+                    note_name(ev.msg.status, prefer_flats).c_str(),
+                    pc_name(ev.msg.status % 12, prefer_flats), quality_suffix(quality),
+                    roman_degree(degree, quality).c_str(), ev.tick);
+    }
     case OutEvent::Kind::kMidi: {
       const MidiMessage& m = ev.msg;
       if (midi::is_realtime(m.status)) {
@@ -99,8 +152,14 @@ std::string to_jsonl(const OutEvent& ev) {
   }
 }
 
-std::string to_human(const OutEvent& ev) {
+std::string to_human(const OutEvent& ev, bool prefer_flats) {
   switch (ev.kind) {
+    case OutEvent::Kind::kChord: {
+      const auto quality = static_cast<ChordQuality>(ev.code >> 8);
+      return format("@%-8u chord %s%s (%s)", ev.tick,
+                    pc_name(ev.msg.status % 12, prefer_flats), quality_suffix(quality),
+                    roman_degree(static_cast<std::uint8_t>(ev.code & 0xFF), quality).c_str());
+    }
     case OutEvent::Kind::kMidi: {
       const MidiMessage& m = ev.msg;
       if (midi::is_realtime(m.status))
