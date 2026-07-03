@@ -413,6 +413,18 @@ void test_shell_seq_commands() {
   CHECK(!f.run("seq"));
 }
 
+void test_help_command() {
+  ShellFixture f;
+  CHECK(f.run("help"));
+  CHECK(f.run("help chord"));
+  CHECK(f.run("help seq"));
+  CHECK(f.run("help style"));
+  CHECK(f.run("help track"));
+  CHECK(f.run("help midi"));
+  CHECK(f.run("help nonsense"));  // unknown topic falls back to the overview
+  CHECK(f.events.empty());        // help never touches the engine
+}
+
 void test_alsa_null_state_is_safe() {
   // Without open(): every entry point must be a graceful no-op. Covers the
   // guard branches without needing a sequencer device.
@@ -459,6 +471,7 @@ int main() {
   test_shell_style_commands();
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
+  test_help_command();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
   if (arrangrr::test::failures() == 0) std::printf("test_host: all OK\n");

@@ -64,6 +64,7 @@ class Shell {
 
   int find_track(const std::string& name) const;
   int find_seq(const std::string& name) const;
+  void print_help(const std::string& topic) const;
 
   Engine engine_;
   EventSink sink_;
