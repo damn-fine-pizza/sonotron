@@ -1,21 +1,43 @@
 #!/usr/bin/env bash
 # One-console jam: starts a GM synth (FluidSynth) in the background, launches
-# the arrangrr REPL with the band pre-configured (setup.acmd), and wires
-# arrangrr's MIDI output to the synth. Quit the REPL (`quit` or Ctrl-D) and
-# everything shuts down.
+# the arrangrr REPL with the band pre-configured (setup.acmd via --init), and
+# wires arrangrr's MIDI output to the synth. Quit the REPL (`quit`, Ctrl-D or
+# Ctrl-C) and everything this script started is killed.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 CLI=build/host/app/platform/host/arrangrr
 SETUP="$(dirname "$0")/setup.acmd"
 SYNTH_PID=""
+WAITER_PID=""
+CLI_PID=""
 
 cleanup() {
+  trap - EXIT INT TERM
+  [ -n "$CLI_PID" ] && kill "$CLI_PID" 2>/dev/null
+  [ -n "$WAITER_PID" ] && kill "$WAITER_PID" 2>/dev/null
   [ -n "$SYNTH_PID" ] && kill "$SYNTH_PID" 2>/dev/null
+  # Belt and braces: nothing this script spawned may survive it.
+  pkill -P $$ 2>/dev/null || true
+  wait 2>/dev/null || true
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
-# --- prerequisites ---------------------------------------------------------
+# --- safeguard: refuse to start on top of leftover processes ----------------
+if pgrep -x arrangrr >/dev/null 2>&1; then
+  echo "An 'arrangrr' process is already running:"
+  pgrep -ax arrangrr
+  echo "Stop it first (pkill -x arrangrr) or use that session."
+  exit 2
+fi
+if pgrep -x fluidsynth >/dev/null 2>&1; then
+  echo "A 'fluidsynth' process is already running:"
+  pgrep -ax fluidsynth
+  echo "Stop it first (pkill -x fluidsynth) — this script manages its own synth."
+  exit 2
+fi
+
+# --- prerequisites ----------------------------------------------------------
 if ! command -v fluidsynth >/dev/null 2>&1; then
   echo "fluidsynth is not installed. Get it with:"
   echo "  sudo dnf install fluidsynth fluid-soundfont-gm"
@@ -39,12 +61,11 @@ if [ ! -x "$CLI" ]; then
   cmake --build --preset host >/dev/null
 fi
 
-# --- synth in the background ----------------------------------------------
+# --- synth in the background -------------------------------------------------
 echo "Starting FluidSynth ($SOUNDFONT)..."
 fluidsynth -a pipewire -i -s "$SOUNDFONT" >/dev/null 2>&1 &
 SYNTH_PID=$!
 
-# Wait for the synth's ALSA client to appear.
 for _ in $(seq 1 50); do
   aconnect -l 2>/dev/null | grep -q "FLUID Synth" && break
   sleep 0.1
@@ -54,7 +75,7 @@ if ! aconnect -l 2>/dev/null | grep -q "FLUID Synth"; then
   exit 1
 fi
 
-# --- wire arrangrr -> synth as soon as its port shows up --------------------
+# --- wire arrangrr -> synth as soon as its port shows up ---------------------
 (
   for _ in $(seq 1 50); do
     aconnect -l 2>/dev/null | grep -q "arrangrr" && break
@@ -62,6 +83,7 @@ fi
   done
   aconnect arrangrr:1 "FLUID Synth":0 2>/dev/null || true
 ) &
+WAITER_PID=$!
 
 cat <<'BANNER'
 ------------------------------------------------------------------
@@ -78,6 +100,13 @@ cat <<'BANNER'
 ------------------------------------------------------------------
 BANNER
 
-# Feed the setup, then hand stdin over to you (same REPL, one console).
-exec 3<"$SETUP"
-{ cat <&3; exec cat; } | "$CLI" --events human
+# The REPL runs as a child and we wait on it: `wait` is interruptible, so
+# INT/TERM reach the trap immediately (a foreground child would defer it) and
+# the trap tears everything down. Without job control the child shares our
+# process group, so it reads the terminal freely and Ctrl-C reaches it too.
+"$CLI" --events human --init "$SETUP" &
+CLI_PID=$!
+rc=0
+wait "$CLI_PID" || rc=$?
+CLI_PID=""
+exit "$rc"

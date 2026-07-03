@@ -68,7 +68,7 @@ std::uint64_t monotonic_us() {
          static_cast<std::uint64_t>(ts.tv_nsec) / 1000u;
 }
 
-int run_live(bool human) {
+int run_live(bool human, const char* init_path) {
   AlsaMidi alsa;
   std::string error;
   if (!alsa.open("arrangrr", error)) {
@@ -94,6 +94,25 @@ int run_live(bool human) {
   shell.exec_line("port open out out0", ignored);
   shell.exec_line("thru in0 out0", ignored);
   std::printf("arrangrr live: ALSA ports in0/out0 (thru). Type commands; 'quit' to exit.\n");
+
+  // --init FILE: run a setup script, then stay interactive.
+  if (init_path != nullptr) {
+    std::ifstream init(init_path);
+    if (!init) {
+      std::fprintf(stderr, "cannot open init script: %s\n", init_path);
+      return 2;
+    }
+    std::string line;
+    int line_no = 0;
+    while (std::getline(init, line)) {
+      ++line_no;
+      if (!shell.exec_line(line, error)) {
+        std::fprintf(stderr, "%s:%d: %s\n", init_path, line_no, error.c_str());
+        return 1;
+      }
+    }
+    std::printf("init: %s loaded\n", init_path);
+  }
 
   // Tick wakeup timer; actual tick count derives from elapsed time through
   // the core's drift-free TickAccumulator.
@@ -174,16 +193,20 @@ int run_live(bool human) {
 
 int main(int argc, char** argv) {
   const char* script = nullptr;
+  const char* init = nullptr;
   bool human = false;
   bool events_set = false;
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--script") == 0 && i + 1 < argc) {
       script = argv[++i];
+    } else if (std::strcmp(argv[i], "--init") == 0 && i + 1 < argc) {
+      init = argv[++i];
     } else if (std::strcmp(argv[i], "--events") == 0 && i + 1 < argc) {
       human = std::strcmp(argv[++i], "human") == 0;
       events_set = true;
     } else if (std::strcmp(argv[i], "--help") == 0) {
-      std::printf("usage: arrangrr [--script FILE|-] [--events jsonl|human]\n");
+      std::printf(
+          "usage: arrangrr [--script FILE|-] [--init FILE] [--events jsonl|human]\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -192,5 +215,5 @@ int main(int argc, char** argv) {
   }
   // Script mode defaults to canonical JSONL (golden format); live to human.
   if (script) return run_script(script, human);
-  return run_live(events_set ? human : true);
+  return run_live(events_set ? human : true, init);
 }
