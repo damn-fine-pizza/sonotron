@@ -39,6 +39,13 @@ enum class Param : std::uint16_t {
   kTrackLength = 11,       // set: idx = track; a = steps (1..kMaxStepsPerTrack)
   kTrackMute = 12,         // set: idx = track; a = 0/1
   kTrackSolo = 13,         // set: idx = track; a = 0/1
+  kKeySet = 14,            // set: a = root pitch class (0..11), b = Mode
+  kChordPlay = 15,         // do: a = input note (0..127)
+                           //     b = quality override (-1 = smart/D19)
+                           //     c = velocity (1..127)
+  kChordStop = 16,         // do
+  kChordHold = 17,         // set: a = 0/1
+  kChordOut = 18,          // set: a = port | (channel_0based << 8)
 };
 
 struct Command {
@@ -58,6 +65,7 @@ enum class WarnCode : std::uint16_t {
   kUnknownCommand = 3,
   kBadArgument = 4,
   kTrackTableFull = 5,
+  kNotInKey = 6,  // chord input note is chromatic to the key (D20: strict)
 };
 
 // Event from core to host.
@@ -66,6 +74,8 @@ struct OutEvent {
     kMidi = 0,       // msg on port, at tick
     kTransport = 1,  // code = TransportState
     kWarn = 2,       // code = WarnCode
+    kChord = 3,      // code = degree | (ChordQuality << 8);
+                     // msg = {input root note, chord tone count, velocity}
   };
 
   Kind kind = Kind::kMidi;
@@ -87,6 +97,17 @@ struct OutEvent {
     e.kind = Kind::kTransport;
     e.code = state;
     e.tick = t;
+    return e;
+  }
+  static constexpr OutEvent chord(std::uint8_t port, std::uint8_t degree,
+                                  std::uint8_t quality, std::uint8_t root_note,
+                                  std::uint8_t count, std::uint8_t vel, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kChord;
+    e.port = port;
+    e.msg = MidiMessage{root_note, count, vel};
+    e.tick = t;
+    e.code = static_cast<std::uint16_t>(degree | (quality << 8));
     return e;
   }
   static constexpr OutEvent warn(WarnCode code, Tick t) noexcept {

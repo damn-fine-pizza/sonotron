@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/abi.hpp"
+#include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/common/time.hpp"
@@ -34,6 +35,7 @@ class Engine {
   constexpr Tick now() const noexcept { return now_; }
   constexpr const Transport& transport() const noexcept { return transport_; }
   const Timeline& timeline() const noexcept { return timeline_; }
+  const ChordEngine& chords() const noexcept { return chords_; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -129,6 +131,54 @@ class Engine {
           sink(OutEvent::warn(WarnCode::kBadArgument, now_));
         }
         break;
+      case Param::kKeySet:
+        if (cmd.a < 0 || cmd.a > 11 || cmd.b < 0 || cmd.b >= kModeCount) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else {
+          chords_.set_key(Key{static_cast<std::uint8_t>(cmd.a), static_cast<Mode>(cmd.b)});
+        }
+        break;
+      case Param::kChordOut: {
+        const auto port = static_cast<std::uint8_t>(cmd.a & 0xFF);
+        const auto channel = static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF);
+        if (port >= kMaxPorts || channel > 15) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+        } else {
+          chords_.set_output(port, channel);
+        }
+        break;
+      }
+      case Param::kChordHold:
+        chords_.set_hold(cmd.a != 0);
+        break;
+      case Param::kChordPlay: {
+        const auto vel = static_cast<std::uint8_t>(cmd.c);
+        if (cmd.a < 0 || cmd.a > 127 || vel == 0 || vel > 127 ||
+            cmd.b >= kQualityCount) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, now_));
+          break;
+        }
+        const ChordResult r = chords_.play(
+            static_cast<std::uint8_t>(cmd.a), static_cast<std::int8_t>(cmd.b), vel,
+            [&](std::uint8_t port, const MidiMessage& msg) {
+              schedule_or_warn(port, now_, msg, sink);
+            });
+        if (r.degree < 0) {
+          sink(OutEvent::warn(WarnCode::kNotInKey, now_));
+        } else {
+          sink(OutEvent::chord(chords_.out_port(), static_cast<std::uint8_t>(r.degree),
+                               static_cast<std::uint8_t>(r.quality), r.root_note,
+                               r.shape.count, vel, now_));
+          flush(sink);
+        }
+        break;
+      }
+      case Param::kChordStop:
+        chords_.release([&](std::uint8_t port, const MidiMessage& msg) {
+          schedule_or_warn(port, now_, msg, sink);
+        });
+        flush(sink);
+        break;
       case Param::kTrackMute:
       case Param::kTrackSolo: {
         Track* t = timeline_.track(cmd.idx);
@@ -209,6 +259,7 @@ class Engine {
   MidiParser parsers_[kMaxPorts];
   Router router_;
   Timeline timeline_;
+  ChordEngine chords_;
   NoteTracker tracker_;
   OutScheduler<kSchedulerCapacity> scheduler_;
   std::uint8_t clock_out_mask_ = 0;  // off by default; enabled via kClockOutMask
