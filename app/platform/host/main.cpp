@@ -108,6 +108,14 @@ int run_live(bool human, const char* init_path) {
     }
   });
   shell_ref = &shell;
+  shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    if (!tui) {
+      return false;  // plain mode prints help inline as before
+    }
+    console.set_panel(lines);
+    console.render_input(editor);
+    return true;
+  });
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
     if (!alsa.create_port(def, port_error)) {

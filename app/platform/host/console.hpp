@@ -50,17 +50,26 @@ class Console {
   ~Console() { shutdown(); }
 
   void emit(const std::string& line);        // print into the output pane
-  void set_status(const std::string& text);  // repaint the status bar
+  void set_status(const std::string& text);  // repaint the status bar (and
+                                             // re-layout after a resize)
   void render_input(const LineEditor& ed);   // repaint prompt + buffer + cursor
+
+  // Persistent panel between the log pane and the status bar (help lives
+  // here). Empty vector hides it. The log pane always keeps >= ~60% of the
+  // screen: overlong panels are truncated.
+  void set_panel(const std::vector<std::string>& lines);
 
  private:
   void refresh_geometry();
+  void apply_layout();  // scroll region + panel + status repaint
+  int log_bottom() const;
   void write_raw(const std::string& s);
 
   bool m_active = false;
   int m_rows = 24;
   int m_cols = 80;
   std::string m_status;
+  std::vector<std::string> m_panel;
 };
 
 }  // namespace arrangrr::host

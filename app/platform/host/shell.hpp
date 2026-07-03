@@ -29,6 +29,9 @@ class Shell {
   // Called when a `port open` line runs, so a live backend can create the
   // OS-level port. May be empty (script/null backend).
   using PortHook = std::function<void(const PortDef&)>;
+  // Receives help-panel content (empty vector = close). Returns true when a
+  // panel UI consumed it; false falls back to plain printing.
+  using PanelHook = std::function<bool(const std::vector<std::string>&)>;
   // Sends raw bytes into the engine input path (used by the live backend).
   void feed_midi(std::uint8_t port, Span<const std::uint8_t> bytes) {
     m_engine.push_midi_in(port, bytes, m_sink);
@@ -36,6 +39,7 @@ class Shell {
 
   explicit Shell(EventSink sink) : m_sink(std::move(sink)) {}
   void set_port_hook(PortHook hook) { m_port_hook = std::move(hook); }
+  void set_panel_hook(PanelHook hook) { m_panel_hook = std::move(hook); }
 
   Engine& engine() { return m_engine; }
   const Engine& engine() const { return m_engine; }
@@ -65,11 +69,13 @@ class Shell {
 
   int find_track(const std::string& name) const;
   int find_seq(const std::string& name) const;
-  void print_help(const std::string& topic) const;
+  std::vector<std::string> build_help(const std::string& topic) const;
 
   Engine m_engine;
   EventSink m_sink;
   PortHook m_port_hook;
+  PanelHook m_panel_hook;
+  std::vector<std::string> m_last_help;
   std::vector<PortDef> m_ports;
   std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)
   std::vector<std::string> m_seqs;

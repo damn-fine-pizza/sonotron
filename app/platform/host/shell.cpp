@@ -290,63 +290,69 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
 
 }  // namespace
 
-void Shell::print_help(const std::string& topic) const {
+std::vector<std::string> Shell::build_help(const std::string& topic) const {
   if (topic == "chord") {
-    std::printf(
-        "  key <root> <mode>            C..B(+#/b); major minor dorian phrygian lydian\n"
-        "                               mixolydian locrian\n"
-        "  chord mode diatonic|single|shell\n"
-        "  play <note.. up to 4> [quality] [vel]   e.g. play D | play C E Bb | play G 7\n"
-        "  chord play ... | chord stop | chord hold on|off | chord out <port>[:ch]\n"
-        "  qualities: maj min dim aug maj7 min7 m7 7 dom7 m7b5 halfdim dim7 sus2 sus4\n");
-    return;
+    return {
+        "help: chord",
+        "  key <root> <mode>            C..B(+#/b); major minor dorian phrygian lydian",
+        "                               mixolydian locrian",
+        "  chord mode diatonic|single|shell",
+        "  play <note.. up to 4> [quality] [vel]   e.g. play D | play C E Bb | play G 7",
+        "  chord play ... | chord stop | chord hold on|off | chord out <port>[:ch]",
+        "  qualities: maj min dim aug maj7 min7 m7 7 dom7 m7b5 halfdim dim7 sus2 sus4",
+    };
   }
   if (topic == "seq") {
-    std::printf(
-        "  seq new <name> | seq use <name>\n"
-        "  seq add <note> [quality] [Nbars|Nbeats]   step entry (default 1bar)\n"
-        "  seq rec | seq stop            record live plays; quantized to bars on stop\n"
-        "  seq loop on|off | seq play\n"
-        "  seq transpose to <root> [mode] | seq transpose +N|-N   re-derives degrees\n"
-        "  seq del <i> | seq clear\n");
-    return;
+    return {
+        "help: seq",
+        "  seq new <name> | seq use <name>",
+        "  seq add <note> [quality] [Nbars|Nbeats]   step entry (default 1bar)",
+        "  seq rec | seq stop            record live plays; quantized to bars on stop",
+        "  seq loop on|off | seq play",
+        "  seq transpose to <root> [mode] | seq transpose +N|-N   re-derives degrees",
+        "  seq del <i> | seq clear",
+    };
   }
   if (topic == "style") {
-    std::printf(
-        "  style load basic\n"
-        "  style route <role> <port>[:ch]   roles: drums perc bass chord1 chord2 pad\n"
-        "                                   arp phrase lead cc\n"
-        "  style section <name>             intro1|2 varA..D fillA..D break ending1|2\n"
-        "                                   (lands on the next bar while playing)\n");
-    return;
+    return {
+        "help: style",
+        "  style load basic",
+        "  style route <role> <port>[:ch]   roles: drums perc bass chord1 chord2 pad",
+        "                                   arp phrase lead cc",
+        "  style section <name>             intro1|2 varA..D fillA..D break ending1|2",
+        "                                   (lands on the next bar while playing)",
+    };
   }
   if (topic == "track") {
-    std::printf(
-        "  track new <name> <port>[:ch] [role]\n"
-        "  track step <name> <1-based #> <note|clear> [vel] [gate]\n"
-        "  track length <name> <steps>      per-track length = polymeter\n"
-        "  track mute|solo <name> on|off\n");
-    return;
+    return {
+        "help: track",
+        "  track new <name> <port>[:ch] [role]",
+        "  track step <name> <1-based #> <note|clear> [vel] [gate]",
+        "  track length <name> <steps>      per-track length = polymeter",
+        "  track mute|solo <name> on|off",
+    };
   }
   if (topic == "midi") {
-    std::printf(
-        "  port open in|out <name> [as <alias>]\n"
-        "  route <in>[:ch] -> <out>[:ch] | thru <in> <out>\n"
-        "  clock out <port>|none            MIDI clock master on that port\n"
-        "  midi send <port> <hex bytes..>   raw injection\n"
-        "  panic                            all notes off everywhere\n");
-    return;
+    return {
+        "help: midi",
+        "  port open in|out <name> [as <alias>]",
+        "  route <in>[:ch] -> <out>[:ch] | thru <in> <out>",
+        "  clock out <port>|none            MIDI clock master on that port",
+        "  midi send <port> <hex bytes..>   raw injection",
+        "  panic                            all notes off everywhere",
+    };
   }
-  std::printf(
-      "commands (help <topic> for details):\n"
-      "  transport start|stop|continue|tempo <bpm>\n"
-      "  chord  — key, modes, play          (help chord)\n"
-      "  seq    — chord progressions        (help seq)\n"
-      "  style  — the arranger band         (help style)\n"
-      "  track  — step sequencer            (help track)\n"
-      "  midi   — ports, routing, panic     (help midi)\n"
-      "  advance <N>[bars] | @<tick> <cmd> | quit\n"
-      "notes: C4=60, octave optional (D = D4), sharps/flats (F#3, Bb)\n");
+  return {
+      "help  (help <topic> opens the panel; help close / help open)",
+      "  transport start|stop|continue|tempo <bpm>",
+      "  chord  - key, modes, play          (help chord)",
+      "  seq    - chord progressions        (help seq)",
+      "  style  - the arranger band         (help style)",
+      "  track  - step sequencer            (help track)",
+      "  midi   - ports, routing, panic     (help midi)",
+      "  advance <N>[bars] | @<tick> <cmd> | quit",
+      "  notes: C4=60, octave optional (D = D4), sharps/flats (F#3, Bb)",
+  };
 }
 
 int Shell::find_seq(const std::string& name) const {
@@ -459,7 +465,28 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
   }
 
   if (cmd == "help") {
-    print_help(t.size() >= 2 ? t[1] : "");
+    const std::string sub = t.size() >= 2 ? t[1] : "";
+    if (sub == "close") {
+      if (m_panel_hook) {
+        (void)m_panel_hook({});
+      }
+      return true;
+    }
+    if (sub == "open") {
+      const std::vector<std::string> lines =
+          m_last_help.empty() ? build_help("") : m_last_help;
+      if (m_panel_hook && m_panel_hook(lines)) {
+        return true;
+      }
+    }
+    const std::vector<std::string> lines = build_help(sub == "open" ? "" : sub);
+    m_last_help = lines;
+    if (m_panel_hook && m_panel_hook(lines)) {
+      return true;
+    }
+    for (const std::string& line : lines) {
+      std::printf("%s\n", line.c_str());
+    }
     return true;
   }
 

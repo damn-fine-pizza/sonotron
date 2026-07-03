@@ -166,15 +166,53 @@ bool Console::init() {
 
   refresh_geometry();
   m_active = true;
-  // Scroll region = output pane; park the cursor inside it.
   write_raw("\x1b[2J");  // clear screen once
-  char buf[32];
-  std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", m_rows - 2);
-  write_raw(buf);
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", m_rows - 2);
-  write_raw(buf);
-  set_status("arrangrr");
+  m_status = "arrangrr";
+  apply_layout();
   return true;
+}
+
+int Console::log_bottom() const {
+  // Reserve: panel lines, status bar, input line. The log pane keeps at
+  // least ~60% of the screen; the panel is truncated beyond that.
+  int panel = static_cast<int>(m_panel.size());
+  const int max_panel = (m_rows * 2) / 5;  // <= 40%
+  if (panel > max_panel) {
+    panel = max_panel;
+  }
+  return m_rows - 2 - panel;
+}
+
+void Console::apply_layout() {
+  if (!m_active) {
+    return;
+  }
+  char buf[32];
+  // Scroll region = log pane only.
+  std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", log_bottom());
+  write_raw(buf);
+  // Panel rows (each cleared, truncated to the pane width).
+  const int bottom = log_bottom();
+  const int panel = m_rows - 2 - bottom;
+  std::string out;
+  for (int i = 0; i < panel; ++i) {
+    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", bottom + 1 + i);
+    out += buf;
+    std::string line = i < static_cast<int>(m_panel.size()) ? m_panel[i] : "";
+    if (static_cast<int>(line.size()) > m_cols) {
+      line.resize(static_cast<std::size_t>(m_cols));
+    }
+    out += "\x1b[2m";  // dim: visually separate from the live log
+    out += line;
+    out += "\x1b[0m";
+  }
+  write_raw(out);
+  set_status(m_status);
+}
+
+void Console::set_panel(const std::vector<std::string>& lines) {
+  m_panel = lines;
+  apply_layout();
 }
 
 void Console::shutdown() {
@@ -210,7 +248,7 @@ void Console::emit(const std::string& line) {
   // the cursor there; the input line is repainted by render_input.
   std::string out;
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", m_rows - 2);
+  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", log_bottom());
   out += buf;
   out += "\n";
   out += line;
@@ -222,7 +260,13 @@ void Console::set_status(const std::string& text) {
   if (!m_active) {
     return;
   }
+  const int prev_rows = m_rows;
+  const int prev_cols = m_cols;
   refresh_geometry();
+  if (m_rows != prev_rows || m_cols != prev_cols) {
+    apply_layout();  // terminal resized: rebuild regions and repaint
+    return;
+  }
   std::string out;
   char buf[32];
   std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", m_rows - 1);

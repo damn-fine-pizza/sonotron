@@ -490,7 +490,43 @@ void test_help_command() {
   CHECK(f.run("help track"));
   CHECK(f.run("help midi"));
   CHECK(f.run("help nonsense"));  // unknown topic falls back to the overview
+  CHECK(f.run("help close"));     // no-ops without a panel UI
+  CHECK(f.run("help open"));
   CHECK(f.events.empty());        // help never touches the engine
+}
+
+void test_help_panel_hook() {
+  ShellFixture f;
+  std::vector<std::string> panel{"sentinel"};
+  int calls = 0;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    ++calls;
+    return true;
+  });
+  // help <topic> opens the panel with that topic.
+  CHECK(f.run("help chord"));
+  CHECK(calls == 1 && !panel.empty() && panel[0] == "help: chord");
+  // help close closes it (empty vector).
+  CHECK(f.run("help close"));
+  CHECK(calls == 2 && panel.empty());
+  // help open reopens the LAST panel that was shown.
+  CHECK(f.run("help open"));
+  CHECK(calls == 3 && !panel.empty() && panel[0] == "help: chord");
+  // A different topic replaces the remembered panel.
+  CHECK(f.run("help midi"));
+  CHECK(f.run("help close"));
+  CHECK(f.run("help open"));
+  CHECK(panel[0] == "help: midi");
+  // help open before any help ever shown -> overview.
+  ShellFixture fresh;
+  std::vector<std::string> fresh_panel;
+  fresh.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    fresh_panel = lines;
+    return true;
+  });
+  CHECK(fresh.run("help open"));
+  CHECK(!fresh_panel.empty() && fresh_panel[0].find("help") == 0);
 }
 
 void test_alsa_null_state_is_safe() {
@@ -540,6 +576,7 @@ int main() {
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
   test_help_command();
+  test_help_panel_hook();
   test_line_editor();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
