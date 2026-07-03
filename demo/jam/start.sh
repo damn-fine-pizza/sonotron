@@ -100,11 +100,20 @@ cat <<'BANNER'
 ------------------------------------------------------------------
 BANNER
 
+# Line editing: rlwrap gives the REPL history and arrow keys.
+REPL=("$CLI" --events human --init "$SETUP")
+if command -v rlwrap >/dev/null 2>&1; then
+  REPL=(rlwrap -a "${REPL[@]}")
+else
+  echo "(tip: 'sudo dnf install rlwrap' enables arrow keys and history)"
+fi
+
 # The REPL runs as a child and we wait on it: `wait` is interruptible, so
 # INT/TERM reach the trap immediately (a foreground child would defer it) and
-# the trap tears everything down. Without job control the child shares our
-# process group, so it reads the terminal freely and Ctrl-C reaches it too.
-"$CLI" --events human --init "$SETUP" &
+# the trap tears everything down. The explicit <&0 matters: POSIX gives a
+# backgrounded command /dev/null as stdin, which made the REPL quit on the
+# spot — redirecting from our fd 0 hands it the real terminal.
+"${REPL[@]}" <&0 &
 CLI_PID=$!
 rc=0
 wait "$CLI_PID" || rc=$?
