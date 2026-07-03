@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "host",
+      "displayName": "Host (debug, tests)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+    {
+      "name": "host-release",
+      "displayName": "Host (release)",
+      "inherits": "host",
+      "binaryDir": "${sourceDir}/build/host-release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "arm",
+      "displayName": "STM32 anchor (Cortex-M7 cross)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/arm",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/arm-cortex-m7.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "host", "configurePreset": "host" },
+    { "name": "host-release", "configurePreset": "host-release" },
+    { "name": "arm", "configurePreset": "arm" }
+  ],
+  "testPresets": [
+    {
+      "name": "host",
+      "configurePreset": "host",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
