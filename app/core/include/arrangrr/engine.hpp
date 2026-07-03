@@ -55,6 +55,9 @@ class Engine {
       case Param::kTransportStart:
         transport_.start();
         emit_realtime(midi::kStart, sink);
+        // MIDI convention: the first F8 follows FA immediately — the slave's
+        // beat zero is this clock, not one period later.
+        emit_realtime(midi::kClock, sink);
         sink(OutEvent::transport(static_cast<std::uint16_t>(transport_.state()), now_));
         break;
       case Param::kTransportStop:

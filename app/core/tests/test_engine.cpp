@@ -76,10 +76,11 @@ void test_transport_clock_emission() {
   Command start;
   start.param = Param::kTransportStart;
   e.push_command(start, sink);
-  // Expect: FA (Start) + transport state event.
-  CHECK(ev.size() == 2);
+  // Expect: FA (Start), the immediate first F8, then the transport event.
+  CHECK(ev.size() == 3);
   CHECK(ev[0].kind == OutEvent::Kind::kMidi && ev[0].msg.status == midi::kStart);
-  CHECK(ev[1].kind == OutEvent::Kind::kTransport);
+  CHECK(ev[1].kind == OutEvent::Kind::kMidi && ev[1].msg.status == midi::kClock);
+  CHECK(ev[2].kind == OutEvent::Kind::kTransport);
 
   ev.clear();
   e.advance_ticks(80, sink);  // two clock periods (40 ticks each)

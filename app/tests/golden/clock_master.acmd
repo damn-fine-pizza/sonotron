@@ -1,0 +1,11 @@
+# Golden G-M0-2: transport as clock master.
+# Start emits FA + one immediate F8 (tick 0 of the transport is a clock
+# tick); 80 ticks then carry two more F8 (every 40 ticks at 960 PPQN);
+# stop emits FC and the clock goes silent.
+port open out synth
+clock out synth
+transport start
+advance 80
+transport stop
+advance 80
+quit
