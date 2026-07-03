@@ -1,0 +1,17 @@
+# Band setup fed to the REPL on startup by demo/jam/start.sh.
+# Edit freely — this is your jam template. The transport is left stopped:
+# type `transport start` when you are ready.
+key C major
+chord out out0:4
+style load basic
+style route drums out0:10
+style route bass out0:2
+style route chord1 out0:3
+seq new verse
+seq add C 1bar
+seq add A 1bar
+seq add F 1bar
+seq add G 1bar
+seq loop on
+seq play
+transport tempo 96
