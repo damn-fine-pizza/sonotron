@@ -57,16 +57,23 @@ class ChordEngine {
                     ? static_cast<ChordQuality>(override_quality)
                     : theory::smart_quality(key_.mode, degree);
     r.shape = theory::shape_of(r.quality);
+    sound(note, r.quality, velocity, schedule);
+    return r;
+  }
 
+  // Sounds an already-resolved chord (the ChordSequencer path): releases the
+  // previous voicing and stacks the shape from `root_note` upward.
+  void sound(std::uint8_t root_note, ChordQuality quality, std::uint8_t velocity,
+             ScheduleFn schedule) {
+    const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
-    for (std::uint8_t i = 0; i < r.shape.count; ++i) {
-      const int n = note + r.shape.offsets[i];
+    for (std::uint8_t i = 0; i < shape.count; ++i) {
+      const int n = root_note + shape.offsets[i];
       if (n > 127) continue;  // clamp: drop tones that leave the range
       sounding_[sounding_count_++] = static_cast<std::uint8_t>(n);
       schedule(out_port_, MidiMessage::note_on(out_channel_, static_cast<std::uint8_t>(n),
                                                velocity));
     }
-    return r;
   }
 
   // Releases the current voicing (chord stop / transport panic path).

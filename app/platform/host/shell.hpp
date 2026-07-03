@@ -63,12 +63,14 @@ class Shell {
   int find_port(const std::string& name, bool input) const;
 
   int find_track(const std::string& name) const;
+  int find_seq(const std::string& name) const;
 
   Engine engine_;
   EventSink sink_;
   PortHook port_hook_;
   std::vector<PortDef> ports_;
   std::vector<std::string> tracks_;  // name -> index (D26: names live host-side)
+  std::vector<std::string> seqs_;
   std::uint8_t next_in_ = 0, next_out_ = 0;
   bool prefer_flats_ = false;
 

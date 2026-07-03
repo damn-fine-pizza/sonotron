@@ -9,6 +9,7 @@ arrangrr_test(test_midi)
 arrangrr_test(test_engine)
 arrangrr_test(test_timeline)
 arrangrr_test(test_chord)
+arrangrr_test(test_chord_seq)
 
 arrangrr_test(test_host)
 target_link_libraries(test_host PRIVATE arrangrr_host)

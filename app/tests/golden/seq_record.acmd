@@ -1,0 +1,21 @@
+# Golden G-M3-2 (DESIGN §29.5 G2 shape): record a progression from sparse
+# input with sloppy timing, quantize-after to whole bars, then loop it.
+# While recording, each play ALSO sounds live (double output, D13).
+key C major
+port open out virt as synth
+chord out synth
+seq new verse
+seq rec
+@0     play D
+@3910  play G
+@7615  play C
+@11540 play A
+advance 15360
+seq stop
+chord stop
+seq loop on
+seq play
+transport start
+advance 7680
+transport stop
+quit

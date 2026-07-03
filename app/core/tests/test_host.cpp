@@ -306,6 +306,65 @@ void test_jsonl_chord_rendering() {
   CHECK(human.find("chord Dm7 (ii)") != std::string::npos);
 }
 
+void test_shell_seq_commands() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("chord out synth"));
+  CHECK(f.run("key C major"));
+  CHECK(f.run("seq new verse"));
+  CHECK(f.run("seq add D 1bar"));
+  CHECK(f.run("seq add G maj7 2bars"));  // explicit quality + duration
+  CHECK(f.run("seq add C 4beats"));
+  CHECK(f.run("seq add A"));  // default: smart quality, 1 bar
+  const ChordSequence* seq = f.shell.engine().sequences().current();
+  CHECK(seq->count() == 4);
+  CHECK(seq->step(1).duration == 2 * kTicksPerBar);
+  CHECK(seq->step(1).quality_ovr == static_cast<std::int8_t>(ChordQuality::kMaj7));
+  CHECK(seq->step(2).duration == 4 * kTicksPerBeat);
+  CHECK(f.run("seq del 1"));
+  CHECK(seq->count() == 3);
+  CHECK(f.run("seq loop on"));
+  CHECK(seq->loop);
+  CHECK(f.run("seq transpose to G major"));
+  CHECK(seq->key.root_pc == 7);
+  CHECK(f.run("seq transpose to Bb"));  // mode kept
+  CHECK(seq->key.root_pc == 10);
+  CHECK(f.run("seq transpose +2"));
+  CHECK(seq->key.root_pc == 0);
+  CHECK(f.run("seq transpose -1"));
+  CHECK(seq->key.root_pc == 11);
+  CHECK(f.run("seq play"));
+  CHECK(f.run("transport start"));
+  CHECK(f.run("seq stop"));  // stops playback (not recording)
+  CHECK(f.run("seq clear"));
+  CHECK(seq->count() == 0);
+  // Recording flow.
+  CHECK(f.run("seq new chorus"));
+  CHECK(f.run("seq use verse"));
+  CHECK(f.run("seq use 1"));  // numeric index works too
+  CHECK(f.run("seq rec"));
+  CHECK(f.shell.engine().sequences().recording());
+  CHECK(f.run("play D"));
+  CHECK(f.run("advance 3840"));
+  CHECK(f.run("play G"));
+  CHECK(f.run("advance 3840"));
+  CHECK(f.run("seq stop"));
+  CHECK(!f.shell.engine().sequences().recording());
+  CHECK(f.shell.engine().sequences().current()->count() == 2);
+  // Errors.
+  CHECK(!f.run("seq use ghost"));
+  CHECK(!f.run("seq add X 1bar"));
+  CHECK(!f.run("seq add D 3parsecs"));
+  CHECK(!f.run("seq transpose to H"));
+  CHECK(!f.run("seq transpose sideways"));
+  CHECK(!f.run("seq transpose +0"));
+  CHECK(!f.run("seq transpose +30"));
+  CHECK(!f.run("seq del 0"));
+  CHECK(!f.run("seq del abc"));
+  CHECK(!f.run("seq warp"));
+  CHECK(!f.run("seq"));
+}
+
 void test_alsa_null_state_is_safe() {
   // Without open(): every entry point must be a graceful no-op. Covers the
   // guard branches without needing a sequencer device.
@@ -347,6 +406,7 @@ int main() {
   test_shell_track_commands();
   test_note_name_parsing();
   test_shell_chord_commands();
+  test_shell_seq_commands();
   test_jsonl_chord_rendering();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();

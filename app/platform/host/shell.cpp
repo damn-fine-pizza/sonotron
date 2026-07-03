@@ -161,6 +161,20 @@ bool key_prefers_flats(std::uint8_t root_pc, Mode mode) {
          parent == 6;
 }
 
+// "2bars" / "1bar" / "4beats" / "1beat" -> ticks.
+bool parse_duration(const std::string& s, std::uint64_t& out_ticks) {
+  auto strip = [&](const char* suffix, std::uint64_t mult) {
+    const std::size_t n = std::string(suffix).size();
+    if (s.size() <= n || s.substr(s.size() - n) != suffix) return false;
+    std::uint64_t v = 0;
+    if (!parse_u64(s.substr(0, s.size() - n), v) || v == 0) return false;
+    out_ticks = v * mult;
+    return true;
+  };
+  return strip("bars", kTicksPerBar) || strip("bar", kTicksPerBar) ||
+         strip("beats", kTicksPerBeat) || strip("beat", kTicksPerBeat);
+}
+
 bool parse_role(const std::string& s, TrackRole& out) {
   struct Entry {
     const char* name;
@@ -192,6 +206,15 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
 }
 
 }  // namespace
+
+int Shell::find_seq(const std::string& name) const {
+  for (std::size_t i = 0; i < seqs_.size(); ++i) {
+    if (seqs_[i] == name) return static_cast<int>(i);
+  }
+  std::uint64_t idx = 0;
+  if (parse_u64(name, idx) && idx < seqs_.size()) return static_cast<int>(idx);
+  return -1;
+}
 
 int Shell::find_track(const std::string& name) const {
   for (std::size_t i = 0; i < tracks_.size(); ++i) {
@@ -482,6 +505,119 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
       return true;
     }
     error = "chord play|stop|hold|out ...";
+    return false;
+  }
+
+  if (cmd == "seq" && t.size() >= 2) {
+    const std::string& verb = t[1];
+    Command c;
+
+    if (verb == "new" && t.size() >= 3) {
+      c.param = Param::kSeqNew;
+      engine_.push_command(c, sink_);
+      seqs_.push_back(t[2]);
+      return true;
+    }
+    if (verb == "use" && t.size() >= 3) {
+      const int idx = find_seq(t[2]);
+      if (idx < 0) {
+        error = "unknown sequence: " + t[2];
+        return false;
+      }
+      c.param = Param::kSeqUse;
+      c.idx = static_cast<std::uint16_t>(idx);
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "rec") {
+      c.param = Param::kSeqRec;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "stop") {
+      c.param = Param::kSeqStop;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "add" && t.size() >= 3) {
+      // seq add <note> [quality] [Nbars|Nbeats]
+      std::uint8_t note = 0;
+      if (!parse_note(t[2], note)) {
+        error = "bad note: " + t[2];
+        return false;
+      }
+      std::int8_t quality = -1;
+      std::uint64_t dur = kTicksPerBar;
+      std::size_t next = 3;
+      if (next < t.size() && parse_quality(t[next], quality)) ++next;
+      if (next < t.size() && !parse_duration(t[next], dur)) {
+        error = "bad duration (Nbars/Nbeats): " + t[next];
+        return false;
+      }
+      c.param = Param::kSeqAdd;
+      c.a = note;
+      c.b = (quality + 1) | (100 << 8);
+      c.c = static_cast<std::int32_t>(dur);
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "loop" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
+      c.op = Op::kSet;
+      c.param = Param::kSeqLoop;
+      c.a = t[2] == "on" ? 1 : 0;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "play") {
+      c.param = Param::kSeqPlay;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "transpose" && t.size() >= 3) {
+      c.op = Op::kSet;
+      c.param = Param::kSeqTranspose;
+      if (t[2] == "to" && t.size() >= 4) {
+        std::uint8_t root = 0;
+        if (!parse_pc(t[3], root)) {
+          error = "bad key root: " + t[3];
+          return false;
+        }
+        Mode mode = Mode::kMajor;
+        c.a = root;
+        c.b = (t.size() >= 5 && parse_mode(t[4], mode)) ? static_cast<std::int32_t>(mode)
+                                                        : -1;
+        // Spelling follows the new key when the mode is known.
+        if (c.b >= 0) prefer_flats_ = key_prefers_flats(root, mode);
+      } else {
+        char* end = nullptr;
+        const long delta = std::strtol(t[2].c_str(), &end, 10);
+        if (end == nullptr || *end != '\0' || delta == 0 || delta < -11 || delta > 11) {
+          error = "bad transpose (use to <root> or +/-N): " + t[2];
+          return false;
+        }
+        c.a = -1;
+        c.c = static_cast<std::int32_t>(delta);
+      }
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "del" && t.size() >= 3) {
+      std::uint64_t idx = 0;
+      if (!parse_u64(t[2], idx) || idx < 1) {
+        error = "bad step index: " + t[2];
+        return false;
+      }
+      c.param = Param::kSeqDel;
+      c.a = static_cast<std::int32_t>(idx - 1);  // CLI is 1-based
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    if (verb == "clear") {
+      c.param = Param::kSeqClear;
+      engine_.push_command(c, sink_);
+      return true;
+    }
+    error = "seq new|use|rec|stop|add|loop|play|transpose|del|clear ...";
     return false;
   }
 

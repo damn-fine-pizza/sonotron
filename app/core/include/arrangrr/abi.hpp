@@ -46,6 +46,21 @@ enum class Param : std::uint16_t {
   kChordStop = 16,         // do
   kChordHold = 17,         // set: a = 0/1
   kChordOut = 18,          // set: a = port | (channel_0based << 8)
+  kSeqNew = 19,            // do: new sequence, reference key = current key
+  kSeqUse = 20,            // do: idx = sequence index
+  kSeqRec = 21,            // do: start recording into the current sequence
+  kSeqAdd = 22,            // do: a = root note (interpreted in the seq key)
+                           //     b = (quality_ovr + 1) | (velocity << 8)
+                           //     c = duration in ticks (free, D14)
+  kSeqLoop = 23,           // set: a = 0/1
+  kSeqPlay = 24,           // do: start playback at the current transport tick
+  kSeqStop = 25,           // do: stop recording (quantize-after, a = grid or
+                           //     0 = one bar) or, if not recording, playback
+  kSeqTranspose = 26,      // set: a = new root pc (D28 re-derive) with
+                           //     b = mode (-1 keep), or a = -1 with
+                           //     c = relative semitones
+  kSeqDel = 27,            // do: a = step index (0-based)
+  kSeqClear = 28,          // do
 };
 
 struct Command {
@@ -66,6 +81,8 @@ enum class WarnCode : std::uint16_t {
   kBadArgument = 4,
   kTrackTableFull = 5,
   kNotInKey = 6,  // chord input note is chromatic to the key (D20: strict)
+  kSeqTableFull = 7,
+  kSeqEmpty = 8,  // play/record on a sequence with no usable content
 };
 
 // Event from core to host.
