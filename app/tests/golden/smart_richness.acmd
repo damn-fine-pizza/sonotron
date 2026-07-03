@@ -1,0 +1,14 @@
+# Golden G-M2-2: D19 smart richness across degrees in C major.
+# C -> Cmaj7 (I), F -> Fmaj7 (IV), G -> G7 (V), B -> Bm7b5 (vii).
+# Each change releases the previous voicing on the same tick, and the
+# NoteOffs must sort before the new NoteOns (D29).
+key C major
+port open out virt as synth
+chord out synth
+@0   play C
+@96  play F
+@192 play G
+@288 play B
+@384 chord stop
+advance 480
+quit

@@ -41,9 +41,12 @@ int run_script(const char* path, bool human) {
     in = &file;
   }
 
+  Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
-    std::puts((human ? to_human(ev) : to_jsonl(ev)).c_str());
+    const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
+    std::puts((human ? to_human(ev, flats) : to_jsonl(ev, flats)).c_str());
   });
+  shell_ref = &shell;
 
   std::string line, error;
   int line_no = 0;
@@ -73,10 +76,13 @@ int run_live(bool human) {
     return 2;
   }
 
+  Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
     if (ev.kind == OutEvent::Kind::kMidi) alsa.send(ev.port, ev.msg);
-    std::puts((human ? to_human(ev) : to_jsonl(ev)).c_str());
+    const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
+    std::puts((human ? to_human(ev, flats) : to_jsonl(ev, flats)).c_str());
   });
+  shell_ref = &shell;
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
     if (!alsa.create_port(def, port_error)) std::fprintf(stderr, "%s\n", port_error.c_str());

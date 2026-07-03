@@ -1,0 +1,10 @@
+# Golden G-M2-1 (= DESIGN §29.5 G1): one diatonic smart chord.
+# key C major, play D (defaults to D4=62) -> Dm7 = 62 65 69 72,
+# released at tick 96.
+key C major
+port open out virt as synth
+chord out synth
+@0 play D
+@96 chord stop
+advance 192
+quit

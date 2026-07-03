@@ -1,0 +1,9 @@
+{"ev":"chord","in":"D4","out":"Dm7","deg":"ii","@":0}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":62,"vel":100,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":65,"vel":100,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":69,"vel":100,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":72,"vel":100,"@":0}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":62,"vel":64,"@":96}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":65,"vel":64,"@":96}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":69,"vel":64,"@":96}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":72,"vel":64,"@":96}

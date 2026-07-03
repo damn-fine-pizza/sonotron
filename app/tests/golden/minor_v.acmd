@@ -1,0 +1,11 @@
+# Golden G-M2-3: the harmonic-minor V exception.
+# In A minor, E is the V degree and becomes E7 (dominant), not Em7.
+# The i chord (Am7) shows the plain natural-minor stacking.
+key A minor
+port open out virt as synth
+chord out synth
+@0  play A 100
+@96 play E
+@192 chord stop
+advance 240
+quit

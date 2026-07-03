@@ -251,8 +251,59 @@ void test_note_name_parsing() {
   CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 54);
   CHECK(!f.run("track step t 1 G#9"));  // above 127
   CHECK(!f.run("track step t 1 Cb-1"));  // below 0
-  CHECK(!f.run("track step t 1 C"));     // missing octave
+  CHECK(f.run("track step t 1 C"));      // octave optional: defaults to 4
+  CHECK(f.shell.engine().timeline().track(0)->steps[0].note == 60);
   CHECK(!f.run("track step t 1 128"));   // numeric out of range
+}
+
+void test_shell_chord_commands() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("chord out synth:1"));
+  CHECK(f.run("key C major"));
+  CHECK(!f.shell.prefer_flats());
+  CHECK(f.run("play D"));  // Dm7: chord event + 4 note-ons
+  int chords = 0;
+  for (const OutEvent& o : f.events)
+    if (o.kind == OutEvent::Kind::kChord) ++chords;
+  CHECK(chords == 1 && f.midi_count() == 4);
+  CHECK(f.run("chord play G 7 90"));  // explicit quality + velocity
+  CHECK(f.run("chord stop"));
+  CHECK(f.run("chord hold off"));
+  CHECK(f.run("chord hold on"));
+  // Flat-side key flips the spelling preference.
+  CHECK(f.run("key F major"));
+  CHECK(f.shell.prefer_flats());
+  CHECK(f.run("key A minor"));
+  CHECK(!f.shell.prefer_flats());
+  CHECK(f.run("key Bb major"));
+  CHECK(f.shell.prefer_flats());
+  // Errors.
+  CHECK(!f.run("key H major"));
+  CHECK(!f.run("key C ionianish"));
+  CHECK(!f.run("play X"));
+  CHECK(!f.run("play D maj7 999"));
+  CHECK(!f.run("chord out nowhere"));
+  CHECK(!f.run("chord hold maybe"));
+  CHECK(!f.run("chord flip"));
+}
+
+void test_jsonl_chord_rendering() {
+  // ii in C major: D4 input, min7 -> {"in":"D4","out":"Dm7","deg":"ii"}.
+  const OutEvent ev = OutEvent::chord(0, 1, static_cast<std::uint8_t>(ChordQuality::kMin7),
+                                      62, 4, 100, 0);
+  CHECK(to_jsonl(ev) == R"({"ev":"chord","in":"D4","out":"Dm7","deg":"ii","@":0})");
+  // Flat spelling: Bb root.
+  const OutEvent bb = OutEvent::chord(0, 0, static_cast<std::uint8_t>(ChordQuality::kMaj7),
+                                      70, 4, 100, 5);
+  CHECK(to_jsonl(bb, true) == R"({"ev":"chord","in":"Bb4","out":"Bbmaj7","deg":"I","@":5})");
+  CHECK(to_jsonl(bb, false) == R"({"ev":"chord","in":"A#4","out":"A#maj7","deg":"I","@":5})");
+  // Half-diminished renders lowercase with m7b5, dominant uppercase.
+  const OutEvent halfdim = OutEvent::chord(
+      0, 6, static_cast<std::uint8_t>(ChordQuality::kHalfDim7), 71, 4, 100, 0);
+  CHECK(to_jsonl(halfdim) == R"({"ev":"chord","in":"B4","out":"Bm7b5","deg":"viim7b5","@":0})");
+  const std::string human = to_human(ev);
+  CHECK(human.find("chord Dm7 (ii)") != std::string::npos);
 }
 
 void test_alsa_null_state_is_safe() {
@@ -295,6 +346,8 @@ int main() {
   test_shell_parse_edges();
   test_shell_track_commands();
   test_note_name_parsing();
+  test_shell_chord_commands();
+  test_jsonl_chord_rendering();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
   if (arrangrr::test::failures() == 0) std::printf("test_host: all OK\n");
