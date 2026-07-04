@@ -1,6 +1,5 @@
 #include "shell.hpp"
 
-#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -170,9 +169,13 @@ bool parse_mode(const std::string& s, Mode& out) {
     Mode mode;
   };
   static constexpr Entry kModes[] = {
-      {"major", Mode::kMajor},       {"minor", Mode::kMinor},   {"dorian", Mode::kDorian},
-      {"phrygian", Mode::kPhrygian}, {"lydian", Mode::kLydian}, {"mixolydian", Mode::kMixolydian},
-      {"locrian", Mode::kLocrian},
+      {.name = "major", .mode = Mode::kMajor},
+      {.name = "minor", .mode = Mode::kMinor},
+      {.name = "dorian", .mode = Mode::kDorian},
+      {.name = "phrygian", .mode = Mode::kPhrygian},
+      {.name = "lydian", .mode = Mode::kLydian},
+      {.name = "mixolydian", .mode = Mode::kMixolydian},
+      {.name = "locrian", .mode = Mode::kLocrian},
   };
   for (const Entry& e : kModes) {
     if (s == e.name) {
@@ -189,13 +192,20 @@ bool parse_quality(const std::string& s, std::int8_t& out) {
     ChordQuality q;
   };
   static constexpr Entry kQ[] = {
-      {"maj", ChordQuality::kMaj},          {"min", ChordQuality::kMin},
-      {"dim", ChordQuality::kDim},          {"aug", ChordQuality::kAug},
-      {"maj7", ChordQuality::kMaj7},        {"min7", ChordQuality::kMin7},
-      {"m7", ChordQuality::kMin7},          {"7", ChordQuality::kDom7},
-      {"dom7", ChordQuality::kDom7},        {"m7b5", ChordQuality::kHalfDim7},
-      {"halfdim", ChordQuality::kHalfDim7}, {"dim7", ChordQuality::kDim7},
-      {"sus2", ChordQuality::kSus2},        {"sus4", ChordQuality::kSus4},
+      {.name = "maj", .q = ChordQuality::kMaj},
+      {.name = "min", .q = ChordQuality::kMin},
+      {.name = "dim", .q = ChordQuality::kDim},
+      {.name = "aug", .q = ChordQuality::kAug},
+      {.name = "maj7", .q = ChordQuality::kMaj7},
+      {.name = "min7", .q = ChordQuality::kMin7},
+      {.name = "m7", .q = ChordQuality::kMin7},
+      {.name = "7", .q = ChordQuality::kDom7},
+      {.name = "dom7", .q = ChordQuality::kDom7},
+      {.name = "m7b5", .q = ChordQuality::kHalfDim7},
+      {.name = "halfdim", .q = ChordQuality::kHalfDim7},
+      {.name = "dim7", .q = ChordQuality::kDim7},
+      {.name = "sus2", .q = ChordQuality::kSus2},
+      {.name = "sus4", .q = ChordQuality::kSus4},
   };
   for (const Entry& e : kQ) {
     if (s == e.name) {
@@ -239,13 +249,19 @@ bool parse_section(const std::string& s, SectionType& out) {
     SectionType type;
   };
   static constexpr Entry kSections[] = {
-      {"intro1", SectionType::kIntro1},   {"intro2", SectionType::kIntro2},
-      {"varA", SectionType::kVarA},       {"varB", SectionType::kVarB},
-      {"varC", SectionType::kVarC},       {"varD", SectionType::kVarD},
-      {"fillA", SectionType::kFillA},     {"fillB", SectionType::kFillB},
-      {"fillC", SectionType::kFillC},     {"fillD", SectionType::kFillD},
-      {"break", SectionType::kBreak},     {"ending1", SectionType::kEnding1},
-      {"ending2", SectionType::kEnding2},
+      {.name = "intro1", .type = SectionType::kIntro1},
+      {.name = "intro2", .type = SectionType::kIntro2},
+      {.name = "varA", .type = SectionType::kVarA},
+      {.name = "varB", .type = SectionType::kVarB},
+      {.name = "varC", .type = SectionType::kVarC},
+      {.name = "varD", .type = SectionType::kVarD},
+      {.name = "fillA", .type = SectionType::kFillA},
+      {.name = "fillB", .type = SectionType::kFillB},
+      {.name = "fillC", .type = SectionType::kFillC},
+      {.name = "fillD", .type = SectionType::kFillD},
+      {.name = "break", .type = SectionType::kBreak},
+      {.name = "ending1", .type = SectionType::kEnding1},
+      {.name = "ending2", .type = SectionType::kEnding2},
   };
   for (const Entry& e : kSections) {
     if (s == e.name) {
@@ -262,10 +278,16 @@ bool parse_role(const std::string& s, TrackRole& out) {
     TrackRole role;
   };
   static constexpr Entry kRoles[] = {
-      {"drums", TrackRole::kDrums},   {"perc", TrackRole::kPerc},     {"bass", TrackRole::kBass},
-      {"chord1", TrackRole::kChord1}, {"chord2", TrackRole::kChord2}, {"pad", TrackRole::kPad},
-      {"arp", TrackRole::kArp},       {"phrase", TrackRole::kPhrase}, {"lead", TrackRole::kLead},
-      {"cc", TrackRole::kCc},
+      {.name = "drums", .role = TrackRole::kDrums},
+      {.name = "perc", .role = TrackRole::kPerc},
+      {.name = "bass", .role = TrackRole::kBass},
+      {.name = "chord1", .role = TrackRole::kChord1},
+      {.name = "chord2", .role = TrackRole::kChord2},
+      {.name = "pad", .role = TrackRole::kPad},
+      {.name = "arp", .role = TrackRole::kArp},
+      {.name = "phrase", .role = TrackRole::kPhrase},
+      {.name = "lead", .role = TrackRole::kLead},
+      {.name = "cc", .role = TrackRole::kCc},
   };
   for (const Entry& e : kRoles) {
     if (s == e.name) {
@@ -475,7 +497,12 @@ bool Shell::push_panels() {
     refresh_piano_content();
   }
 
-  return m_panel_hook && m_panel_hook(m_panels.combined_lines(panel_columns()));
+  return m_panel_hook && m_panel_hook(m_panels.combined_lines(panel_columns(), m_style));
+}
+
+void Shell::configure_terminal(bool is_tty, bool utf8) {
+  m_style.set_terminal_is_tty(is_tty);
+  m_style.set_terminal_utf8(utf8);
 }
 
 void Shell::refresh_panels() { (void)push_panels(); }
@@ -609,8 +636,12 @@ void Shell::toggle_piano_key(char key, int semitone_from_base) {
     bytes[0] = static_cast<std::uint8_t>(midi::kNoteOn | m_piano.channel);
     bytes[1] = midi_note;
     bytes[2] = m_piano.velocity;
-    if (!m_piano_held.note_on(
-            {kPianoInputPort, m_piano.channel, midi_note, m_piano.velocity, key, 0})) {
+    if (!m_piano_held.note_on({.port = kPianoInputPort,
+                               .channel = m_piano.channel,
+                               .note = midi_note,
+                               .velocity = m_piano.velocity,
+                               .source_key = key,
+                               .start_tick = 0})) {
       print_line("piano: too many held notes");
       return;
     }
@@ -869,6 +900,8 @@ bool Shell::cmd_view(const std::vector<std::string>& t, std::string& error) {
       m_view_options.show_channel = on;
     } else if (t[2] == "port") {
       m_view_options.show_port = on;
+    } else if (t[2] == "drum-names") {
+      m_view_options.show_drum_names = on;
     } else {
       error = "view show: unknown option: " + t[2];
       return false;
@@ -879,6 +912,70 @@ bool Shell::cmd_view(const std::vector<std::string>& t, std::string& error) {
 
   error = kUsage;
   return false;
+}
+
+bool Shell::cmd_theme(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage = "theme list | theme set <name> | theme current";
+
+  if (t.size() < 2) {
+    error = kUsage;
+    return false;
+  }
+
+  if (t[1] == "list") {
+    std::string line = "themes:";
+    for (const std::string& name : UiStyle::theme_names()) {
+      line += ' ';
+      line += name;
+      if (name == m_style.theme_name()) {
+        line += "*";  // marks the active theme
+      }
+    }
+    print_line(line);
+    return true;
+  }
+
+  if (t[1] == "current") {
+    print_line(std::string("theme: ") + std::string(m_style.theme_name()));
+    return true;
+  }
+
+  if (t[1] == "set") {
+    if (t.size() < 3) {
+      error = "theme set <name>";
+      return false;
+    }
+    if (!m_style.set_theme(t[2])) {
+      error = "unknown theme '" + t[2] + "' (theme list)";
+      return false;
+    }
+    (void)push_panels();  // re-render so the switch is visible at once
+    return true;
+  }
+
+  error = kUsage;
+  return false;
+}
+
+bool Shell::cmd_colors(const std::vector<std::string>& t, std::string& error) {
+  if (t.size() < 2) {
+    error = "colors on|off|toggle";
+    return false;
+  }
+
+  if (t[1] == "on") {
+    m_style.set_color_mode(ColorMode::kOn);
+  } else if (t[1] == "off") {
+    m_style.set_color_mode(ColorMode::kOff);
+  } else if (t[1] == "toggle") {
+    m_style.set_color_mode(m_style.colors_enabled() ? ColorMode::kOff : ColorMode::kOn);
+  } else {
+    error = "colors on|off|toggle";
+    return false;
+  }
+
+  (void)push_panels();
+  return true;
 }
 
 bool Shell::handle_ui_key(std::uint8_t byte) {
@@ -1022,7 +1119,8 @@ bool Shell::exec_line(const std::string& line, std::string& error) {
       error = "@tick in the past";
       return false;
     }
-    m_pending.push_back(Pending{tick, m_pending_order++, std::move(tokens)});
+    m_pending.push_back(
+        Pending{.tick = tick, .order = m_pending_order++, .tokens = std::move(tokens)});
     return true;
   }
 
@@ -1102,6 +1200,14 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
     return cmd_view(t, error);
   }
 
+  if (cmd == "theme") {
+    return cmd_theme(t, error);
+  }
+
+  if (cmd == "colors") {
+    return cmd_colors(t, error);
+  }
+
   if (cmd == "port" && t.size() >= 3 && t[1] == "open") {
     // port open in|out <name> [as <alias>]
     const bool input = t[2] == "in";
@@ -1122,7 +1228,7 @@ bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
       error = "no free port slots";
       return false;
     }
-    const PortDef def{name, input, next++};
+    const PortDef def{.name = name, .is_input = input, .index = next++};
     m_ports.push_back(def);
     if (m_port_hook) {
       m_port_hook(def);

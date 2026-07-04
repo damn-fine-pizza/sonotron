@@ -62,28 +62,28 @@ constexpr const char* kTooNarrowMessage = "piano: terminal too narrow";
 
 // Row/'A' A S D F G H J K L ; ' -> C D E F G A B (over ~1.5 octaves).
 constexpr std::array<PianoKeyBinding, kWhiteKeyCount> kWhiteKeys = {{
-    {'A', 0},
-    {'S', 2},
-    {'D', 4},
-    {'F', 5},
-    {'G', 7},
-    {'H', 9},
-    {'J', 11},
-    {'K', 12},
-    {'L', 14},
-    {';', 16},
-    {'\'', 17},
+    {.key = 'A', .semitone_from_base = 0},
+    {.key = 'S', .semitone_from_base = 2},
+    {.key = 'D', .semitone_from_base = 4},
+    {.key = 'F', .semitone_from_base = 5},
+    {.key = 'G', .semitone_from_base = 7},
+    {.key = 'H', .semitone_from_base = 9},
+    {.key = 'J', .semitone_from_base = 11},
+    {.key = 'K', .semitone_from_base = 12},
+    {.key = 'L', .semitone_from_base = 14},
+    {.key = ';', .semitone_from_base = 16},
+    {.key = '\'', .semitone_from_base = 17},
 }};
 
 // W E T Y U O -> C# D# F# G# A# C#(+octave). 'P' is deliberately absent.
 constexpr std::array<PianoKeyBinding, kBlackKeyCount> kBlackKeys = {{
-    {'W', 1},
-    {'E', 3},
-    {'T', 6},
-    {'Y', 8},
-    {'U', 10},
-    {'O', 13},
-    {'P', 15},
+    {.key = 'W', .semitone_from_base = 1},
+    {.key = 'E', .semitone_from_base = 3},
+    {.key = 'T', .semitone_from_base = 6},
+    {.key = 'Y', .semitone_from_base = 8},
+    {.key = 'U', .semitone_from_base = 10},
+    {.key = 'O', .semitone_from_base = 13},
+    {.key = 'P', .semitone_from_base = 15},
 }};
 
 int octave_of(std::uint8_t midi_note) { return midi_note / piano_keys::kSemitonesPerOctave - 1; }
@@ -114,7 +114,9 @@ const char* naming_word(NoteNaming naming) {
 std::string key_label(const PianoViewState& state, std::uint8_t midi_note,
                       KeyboardNoteLabelMode mode) {
   if (state.octave_display == OctaveDisplayMode::kNone) {
-    return pitch_class_name(midi_note, NoteNameOptions{state.note_naming, false, false});
+    return pitch_class_name(midi_note, NoteNameOptions{.naming = state.note_naming,
+                                                       .prefer_flats = false,
+                                                       .include_octave = false});
   }
 
   return format_keyboard_note_label(midi_note, state.note_naming, mode);
@@ -309,7 +311,8 @@ void truncate_lines(std::vector<std::string>& lines, int terminal_columns) {
 
 // Note name with octave and no internal spacing ("C4", "Do4").
 std::string compact_note_name(std::uint8_t midi_note, NoteNaming naming) {
-  return note_name(midi_note, NoteNameOptions{naming, false, true});
+  return note_name(
+      midi_note, NoteNameOptions{.naming = naming, .prefer_flats = false, .include_octave = true});
 }
 
 // Which computer-keyboard keys are lit right now, indexed by MIDI note.
@@ -526,7 +529,8 @@ const std::array<PianoKeyBinding, kBlackKeyCount>& default_keymap_black() { retu
 
 std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming,
                                        KeyboardNoteLabelMode mode) {
-  const std::string pitch = pitch_class_name(midi_note, NoteNameOptions{naming, false, false});
+  const std::string pitch = pitch_class_name(
+      midi_note, NoteNameOptions{.naming = naming, .prefer_flats = false, .include_octave = false});
 
   char octave[8];
   std::snprintf(octave, sizeof(octave), "%d", octave_of(midi_note));

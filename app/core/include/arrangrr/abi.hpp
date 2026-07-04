@@ -131,7 +131,7 @@ struct OutEvent {
     OutEvent e;
     e.kind = Kind::kChord;
     e.port = port;
-    e.msg = MidiMessage{root_note, count, vel};
+    e.msg = MidiMessage{.status=root_note, .d1=count, .d2=vel};
     e.tick = t;
     e.code = static_cast<std::uint16_t>(degree | (quality << 8));
     return e;

@@ -57,7 +57,7 @@ class Arranger {
     if (idx >= kRoleCount || port >= kMaxPorts || channel > 15) {
       return false;
     }
-    m_routes[idx] = Route{port, channel, true};
+    m_routes[idx] = Route{.port=port, .channel=channel, .enabled=true};
     return true;
   }
 

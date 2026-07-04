@@ -121,6 +121,15 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     shell.set_width_provider([&]() { return console.columns(); });
     // Resize contract (H1): geometry changed -> panels re-render from state.
     console.set_resize_hook([&]() { shell.refresh_panels(); });
+
+    // Colors/unicode auto-resolve from the real terminal (H3): a TTY enables
+    // colors; a UTF-8 locale enables unicode. --no-colors etc. would override.
+    const char* locale = std::getenv("LC_ALL");
+    if (locale == nullptr || *locale == '\0') {
+      locale = std::getenv("LANG");
+    }
+    const bool utf8 = locale != nullptr && std::strstr(locale, "UTF-8") != nullptr;
+    shell.configure_terminal(true, utf8);
   }
 
   // --motd FILE: guidance seeded into the help panel from the start. A
@@ -149,6 +158,13 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   shell.exec_line("port open out out0", ignored);
   shell.exec_line("thru in0 out0", ignored);
   std::printf("arrangrr live: ALSA ports in0/out0 (thru). Type commands; 'quit' to exit.\n");
+
+  // Piano and filter panels are visible from the start (help opens on demand
+  // via `help <topic>` / --motd). Panels only exist in the live TUI.
+  if (tui) {
+    shell.exec_line("panel open filter", ignored);
+    shell.exec_line("panel open piano", ignored);
+  }
 
   // --init FILE: run a setup script, then stay interactive.
   if (init_path != nullptr) {

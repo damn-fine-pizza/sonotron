@@ -91,17 +91,17 @@ struct MidiMessage {
 
   static constexpr MidiMessage note_on(std::uint8_t ch, std::uint8_t note,
                                        std::uint8_t vel) noexcept {
-    return {static_cast<std::uint8_t>(midi::kNoteOn | (ch & 0x0Fu)), note, vel};
+    return {.status=static_cast<std::uint8_t>(midi::kNoteOn | (ch & 0x0Fu)), .d1=note, .d2=vel};
   }
   static constexpr MidiMessage note_off(std::uint8_t ch, std::uint8_t note,
                                         std::uint8_t vel = 64) noexcept {
-    return {static_cast<std::uint8_t>(midi::kNoteOff | (ch & 0x0Fu)), note, vel};
+    return {.status=static_cast<std::uint8_t>(midi::kNoteOff | (ch & 0x0Fu)), .d1=note, .d2=vel};
   }
   static constexpr MidiMessage cc(std::uint8_t ch, std::uint8_t controller,
                                   std::uint8_t value) noexcept {
-    return {static_cast<std::uint8_t>(midi::kControlChange | (ch & 0x0Fu)), controller, value};
+    return {.status=static_cast<std::uint8_t>(midi::kControlChange | (ch & 0x0Fu)), .d1=controller, .d2=value};
   }
-  static constexpr MidiMessage realtime(std::uint8_t status) noexcept { return {status, 0, 0}; }
+  static constexpr MidiMessage realtime(std::uint8_t status) noexcept { return {.status=status, .d1=0, .d2=0}; }
 };
 static_assert(sizeof(MidiMessage) == 3);
 

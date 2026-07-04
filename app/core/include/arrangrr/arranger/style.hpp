@@ -87,105 +87,105 @@ namespace styles {
 namespace basic {
 
 inline constexpr StyleEvent kVarADrums[] = {
-    {0, 36, 0, 110, 120}, {4, 38, 0, 100, 120}, {8, 36, 0, 105, 120}, {12, 38, 0, 100, 120},
-    {0, 42, 0, 70, 60},   {2, 42, 0, 60, 60},   {4, 42, 0, 70, 60},   {6, 42, 0, 60, 60},
-    {8, 42, 0, 70, 60},   {10, 42, 0, 60, 60},  {12, 42, 0, 70, 60},  {14, 42, 0, 60, 60},
+    {.step=0, .tone=36, .octave=0, .vel=110, .gate=120}, {.step=4, .tone=38, .octave=0, .vel=100, .gate=120}, {.step=8, .tone=36, .octave=0, .vel=105, .gate=120}, {.step=12, .tone=38, .octave=0, .vel=100, .gate=120},
+    {.step=0, .tone=42, .octave=0, .vel=70, .gate=60},   {.step=2, .tone=42, .octave=0, .vel=60, .gate=60},   {.step=4, .tone=42, .octave=0, .vel=70, .gate=60},   {.step=6, .tone=42, .octave=0, .vel=60, .gate=60},
+    {.step=8, .tone=42, .octave=0, .vel=70, .gate=60},   {.step=10, .tone=42, .octave=0, .vel=60, .gate=60},  {.step=12, .tone=42, .octave=0, .vel=70, .gate=60},  {.step=14, .tone=42, .octave=0, .vel=60, .gate=60},
 };
 inline constexpr StyleEvent kVarABass[] = {
-    {0, 0, 0, 100, 220},  // root
-    {4, 2, 0, 85, 220},   // fifth
-    {8, 0, 0, 95, 220},
-    {12, 2, 0, 85, 220},
+    {.step=0, .tone=0, .octave=0, .vel=100, .gate=220},  // root
+    {.step=4, .tone=2, .octave=0, .vel=85, .gate=220},   // fifth
+    {.step=8, .tone=0, .octave=0, .vel=95, .gate=220},
+    {.step=12, .tone=2, .octave=0, .vel=85, .gate=220},
 };
 inline constexpr StyleEvent kVarAChord[] = {
     // Comp stabs on beats 1 and 3: full stack (tones 0..3).
-    {0, 0, 0, 80, 360}, {0, 1, 0, 80, 360}, {0, 2, 0, 80, 360}, {0, 3, 0, 80, 360},
-    {8, 0, 0, 75, 360}, {8, 1, 0, 75, 360}, {8, 2, 0, 75, 360}, {8, 3, 0, 75, 360},
+    {.step=0, .tone=0, .octave=0, .vel=80, .gate=360}, {.step=0, .tone=1, .octave=0, .vel=80, .gate=360}, {.step=0, .tone=2, .octave=0, .vel=80, .gate=360}, {.step=0, .tone=3, .octave=0, .vel=80, .gate=360},
+    {.step=8, .tone=0, .octave=0, .vel=75, .gate=360}, {.step=8, .tone=1, .octave=0, .vel=75, .gate=360}, {.step=8, .tone=2, .octave=0, .vel=75, .gate=360}, {.step=8, .tone=3, .octave=0, .vel=75, .gate=360},
 };
 inline constexpr StylePattern kVarAPatterns[] = {
-    {TrackRole::kDrums, RolePolicy::kFixed, Span<const StyleEvent>(kVarADrums)},
-    {TrackRole::kBass, RolePolicy::kChordTone, Span<const StyleEvent>(kVarABass)},
-    {TrackRole::kChord1, RolePolicy::kChordTone, Span<const StyleEvent>(kVarAChord)},
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarADrums)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarABass)},
+    {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarAChord)},
 };
 
 inline constexpr StyleEvent kVarBDrums[] = {
-    {0, 36, 0, 115, 120},  {4, 38, 0, 105, 120}, {7, 36, 0, 90, 120}, {8, 36, 0, 110, 120},
-    {12, 38, 0, 105, 120}, {0, 42, 0, 75, 50},   {1, 42, 0, 55, 50},  {2, 42, 0, 65, 50},
-    {3, 42, 0, 55, 50},    {4, 42, 0, 75, 50},   {5, 42, 0, 55, 50},  {6, 42, 0, 65, 50},
-    {7, 42, 0, 55, 50},    {8, 42, 0, 75, 50},   {9, 42, 0, 55, 50},  {10, 42, 0, 65, 50},
-    {11, 42, 0, 55, 50},   {12, 42, 0, 75, 50},  {13, 42, 0, 55, 50}, {14, 42, 0, 65, 50},
-    {15, 42, 0, 55, 50},
+    {.step=0, .tone=36, .octave=0, .vel=115, .gate=120},  {.step=4, .tone=38, .octave=0, .vel=105, .gate=120}, {.step=7, .tone=36, .octave=0, .vel=90, .gate=120}, {.step=8, .tone=36, .octave=0, .vel=110, .gate=120},
+    {.step=12, .tone=38, .octave=0, .vel=105, .gate=120}, {.step=0, .tone=42, .octave=0, .vel=75, .gate=50},   {.step=1, .tone=42, .octave=0, .vel=55, .gate=50},  {.step=2, .tone=42, .octave=0, .vel=65, .gate=50},
+    {.step=3, .tone=42, .octave=0, .vel=55, .gate=50},    {.step=4, .tone=42, .octave=0, .vel=75, .gate=50},   {.step=5, .tone=42, .octave=0, .vel=55, .gate=50},  {.step=6, .tone=42, .octave=0, .vel=65, .gate=50},
+    {.step=7, .tone=42, .octave=0, .vel=55, .gate=50},    {.step=8, .tone=42, .octave=0, .vel=75, .gate=50},   {.step=9, .tone=42, .octave=0, .vel=55, .gate=50},  {.step=10, .tone=42, .octave=0, .vel=65, .gate=50},
+    {.step=11, .tone=42, .octave=0, .vel=55, .gate=50},   {.step=12, .tone=42, .octave=0, .vel=75, .gate=50},  {.step=13, .tone=42, .octave=0, .vel=55, .gate=50}, {.step=14, .tone=42, .octave=0, .vel=65, .gate=50},
+    {.step=15, .tone=42, .octave=0, .vel=55, .gate=50},
 };
 inline constexpr StyleEvent kVarBBass[] = {
-    {0, 0, 0, 105, 200}, {2, 0, 0, 70, 100},  {4, 1, 0, 90, 200},
-    {8, 2, 0, 95, 200},  {10, 0, 1, 75, 100}, {12, 3, 0, 90, 200},
+    {.step=0, .tone=0, .octave=0, .vel=105, .gate=200}, {.step=2, .tone=0, .octave=0, .vel=70, .gate=100},  {.step=4, .tone=1, .octave=0, .vel=90, .gate=200},
+    {.step=8, .tone=2, .octave=0, .vel=95, .gate=200},  {.step=10, .tone=0, .octave=1, .vel=75, .gate=100}, {.step=12, .tone=3, .octave=0, .vel=90, .gate=200},
 };
 inline constexpr StyleEvent kVarBChord[] = {
-    {2, 0, 0, 78, 200},  {2, 1, 0, 78, 200},  {2, 2, 0, 78, 200},  {6, 0, 0, 72, 200},
-    {6, 1, 0, 72, 200},  {6, 2, 0, 72, 200},  {10, 0, 0, 78, 200}, {10, 1, 0, 78, 200},
-    {10, 2, 0, 78, 200}, {14, 0, 0, 72, 200}, {14, 1, 0, 72, 200}, {14, 2, 0, 72, 200},
+    {.step=2, .tone=0, .octave=0, .vel=78, .gate=200},  {.step=2, .tone=1, .octave=0, .vel=78, .gate=200},  {.step=2, .tone=2, .octave=0, .vel=78, .gate=200},  {.step=6, .tone=0, .octave=0, .vel=72, .gate=200},
+    {.step=6, .tone=1, .octave=0, .vel=72, .gate=200},  {.step=6, .tone=2, .octave=0, .vel=72, .gate=200},  {.step=10, .tone=0, .octave=0, .vel=78, .gate=200}, {.step=10, .tone=1, .octave=0, .vel=78, .gate=200},
+    {.step=10, .tone=2, .octave=0, .vel=78, .gate=200}, {.step=14, .tone=0, .octave=0, .vel=72, .gate=200}, {.step=14, .tone=1, .octave=0, .vel=72, .gate=200}, {.step=14, .tone=2, .octave=0, .vel=72, .gate=200},
 };
 inline constexpr StylePattern kVarBPatterns[] = {
-    {TrackRole::kDrums, RolePolicy::kFixed, Span<const StyleEvent>(kVarBDrums)},
-    {TrackRole::kBass, RolePolicy::kChordTone, Span<const StyleEvent>(kVarBBass)},
-    {TrackRole::kChord1, RolePolicy::kChordTone, Span<const StyleEvent>(kVarBChord)},
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarBDrums)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarBBass)},
+    {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarBChord)},
 };
 
 inline constexpr StyleEvent kIntroDrums[] = {
-    {8, 42, 0, 60, 60},
-    {10, 42, 0, 65, 60},
-    {12, 42, 0, 70, 60},
-    {14, 42, 0, 80, 60},
+    {.step=8, .tone=42, .octave=0, .vel=60, .gate=60},
+    {.step=10, .tone=42, .octave=0, .vel=65, .gate=60},
+    {.step=12, .tone=42, .octave=0, .vel=70, .gate=60},
+    {.step=14, .tone=42, .octave=0, .vel=80, .gate=60},
 };
 inline constexpr StyleEvent kIntroBass[] = {
-    {0, 0, 0, 90, 3600},  // held root pickup
+    {.step=0, .tone=0, .octave=0, .vel=90, .gate=3600},  // held root pickup
 };
 inline constexpr StylePattern kIntroPatterns[] = {
-    {TrackRole::kDrums, RolePolicy::kFixed, Span<const StyleEvent>(kIntroDrums)},
-    {TrackRole::kBass, RolePolicy::kChordTone, Span<const StyleEvent>(kIntroBass)},
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIntroDrums)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntroBass)},
 };
 
 inline constexpr StyleEvent kFillDrums[] = {
-    {0, 36, 0, 110, 120}, {4, 38, 0, 100, 120},  {8, 38, 0, 90, 100},
-    {10, 38, 0, 95, 100}, {12, 38, 0, 105, 100}, {14, 38, 0, 115, 100},
+    {.step=0, .tone=36, .octave=0, .vel=110, .gate=120}, {.step=4, .tone=38, .octave=0, .vel=100, .gate=120},  {.step=8, .tone=38, .octave=0, .vel=90, .gate=100},
+    {.step=10, .tone=38, .octave=0, .vel=95, .gate=100}, {.step=12, .tone=38, .octave=0, .vel=105, .gate=100}, {.step=14, .tone=38, .octave=0, .vel=115, .gate=100},
 };
 inline constexpr StyleEvent kFillBass[] = {
-    {0, 0, 0, 100, 220},
-    {8, 2, 0, 90, 220},
+    {.step=0, .tone=0, .octave=0, .vel=100, .gate=220},
+    {.step=8, .tone=2, .octave=0, .vel=90, .gate=220},
 };
 inline constexpr StylePattern kFillPatterns[] = {
-    {TrackRole::kDrums, RolePolicy::kFixed, Span<const StyleEvent>(kFillDrums)},
-    {TrackRole::kBass, RolePolicy::kChordTone, Span<const StyleEvent>(kFillBass)},
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kFillDrums)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass)},
 };
 
 inline constexpr StyleEvent kEndDrums[] = {
-    {0, 36, 0, 115, 120},
-    {0, 49, 0, 110, 1800},
+    {.step=0, .tone=36, .octave=0, .vel=115, .gate=120},
+    {.step=0, .tone=49, .octave=0, .vel=110, .gate=1800},
 };
 inline constexpr StyleEvent kEndBass[] = {
-    {0, 0, 0, 100, 3600},
+    {.step=0, .tone=0, .octave=0, .vel=100, .gate=3600},
 };
 inline constexpr StyleEvent kEndChord[] = {
-    {0, 0, 0, 85, 3600},
-    {0, 1, 0, 85, 3600},
-    {0, 2, 0, 85, 3600},
-    {0, 3, 0, 85, 3600},
+    {.step=0, .tone=0, .octave=0, .vel=85, .gate=3600},
+    {.step=0, .tone=1, .octave=0, .vel=85, .gate=3600},
+    {.step=0, .tone=2, .octave=0, .vel=85, .gate=3600},
+    {.step=0, .tone=3, .octave=0, .vel=85, .gate=3600},
 };
 inline constexpr StylePattern kEndPatterns[] = {
-    {TrackRole::kDrums, RolePolicy::kFixed, Span<const StyleEvent>(kEndDrums)},
-    {TrackRole::kBass, RolePolicy::kChordTone, Span<const StyleEvent>(kEndBass)},
-    {TrackRole::kChord1, RolePolicy::kChordTone, Span<const StyleEvent>(kEndChord)},
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kEndDrums)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kEndBass)},
+    {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kEndChord)},
 };
 
 inline constexpr StyleSection kSections[] = {
-    {SectionType::kIntro1, 1, Span<const StylePattern>(kIntroPatterns)},
-    {SectionType::kVarA, 1, Span<const StylePattern>(kVarAPatterns)},
-    {SectionType::kVarB, 1, Span<const StylePattern>(kVarBPatterns)},
-    {SectionType::kFillA, 1, Span<const StylePattern>(kFillPatterns)},
-    {SectionType::kEnding1, 1, Span<const StylePattern>(kEndPatterns)},
+    {.type=SectionType::kIntro1, .bars=1, .patterns=Span<const StylePattern>(kIntroPatterns)},
+    {.type=SectionType::kVarA, .bars=1, .patterns=Span<const StylePattern>(kVarAPatterns)},
+    {.type=SectionType::kVarB, .bars=1, .patterns=Span<const StylePattern>(kVarBPatterns)},
+    {.type=SectionType::kFillA, .bars=1, .patterns=Span<const StylePattern>(kFillPatterns)},
+    {.type=SectionType::kEnding1, .bars=1, .patterns=Span<const StylePattern>(kEndPatterns)},
 };
 
-inline constexpr Style kStyle{"basic", Span<const StyleSection>(kSections)};
+inline constexpr Style kStyle{.name="basic", .sections=Span<const StyleSection>(kSections)};
 
 }  // namespace basic
 

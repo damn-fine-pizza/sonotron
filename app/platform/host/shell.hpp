@@ -62,6 +62,11 @@ class Shell {
   const PanelManager& panels() const { return m_panels; }
   const PianoViewState& piano_state() const { return m_piano; }
   const MidiMonitor& monitor() const { return m_monitor; }
+  const UiStyle& ui_style() const { return m_style; }
+
+  // Live TUI wires the real terminal capabilities in (a fresh Shell assumes
+  // no TTY / no UTF-8, so colors stay off for scripts and tests).
+  void configure_terminal(bool is_tty, bool utf8);
 
   // Live TUI key dispatch (H2): consumes the byte when a panel has focus.
   // Returns false with REPL focus so typing stays exactly as before —
@@ -103,6 +108,8 @@ class Shell {
   bool cmd_notes(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_filter(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_view(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_theme(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_colors(const std::vector<std::string>& tokens, std::string& error);
   void open_help_topic(const std::string& topic);
   void refresh_piano_content();
   bool push_panels();
@@ -120,6 +127,7 @@ class Shell {
   WidthProvider m_width_provider;
   PanelManager m_panels;
   PianoViewState m_piano;
+  UiStyle m_style;
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;

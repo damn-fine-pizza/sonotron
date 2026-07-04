@@ -41,31 +41,37 @@ const std::string& white_label_line(const std::vector<std::string>& lines) {
 }
 
 void test_note_name_cde() {
-  const NoteNameOptions sharp{NoteNaming::kCde, false, true};
+  const NoteNameOptions sharp{
+      .naming = NoteNaming::kCde, .prefer_flats = false, .include_octave = true};
   CHECK(note_name(60, sharp) == "C4");
   CHECK(note_name(61, sharp) == "C#4");
   CHECK(note_name(59, sharp) == "B3");
   CHECK(note_name(0, sharp) == "C-1");
   CHECK(note_name(127, sharp) == "G9");
 
-  const NoteNameOptions flat{NoteNaming::kCde, true, true};
+  const NoteNameOptions flat{
+      .naming = NoteNaming::kCde, .prefer_flats = true, .include_octave = true};
   CHECK(note_name(61, flat) == "Db4");
 
-  const NoteNameOptions no_octave{NoteNaming::kCde, false, false};
+  const NoteNameOptions no_octave{
+      .naming = NoteNaming::kCde, .prefer_flats = false, .include_octave = false};
   CHECK(note_name(60, no_octave) == "C");
 }
 
 void test_note_name_doremi() {
-  const NoteNameOptions sharp{NoteNaming::kDoReMi, false, true};
+  const NoteNameOptions sharp{
+      .naming = NoteNaming::kDoReMi, .prefer_flats = false, .include_octave = true};
   CHECK(note_name(60, sharp) == "Do4");
   CHECK(note_name(61, sharp) == "Do#4");
 
-  const NoteNameOptions flat{NoteNaming::kDoReMi, true, true};
+  const NoteNameOptions flat{
+      .naming = NoteNaming::kDoReMi, .prefer_flats = true, .include_octave = true};
   CHECK(note_name(61, flat) == "Reb4");
 }
 
 void test_pitch_class_ignores_octave() {
-  const NoteNameOptions opts{NoteNaming::kCde, false, true};
+  const NoteNameOptions opts{
+      .naming = NoteNaming::kCde, .prefer_flats = false, .include_octave = true};
   CHECK(pitch_class_name(60, opts) == "C");
   CHECK(pitch_class_name(72, opts) == "C");
   CHECK(pitch_class_name(61, opts) == "C#");

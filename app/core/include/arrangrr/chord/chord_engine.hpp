@@ -121,7 +121,7 @@ class ChordEngine {
   // previous voicing and stacks the shape from `root_note` upward.
   void sound(std::uint8_t root_note, ChordQuality quality, std::uint8_t velocity,
              ScheduleFn schedule) {
-    m_state = ChordState{static_cast<std::uint8_t>(root_note % 12), quality, true};
+    m_state = ChordState{.root_pc=static_cast<std::uint8_t>(root_note % 12), .quality=quality, .valid=true};
     const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
     for (std::uint8_t i = 0; i < shape.count; ++i) {

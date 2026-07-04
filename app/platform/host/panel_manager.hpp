@@ -5,10 +5,13 @@
 #include <string>
 #include <vector>
 
+#include "ui_style.hpp"
+
 // Host-only multi-panel state (H1, docs/TUI_SPEC.md). Pure data + line
-// composition: no terminal access, no ANSI. The composed block travels
-// through the existing Shell::PanelHook into Console, whose global height
-// cap still applies on top of the per-panel fairness cap below.
+// composition: no terminal access, no raw ANSI (styling goes through UiStyle
+// roles, H3). The composed block travels through the existing Shell::PanelHook
+// into Console, whose global height cap still applies on top of the per-panel
+// fairness cap below.
 
 namespace arrangrr::host {
 
@@ -78,8 +81,9 @@ class PanelManager {
   // with the side-by-side layout, two+ visible panels and enough width — the
   // first two visible panels in columns (extra panels stack below). Each
   // panel is preceded by an ASCII title rule; the focused panel's title
-  // carries a '*' marker.
-  std::vector<std::string> combined_lines(int terminal_columns) const;
+  // carries a '*' marker. Titles are styled through `style` (a default,
+  // colors-off UiStyle leaves them plain).
+  std::vector<std::string> combined_lines(int terminal_columns, const UiStyle& style = {}) const;
 
   // One line per panel for `panel list` / `panel status`.
   std::vector<std::string> list_lines() const;
@@ -93,9 +97,9 @@ class PanelManager {
 
   const Panel& at(PanelId id) const;
   Panel& at(PanelId id);
-  std::vector<std::string> panel_block(PanelId id) const;
-  std::vector<std::string> stacked_lines() const;
-  std::vector<std::string> side_by_side_lines(int terminal_columns) const;
+  std::vector<std::string> panel_block(PanelId id, const UiStyle& style) const;
+  std::vector<std::string> stacked_lines(const UiStyle& style) const;
+  std::vector<std::string> side_by_side_lines(int terminal_columns, const UiStyle& style) const;
 
   std::array<Panel, kPanelCount> m_panels;
   PanelFocus m_focus = PanelFocus::kRepl;

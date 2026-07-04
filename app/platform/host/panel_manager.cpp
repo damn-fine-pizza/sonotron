@@ -17,7 +17,7 @@ constexpr std::array<PanelId, kPanelCount> kPanelOrder = {
 
 constexpr std::size_t index_of(PanelId id) { return static_cast<std::size_t>(id); }
 
-std::string title_rule(PanelId id, bool focused) {
+std::string title_rule(PanelId id, bool focused, const UiStyle& style) {
   std::string title = "-- ";
   title += kPanelNames[index_of(id)];
 
@@ -25,7 +25,9 @@ std::string title_rule(PanelId id, bool focused) {
     title += "*";
   }
   title += " --";
-  return title;
+
+  const UiRole role = focused ? UiRole::kPanelTitleFocused : UiRole::kPanelTitle;
+  return style.apply(role, title);
 }
 
 }  // namespace
@@ -133,12 +135,12 @@ void PanelManager::toggle_layout() {
 PanelLayout PanelManager::layout() const { return m_layout; }
 
 // One panel's title rule + capped content: the unit both layouts compose.
-std::vector<std::string> PanelManager::panel_block(PanelId id) const {
+std::vector<std::string> PanelManager::panel_block(PanelId id, const UiStyle& style) const {
   const Panel& panel = at(id);
   std::vector<std::string> out;
 
   const bool focused = m_focus == PanelFocus::kPanel && m_focused == id;
-  out.push_back(title_rule(id, focused));
+  out.push_back(title_rule(id, focused, style));
 
   // Per-panel fairness cap: a long panel must not push its neighbours out of
   // Console's shared panel area (its global cap still applies).
@@ -155,7 +157,7 @@ std::vector<std::string> PanelManager::panel_block(PanelId id) const {
   return out;
 }
 
-std::vector<std::string> PanelManager::stacked_lines() const {
+std::vector<std::string> PanelManager::stacked_lines(const UiStyle& style) const {
   std::vector<std::string> out;
 
   for (PanelId id : kPanelOrder) {
@@ -163,13 +165,14 @@ std::vector<std::string> PanelManager::stacked_lines() const {
       continue;
     }
 
-    const std::vector<std::string> block = panel_block(id);
+    const std::vector<std::string> block = panel_block(id, style);
     out.insert(out.end(), block.begin(), block.end());
   }
   return out;
 }
 
-std::vector<std::string> PanelManager::side_by_side_lines(int terminal_columns) const {
+std::vector<std::string> PanelManager::side_by_side_lines(int terminal_columns,
+                                                          const UiStyle& style) const {
   // Collect the visible panels: the first two go in columns, the rest stack.
   std::vector<PanelId> shown;
   for (PanelId id : kPanelOrder) {
@@ -178,8 +181,8 @@ std::vector<std::string> PanelManager::side_by_side_lines(int terminal_columns) 
     }
   }
 
-  const std::vector<std::string> left = panel_block(shown[0]);
-  const std::vector<std::string> right = panel_block(shown[1]);
+  const std::vector<std::string> left = panel_block(shown[0], style);
+  const std::vector<std::string> right = panel_block(shown[1], style);
 
   const std::size_t width = static_cast<std::size_t>(terminal_columns);
   const std::size_t column = (width - panel_layout::kSideGutterWidth) / 2;
@@ -197,14 +200,15 @@ std::vector<std::string> PanelManager::side_by_side_lines(int terminal_columns) 
 
   // A third visible panel stacks below the pair.
   for (std::size_t p = 2; p < shown.size(); ++p) {
-    const std::vector<std::string> block = panel_block(shown[p]);
+    const std::vector<std::string> block = panel_block(shown[p], style);
     out.insert(out.end(), block.begin(), block.end());
   }
 
   return out;
 }
 
-std::vector<std::string> PanelManager::combined_lines(int terminal_columns) const {
+std::vector<std::string> PanelManager::combined_lines(int terminal_columns,
+                                                      const UiStyle& style) const {
   // Side-by-side needs two visible panels and enough width; anything else
   // falls back to the vertical stack (H3 resize contract).
   std::size_t visible_count = 0;
@@ -216,10 +220,10 @@ std::vector<std::string> PanelManager::combined_lines(int terminal_columns) cons
 
   if (m_layout == PanelLayout::kSideBySide && visible_count >= 2 &&
       terminal_columns >= panel_layout::kSideMinColumns) {
-    return side_by_side_lines(terminal_columns);
+    return side_by_side_lines(terminal_columns, style);
   }
 
-  return stacked_lines();
+  return stacked_lines(style);
 }
 
 std::vector<std::string> PanelManager::list_lines() const {
