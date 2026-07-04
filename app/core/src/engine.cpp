@@ -49,6 +49,7 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kStyleLoad:
     case Param::kStyleSection:
     case Param::kStyleRoute:
+    case Param::kStyleSwitch:
       cmd_style(cmd, sink);
       break;
     default:
@@ -396,6 +397,23 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
       }
       break;
+    case Param::kStyleSwitch: {
+      // A combined style + section switch (D24). Immediate on explicit request
+      // (CTRL+\ "now") or whenever the transport is stopped — a queued switch
+      // could never land without ticks; otherwise it rides the next bar
+      // boundary (ENTER "next-bar"), matching kStyleSection's quantization.
+      const bool immediate = cmd.c != 0 || !m_transport.playing();
+      const bool ok = cmd.a >= 0 && cmd.a < static_cast<std::int32_t>(styles::kBuiltinCount) &&
+                      cmd.b >= 0 && cmd.b < kSectionTypeCount &&
+                      m_arranger.request_style(styles::kBuiltins[static_cast<std::uint8_t>(cmd.a)],
+                                               static_cast<SectionType>(cmd.b), immediate);
+      if (!ok) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else if (immediate) {
+        sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+      }
+      break;
+    }
     case Param::kStyleRoute:
     default: {
       const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);

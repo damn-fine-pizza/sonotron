@@ -275,6 +275,68 @@ void test_seamless_style_switch() {
   CHECK(!f.request_style(nullptr, SectionType::kVarA, true));
 }
 
+void test_style_switch_immediate_when_stopped() {
+  Band b;
+  b.setup_basic();  // basic is builtin 0, loaded on varA
+  b.ev.clear();
+  // Combined switch to (style 0, VarB): stopped -> immediate regardless of c.
+  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 0);
+  CHECK(b.e.arranger().current() == SectionType::kVarB);
+  const auto sec = b.sections();
+  CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarB));
+}
+
+void test_style_switch_next_bar_when_playing() {
+  Band b;
+  b.setup_basic();
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.cmd(Param::kTransportStart);
+  b.advance(10);
+  b.ev.clear();
+  // c = 0 while playing -> quantized to the next bar, no immediate section event.
+  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 0);
+  CHECK(b.sections().empty());  // nothing landed yet
+  CHECK(b.e.arranger().current() == SectionType::kVarA);
+  b.ev.clear();
+  b.advance(kTicksPerBar);  // crosses the bar boundary
+  const auto sec = b.sections();
+  CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarB));
+  CHECK(b.e.arranger().current() == SectionType::kVarB);
+}
+
+void test_style_switch_immediate_while_playing() {
+  Band b;
+  b.setup_basic();
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.cmd(Param::kTransportStart);
+  b.advance(10);
+  b.ev.clear();
+  // c != 0 while playing -> hard cut now.
+  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 1);
+  CHECK(b.e.arranger().current() == SectionType::kVarB);
+  const auto sec = b.sections();
+  CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarB));
+}
+
+void test_style_switch_bad_index_warns() {
+  Band b;
+  b.setup_basic();
+  b.ev.clear();
+  b.cmd(Param::kStyleSwitch, 7, static_cast<std::int32_t>(SectionType::kVarA), 1);   // no style 7
+  b.cmd(Param::kStyleSwitch, -1, static_cast<std::int32_t>(SectionType::kVarA), 1);  // negative
+  b.cmd(Param::kStyleSwitch, 0, 99, 1);                                              // bad section
+  int warns = 0;
+  for (const OutEvent& o : b.ev) {
+    if (o.kind == OutEvent::Kind::kWarn &&
+        o.code == static_cast<std::uint16_t>(WarnCode::kBadArgument)) {
+      ++warns;
+    }
+  }
+  CHECK(warns == 3);
+  // No crash, and the arranger stayed on its loaded section.
+  CHECK(b.e.arranger().current() == SectionType::kVarA);
+}
+
 }  // namespace
 
 int main() {
@@ -289,6 +351,10 @@ int main() {
   test_multibar_section_plays_bar_two();
   test_immediate_switch_when_stopped();
   test_seamless_style_switch();
+  test_style_switch_immediate_when_stopped();
+  test_style_switch_next_bar_when_playing();
+  test_style_switch_immediate_while_playing();
+  test_style_switch_bad_index_warns();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_arranger: all OK\n");
   }

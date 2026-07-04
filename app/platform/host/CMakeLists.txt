@@ -12,6 +12,7 @@ add_library(arrangrr_host STATIC
   piano_view.cpp
   midi_monitor.cpp
   ui_style.cpp
+  style_chooser.cpp
 )
 target_include_directories(arrangrr_host PUBLIC .)
 target_link_libraries(arrangrr_host PUBLIC arrangrr_core ALSA::ALSA)

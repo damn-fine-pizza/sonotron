@@ -67,6 +67,10 @@ enum class Param : std::uint16_t {
   kStyleSection = 31,      // do: a = SectionType (quantized to the next bar
                            //     while playing, immediate otherwise)
   kStyleRoute = 32,        // set: a = TrackRole, b = port | (channel << 8)
+  kStyleSwitch = 33,       // do: a = builtin style index, b = SectionType,
+                           //     c = immediate (0 = next bar while playing,
+                           //     else a hard mid-bar cut; stopped is always
+                           //     immediate). Combined style + section switch.
 };
 
 struct Command {
