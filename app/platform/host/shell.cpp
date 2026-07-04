@@ -272,6 +272,64 @@ bool parse_section(const std::string& s, SectionType& out) {
   return false;
 }
 
+// Structural label of a section type (the inverse of parse_section). The
+// spellings match parse_section, so a listing round-trips through
+// `style section <name>`.
+const char* section_type_name(SectionType type) {
+  switch (type) {
+    case SectionType::kIntro1:
+      return "intro1";
+    case SectionType::kIntro2:
+      return "intro2";
+    case SectionType::kVarA:
+      return "varA";
+    case SectionType::kVarB:
+      return "varB";
+    case SectionType::kVarC:
+      return "varC";
+    case SectionType::kVarD:
+      return "varD";
+    case SectionType::kFillA:
+      return "fillA";
+    case SectionType::kFillB:
+      return "fillB";
+    case SectionType::kFillC:
+      return "fillC";
+    case SectionType::kFillD:
+      return "fillD";
+    case SectionType::kBreak:
+      return "break";
+    case SectionType::kEnding1:
+      return "ending1";
+    case SectionType::kEnding2:
+      return "ending2";
+  }
+  return "?";
+}
+
+// Case-insensitive comparison of a C string against a std::string (ASCII).
+bool iequals(const char* a, const std::string& b) {
+  std::size_t i = 0;
+  for (; a[i] != '\0' && i < b.size(); ++i) {
+    if (std::tolower(static_cast<unsigned char>(a[i])) !=
+        std::tolower(static_cast<unsigned char>(b[i]))) {
+      return false;
+    }
+  }
+  return a[i] == '\0' && i == b.size();
+}
+
+// Resolves a style name to its builtin index, case-insensitively (a superset of
+// how `style load` maps names to indices). Returns -1 when nothing matches.
+int find_builtin_style(const std::string& name) {
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+    if (iequals(styles::kBuiltins[i]->name, name)) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
 bool parse_role(const std::string& s, TrackRole& out) {
   struct Entry {
     const char* name;
@@ -1014,11 +1072,22 @@ bool Shell::cmd_filter(const std::vector<std::string>& t, std::string& error) {
 bool Shell::cmd_view(const std::vector<std::string>& t, std::string& error) {
   static const char* kUsage =
       "view show note-names|note-numbers|velocity|channel|port on|off | "
-      "view show-octaves boundary|all|none | view clear";
+      "view show-octaves boundary|all|none | view external-keys on|off | view clear";
 
   if (t.size() < 2) {
     error = kUsage;
     return false;
+  }
+
+  if (t[1] == "external-keys") {
+    if (t.size() < 3 || (t[2] != "on" && t[2] != "off")) {
+      error = "view external-keys on|off";
+      return false;
+    }
+    // Lights arranger/sequencer notes on the keyboard too (H3 overlay).
+    m_view_options.show_external_keys = t[2] == "on";
+    (void)push_panels();
+    return true;
   }
 
   if (t[1] == "clear") {
@@ -1671,6 +1740,29 @@ bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
 
 bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
   const std::string& verb = t[1];
+
+  // Prints one line per section of `style`. `mark_current` annotates the
+  // arranger's active section (only meaningful for the loaded style).
+  auto print_sections = [this](const Style& style, bool mark_current) {
+    const SectionType current = m_engine.arranger().current();
+    const bool loaded = m_engine.arranger().loaded();
+    for (const StyleSection& s : style.sections) {
+      std::string line = section_type_name(s.type);
+      if (mark_current && loaded && current == s.type) {
+        line += "  (current)";
+      }
+      print_line(line);
+    }
+  };
+
+  // `style list` — every builtin as `index  name`.
+  if (verb == "list") {
+    for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+      print_line(std::to_string(static_cast<int>(i)) + "  " + styles::kBuiltins[i]->name);
+    }
+    return true;
+  }
+
   Command c;
   if (verb == "load" && t.size() >= 3) {
     // Built-in styles resolve by name host-side (D26).
@@ -1712,6 +1804,13 @@ bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
     return true;
   }
   if (verb == "section" && t.size() >= 3) {
+    // `style section list` — the CURRENTLY loaded style's sections. The shell
+    // tracks no current-style index and the arranger exposes no style pointer,
+    // so with a single builtin the loaded style is kBuiltins[0].
+    if (t[2] == "list") {
+      print_sections(*styles::kBuiltins[0], /*mark_current=*/true);
+      return true;
+    }
     SectionType type = SectionType::kVarA;
     if (!parse_section(t[2], type)) {
       error = "unknown section: " + t[2];
@@ -1722,7 +1821,17 @@ bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
     m_engine.push_command(c, m_sink);
     return true;
   }
-  error = "style load|route|section ...";
+  // `style <name> section list` — a named builtin style's sections.
+  if (t.size() >= 4 && t[2] == "section" && t[3] == "list") {
+    const int idx = find_builtin_style(verb);
+    if (idx < 0) {
+      error = "unknown style: " + verb;
+      return false;
+    }
+    print_sections(*styles::kBuiltins[idx], /*mark_current=*/false);
+    return true;
+  }
+  error = "style list | load|route|section ... | [<name>] section list";
   return false;
 }
 
