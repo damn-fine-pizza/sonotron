@@ -46,6 +46,14 @@ inline constexpr std::uint8_t kAsciiDigitHigh = '9';
 inline constexpr std::uint8_t kPianoInputPort = 0;
 inline constexpr std::uint8_t kPianoReleaseVelocity = 64;
 
+// Toggle-mode auto-repeat debounce window (microseconds). OS key auto-repeat is
+// typically an initial delay of ~250-500 ms then a sustained ~30 ms cadence; a
+// window this wide swallows the sustained machine-gun (and slides forward on
+// every repeat, so a held key stays one note). Toggle mode cannot perfectly tell
+// a fast intentional re-tap from auto-repeat — that is why kitty/momentary is
+// preferred — but this stops the flood.
+inline constexpr std::uint64_t kToggleAutoRepeatDebounceUs = 300'000;
+
 // Piano policy limits (docs/TUI_SPEC.md §4) and MIDI wire ranges.
 inline constexpr int kPianoMinOctave = -1;
 inline constexpr int kPianoMaxOctave = 9;

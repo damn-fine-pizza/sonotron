@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -120,6 +121,19 @@ class Shell {
   bool piano_key_event(char key, bool pressed);
 
   PianoKeyMode piano_key_mode() const { return m_piano_key_mode; }
+
+  // The live loop injects the current wall-clock (monotonic microseconds) before
+  // it processes a batch of REPL input, so the toggle-mode auto-repeat debounce
+  // (toggle_piano_key) can measure key cadence WITHOUT the Shell ever touching a
+  // real clock — that keeps the debounce unit-testable with an injected time.
+  // Left at 0 (the default) the debounce is inert, so tests that never inject a
+  // time keep their exact toggle-on/toggle-off behaviour.
+  void set_input_time_us(std::uint64_t us) { m_input_time_us = us; }
+
+  // True if the byte maps to a musical piano key. The live loop uses this to
+  // drop kitty keyboard-protocol autorepeat (kRepeat) events for musical keys,
+  // so a physically-held key can never re-fire a note-on.
+  bool piano_is_musical_key(std::uint8_t byte) const { return piano_binding_for(byte) != nullptr; }
 
   // The style/section chooser dissolved into the always-present styles panel:
   // it is ALWAYS constructed and always rendered. Interactions (digits, arrows,
@@ -338,6 +352,13 @@ class Shell {
   PianoKeyMode m_piano_key_mode = PianoKeyMode::kMomentary;  // default: momentary
   bool m_momentary_available = true;  // cleared when the terminal has no key-release
   char m_pending_source_key = 0;      // annotates monitor events while feeding
+  // Toggle-mode auto-repeat debounce (H3): a plain TTY delivers OS key
+  // auto-repeat as a stream of identical bytes; without this each repeat would
+  // flip the note on/off/on/off ("a manetta"). m_input_time_us is the injected
+  // clock; m_toggle_last_us[note] is the last toggle attempt time for that MIDI
+  // note (0 = never / clock un-injected -> debounce inert).
+  std::uint64_t m_input_time_us = 0;
+  std::array<std::uint64_t, 128> m_toggle_last_us{};
   std::vector<PortDef> m_ports;
   std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)
   std::vector<std::string> m_seqs;
