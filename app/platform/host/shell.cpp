@@ -422,7 +422,10 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "help: piano",
         "  panel open piano, then TAB to enter/leave play mode",
         "  white: A S D F G H J K L ; '           black: W E T Y U O P",
-        "  press = note-on, same key again = note-off (no key-release in ttys)",
+        "  SPACE toggles key mode: momentary (default) <-> toggle",
+        "  momentary: hold to sound, release to stop (needs a kitty-protocol",
+        "             terminal: kitty/foot/ghostty/wezterm/recent xterm)",
+        "  toggle:    press = note-on, same key again = note-off (any terminal)",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
         "  play keys: TAB exit | N names | V view | C clear | . octave- | / octave+",
@@ -605,53 +608,103 @@ bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
 
 void Shell::print_line(const std::string& line) { print_lines({line}); }
 
-void Shell::toggle_piano_key(char key, int semitone_from_base) {
-  // Toggle note-off policy (H2): terminals deliver no key-release events,
-  // so pressing the same key again releases the note.
+bool Shell::piano_midi_note(int semitone_from_base, std::uint8_t& out) const {
   const int note = (m_piano.base_octave + 1) * kSemitonesPerOctave + semitone_from_base;
-
   if (note < 0 || note > kMidiNoteMax) {
-    print_line("piano: note out of MIDI range (octave " + std::to_string(m_piano.base_octave) +
-               ")");
-    return;
+    return false;
   }
-  const std::uint8_t midi_note = static_cast<std::uint8_t>(note);
+  out = static_cast<std::uint8_t>(note);
+  return true;
+}
 
-  bool held = false;
+bool Shell::piano_note_held(std::uint8_t midi_note) const {
   for (std::size_t i = 0; i < m_piano_held.size(); ++i) {
     const ActiveNote& n = m_piano_held.notes()[i];
     if (n.note == midi_note && n.channel == m_piano.channel) {
-      held = true;
-      break;
+      return true;
     }
   }
+  return false;
+}
 
+void Shell::piano_send_note(char key, std::uint8_t midi_note, bool note_on) {
+  // Every piano note goes through the same feed_midi -> push_midi_in path real
+  // hardware uses (docs/TUI_SPEC.md §1.3): the piano is an input device, never
+  // a shortcut into the engine.
   std::uint8_t bytes[3];
-  if (held) {
-    bytes[0] = static_cast<std::uint8_t>(midi::kNoteOff | m_piano.channel);
-    bytes[1] = midi_note;
-    bytes[2] = kPianoReleaseVelocity;
-    m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
-  } else {
-    bytes[0] = static_cast<std::uint8_t>(midi::kNoteOn | m_piano.channel);
-    bytes[1] = midi_note;
-    bytes[2] = m_piano.velocity;
-    if (!m_piano_held.note_on({.port = kPianoInputPort,
-                               .channel = m_piano.channel,
-                               .note = midi_note,
-                               .velocity = m_piano.velocity,
-                               .source_key = key,
-                               .start_tick = 0})) {
-      print_line("piano: too many held notes");
-      return;
-    }
-  }
+  bytes[0] =
+      static_cast<std::uint8_t>((note_on ? midi::kNoteOn : midi::kNoteOff) | m_piano.channel);
+  bytes[1] = midi_note;
+  bytes[2] = note_on ? m_piano.velocity : kPianoReleaseVelocity;
 
   m_pending_source_key = key;
   feed_midi(kPianoInputPort, Span<const std::uint8_t>(bytes, sizeof(bytes)));
   m_pending_source_key = 0;
 
   (void)push_panels();
+}
+
+void Shell::toggle_piano_key(char key, int semitone_from_base) {
+  // Toggle note-off policy (H2): a plain TTY delivers no key-release events,
+  // so pressing the same key again releases the note. This is also the
+  // fallback the plain-byte path always uses, even in momentary mode.
+  std::uint8_t midi_note = 0;
+  if (!piano_midi_note(semitone_from_base, midi_note)) {
+    print_line("piano: note out of MIDI range (octave " + std::to_string(m_piano.base_octave) +
+               ")");
+    return;
+  }
+
+  if (piano_note_held(midi_note)) {
+    m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
+    piano_send_note(key, midi_note, false);
+    return;
+  }
+
+  if (!m_piano_held.note_on(
+          {kPianoInputPort, m_piano.channel, midi_note, m_piano.velocity, key, 0})) {
+    print_line("piano: too many held notes");
+    return;
+  }
+  piano_send_note(key, midi_note, true);
+}
+
+void Shell::piano_momentary_on(char key, int semitone_from_base) {
+  // Momentary note-on (kitty key-down): sound the note unless it is already
+  // sounding. Autorepeat re-presses land here too, so the held check keeps a
+  // physically-held key from double-firing note-on.
+  std::uint8_t midi_note = 0;
+  if (!piano_midi_note(semitone_from_base, midi_note)) {
+    print_line("piano: note out of MIDI range (octave " + std::to_string(m_piano.base_octave) +
+               ")");
+    return;
+  }
+
+  if (piano_note_held(midi_note)) {
+    return;
+  }
+
+  if (!m_piano_held.note_on(
+          {kPianoInputPort, m_piano.channel, midi_note, m_piano.velocity, key, 0})) {
+    print_line("piano: too many held notes");
+    return;
+  }
+  piano_send_note(key, midi_note, true);
+}
+
+void Shell::piano_momentary_off(char key, int semitone_from_base) {
+  // Momentary note-off (kitty key-up): release the note only if we were
+  // sounding it.
+  std::uint8_t midi_note = 0;
+  if (!piano_midi_note(semitone_from_base, midi_note)) {
+    return;
+  }
+
+  if (!piano_note_held(midi_note)) {
+    return;
+  }
+  m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
+  piano_send_note(key, midi_note, false);
 }
 
 void Shell::piano_all_notes_off() {
@@ -1001,6 +1054,17 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return false;  // help/filter focus: keys fall through to the editor
   }
 
+  // SPACE flips the key mode (momentary <-> toggle). It is a mode switch only
+  // in piano focus and is never a musical note.
+  if (byte == ' ') {
+    m_piano_key_mode = m_piano_key_mode == PianoKeyMode::kMomentary ? PianoKeyMode::kToggle
+                                                                    : PianoKeyMode::kMomentary;
+    print_line(m_piano_key_mode == PianoKeyMode::kMomentary
+                   ? "piano: momentary key mode (hold to sound; needs a kitty-protocol terminal)"
+                   : "piano: toggle key mode (press = on, same key again = off)");
+    return true;
+  }
+
   const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
 
   // Piano-focus shortcuts take priority over musical keys (none collide).
@@ -1038,22 +1102,60 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
       break;
   }
 
-  // Musical keys (case-insensitive; ';' and '\'' have no upper form).
-  for (const PianoKeyBinding& binding : default_keymap_white()) {
-    if (binding.key == upper || binding.key == static_cast<char>(byte)) {
-      toggle_piano_key(binding.key, binding.semitone_from_base);
-      return true;
-    }
-  }
-  for (const PianoKeyBinding& binding : default_keymap_black()) {
-    if (binding.key == upper) {
-      toggle_piano_key(binding.key, binding.semitone_from_base);
-      return true;
-    }
+  // Musical keys: the plain-byte path is ALWAYS toggle (a plain TTY cannot see
+  // key-release), so the piano is playable on every terminal even in momentary
+  // mode. True momentary press/release arrives via piano_key_event instead.
+  if (const PianoKeyBinding* binding = piano_binding_for(byte); binding != nullptr) {
+    toggle_piano_key(binding->key, binding->semitone_from_base);
+    return true;
   }
 
   // Piano focus swallows everything else so stray keys never leak into a
   // half-typed REPL command.
+  return true;
+}
+
+const PianoKeyBinding* Shell::piano_binding_for(std::uint8_t byte) const {
+  // Case-insensitive; ';' and '\'' have no upper form so they match by byte.
+  const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
+  for (const PianoKeyBinding& binding : default_keymap_white()) {
+    if (binding.key == upper || binding.key == static_cast<char>(byte)) {
+      return &binding;
+    }
+  }
+  for (const PianoKeyBinding& binding : default_keymap_black()) {
+    if (binding.key == upper) {
+      return &binding;
+    }
+  }
+  return nullptr;
+}
+
+bool Shell::piano_key_event(char key, bool pressed) {
+  // Only piano focus turns keys into notes (matches handle_ui_key). Non-piano
+  // focus lets the caller fall back to the normal byte path.
+  if (m_panels.focus_kind() != PanelFocus::kPanel || m_panels.focused_panel() != PanelId::kPiano) {
+    return false;
+  }
+
+  const PianoKeyBinding* binding = piano_binding_for(static_cast<std::uint8_t>(key));
+  if (binding == nullptr) {
+    return false;  // TAB / SPACE / shortcuts: caller drives the byte path
+  }
+
+  if (m_piano_key_mode == PianoKeyMode::kToggle) {
+    // In toggle mode a key-down toggles; the key-up carries no meaning.
+    if (pressed) {
+      toggle_piano_key(binding->key, binding->semitone_from_base);
+    }
+    return true;
+  }
+
+  if (pressed) {
+    piano_momentary_on(binding->key, binding->semitone_from_base);
+  } else {
+    piano_momentary_off(binding->key, binding->semitone_from_base);
+  }
   return true;
 }
 

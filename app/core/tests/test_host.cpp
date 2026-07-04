@@ -10,6 +10,7 @@
 #include "arrangrr/transport/transport.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
+#include "kitty_keys.hpp"
 #include "shell.hpp"
 #include "test.hpp"
 
@@ -800,6 +801,102 @@ void test_piano_focus_shortcuts() {
   CHECK(f.shell.handle_ui_key('1'));
 }
 
+void test_kitty_key_parser() {
+  using Type = KittyKeyEvent::Type;
+
+  // Bare code = press (event type defaults to 1).
+  auto a = parse_kitty_key("97");
+  CHECK(a.has_value() && a->code == 97 && a->type == Type::kPress);
+
+  // Explicit press / repeat / release event types.
+  auto press = parse_kitty_key("97;1u");  // trailing 'u' tolerated
+  CHECK(press.has_value() && press->code == 97 && press->type == Type::kPress);
+  auto repeat = parse_kitty_key("97;1:2");
+  CHECK(repeat.has_value() && repeat->type == Type::kRepeat);
+  auto release = parse_kitty_key("97;1:3");
+  CHECK(release.has_value() && release->code == 97 && release->type == Type::kRelease);
+
+  // Extra key/text sub-fields are skipped; the base code still parses.
+  auto shifted = parse_kitty_key("59:58;2:3");  // ';' key, shift modifier, release
+  CHECK(shifted.has_value() && shifted->code == 59 && shifted->type == Type::kRelease);
+
+  // Malformed / non-events -> nullopt (a plain letter is not a kitty event).
+  CHECK(!parse_kitty_key("a").has_value());
+  CHECK(!parse_kitty_key("").has_value());
+  CHECK(!parse_kitty_key(";1").has_value());      // no key code
+  CHECK(!parse_kitty_key("97;1:9").has_value());  // unknown event type
+}
+
+void test_piano_momentary_mode() {
+  PianoFixture f;
+  // Default is momentary: true press/release drive note-on/off.
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // 'A' pressed = note-on for MIDI 60 through the normal feed_midi path.
+  CHECK(f.shell.piano_key_event('A', true));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.events.back().msg.type() == midi::kNoteOn);
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+
+  // Re-press without release (autorepeat) must NOT double note-on.
+  CHECK(f.shell.piano_key_event('A', true));
+  CHECK(f.note_ons() == 1);
+
+  // Release = matching note-off.
+  CHECK(f.shell.piano_key_event('A', false));
+  CHECK(f.note_offs() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // A release with nothing held is a no-op, not a spurious note-off.
+  const int offs = f.note_offs();
+  CHECK(f.shell.piano_key_event('A', false));
+  CHECK(f.note_offs() == offs);
+
+  // Polyphony: two distinct keys held together.
+  CHECK(f.shell.piano_key_event('A', true));  // 60
+  CHECK(f.shell.piano_key_event('S', true));  // 62
+  CHECK(f.shell.monitor().active_notes().size() == 2);
+  CHECK(f.shell.piano_key_event('A', false));
+  CHECK(f.shell.piano_key_event('S', false));
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+}
+
+void test_piano_space_toggles_mode() {
+  PianoFixture f;
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // SPACE flips the mode and is never a musical note.
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+  CHECK(f.note_ons() == 0);
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+  CHECK(f.note_ons() == 0);
+
+  // In kToggle, piano_key_event presses toggle and releases are ignored.
+  CHECK(f.shell.handle_ui_key(' '));  // -> kToggle
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+  CHECK(f.shell.piano_key_event('A', true));  // note-on
+  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.piano_key_event('A', false));  // release ignored in toggle mode
+  CHECK(f.note_offs() == 0);
+  CHECK(f.shell.piano_key_event('A', true));  // same key again = note-off
+  CHECK(f.note_offs() == 1);
+}
+
+void test_piano_plain_bytes_always_toggle() {
+  // The plain-byte path is toggle even in momentary mode, so a terminal
+  // without the kitty protocol still plays (graceful degradation).
+  PianoFixture f;
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+  CHECK(f.shell.handle_ui_key('a'));  // press = note-on
+  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.handle_ui_key('a'));  // same key again = note-off
+  CHECK(f.note_offs() == 1);
+}
+
 void test_tab_enters_piano_from_repl() {
   ShellFixture f;
   CHECK(f.run("panel open piano"));
@@ -953,6 +1050,10 @@ int main() {
   test_filter_view_commands();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();
+  test_kitty_key_parser();
+  test_piano_momentary_mode();
+  test_piano_space_toggles_mode();
+  test_piano_plain_bytes_always_toggle();
   test_tab_enters_piano_from_repl();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
