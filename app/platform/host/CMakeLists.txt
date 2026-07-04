@@ -14,6 +14,7 @@ add_library(arrangrr_host STATIC
   console.cpp
   kitty_keys.cpp
   note_names.cpp
+  gm_program.cpp
   panel_manager.cpp
   piano_view.cpp
   midi_monitor.cpp

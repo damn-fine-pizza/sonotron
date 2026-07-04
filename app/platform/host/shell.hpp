@@ -233,6 +233,7 @@ class Shell {
   bool seq_transpose(const std::vector<std::string>& tokens, std::string& error);
   bool seq_del(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_track(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_program(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);

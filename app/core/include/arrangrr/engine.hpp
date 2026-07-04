@@ -118,6 +118,7 @@ class Engine {
   void cmd_seq(const Command& cmd, EventSink sink);
   void cmd_track(const Command& cmd, EventSink sink);
   void cmd_style(const Command& cmd, EventSink sink);
+  void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
 
   void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
     if (!m_scheduler.schedule(port, tick, msg)) {

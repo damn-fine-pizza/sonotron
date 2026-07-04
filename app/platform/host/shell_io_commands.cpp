@@ -54,6 +54,16 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  track mute|solo <name> on|off",
     };
   }
+  if (topic == "program") {
+    return {
+        "help: program  (choose the GM voice, so arrangrr picks the sound)",
+        "  program <port>[:ch] <voice>   ch 1..16 (default 1)",
+        "  <voice> = GM number 0..127, or a name matched uniquely: trumpet,",
+        "            violin, flute, marimba, finger (=fingered bass), pad-2-warm",
+        "  ambiguous families (piano, strings, pad) need a number or fuller name",
+        "  e.g. program synth:2 trumpet | program synth 0 | program synth 48",
+    };
+  }
   if (topic == "midi") {
     return {
         "help: midi",
@@ -132,6 +142,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
       "  seq    - chord progressions        (help seq)",
       "  style  - the arranger band         (help style)",
       "  track  - step sequencer            (help track)",
+      "  program- pick the GM voice         (help program)",
       "  midi   - ports, routing, panic     (help midi)",
       "  panel  - help/piano/filter panels  (help panel)",
       "  piano  - simulated keyboard        (help piano)",

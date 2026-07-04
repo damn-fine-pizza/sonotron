@@ -3,6 +3,8 @@
 
 #include <cstdlib>
 
+#include "gm_program.hpp"
+
 // Shell command handlers for the musical surface: key, chord/play, style,
 // sequences and step tracks. Bodies moved verbatim from shell.cpp; see
 // shell_io_commands.cpp for the MIDI/transport I/O commands.
@@ -180,6 +182,43 @@ bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
   }
   error = "chord play|stop|hold|out ...";
   return false;
+}
+
+bool Shell::cmd_program(const std::vector<std::string>& t, std::string& error) {
+  // program <port>[:ch] <GM voice>   e.g. program synth:2 trumpet | program synth 40
+  std::string port_name;
+  int channel = -1;
+  if (!split_port_channel(t[1], port_name, channel)) {
+    error = "bad program destination: " + t[1];
+    return false;
+  }
+  const int port = find_port(port_name, false);
+  if (port < 0) {
+    error = "unknown output port: " + port_name;
+    return false;
+  }
+  // Join the trailing tokens so multi-word GM names survive the tokenizer
+  // ("program synth electric piano 1"); parse_gm_program also takes a number.
+  std::string voice = t[2];
+  for (std::size_t i = 3; i < t.size(); ++i) {
+    voice += ' ';
+    voice += t[i];
+  }
+  const int program = parse_gm_program(voice);
+  if (program < 0) {
+    error = "unknown GM voice: " + voice;
+    return false;
+  }
+  const int ch = channel < 0 ? 0 : channel;  // default channel 1 (0-based 0)
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kProgram;
+  c.a = program;
+  c.b = port | (ch << 8);
+  m_engine.push_command(c, m_sink);
+  console_output("program " + port_name + ":" + std::to_string(ch + 1) + " -> " +
+                 std::to_string(program) + " " + gm_program_name(static_cast<std::uint8_t>(program)));
+  return true;
 }
 
 bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {

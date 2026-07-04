@@ -75,6 +75,10 @@ enum class Param : std::uint16_t {
                            //     notes on the input port re-harmonize the
                            //     arranger, chord-memory hold-last), b = input
                            //     port. Distinct from the reserved kChordHold.
+  kProgram = 35,           // set: a = GM program (0..127), b = port |
+                           //     (channel_0based << 8). Sends a Program Change
+                           //     so the arrangrr picks the voice, not just the
+                           //     external synth.
 };
 
 struct Command {

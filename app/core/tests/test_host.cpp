@@ -7,6 +7,7 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/arranger/arranger.hpp"
+#include "gm_program.hpp"
 #include "arrangrr/transport/transport.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
@@ -374,6 +375,46 @@ void test_shell_chord_detect_panel() {
 
   CHECK(f.run("chord detect off"));
   CHECK(block_contains(panel, "detect: off"));
+}
+
+void test_gm_program_parsing() {
+  CHECK(parse_gm_program("0") == 0);
+  CHECK(parse_gm_program("127") == 127);
+  CHECK(parse_gm_program("128") == -1);        // out of range
+  CHECK(parse_gm_program("-1") == -1);
+  CHECK(parse_gm_program("trumpet") == 56);    // exact name
+  CHECK(parse_gm_program("Trumpet") == 56);    // case-insensitive
+  CHECK(parse_gm_program("acoustic-grand-piano") == 0);  // hyphen-normalized
+  CHECK(parse_gm_program("Electric Piano 1") == 4);      // spaces normalized
+  CHECK(parse_gm_program("finger") == 33);     // unique substring: Electric Bass (finger)
+  CHECK(parse_gm_program("violin") == 40);     // exact single name
+  CHECK(parse_gm_program("pad") == -1);        // ambiguous (Pad 1..8) -> reject
+  CHECK(parse_gm_program("piano") == -1);      // ambiguous family -> reject, use a number
+  CHECK(parse_gm_program("zzznope") == -1);    // unknown
+  CHECK(std::string(gm_program_name(56)) == "Trumpet");
+}
+
+void test_shell_program_command() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("program synth 0"));                 // by number, default channel 1
+  CHECK(f.run("program synth:2 trumpet"));         // name + explicit channel
+  CHECK(f.run("program synth electric piano 1"));  // multi-word GM name
+  CHECK(!f.run("program synth 200"));              // out of range
+  CHECK(!f.run("program synth zzznope"));          // unknown voice
+  CHECK(!f.run("program nowhere 0"));              // unknown port
+  int programs = 0;
+  int trumpet_ch2 = 0;
+  for (const OutEvent& o : f.events) {
+    if (o.kind == OutEvent::Kind::kMidi && (o.msg.status & 0xF0) == 0xC0) {
+      ++programs;
+      if (o.msg.d1 == 56 && (o.msg.status & 0x0F) == 1) {  // trumpet on channel 2 (0-based 1)
+        ++trumpet_ch2;
+      }
+    }
+  }
+  CHECK(programs == 3);
+  CHECK(trumpet_ch2 == 1);
 }
 
 void test_shell_chord_modes_cli() {
@@ -1639,6 +1680,8 @@ int main() {
   test_note_name_parsing();
   test_shell_chord_commands();
   test_shell_chord_detect_panel();
+  test_gm_program_parsing();
+  test_shell_program_command();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();

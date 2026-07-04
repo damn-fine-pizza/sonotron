@@ -53,6 +53,9 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kStyleSwitch:
       cmd_style(cmd, sink);
       break;
+    case Param::kProgram:
+      cmd_voice(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -438,6 +441,24 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       break;
     }
   }
+}
+
+// Voice selection: a Program Change on a port+channel so the arranger (or the
+// user) picks the GM instrument, instead of leaving the timbre to the synth.
+void Engine::cmd_voice(const Command& cmd, EventSink sink) {
+  if (cmd.param != Param::kProgram) {
+    sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
+    return;
+  }
+  const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
+  const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
+  if (cmd.a < 0 || cmd.a > 127 || port >= kMaxPorts || channel > 15) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  schedule_or_warn(port, m_now, MidiMessage::program(channel, static_cast<std::uint8_t>(cmd.a)),
+                   sink);
+  flush(sink);
 }
 
 }  // namespace arrangrr

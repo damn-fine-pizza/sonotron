@@ -101,6 +101,10 @@ struct MidiMessage {
                                   std::uint8_t value) noexcept {
     return {.status=static_cast<std::uint8_t>(midi::kControlChange | (ch & 0x0Fu)), .d1=controller, .d2=value};
   }
+  // Program Change: one data byte (GM program 0..127); d2 is unused.
+  static constexpr MidiMessage program(std::uint8_t ch, std::uint8_t num) noexcept {
+    return {.status=static_cast<std::uint8_t>(midi::kProgramChange | (ch & 0x0Fu)), .d1=num, .d2=0};
+  }
   static constexpr MidiMessage realtime(std::uint8_t status) noexcept { return {.status=status, .d1=0, .d2=0}; }
 };
 static_assert(sizeof(MidiMessage) == 3);

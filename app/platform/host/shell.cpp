@@ -446,6 +446,9 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   if (cmd == "track" && t.size() >= 3) {
     return cmd_track(t, error);
   }
+  if (cmd == "program" && t.size() >= 3) {
+    return cmd_program(t, error);
+  }
   return std::nullopt;
 }
 
