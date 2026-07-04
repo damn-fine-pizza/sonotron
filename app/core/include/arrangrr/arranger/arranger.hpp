@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/arranger/style.hpp"
-#include "arrangrr/chord/chord_engine.hpp"
+#include "arrangrr/chord/theory.hpp"  // ChordState, ChordShape, theory::shape_of
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/config.hpp"

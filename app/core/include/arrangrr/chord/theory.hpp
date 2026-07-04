@@ -49,6 +49,18 @@ struct ChordShape {
   std::uint8_t offsets[4] = {0, 0, 0, 0};
 };
 
+// The live harmonic context the arranger's NTT resolution (D24) resolves
+// against: a pitch class + quality, `valid` until the first chord sounds. Set
+// by the ChordEngine (chord play / recorded ChordSequencer) and by live
+// piano->chord detection. Lives here as a pure-theory type so both the chord
+// engine and the freestanding ChordDetector can name it without pulling in
+// MIDI/host headers.
+struct ChordState {
+  std::uint8_t root_pc = 0;
+  ChordQuality quality = ChordQuality::kMaj;
+  bool valid = false;  // false until the first chord sounds
+};
+
 namespace theory {
 
 // Scale intervals per mode (rotations of the major scale).

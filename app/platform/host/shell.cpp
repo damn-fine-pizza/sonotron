@@ -87,7 +87,8 @@ Shell::Shell(EventSink sink)
       }),
       m_chooser(build_style_infos()) {
   m_panels.set_content(PanelId::kFilter, {"filter: channel|port|event|clear (help filter)"});
-  m_panels.set_content(PanelId::kChords, {"(chord detection: not wired yet)"});
+  m_panels.set_content(PanelId::kChords,
+                       {"detect: off  (chord detect on|off)", "chord: (no chord)"});
 }
 
 void Shell::print_lines(const std::vector<std::string>& lines) {
@@ -137,6 +138,43 @@ void Shell::refresh_styles_content() {
     lines.insert(lines.end() - 1, std::move(key_line));  // before the hint line
   }
   m_panels.set_content(PanelId::kStyles, std::move(lines));
+}
+
+namespace {
+// Jazz/lead-sheet suffix for a chord quality ("" = plain major, so root only).
+const char* chord_quality_suffix(ChordQuality q) {
+  switch (q) {
+    case ChordQuality::kMaj:      return "";
+    case ChordQuality::kMin:      return "m";
+    case ChordQuality::kDim:      return "dim";
+    case ChordQuality::kAug:      return "aug";
+    case ChordQuality::kMaj7:     return "maj7";
+    case ChordQuality::kMin7:     return "m7";
+    case ChordQuality::kDom7:     return "7";
+    case ChordQuality::kHalfDim7: return "m7b5";
+    case ChordQuality::kDim7:     return "dim7";
+    case ChordQuality::kSus2:     return "sus2";
+    case ChordQuality::kSus4:     return "sus4";
+  }
+  return "";
+}
+}  // namespace
+
+void Shell::refresh_chords_content() {
+  // The chords panel reports the live piano->chord state: whether detection is
+  // armed and the chord the arranger is currently harmonizing against (set by
+  // held keys, `chord play`, or a recorded sequence). Chord memory means the
+  // name lingers after the keys are released, until a new chord is played.
+  const ChordState& chord = m_engine.chords().state();
+  const bool detect = m_engine.chord_detect();
+  const NoteNameOptions opts{
+      .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
+  std::vector<std::string> lines;
+  lines.push_back(std::string("detect: ") + (detect ? "on " : "off") + "  (chord detect on|off)");
+  lines.push_back(chord.valid ? "chord: " + pitch_class_name(chord.root_pc, opts) +
+                                    chord_quality_suffix(chord.quality)
+                              : "chord: (no chord)");
+  m_panels.set_content(PanelId::kChords, std::move(lines));
 }
 
 UiMode Shell::current_ui_mode() const {
@@ -191,6 +229,9 @@ bool Shell::push_panels() {
   refresh_styles_content();  // the styles panel always reflects the chooser + key
   if (m_panels.visible(PanelId::kPiano)) {
     refresh_piano_content();
+  }
+  if (m_panels.visible(PanelId::kChords)) {
+    refresh_chords_content();
   }
 
   return m_panel_hook &&

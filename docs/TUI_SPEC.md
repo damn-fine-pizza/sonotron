@@ -212,6 +212,25 @@ The following spellings are explicitly rejected — if a command handler for any
 | `help open <topic>` | `help <topic>` |
 | `<any-panel> toggle` (bespoke, panel-specific) | `panel toggle <panel>` |
 
+### 3.8 `chord detect` — live piano→chord harmonizer surface (DESIGN.md D34)
+
+This is the one command in this document whose *engine* is **not** host-only: the recognition logic is a **core-portable** `ChordDetector` + `ChordEngine::set_context` (DESIGN.md D34 / §11), so it is exempt from §1's "core impact: none allowed" rule — that rule governs the piano/monitor TUI, not this feature. What lives here is only the **host-live command and panel surface** over that core detector; the detection itself is specified in DESIGN.md, not here.
+
+**Command grammar** (L2 surface, no aliases, same rules as §3):
+
+```
+chord detect on                  # enable: notes held on the input port re-harmonize the running band
+chord detect off                 # disable live detection
+```
+
+**What it does, from the player's point of view.** With `chord detect on` and the arranger playing, holding a chord on the simulated piano (or any external keyboard on the input port) makes the whole band follow that chord — bass and comping re-harmonize in real time, like a pro arranger keyboard. The keys you hold still sound through normal routing; detection only *steers* the arranger, so there is no doubled voicing. A chord is recognized once **≥3 notes** are held (lowest note = root, notes above complete the quality).
+
+**Chord-memory (hold-last).** Releasing the keys does **not** stop the band or clear the chord: dropping below 3 held notes leaves the **last** recognized chord in place, and the arranger keeps playing on it until you hold a new chord. Lifting your hands is not a reset — a new chord replaces the old one, silence does not.
+
+**`kChords` panel readout.** The existing `kChords` panel (previously a placeholder) now renders the **live-recognized chord name** (e.g. `C maj7`, `A min`) together with the **detect on/off** state; before the first chord is recognized it shows `(no chord)`. The panel is a pure readout of the engine's current harmonic context — it draws what was recognized, it does not itself recognize (consistent with §5's "state is the source of truth, renderers regenerate" rule).
+
+**Scope (MVP) and future refinement.** For the MVP the **whole** simulated keyboard acts as chord input while `chord detect` is ON — a single toggle, no split. **Keyboard split / zones** (low range = chords, high range = melody) is a documented **future refinement**, deferred out of this pass (it is core-portable too; see DESIGN.md D34 / §11's "Split & layer").
+
 ---
 
 ## 4. Piano rendering spec (two-row keys)

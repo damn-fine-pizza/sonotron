@@ -256,6 +256,7 @@ class Shell {
 
   void refresh_piano_content();
   void refresh_styles_content();
+  void refresh_chords_content();  // live piano->chord readout (detect state + name)
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
   void sync_contextual_panel();

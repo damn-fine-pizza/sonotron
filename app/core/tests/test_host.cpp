@@ -342,6 +342,38 @@ void test_shell_chord_commands() {
   CHECK(!f.run("chord out nowhere"));
   CHECK(!f.run("chord hold maybe"));
   CHECK(!f.run("chord flip"));
+  CHECK(!f.run("chord detect maybe"));  // detect wants on|off
+}
+
+void test_shell_chord_detect_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open chords"));
+  CHECK(block_contains(panel, "detect: off"));
+  CHECK(block_contains(panel, "(no chord)"));
+
+  CHECK(f.run("chord detect on"));
+  CHECK(block_contains(panel, "detect: on"));
+
+  // Hold a C major triad on the piano input port (port 0): the arranger's live
+  // chord context becomes C major, and the chords panel names it.
+  const std::uint8_t on[9] = {0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(on, sizeof(on)));
+  CHECK(f.run("chord detect on"));  // idempotent toggle repaints the panel
+  CHECK(block_contains(panel, "chord: C"));
+
+  // Chord memory: releasing the keys leaves the last chord named.
+  const std::uint8_t off[9] = {0x80, 60, 0, 0x80, 64, 0, 0x80, 67, 0};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(off, sizeof(off)));
+  CHECK(f.run("chord detect on"));
+  CHECK(block_contains(panel, "chord: C"));
+
+  CHECK(f.run("chord detect off"));
+  CHECK(block_contains(panel, "detect: off"));
 }
 
 void test_shell_chord_modes_cli() {
@@ -1606,6 +1638,7 @@ int main() {
   test_shell_track_commands();
   test_note_name_parsing();
   test_shell_chord_commands();
+  test_shell_chord_detect_panel();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();

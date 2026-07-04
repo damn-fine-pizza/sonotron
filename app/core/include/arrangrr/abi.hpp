@@ -71,6 +71,10 @@ enum class Param : std::uint16_t {
                            //     c = immediate (0 = next bar while playing,
                            //     else a hard mid-bar cut; stopped is always
                            //     immediate). Combined style + section switch.
+  kChordDetect = 34,       // set: a = 0/1 (live piano->chord detection: held
+                           //     notes on the input port re-harmonize the
+                           //     arranger, chord-memory hold-last), b = input
+                           //     port. Distinct from the reserved kChordHold.
 };
 
 struct Command {

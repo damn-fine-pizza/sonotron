@@ -10,6 +10,7 @@ arrangrr_test(test_engine)
 arrangrr_test(test_timeline)
 arrangrr_test(test_chord)
 arrangrr_test(test_chord_seq)
+arrangrr_test(test_chord_detect)
 arrangrr_test(test_arranger)
 
 arrangrr_test(test_host)

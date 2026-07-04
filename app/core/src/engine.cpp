@@ -25,6 +25,7 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kChordHold:
     case Param::kChordOut:
     case Param::kChordMode:
+    case Param::kChordDetect:
       cmd_chord(cmd, sink);
       break;
     case Param::kSeqNew:
@@ -107,6 +108,7 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
       m_tracker.panic([&](std::uint8_t port, const MidiMessage& msg) {
         schedule_or_warn(port, m_now, msg, sink);
       });
+      m_detector.clear();  // every key is up now; the latched chord stays (memory)
       flush(sink);
       break;
     case Param::kRouteAdd: {
@@ -173,6 +175,17 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
         m_chords.set_mode(static_cast<ChordMode>(cmd.a));
       }
       break;
+    case Param::kChordDetect: {
+      // Live piano->chord: a = 0/1 enable, b = input port (default 0). The
+      // held notes on that port re-harmonize the arranger in real time.
+      const std::int32_t port = cmd.b;
+      if (port < 0 || static_cast<std::size_t>(port) >= kMaxPorts) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        break;
+      }
+      set_chord_detect(cmd.a != 0, static_cast<std::uint8_t>(port));
+      break;
+    }
     case Param::kChordPlay: {
       const auto vel = static_cast<std::uint8_t>(cmd.c);
       // Up to 4 packed notes, zero-terminated (one per byte).

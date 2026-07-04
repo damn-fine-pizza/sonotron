@@ -4,6 +4,7 @@
 
 #include "arrangrr/abi.hpp"
 #include "arrangrr/arranger/arranger.hpp"
+#include "arrangrr/chord/chord_detector.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/common/function_ref.hpp"
@@ -53,10 +54,28 @@ class Engine {
         m_router.route(port, msg, [&](std::uint8_t out_port, const MidiMessage& routed) {
           schedule_or_warn(out_port, m_now, routed, sink);
         });
+        if (m_chord_detect && port == m_chord_detect_port) {
+          observe_chord_input(msg);
+        }
       });
     }
     flush(sink);
   }
+
+  // Live piano->chord (kChordDetect): whether held notes on the detect port
+  // re-harmonize the arranger. `port` selects which input keyboard is the
+  // chord source. Toggling on resets the held-note set but never the latched
+  // chord (chord memory persists).
+  void set_chord_detect(bool enabled, std::uint8_t port) noexcept {
+    if (port < kMaxPorts) {
+      m_chord_detect_port = port;
+    }
+    if (enabled && !m_chord_detect) {
+      m_detector.clear();
+    }
+    m_chord_detect = enabled;
+  }
+  constexpr bool chord_detect() const noexcept { return m_chord_detect; }
 
   // Applies one binary command (D26). Sink receives any resulting events.
   // Implemented in engine.cpp as per-domain handlers: the dispatch stays a
@@ -181,6 +200,25 @@ class Engine {
     });
   }
 
+  // Feeds one parsed message from the chord-detect port into the detector and,
+  // on each successful recognition (>= a triad), steers the arranger's chord
+  // context. A NoteOn with velocity 0 is a running-status release. Chord
+  // memory: fewer notes recognize nothing, so the last chord holds.
+  void observe_chord_input(const MidiMessage& msg) {
+    if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
+      m_detector.note_on(msg.d1);
+    } else if (msg.type() == midi::kNoteOff ||
+               (msg.type() == midi::kNoteOn && msg.d2 == 0)) {
+      m_detector.note_off(msg.d1);
+    } else {
+      return;  // non-note messages leave the held set (and the chord) untouched
+    }
+    ChordState detected;
+    if (m_detector.recognize(detected)) {
+      m_chords.set_context(detected.root_pc, detected.quality);
+    }
+  }
+
   Tick m_now = 0;
   Transport m_transport;
   MidiParser m_parsers[kMaxPorts];
@@ -189,6 +227,9 @@ class Engine {
   ChordEngine m_chords;
   ChordSequencer m_seq;
   Arranger m_arranger;
+  ChordDetector m_detector;                 // live piano->chord held-note set
+  bool m_chord_detect = false;              // kChordDetect: detection enabled
+  std::uint8_t m_chord_detect_port = 0;     // input port feeding the detector
   NoteTracker m_tracker;
   OutScheduler<kSchedulerCapacity> m_scheduler;
   std::uint8_t m_clock_out_mask = 0;  // off by default; enabled via kClockOutMask

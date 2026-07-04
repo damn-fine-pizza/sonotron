@@ -20,6 +20,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  chord mode diatonic|single|shell",
         "  play <note.. up to 4> [quality] [vel]   e.g. play D | play C E Bb | play G 7",
         "  chord play ... | chord stop | chord hold on|off | chord out <port>[:ch]",
+        "  chord detect on|off         live: held piano keys re-harmonize the band",
         "  qualities: maj min dim aug maj7 min7 m7 7 dom7 m7b5 halfdim dim7 sus2 sus4",
     };
   }
@@ -86,6 +87,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  CTRL+P play/stop (global) | ` style/section chooser | CTRL+C quit",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
+        "  chord detect on|off: held keys re-harmonize the band (chords panel)",
     };
   }
   if (topic == "styles") {
