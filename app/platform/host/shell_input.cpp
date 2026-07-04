@@ -66,6 +66,21 @@ void Shell::toggle_piano_key(char key, int semitone_from_base) {
     return;
   }
 
+  // Auto-repeat debounce: a plain TTY delivers a held key as a stream of
+  // identical bytes; without this each byte would flip the note on/off/on/off
+  // (a note "a manetta", no rhythm). Ignore a toggle that lands within the
+  // debounce window of this key's previous toggle attempt, and slide the window
+  // forward on EVERY attempt so a sustained auto-repeat stays suppressed for as
+  // long as the key is held. The clock is injected (set_input_time_us); at time
+  // 0 (never injected) the debounce is inert, preserving the simple test path.
+  const std::uint64_t now = m_input_time_us;
+  const std::uint64_t last = m_toggle_last_us[midi_note];
+  const bool debounce_armed = now != 0 && last != 0 && now >= last;
+  m_toggle_last_us[midi_note] = now;
+  if (debounce_armed && now - last < kToggleAutoRepeatDebounceUs) {
+    return;
+  }
+
   if (piano_note_held(midi_note)) {
     m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
     piano_send_note(key, midi_note, false);

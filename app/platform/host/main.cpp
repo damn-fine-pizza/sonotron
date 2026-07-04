@@ -382,7 +382,17 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       shell.piano_key_event(key, false);
       return;
     }
-    // Press or autorepeat: try the piano first, then the normal byte path.
+    // A kitty autorepeat (kRepeat) for a held MUSICAL key must never create a
+    // second note-on: the key is already sounding from its kPress, and the
+    // momentary held-check would absorb it anyway — dropping it here keeps a
+    // held key to exactly one note-on / note-off pair. Non-musical repeats still
+    // fall through so held shortcuts keep their normal byte behaviour.
+    if (ev->type == KittyKeyEvent::Type::kRepeat &&
+        shell.piano_is_musical_key(static_cast<std::uint8_t>(key))) {
+      return;
+    }
+    // Press (or a non-musical autorepeat): try the piano first, then the normal
+    // byte path.
     if (!shell.piano_key_event(key, true)) {
       (void)feed_editor_byte(static_cast<std::uint8_t>(key));
     }
@@ -576,6 +586,9 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       if (got <= 0) {
         running = false;
       } else if (tui) {
+        // Stamp the input clock so the piano's toggle-mode auto-repeat debounce
+        // can measure key cadence without the Shell touching a real clock.
+        shell.set_input_time_us(monotonic_us());
         // UI key dispatch runs before the line editor: with panel focus the
         // byte drives panels/piano; with REPL focus it falls through and typing
         // behaves exactly as before.

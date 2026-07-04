@@ -1538,6 +1538,123 @@ void test_piano_plain_bytes_always_toggle() {
   CHECK(f.note_offs() == 1);
 }
 
+void test_piano_toggle_autorepeat_debounce() {
+  // The bug: in toggle mode (the plain-TTY fallback, no key-release), holding a
+  // piano key makes the OS auto-repeat the keystroke — a stream of identical
+  // bytes. Without a debounce each byte flips the note on/off/on/off, a flood
+  // "a manetta" with no rhythm. The fix ignores toggles that land within the
+  // debounce window of the key's previous toggle, driven by an injected clock.
+  constexpr std::uint64_t kDebounceUs = 300'000;  // mirrors kToggleAutoRepeatDebounceUs
+
+  PianoFixture f;
+  CHECK(f.shell.handle_ui_key(' '));  // momentary -> toggle
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+
+  // First press sounds MIDI 60 ('a' at octave 4).
+  std::uint64_t t = 1'000'000;  // any non-zero base
+  f.shell.set_input_time_us(t);
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.note_offs() == 0);
+
+  // A sustained auto-repeat burst (~30 ms cadence) inside the window is fully
+  // swallowed: no machine-gun. The note simply stays held for as long as the
+  // key is down, because every repeat slides the window forward.
+  for (int i = 0; i < 30; ++i) {
+    t += 30'000;
+    f.shell.set_input_time_us(t);
+    CHECK(f.shell.handle_ui_key('a'));
+  }
+  CHECK(f.note_ons() == 1);   // still exactly one note-on
+  CHECK(f.note_offs() == 0);  // and never toggled off
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+
+  // A genuine re-tap AFTER the window is quiet long enough to be a fresh
+  // keystroke, so it toggles the note off.
+  t += kDebounceUs + 1;
+  f.shell.set_input_time_us(t);
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_offs() == 1);
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // ...and once more turns it back on: intentional re-tapping still works.
+  t += kDebounceUs + 1;
+  f.shell.set_input_time_us(t);
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_ons() == 2);
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+
+  // The debounce is per-key: a DIFFERENT key held at the same instant sounds
+  // its own note, it is not suppressed by the first key's window.
+  CHECK(f.shell.handle_ui_key('s'));  // MIDI 62, same timestamp t
+  CHECK(f.shell.monitor().active_notes().size() == 2);
+}
+
+void test_piano_kitty_repeat_no_double_fire() {
+  // Momentary mode (kitty key protocol): a held key emits kPress then a stream
+  // of kRepeat events. Neither the shell's held-check nor the live loop's
+  // kRepeat drop may let a held key fire a second note-on.
+  PianoFixture f;
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // The live loop drops kRepeat for MUSICAL keys; the predicate it relies on.
+  CHECK(f.shell.piano_is_musical_key(static_cast<std::uint8_t>('a')));
+  CHECK(f.shell.piano_is_musical_key(static_cast<std::uint8_t>('A')));
+  CHECK(!f.shell.piano_is_musical_key(static_cast<std::uint8_t>('\t')));
+  CHECK(!f.shell.piano_is_musical_key(static_cast<std::uint8_t>(' ')));
+
+  // Press then autorepeat (both arrive as piano_key_event(pressed=true) when a
+  // repeat is not dropped): exactly one note-on, then one note-off on release.
+  CHECK(f.shell.piano_key_event('A', true));  // press -> note-on
+  CHECK(f.note_ons() == 1);
+  for (int i = 0; i < 10; ++i) {
+    CHECK(f.shell.piano_key_event('A', true));  // autorepeat re-press: idempotent
+  }
+  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.piano_key_event('A', false));  // release -> note-off
+  CHECK(f.note_offs() == 1);
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+}
+
+void test_arp_live_stays_on_grid() {
+  // Sanity: with the transport PLAYING and the arp on over a held chord, the
+  // output lands on the rate grid (one step per 1/8), NOT a flood — proving the
+  // "a manetta" bug was the input path, never the rhythmic arp engine.
+  ShellFixture f;
+  CHECK(f.run("port open in in0"));
+  CHECK(f.run("port open out out0"));
+  CHECK(f.run("arp out out0:1"));
+  CHECK(f.run("arp rate 1/8"));
+  CHECK(f.run("arp on"));
+
+  auto note_ons = [&]() {
+    int n = 0;
+    for (const OutEvent& e : f.events) {
+      if (e.kind == OutEvent::Kind::kMidi && e.msg.type() == midi::kNoteOn && e.msg.d2 > 0) {
+        ++n;
+      }
+    }
+    return n;
+  };
+
+  // Hold a C major triad on the piano input port; the arp captures it while
+  // playing (push_midi_in), so raw held notes do not pass straight through.
+  CHECK(f.run("transport start"));
+  const std::uint8_t on[9] = {0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(on, sizeof(on)));
+
+  // Advance exactly one bar and count arp note-ons. A 1/8 grid is ~8 steps per
+  // bar: a small bounded number. A flood ("a manetta") would emit on the order
+  // of one note per tick (hundreds per bar), so the bound below fails loudly if
+  // the rhythm ever breaks.
+  const int before = note_ons();
+  std::string err;
+  CHECK(f.shell.advance_by(kTicksPerBar, err));
+  const int fired = note_ons() - before;
+  CHECK(fired > 0);
+  CHECK(fired < static_cast<int>(kTicksPerBar) / 10);  // decisively on the grid, not a flood
+}
+
 void test_tab_enters_piano_from_repl() {
   ShellFixture f;
   CHECK(f.run("panel open piano"));
@@ -1787,6 +1904,9 @@ int main() {
   test_piano_momentary_mode();
   test_piano_space_toggles_mode();
   test_piano_plain_bytes_always_toggle();
+  test_piano_toggle_autorepeat_debounce();
+  test_piano_kitty_repeat_no_double_fire();
+  test_arp_live_stays_on_grid();
   test_tab_enters_piano_from_repl();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
