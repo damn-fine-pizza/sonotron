@@ -374,8 +374,8 @@ constexpr int kDefaultPanelColumns = 80;
 
 // Global TUI shortcut bytes (raw control chars — work on every terminal).
 constexpr std::uint8_t kCtrlPlayStop = 0x10;  // CTRL+P: transport play/stop
-constexpr std::uint8_t kCtrlChooser = 0x60;     // backtick `: style/section chooser toggle
-constexpr std::uint8_t kCtrlQuit = 0x03;  // CTRL+C: always quit the app (ISIG is off)
+constexpr std::uint8_t kCtrlChooser = 0x60;   // backtick `: style/section chooser toggle
+constexpr std::uint8_t kCtrlQuit = 0x03;      // CTRL+C: always quit the app (ISIG is off)
 constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+\: apply the chooser now
 
 // Chooser edit bytes (raw control chars a plain TTY delivers).
@@ -585,7 +585,7 @@ void Shell::sync_contextual_panel() {
   // The menu panel IS the contextual menu: while the chooser is engaged it
   // shows the live picker; otherwise it follows the interactive mode.
   if (m_chooser.has_value()) {
-    m_panels.set_content(PanelId::kHelp, m_chooser->render(m_piano.note_naming));
+    m_panels.set_content(PanelId::kHelp, m_chooser->render(m_piano.note_naming, m_style));
     return;
   }
 
@@ -1441,12 +1441,22 @@ void Shell::open_chooser() {
 }
 
 void Shell::seed_chooser_selection() {
-  // Best-effort: highlight the arranger's current section on the first style so
-  // the chooser opens where the band already is. Style highlight stays at the
-  // first match (only one built-in today); the section nudges from position 0.
+  // Open the chooser where the band already is: put the arrows on the loaded
+  // style and its current section, so opening with ` lands on the right place.
   if (!m_chooser.has_value()) {
     return;
   }
+  // Style highlight -> the loaded built-in (nav_style clamps from position 0).
+  if (const Style* loaded = m_engine.arranger().current_style(); loaded != nullptr) {
+    for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+      if (styles::kBuiltins[i] == loaded) {
+        m_chooser->nav_style(static_cast<int>(i));
+        break;
+      }
+    }
+  }
+  // Section highlight -> the current section. Done AFTER the style, because a
+  // style change resets the section highlight back to the style's first.
   const StyleInfo* style = m_chooser->selected_style();
   if (style == nullptr) {
     return;
@@ -1454,7 +1464,7 @@ void Shell::seed_chooser_selection() {
   const SectionType current = m_engine.arranger().current();
   for (std::size_t i = 0; i < style->sections.size(); ++i) {
     if (style->sections[i] == current) {
-      m_chooser->nav_section(static_cast<int>(i));  // from 0 -> i (clamped)
+      m_chooser->nav_section(static_cast<int>(i));
       return;
     }
   }
@@ -1484,25 +1494,46 @@ bool Shell::chooser_key(std::uint8_t byte) {
     chooser_apply(ChooserApply::kImmediate);
     return true;
   }
+  // A piano musical key sets the style's tonality (key root) live, so you can
+  // audition the picked style/section in any key without leaving the chooser.
+  if (const PianoKeyBinding* binding = piano_binding_for(byte)) {
+    constexpr std::uint8_t kPitchClasses = 12;
+    std::uint8_t note = 0;
+    if (piano_midi_note(binding->semitone_from_base, note)) {
+      const std::uint8_t root = static_cast<std::uint8_t>(note % kPitchClasses);
+      m_prefer_flats = key_prefers_flats(root, Mode::kMajor);
+      Command c;
+      c.op = Op::kSet;
+      c.param = Param::kKeySet;
+      c.a = root;
+      c.b = static_cast<std::int32_t>(Mode::kMajor);
+      m_engine.push_command(c, m_sink);
+      (void)push_panels();
+    }
+    return true;
+  }
   // Every other byte is swallowed while the chooser is up.
   return true;
 }
 
 void Shell::chooser_apply(ChooserApply mode) {
-  if (m_chooser.has_value()) {
-    if (const StyleInfo* style = m_chooser->selected_style(); style != nullptr) {
-      // Same engine entry point cmd_style uses (m_sink); the core forces
-      // immediate when the transport is stopped regardless of the flag.
-      Command c;
-      c.op = Op::kDo;
-      c.param = Param::kStyleSwitch;
-      c.a = style->index;
-      c.b = static_cast<std::int32_t>(m_chooser->selected_section());
-      c.c = mode == ChooserApply::kImmediate ? 1 : 0;
-      m_engine.push_command(c, m_sink);
-    }
+  if (!m_chooser.has_value()) {
+    return;
   }
-  close_chooser();
+  if (const StyleInfo* style = m_chooser->selected_style(); style != nullptr) {
+    // Same engine entry point cmd_style uses (m_sink); the core forces
+    // immediate when the transport is stopped regardless of the flag.
+    Command c;
+    c.op = Op::kDo;
+    c.param = Param::kStyleSwitch;
+    c.a = style->index;
+    c.b = static_cast<std::int32_t>(m_chooser->selected_section());
+    c.c = mode == ChooserApply::kImmediate ? 1 : 0;
+    m_engine.push_command(c, m_sink);
+  }
+  // The chooser STAYS open after applying, so you can keep switching styles and
+  // sections in a row without reopening; close it explicitly with ` or ESC.
+  (void)push_panels();
 }
 
 void Shell::chooser_nav_style(int delta) {

@@ -134,7 +134,7 @@ SectionType StyleChooser::selected_section() const {
   return style->sections[static_cast<std::size_t>(pos)];
 }
 
-std::vector<std::string> StyleChooser::render(NoteNaming /*naming*/) const {
+std::vector<std::string> StyleChooser::render(NoteNaming /*naming*/, const UiStyle& style) const {
   std::vector<std::string> lines;
 
   const std::vector<std::size_t> indices = filtered_indices();
@@ -148,24 +148,29 @@ std::vector<std::string> StyleChooser::render(NoteNaming /*naming*/) const {
   } else {
     for (std::size_t i = 0; i < indices.size(); ++i) {
       const StyleInfo& info = m_styles[indices[i]];
-      style_line += (static_cast<int>(i) == style_pos ? kSelectedMarker : kUnselectedMarker);
-      style_line += std::to_string(info.index);
-      style_line += ' ';
-      style_line += info.name;
+      const bool selected = static_cast<int>(i) == style_pos;
+      std::string token(1, selected ? kSelectedMarker : kUnselectedMarker);
+      token += std::to_string(info.index);
+      token += ' ';
+      token += info.name;
+      style_line += selected ? style.apply(UiRole::kSuccess, token) : token;
       style_line += ' ';
     }
   }
   lines.push_back(style_line);
 
   std::string section_line = "section: ";
-  const StyleInfo* style = selected_style();
-  if (style == nullptr || style->sections.empty()) {
+  const StyleInfo* selected_style_info = selected_style();
+  if (selected_style_info == nullptr || selected_style_info->sections.empty()) {
     section_line += "(none)";
   } else {
-    const int section_pos = clamp_index(m_section_pos, static_cast<int>(style->sections.size()));
-    for (std::size_t i = 0; i < style->sections.size(); ++i) {
-      section_line += (static_cast<int>(i) == section_pos ? kSelectedMarker : kUnselectedMarker);
-      section_line += section_short_name(style->sections[i]);
+    const int section_pos =
+        clamp_index(m_section_pos, static_cast<int>(selected_style_info->sections.size()));
+    for (std::size_t i = 0; i < selected_style_info->sections.size(); ++i) {
+      const bool selected = static_cast<int>(i) == section_pos;
+      std::string token(1, selected ? kSelectedMarker : kUnselectedMarker);
+      token += section_short_name(selected_style_info->sections[i]);
+      section_line += selected ? style.apply(UiRole::kSuccess, token) : token;
       section_line += ' ';
     }
   }

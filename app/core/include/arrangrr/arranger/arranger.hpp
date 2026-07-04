@@ -37,6 +37,7 @@ class Arranger {
   }
   constexpr bool loaded() const noexcept { return m_style != nullptr; }
   constexpr SectionType current() const noexcept { return m_current; }
+  constexpr const Style* current_style() const noexcept { return m_style; }
 
   // Loads a style by pointer (compiled user styles, tests). The pointee must
   // outlive the arranger — builtin styles are constexpr, compiled ones live

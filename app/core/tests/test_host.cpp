@@ -827,7 +827,7 @@ void test_style_chooser_wiring() {
     panel = lines;
     return true;
   });
-  constexpr std::uint8_t kCtrlChooser = 0x60;  // backtick `
+  constexpr std::uint8_t kCtrlChooser = 0x60;   // backtick `
   constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+backslash: apply now
   constexpr std::uint8_t kEnter = 0x0D;
 
@@ -852,12 +852,12 @@ void test_style_chooser_wiring() {
   CHECK(block_contains(panel, "-- menu"));
   CHECK(block_contains(panel, "ENTER next-bar"));
 
-  // ENTER applies: the transport is stopped so the engine switches immediately;
-  // arranger.current() becomes the highlighted section and a section event flows.
+  // ENTER applies but the chooser STAYS OPEN, so you can switch again right
+  // away; the transport is stopped so the engine switches immediately.
   const SectionType want = f.shell.chooser()->selected_section();
   f.events.clear();
   CHECK(f.shell.handle_ui_key(kEnter));
-  CHECK(!f.shell.chooser_active());  // applying closes the chooser
+  CHECK(f.shell.chooser_active());  // applying keeps the chooser open
   CHECK(f.shell.engine().arranger().current() == want);
   bool saw_section = false;
   for (const OutEvent& e : f.events) {
@@ -865,7 +865,11 @@ void test_style_chooser_wiring() {
   }
   CHECK(saw_section);
 
-  // ESC path: reopen, cancel — active goes false and no switch is issued.
+  // Backtick again toggles it closed.
+  CHECK(f.shell.handle_ui_key(kCtrlChooser));
+  CHECK(!f.shell.chooser_active());
+
+  // Cancel path: reopen, cancel — active goes false and no switch is issued.
   CHECK(f.shell.handle_ui_key(kCtrlChooser));
   CHECK(f.shell.chooser_active());
   f.events.clear();
@@ -873,13 +877,14 @@ void test_style_chooser_wiring() {
   CHECK(!f.shell.chooser_active());
   CHECK(f.events.empty());
 
-  // Arrow nav + CTRL+\ (apply now): move the section highlight, then apply.
+  // Arrow nav + CTRL+\ (apply now): move the section highlight, then apply —
+  // this too keeps the chooser open.
   CHECK(f.shell.handle_ui_key(kCtrlChooser));
   CHECK(f.shell.handle_ui_key('0'));
   f.shell.chooser_nav_section(+1);
   const SectionType want2 = f.shell.chooser()->selected_section();
   CHECK(f.shell.handle_ui_key(kCtrlApplyNow));
-  CHECK(!f.shell.chooser_active());
+  CHECK(f.shell.chooser_active());  // apply-now also stays open
   CHECK(f.shell.engine().arranger().current() == want2);
 }
 

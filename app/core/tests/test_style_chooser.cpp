@@ -98,7 +98,7 @@ void test_render_contents() {
   StyleChooser c{make_styles()};
   c.feed_digit('1');
   c.feed_digit('3');
-  const auto lines = c.render(NoteNaming::kCde);
+  const auto lines = c.render(NoteNaming::kCde, UiStyle{});
   CHECK(lines.size() == 3);
   // Style line carries the filter and the selected marker.
   CHECK(contains(lines[0], "13"));
@@ -115,7 +115,7 @@ void test_render_contents() {
 void test_render_no_match() {
   StyleChooser c{make_styles()};
   c.feed_digit('9');
-  const auto lines = c.render(NoteNaming::kCde);
+  const auto lines = c.render(NoteNaming::kCde, UiStyle{});
   CHECK(lines.size() == 3);
   CHECK(contains(lines[0], "(no match)"));
   CHECK(contains(lines[1], "(none)"));

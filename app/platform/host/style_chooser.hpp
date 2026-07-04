@@ -5,6 +5,7 @@
 
 #include "arrangrr/arranger/style.hpp"
 #include "note_names.hpp"
+#include "ui_style.hpp"
 
 // Pure state machine for the interactive style/section chooser, host side only:
 // NO terminal, NO engine, NO I/O. The caller drives it from key events and
@@ -51,10 +52,11 @@ class StyleChooser {
   // The highlighted section of the selected style (kVarA when none).
   SectionType selected_section() const;
 
-  // Compact ASCII block for the contextual panel: a "style:" line, a "section:"
-  // line, and a hint line. No ANSI — styling is applied elsewhere. `naming` is
-  // accepted for API symmetry; section labels are structural, not pitches.
-  std::vector<std::string> render(NoteNaming naming) const;
+  // Compact block for the contextual panel: a "style:" line, a "section:" line,
+  // and a hint line. The currently highlighted style/section are styled bold+
+  // colour via `style` (kSuccess role); with colours off they stay plain.
+  // `naming` is accepted for API symmetry; section labels are structural.
+  std::vector<std::string> render(NoteNaming naming, const UiStyle& style) const;
 
  private:
   std::vector<std::size_t> filtered_indices() const;
