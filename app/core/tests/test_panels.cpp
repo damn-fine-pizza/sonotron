@@ -100,6 +100,27 @@ void test_keyboard_note_labels() {
         "C#4");
   CHECK(format_keyboard_note_label(61, NoteNaming::kDoReMi, KeyboardNoteLabelMode::kBlackKey) ==
         "Do#4");
+
+  // The label a computer key produces at the default octave (base C4 = 60), so
+  // "white key S renders D 4" is checked end-to-end through the shared keymap.
+  const auto& white = default_keymap_white();
+  const auto& black = default_keymap_black();
+  constexpr int kBaseNote = 60;  // (4 + 1) * 12
+  auto white_label = [&](std::size_t i) {
+    return format_keyboard_note_label(
+        static_cast<std::uint8_t>(kBaseNote + white[i].semitone_from_base), NoteNaming::kCde,
+        KeyboardNoteLabelMode::kWhiteKey);
+  };
+  auto black_label = [&](std::size_t i) {
+    return format_keyboard_note_label(
+        static_cast<std::uint8_t>(kBaseNote + black[i].semitone_from_base), NoteNaming::kCde,
+        KeyboardNoteLabelMode::kBlackKey);
+  };
+  CHECK(white_label(0) == "C 4");  // A
+  CHECK(white_label(1) == "D 4");  // S
+  CHECK(white_label(7) == "C 5");  // K
+  CHECK(black_label(0) == "C#4");  // W
+  CHECK(black_label(1) == "D#4");  // E
 }
 
 void test_render_tier_selection() {

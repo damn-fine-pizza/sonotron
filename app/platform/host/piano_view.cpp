@@ -238,7 +238,10 @@ std::vector<std::string> render_grid_keys(const PianoViewState& state, std::size
     black_labels_row.put_centered(center, black_labels[b]);
   }
 
-  return {black_keys_row.text, black_labels_row.text, white_keys_row.text, white_labels_row.text};
+  // A blank separator between the raised (black) group and the natural (white)
+  // group reads as two physical key rows rather than one dense block.
+  return {black_keys_row.text, black_labels_row.text, "", white_keys_row.text,
+          white_labels_row.text};
 }
 
 // The narrow-but-usable fallback: keys grouped on labelled text lines. An
