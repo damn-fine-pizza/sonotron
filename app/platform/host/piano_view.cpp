@@ -51,15 +51,8 @@ constexpr std::size_t kCompactGap = 2;
 
 namespace monitor_view {
 
-// Keyboard events strip: cosmetic, fixed-length activity bar (no animation).
-constexpr std::size_t kBarDashes = 7;          // active bar: "-------*"
-constexpr std::size_t kBarReleasedDashes = 3;  // released bar: "---o    "
-
 // Event-log view: most-recent lines that pass the filter.
 constexpr std::size_t kEventLogRows = 8;
-
-// "source:note" column width in the keyboard events strip (e.g. "p0ch10:F#2").
-constexpr std::size_t kEventLabelWidth = 12;
 
 }  // namespace monitor_view
 
@@ -82,7 +75,7 @@ constexpr std::array<PianoKeyBinding, kWhiteKeyCount> kWhiteKeys = {{
     {.key = '\'', .semitone_from_base = 17},
 }};
 
-// W E T Y U O -> C# D# F# G# A# C#(+octave). 'P' is deliberately absent.
+// W E T Y U O P -> C# D# F# G# A# C#5 D#5. 'P' is the top black key (D#5).
 constexpr std::array<PianoKeyBinding, kBlackKeyCount> kBlackKeys = {{
     {.key = 'W', .semitone_from_base = 1},
     {.key = 'E', .semitone_from_base = 3},
@@ -412,71 +405,15 @@ UiRole note_event_role(bool is_drum, bool active) {
   return active ? UiRole::kMidiNoteOn : UiRole::kMidiNoteOff;
 }
 
-std::string format_event_line(const PianoViewState& state, const PianoVisualEvent& event,
-                              const MidiViewOptions& options, const UiStyle& style) {
-  std::string source;
-  if (event.source_key != 0) {
-    source = std::string(1, event.source_key);
-  } else {
-    char buf[24];
-    std::snprintf(buf, sizeof(buf), "p%uch%u", static_cast<unsigned>(event.port),
-                  static_cast<unsigned>(event.channel) + 1U);
-    source = buf;
-  }
-
-  std::string bar;
-  if (event.active) {
-    bar = std::string(monitor_view::kBarDashes, '-') + '*';
-  } else {
-    bar = std::string(monitor_view::kBarReleasedDashes, '-') + 'o' +
-          std::string(monitor_view::kBarDashes - monitor_view::kBarReleasedDashes, ' ');
-  }
-
-  std::string tail;
-  if (event.active) {
-    if (options.show_velocity) {
-      char buf[8];
-      std::snprintf(buf, sizeof(buf), "v%u", static_cast<unsigned>(event.velocity));
-      tail = buf;
-    }
-  } else {
-    tail = format_duration_ticks(event.end_tick - event.start_tick);
-  }
-
-  // Pad the "source:note" field to a fixed width so every event row columns
-  // up regardless of key vs port/channel origin or note-name length.
-  std::string label = source + ":" + compact_note_name(event.note, state.note_naming);
-  if (label.size() < monitor_view::kEventLabelWidth) {
-    label.resize(monitor_view::kEventLabelWidth, ' ');
-  }
-
-  std::string line = "  ";
-  line += label;
-  line += "  ";
-  line += bar;
-  line += ' ';
-  line += event.active ? "on " : "off";
-  if (!tail.empty()) {
-    line += "  ";
-    line += tail;
-  }
-
-  const bool is_drum = options.show_drum_names && event.channel == kGmDrumChannelZeroBased;
-  return style.apply(note_event_role(is_drum, event.active), line);
-}
-
 std::vector<std::string> render_keyboard(const PianoViewState& state, int terminal_columns,
                                          const MidiMonitor& monitor, const MidiViewOptions& options,
                                          const UiStyle& style) {
+  // The keyboard view is just the header + the keys: the dedicated `events`
+  // panel owns the live event stream now, so the old in-panel event strip is
+  // redundant and only stole the height the keyboard needs. Active notes still
+  // light up on the keys via the mask. (`piano view event-log` still shows
+  // events inside the piano panel for anyone who wants them there.)
   std::vector<std::string> lines{header_line(state)};
-
-  // Recent-events strip: the newest monitor_limits::kVisualEventRows, newest
-  // last, between the header and the keys.
-  const std::vector<PianoVisualEvent> recent = monitor.visual_events().recent_events();
-  const std::size_t shown = std::min(recent.size(), monitor_limits::kVisualEventRows);
-  for (std::size_t i = recent.size() - shown; i < recent.size(); ++i) {
-    lines.push_back(format_event_line(state, recent[i], options, style));
-  }
 
   const ActiveNoteMask active = active_note_mask(monitor, options.show_external_keys);
 

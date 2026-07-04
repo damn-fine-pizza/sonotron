@@ -551,13 +551,12 @@ void test_monitor_renderers() {
   const MidiViewOptions options{};
   const UiStyle plain{};  // colours off: output stays byte-identical to plain
 
-  // Keyboard view: the 'A' key (note 60 at base octave 4) is marked and its
-  // event appears in the strip.
+  // Keyboard view: the 'A' key (note 60 at base octave 4) is marked. (Events no
+  // longer appear here — the dedicated `events` panel owns the stream.)
   PianoViewState keyboard;
   const std::vector<std::string> kb =
       render_piano_panel(keyboard, 100, monitor, filter, options, plain);
   CHECK(any_line_contains(kb, "*A*"));
-  CHECK(any_line_contains(kb, "A:C4"));
 
   // Active-notes view: grouped by channel (1-based), notes named.
   PianoViewState active = keyboard;
@@ -642,13 +641,8 @@ void test_piano_styling() {
     }
   }
   CHECK(any_line_contains(kb_off, "*A*"));  // off-render is plain
-
-  // --- Event strip (keyboard view): note-on line styled on, plain off. ---
-  const std::string* strip_off = find_line(kb_off, "A:C4");
-  const std::string* strip_on = find_line(kb_on, "A:C4");
-  CHECK(strip_off != nullptr && strip_on != nullptr);
-  CHECK(!has_escape(*strip_off));
-  CHECK(has_escape(*strip_on));
+  // The keyboard view no longer carries an event strip (events live in the
+  // dedicated `events` panel now); event styling is covered by the views below.
 
   // --- Active-notes: the channel line is styled on, plain off. ---
   PianoViewState active = keyboard;

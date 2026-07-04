@@ -45,6 +45,54 @@ int default_height(PanelId id) {
   return panel_layout::kEmptyHeight;
 }
 
+// Splits `budget` extra rows across cells weighted by `weights`, via
+// largest-remainder; the last (top) cell wins ties, keeping the flex panel as
+// tall as possible. Returns per-cell extra rows summing to max(budget, 0).
+std::vector<int> distribute_budget(const std::vector<int>& weights, int budget) {
+  const int n = static_cast<int>(weights.size());
+  std::vector<int> extra(static_cast<std::size_t>(std::max(n, 0)), 0);
+  if (budget <= 0 || n == 0) {
+    return extra;
+  }
+  int total = 0;
+  for (const int w : weights) {
+    total += w;
+  }
+  if (total <= 0) {
+    extra[static_cast<std::size_t>(n - 1)] = budget;  // no weights: give it to the top
+    return extra;
+  }
+  std::vector<int> remainder(static_cast<std::size_t>(n));
+  int assigned = 0;
+  for (int k = 0; k < n; ++k) {
+    const int w = weights[static_cast<std::size_t>(k)];
+    extra[static_cast<std::size_t>(k)] = w * budget / total;
+    remainder[static_cast<std::size_t>(k)] = w * budget % total;
+    assigned += extra[static_cast<std::size_t>(k)];
+  }
+  int leftover = budget - assigned;
+  while (leftover > 0) {
+    int best = -1;
+    for (int k = n - 1; k >= 0; --k) {
+      if (remainder[static_cast<std::size_t>(k)] < 0) {
+        continue;
+      }
+      if (best < 0 ||
+          remainder[static_cast<std::size_t>(k)] > remainder[static_cast<std::size_t>(best)]) {
+        best = k;
+      }
+    }
+    if (best < 0) {
+      extra[static_cast<std::size_t>(n - 1)] += leftover;
+      break;
+    }
+    extra[static_cast<std::size_t>(best)] += 1;
+    remainder[static_cast<std::size_t>(best)] = -1;
+    --leftover;
+  }
+  return extra;
+}
+
 }  // namespace
 
 const char* panel_name(PanelId id) { return kPanelNames[index_of(id)]; }
@@ -233,84 +281,74 @@ int PanelManager::panel_number(PanelId id) const {
   return 0;
 }
 
-std::vector<PanelManager::Row> PanelManager::build_rows(int total_rows) const {
+std::vector<PanelManager::Row> PanelManager::pair_rows(int cols) const {
   const std::vector<PanelId> vis = visible_order();
-  std::vector<Row> rows;
+  // Two cells only fit when the terminal holds two min-width cells plus the
+  // gutter; below that we never pair (a narrow cell would overflow the budget
+  // its neighbour was promised) and fall back to one panel per row.
+  const int min_pair_cols =
+      2 * panel_layout::kMinCellWidth + static_cast<int>(panel_layout::kGutterWidth);
+  const bool wide_enough = cols >= min_pair_cols;
 
+  std::vector<Row> rows;
   std::size_t i = 0;
   while (i < vis.size()) {
     const PanelId a = vis[i];
-    const bool pair = m_per_row == panel_layout::kTwoPerRow && !at(a).m_full_row &&
+    const bool pair = wide_enough && m_per_row == panel_layout::kTwoPerRow && !at(a).m_full_row &&
                       i + 1 < vis.size() && !at(vis[i + 1]).m_full_row;
     Row row;
     if (pair) {
-      const PanelId b = vis[i + 1];
-      row.m_panels = {a, b};
+      row.m_panels = {a, vis[i + 1]};
       row.m_count = panel_layout::kTwoPerRow;
-      row.m_height = std::max(at(a).m_height, at(b).m_height);
       i += 2;
     } else {
       row.m_panels = {a, a};
       row.m_count = 1;
-      row.m_height = at(a).m_height;
       i += 1;
     }
     rows.push_back(row);
   }
+  return rows;
+}
 
-  if (rows.empty()) {
+std::vector<PanelManager::Row> PanelManager::build_rows(int cols, int total_rows) const {
+  std::vector<Row> rows = pair_rows(cols);
+  for (Row& row : rows) {
+    row.m_height = row.m_count == panel_layout::kTwoPerRow
+                       ? std::max(at(row.m_panels[0]).m_height, at(row.m_panels[1]).m_height)
+                       : at(row.m_panels[0]).m_height;
+  }
+  if (rows.empty() || total_rows <= 0) {
     return rows;
   }
 
+  // Not enough room for even one line per row: keep the bottom-priority rows
+  // (nearest the input) and drop the top ones, so the kept panels' titles
+  // survive — instead of a blind tail-truncation that would eat piano/console.
+  if (static_cast<int>(rows.size()) > total_rows) {
+    rows.resize(static_cast<std::size_t>(total_rows));
+  }
   const int n = static_cast<int>(rows.size());
+
   int total_target = 0;
   for (const Row& row : rows) {
     total_target += row.m_height;
   }
-
   if (total_target <= total_rows) {
     // Everything fits: the TOP row flexes to absorb the leftover height.
     rows[static_cast<std::size_t>(n - 1)].m_height += total_rows - total_target;
     return rows;
   }
 
-  // Overflow (short terminal, many panels): shrink proportionally to the target
-  // heights via largest-remainder, each row keeping at least one row so its
-  // title always survives. This degrades gracefully instead of starving the
-  // flexing top panel to nothing.
-  std::vector<int> remainder(static_cast<std::size_t>(n));
-  int assigned = 0;
+  // Overflow: every row keeps its title (>= 1 line); the remaining budget is
+  // handed out by target weight. Sum is exactly total_rows, no blind truncation.
+  std::vector<int> weights(static_cast<std::size_t>(n));
   for (int k = 0; k < n; ++k) {
-    const int target = rows[static_cast<std::size_t>(k)].m_height;
-    int h = target * total_rows / total_target;
-    if (h < 1) {
-      h = 1;
-    }
-    remainder[static_cast<std::size_t>(k)] = target * total_rows % total_target;
-    rows[static_cast<std::size_t>(k)].m_height = h;
-    assigned += h;
+    weights[static_cast<std::size_t>(k)] = rows[static_cast<std::size_t>(k)].m_height;
   }
-  // Hand out the rounding leftover to the largest remainders (the top row wins
-  // ties, keeping the flex panel as tall as possible).
-  int leftover = total_rows - assigned;
-  while (leftover > 0) {
-    int best = -1;
-    for (int k = n - 1; k >= 0; --k) {
-      if (remainder[static_cast<std::size_t>(k)] < 0) {
-        continue;
-      }
-      if (best < 0 ||
-          remainder[static_cast<std::size_t>(k)] > remainder[static_cast<std::size_t>(best)]) {
-        best = k;
-      }
-    }
-    if (best < 0) {
-      rows[static_cast<std::size_t>(n - 1)].m_height += leftover;  // ran out: give to top
-      break;
-    }
-    rows[static_cast<std::size_t>(best)].m_height += 1;
-    remainder[static_cast<std::size_t>(best)] = -1;
-    --leftover;
+  const std::vector<int> extra = distribute_budget(weights, total_rows - n);
+  for (int k = 0; k < n; ++k) {
+    rows[static_cast<std::size_t>(k)].m_height = 1 + extra[static_cast<std::size_t>(k)];
   }
   return rows;
 }
@@ -373,7 +411,7 @@ std::vector<std::string> PanelManager::render_cell(PanelId id, int width, int he
 
 int PanelManager::cell_width(PanelId id, int cols) const {
   // Widths depend only on pairing (per_row / full-row / order), not height.
-  const std::vector<Row> rows = build_rows(cols > 0 ? cols : 1);
+  const std::vector<Row> rows = pair_rows(cols > 0 ? cols : 1);
   for (const Row& row : rows) {
     if (row.m_count == 1 && row.m_panels[0] == id) {
       return cols;
@@ -394,9 +432,12 @@ std::vector<std::string> PanelManager::combined_lines(int cols, int rows,
   if (rows <= 0) {
     return out;
   }
-  const std::vector<Row> grid = build_rows(rows);
+  const std::vector<Row> grid = build_rows(cols, rows);
   if (grid.empty()) {
-    return out;  // nothing visible: an empty block clears the pane (= hidden)
+    // Nothing visible: honour the "exactly `rows` lines" contract with a blank
+    // pane instead of relying on the caller to clear it.
+    out.assign(static_cast<std::size_t>(rows), std::string());
+    return out;
   }
 
   // build_rows is bottom-to-top; paint top-to-bottom (reverse).

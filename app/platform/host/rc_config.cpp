@@ -31,14 +31,21 @@ bool parse_uint(const std::string& s, int& out) {
   if (s.empty()) {
     return false;
   }
-  int value = 0;
+  // Layout modes and panel heights are tiny; cap well below INT_MAX so the
+  // accumulation can never signed-overflow (UB) on absurd or malicious input —
+  // an over-long number is rejected like any other illegal character.
+  constexpr long long kMaxParsedValue = 9999;
+  long long value = 0;
   for (const char c : s) {
     if (c < '0' || c > '9') {
       return false;
     }
     value = value * 10 + (c - '0');
+    if (value > kMaxParsedValue) {
+      return false;
+    }
   }
-  out = value;
+  out = static_cast<int>(value);
   return true;
 }
 

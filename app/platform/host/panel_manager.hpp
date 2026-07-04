@@ -148,7 +148,13 @@ class PanelManager {
   const Panel& at(PanelId id) const;
   Panel& at(PanelId id);
   std::vector<PanelId> visible_order() const;
-  std::vector<Row> build_rows(int total_rows) const;
+  // Groups visible panels into rows (which panels share a row): width-aware,
+  // heights NOT set. Two-per-row only when the terminal is wide enough for two
+  // min-width cells + the gutter, else one-per-row.
+  std::vector<Row> pair_rows(int cols) const;
+  // pair_rows + height allocation (top row flexes; proportional shrink that
+  // keeps every title when short) so the result tiles to exactly `total_rows`.
+  std::vector<Row> build_rows(int cols, int total_rows) const;
   std::vector<std::string> render_cell(PanelId id, int width, int height,
                                        const UiStyle& style) const;
   std::string title_line(PanelId id, int width, const UiStyle& style) const;

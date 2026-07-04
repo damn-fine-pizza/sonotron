@@ -1,6 +1,7 @@
 #include "shell.hpp"
 
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 
@@ -74,9 +75,10 @@ bool parse_u64(const std::string& s, std::uint64_t& out) {
   if (s.empty()) {
     return false;
   }
+  errno = 0;
   char* end = nullptr;
   out = std::strtoull(s.c_str(), &end, 10);
-  return end && *end == '\0';
+  return end != nullptr && *end == '\0' && errno == 0;  // reject trailing junk AND overflow
 }
 
 // "120" or "120.5" or "120.50" -> bpm_x100.
@@ -98,6 +100,13 @@ bool parse_bpm_x100(const std::string& s, std::uint32_t& out) {
     if (f.size() == 1) {
       frac *= 10;
     }
+  }
+  // Far above any real tempo (the core clamps to 20..400); rejecting here keeps
+  // whole * 100 from wrapping and a wrapped-small value from sneaking past the
+  // clamp.
+  constexpr std::uint64_t kMaxBpmWhole = 100000;
+  if (whole > kMaxBpmWhole) {
+    return false;
   }
   out = static_cast<std::uint32_t>(whole * 100 + frac);
   return true;

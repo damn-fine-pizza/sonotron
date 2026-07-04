@@ -536,9 +536,14 @@ void test_console_geometry() {
   CHECK(console.panel_rows() == 24 - Console::kStatusInputRows);
 
   // The uniform grid tiles to EXACTLY the requested rows (no bands, no scroll
-  // region), and an all-hidden manager clears the pane (empty block).
+  // region) — including when nothing is open: a blank pane is still `rows` lines,
+  // so the contract holds without leaning on the caller to clear.
   PanelManager pm;
-  CHECK(pm.combined_lines(80, 12).empty());  // nothing open -> hidden
+  const std::vector<std::string> hidden = pm.combined_lines(80, 12);
+  CHECK(static_cast<int>(hidden.size()) == 12);
+  for (const std::string& line : hidden) {
+    CHECK(line.empty());
+  }
   pm.open(PanelId::kEvents);
   for (const int rows : {5, 8, 12, 24, 40}) {
     CHECK(static_cast<int>(pm.combined_lines(80, rows).size()) == rows);
@@ -553,6 +558,29 @@ void test_console_geometry() {
   CHECK(static_cast<int>(grid.size()) == 6);
   CHECK(block_contains(grid, "line39"));  // newest tail line is shown
   CHECK(!block_contains(grid, "line0"));  // oldest is scrolled off
+
+  // Narrow 2-per-row falls back to one-per-row: a wide terminal pairs the two
+  // panels (a " | " gutter) but one too narrow for two min-width cells stacks
+  // them, and no composed line overruns the width (colours off -> size == cols).
+  pm.open(PanelId::kConsole);
+  pm.set_per_row(2);
+  CHECK(block_contains(pm.combined_lines(80, 8), " | "));
+  const std::vector<std::string> narrow = pm.combined_lines(18, 8);
+  CHECK(!block_contains(narrow, " | "));
+  for (const std::string& line : narrow) {
+    CHECK(line.size() <= 18);
+  }
+
+  // Short terminal (more panels than rows): keep the bottom-priority rows, each
+  // still showing at least its title, tiling to EXACTLY rows — never the blind
+  // tail-truncation that used to eat the bottom (most important) panels.
+  pm.set_per_row(1);
+  pm.open(PanelId::kStyles);
+  const std::vector<std::string> tight = pm.combined_lines(80, 2);
+  CHECK(static_cast<int>(tight.size()) == 2);
+  for (const std::string& line : tight) {
+    CHECK(line.find("-- ") != std::string::npos);
+  }
 }
 
 void test_help_command() {
@@ -589,7 +617,7 @@ void test_help_panel_hook() {
   CHECK(block_contains(panel, "help: chord"));
   // Lifecycle now lives under `panel ...`.
   CHECK(f.run("panel close help"));
-  CHECK(calls == 2 && panel.empty());
+  CHECK(calls == 2 && !block_contains(panel, "-- "));  // pane cleared (no titles)
   CHECK(f.run("panel open help"));
   CHECK(calls == 3 && block_contains(panel, "help: chord"));  // content survives close
   // A different topic replaces the content.
@@ -648,7 +676,7 @@ void test_panel_commands() {
   CHECK(f.run("panel toggle piano"));
   CHECK(block_contains(panel, "-- piano"));
   CHECK(f.run("panel close all"));
-  CHECK(panel.empty());
+  CHECK(!block_contains(panel, "-- "));  // nothing visible -> a blank pane
 
   // Focus: focusing opens, the title carries the '*' marker, repl clears it.
   CHECK(f.run("panel focus piano"));
