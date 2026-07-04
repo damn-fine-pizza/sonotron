@@ -1904,6 +1904,39 @@ bool Shell::cmd_transport(const std::vector<std::string>& t, std::string& error)
   return true;
 }
 
+bool Shell::cmd_bpm(const std::vector<std::string>& t, std::string& error) {
+  // Convenience alias for `transport tempo`: with no argument it reports the
+  // current tempo, with one it sets it through the same kTransportTempo path.
+  constexpr std::uint32_t kBpmScale = 100;  // bpm() is bpm x100 (BpmX100)
+  constexpr int kBpmLineSize = 32;
+  char buf[kBpmLineSize];
+
+  if (t.size() < 2) {
+    const std::uint32_t bpm = m_engine.transport().bpm();
+    std::snprintf(buf, sizeof(buf), "bpm %u.%02u", bpm / kBpmScale, bpm % kBpmScale);
+    print_line(buf);
+    return true;
+  }
+
+  std::uint32_t bpm = 0;
+  if (!parse_bpm_x100(t[1], bpm)) {
+    error = "bad bpm: " + t[1];
+    return false;
+  }
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kTransportTempo;
+  c.a = static_cast<std::int32_t>(bpm);
+  m_engine.push_command(c, m_sink);
+
+  // Confirm with the tempo the engine actually holds (it clamps out-of-range
+  // values), so the console never claims a change the core refused.
+  const std::uint32_t now = m_engine.transport().bpm();
+  std::snprintf(buf, sizeof(buf), "tempo set to %u.%02u bpm", now / kBpmScale, now % kBpmScale);
+  print_line(buf);
+  return true;
+}
+
 bool Shell::cmd_route(const std::vector<std::string>& t, std::string& error) {
   // route <in>[:ch] -> <out>[:ch]
   std::string in_name, out_name;
@@ -2558,6 +2591,9 @@ std::optional<bool> Shell::dispatch_transport(const std::vector<std::string>& t,
                                               const std::string& cmd, std::string& error) {
   if (cmd == "transport" && t.size() >= 2) {
     return cmd_transport(t, error);
+  }
+  if (cmd == "bpm") {
+    return cmd_bpm(t, error);
   }
   if (cmd == "advance" && t.size() >= 2) {
     return cmd_advance(t, error);

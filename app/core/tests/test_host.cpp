@@ -128,6 +128,37 @@ void test_shell_tempo_and_bars() {
   CHECK(f.shell.engine().now() == 2 * kTicksPerBar);
 }
 
+void test_shell_bpm_command() {
+  ShellFixture f;
+  std::vector<std::string> out;
+  f.shell.set_print_hook([&](const std::string& line) { out.push_back(line); });
+  auto printed = [&](const char* needle) {
+    for (const std::string& line : out) {
+      if (line.find(needle) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // `bpm <N>` sets the tempo and confirms it.
+  CHECK(f.run("bpm 120"));
+  CHECK(f.shell.engine().transport().bpm() == 12000);
+  CHECK(printed("tempo set to 120.00 bpm"));
+
+  // `bpm` with no argument reports the current tempo and changes nothing.
+  out.clear();
+  CHECK(f.run("bpm"));
+  CHECK(f.shell.engine().transport().bpm() == 12000);
+  CHECK(printed("bpm 120.00"));
+
+  // A bad number errors and leaves the tempo untouched.
+  out.clear();
+  CHECK(!f.run("bpm abc"));
+  CHECK(!f.err.empty());
+  CHECK(f.shell.engine().transport().bpm() == 12000);
+}
+
 void test_shell_transport_and_clock() {
   ShellFixture f;
   CHECK(f.run("port open out synth"));
@@ -1493,6 +1524,7 @@ int main() {
   test_human_encoder();
   test_shell_happy_path();
   test_shell_tempo_and_bars();
+  test_shell_bpm_command();
   test_shell_transport_and_clock();
   test_shell_route_channel_remap();
   test_shell_error_paths();
