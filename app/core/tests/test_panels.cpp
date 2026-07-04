@@ -307,6 +307,15 @@ void test_ui_style() {
   CHECK(styled.find("A") != std::string::npos);
   CHECK(styled.size() > 1 && styled.substr(styled.size() - ansi::kReset.size()) == ansi::kReset);
 
+  // Default theme titles carry a real foreground colour (not bold-only), so
+  // panels look styled even where bold is imperceptible.
+  CHECK(s.theme_name() == "default");
+  const std::string title = s.apply(UiRole::kPanelTitle, "X");
+  CHECK(title.find("36") != std::string::npos);  // 36 = cyan foreground
+  const std::string title_focused = s.apply(UiRole::kPanelTitleFocused, "X");
+  CHECK(title_focused.find("36") != std::string::npos);  // distinct, still coloured
+  CHECK(title_focused.find("7;") != std::string::npos);  // 7 = reverse video
+
   // mono theme uses attributes only — never a colour code (30..47).
   CHECK(s.set_theme("mono"));
   const std::string mono_drum = s.apply(UiRole::kMidiDrum, "Kick");
@@ -535,38 +544,41 @@ void test_monitor_renderers() {
 
   const MidiEventFilter filter{};
   const MidiViewOptions options{};
+  const UiStyle plain{};  // colours off: output stays byte-identical to plain
 
   // Keyboard view: the 'A' key (note 60 at base octave 4) is marked and its
   // event appears in the strip.
   PianoViewState keyboard;
-  const std::vector<std::string> kb = render_piano_panel(keyboard, 100, monitor, filter, options);
+  const std::vector<std::string> kb =
+      render_piano_panel(keyboard, 100, monitor, filter, options, plain);
   CHECK(any_line_contains(kb, "*A*"));
   CHECK(any_line_contains(kb, "A:C4"));
 
   // Active-notes view: grouped by channel (1-based), notes named.
   PianoViewState active = keyboard;
   active.view = PianoView::kActiveNotes;
-  const std::vector<std::string> an = render_piano_panel(active, 100, monitor, filter, options);
+  const std::vector<std::string> an =
+      render_piano_panel(active, 100, monitor, filter, options, plain);
   CHECK(any_line_contains(an, "ch1:"));
   CHECK(any_line_contains(an, "C4"));
 
   PianoViewState active_doremi = active;
   active_doremi.note_naming = NoteNaming::kDoReMi;
   const std::vector<std::string> an_doremi =
-      render_piano_panel(active_doremi, 100, monitor, filter, options);
+      render_piano_panel(active_doremi, 100, monitor, filter, options, plain);
   CHECK(any_line_contains(an_doremi, "Do4"));
 
   // Event-log view: "@<tick>" lines, velocity honours the option.
   PianoViewState log = keyboard;
   log.view = PianoView::kEventLog;
-  const std::vector<std::string> el = render_piano_panel(log, 100, monitor, filter, options);
+  const std::vector<std::string> el = render_piano_panel(log, 100, monitor, filter, options, plain);
   CHECK(any_line_contains(el, "@100"));
   CHECK(any_line_contains(el, "vel"));
 
   MidiViewOptions no_velocity = options;
   no_velocity.show_velocity = false;
   const std::vector<std::string> el_no_vel =
-      render_piano_panel(log, 100, monitor, filter, no_velocity);
+      render_piano_panel(log, 100, monitor, filter, no_velocity, plain);
   CHECK(!any_line_contains(el_no_vel, "vel"));
 
   // Every view keeps lines within the width budget.
@@ -575,6 +587,88 @@ void test_monitor_renderers() {
       CHECK(static_cast<int>(line.size()) <= 100);
     }
   }
+}
+
+// The first line containing `needle`, or nullptr. In the colours-on renders the
+// styling wraps whole lines, so the plain needle survives as a substring.
+const std::string* find_line(const std::vector<std::string>& lines, const char* needle) {
+  for (const std::string& line : lines) {
+    if (line.find(needle) != std::string::npos) {
+      return &line;
+    }
+  }
+  return nullptr;
+}
+
+bool has_escape(const std::string& s) { return s.find(ansi::kEscape) != std::string::npos; }
+
+void test_piano_styling() {
+  MidiMonitor monitor;
+  monitor.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
+
+  const MidiEventFilter filter{};
+  const MidiViewOptions options{};
+
+  UiStyle on;
+  on.set_color_mode(ColorMode::kOn);  // default theme, colours forced on
+  const UiStyle off{};                // colours off
+
+  // --- Keyboard: the held glyph is SGR-wrapped, and columns still line up. ---
+  PianoViewState keyboard;
+  const std::vector<std::string> kb_off =
+      render_piano_panel(keyboard, 100, monitor, filter, options, off);
+  const std::vector<std::string> kb_on =
+      render_piano_panel(keyboard, 100, monitor, filter, options, on);
+  CHECK(kb_off.size() == kb_on.size());
+
+  // Every keyboard row keeps identical VISIBLE width with colours on and off,
+  // even though the on-render carries extra SGR bytes: proof the composer
+  // positions by visible column, not byte size.
+  for (std::size_t i = 0; i < kb_off.size(); ++i) {
+    CHECK(ansi::visible_length(kb_on[i]) == kb_off[i].size());
+    CHECK(ansi::visible_length(kb_on[i]) == ansi::visible_length(kb_off[i]));
+  }
+
+  // The row bearing the active "*A*" glyph gains escapes (and bytes) on.
+  for (std::size_t i = 0; i < kb_off.size(); ++i) {
+    if (kb_off[i].find("*A*") != std::string::npos) {
+      CHECK(has_escape(kb_on[i]));
+      CHECK(kb_on[i].size() > kb_off[i].size());
+    }
+  }
+  CHECK(any_line_contains(kb_off, "*A*"));  // off-render is plain
+
+  // --- Event strip (keyboard view): note-on line styled on, plain off. ---
+  const std::string* strip_off = find_line(kb_off, "A:C4");
+  const std::string* strip_on = find_line(kb_on, "A:C4");
+  CHECK(strip_off != nullptr && strip_on != nullptr);
+  CHECK(!has_escape(*strip_off));
+  CHECK(has_escape(*strip_on));
+
+  // --- Active-notes: the channel line is styled on, plain off. ---
+  PianoViewState active = keyboard;
+  active.view = PianoView::kActiveNotes;
+  const std::vector<std::string> an_off =
+      render_piano_panel(active, 100, monitor, filter, options, off);
+  const std::vector<std::string> an_on =
+      render_piano_panel(active, 100, monitor, filter, options, on);
+  const std::string* an_line_off = find_line(an_off, "ch1:");
+  const std::string* an_line_on = find_line(an_on, "ch1:");
+  CHECK(an_line_off != nullptr && an_line_on != nullptr);
+  CHECK(!has_escape(*an_line_off));
+  CHECK(has_escape(*an_line_on));
+
+  // --- Event-log: the note-on entry is styled on, plain off. ---
+  PianoViewState log = keyboard;
+  log.view = PianoView::kEventLog;
+  const std::vector<std::string> el_off =
+      render_piano_panel(log, 100, monitor, filter, options, off);
+  const std::vector<std::string> el_on = render_piano_panel(log, 100, monitor, filter, options, on);
+  const std::string* el_line_off = find_line(el_off, "@100");
+  const std::string* el_line_on = find_line(el_on, "@100");
+  CHECK(el_line_off != nullptr && el_line_on != nullptr);
+  CHECK(!has_escape(*el_line_off));
+  CHECK(has_escape(*el_line_on));
 }
 
 }  // namespace
@@ -599,6 +693,7 @@ int main() {
   test_visual_event_buffer();
   test_midi_monitor_observe();
   test_monitor_renderers();
+  test_piano_styling();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_panels: all OK\n");
   }
