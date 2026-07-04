@@ -114,17 +114,24 @@ class ArpeggiatorEngine {
   // A key is pressed. With latch on, the first press after a full release starts
   // a fresh chord (clears the held set); further presses extend it.
   void note_on(std::uint8_t note, std::uint8_t velocity) noexcept {
-    if (note > 127 || m_count >= kMaxArpNotes) {
+    if (note > 127) {
       return;
     }
-    if (m_params.latch && m_physical == 0) {
+    // A fresh chord under latch begins only on a genuinely new press after ALL
+    // keys are up. Terminal auto-repeat re-fires note-on for a still-held key;
+    // tracking DISTINCT physically-held notes (not a raw counter) keeps
+    // physical_empty() honest so latch reset and "all released" stay correct.
+    if (m_params.latch && physical_empty()) {
       clear();  // new chord under latch
     }
-    ++m_physical;
+    physical_set(note);  // idempotent: auto-repeat re-presses cannot inflate it
     for (std::uint8_t i = 0; i < m_count; ++i) {
       if (m_notes[i] == note) {
         return;  // already held (retrigger keeps the first velocity)
       }
+    }
+    if (m_count >= kMaxArpNotes) {
+      return;  // playable set full; physical bookkeeping already updated
     }
     m_notes[m_count] = note;
     m_vels[m_count] = velocity == 0 ? 1 : velocity;
@@ -132,8 +139,8 @@ class ArpeggiatorEngine {
   }
 
   void note_off(std::uint8_t note) noexcept {
-    if (m_physical > 0) {
-      --m_physical;
+    if (note <= 127) {
+      physical_clear(note);  // decrement only a truly-held note
     }
     if (m_params.latch) {
       return;  // latched notes persist until the next fresh chord
@@ -147,7 +154,8 @@ class ArpeggiatorEngine {
   }
   void panic() noexcept {
     clear();
-    m_physical = 0;
+    m_physical[0] = 0;
+    m_physical[1] = 0;
   }
 
   constexpr bool active() const noexcept { return m_count > 0; }
@@ -195,13 +203,23 @@ class ArpeggiatorEngine {
   void set_latch(bool on) noexcept {
     m_params.latch = on;
     if (!on) {
-      // Turning latch off drops any notes no longer physically held: with none
-      // down, the arp stops; the count can't exceed what is physical.
-      if (m_physical == 0) {
+      // Turning latch off drops the latched chord once nothing is physically
+      // held: with no key down, the arp stops immediately.
+      if (physical_empty()) {
         clear();
       }
     }
   }
+
+  // Physically-held-note set (128-bit), so terminal auto-repeat re-pressing a
+  // key that is already down cannot inflate the count and strand the arp.
+  void physical_set(std::uint8_t note) noexcept {
+    m_physical[note >> 6] |= (std::uint64_t{1} << (note & 63));
+  }
+  void physical_clear(std::uint8_t note) noexcept {
+    m_physical[note >> 6] &= ~(std::uint64_t{1} << (note & 63));
+  }
+  bool physical_empty() const noexcept { return m_physical[0] == 0 && m_physical[1] == 0; }
 
   void remove(std::uint8_t note) noexcept {
     for (std::uint8_t i = 0; i < m_count; ++i) {
@@ -301,9 +319,9 @@ class ArpeggiatorEngine {
   ArpeggiatorParams m_params{};
   std::uint8_t m_notes[kMaxArpNotes] = {};
   std::uint8_t m_vels[kMaxArpNotes] = {};
-  std::uint8_t m_count = 0;      // playable notes (survives release under latch)
-  std::uint8_t m_physical = 0;   // physically-held count (latch bookkeeping)
-  std::uint32_t m_step = 0;      // advancing arp step index
+  std::uint8_t m_count = 0;          // playable notes (survives release under latch)
+  std::uint64_t m_physical[2] = {};  // physically-held-note set (latch bookkeeping)
+  std::uint32_t m_step = 0;          // advancing arp step index
 };
 
 }  // namespace arrangrr
