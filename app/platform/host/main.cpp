@@ -199,7 +199,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     return true;
   });
   if (tui) {
-    shell.set_print_hook([&](const std::string& line) { console.emit(line); });
+    shell.set_print_hook([&](const std::string& line) { console.console_line(line); });
     shell.set_width_provider([&]() { return console.columns(); });
     // Resize contract (H1): geometry changed -> panels re-render from state.
     console.set_resize_hook([&]() { shell.refresh_panels(); });
@@ -322,9 +322,9 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       return false;
     }
     if (r.line) {
-      console.emit("> " + *r.line);
+      console.console_line("> " + *r.line);
       if (!shell.exec_line(*r.line, error)) {
-        console.emit("error: " + error);
+        console.console_line("error: " + error);
       }
       if (shell.quit_requested()) {
         running = false;

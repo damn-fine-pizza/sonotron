@@ -176,15 +176,81 @@ bool Console::init() {
   return true;
 }
 
-int Console::log_bottom() const {
-  // Reserve: panel lines, status bar, input line. The log pane keeps at
-  // least ~60% of the screen; the panel is truncated beyond that.
-  int panel = static_cast<int>(m_panel.size());
-  const int max_panel = (m_rows * 2) / 5;  // <= 40%
-  if (panel > max_panel) {
-    panel = max_panel;
+Console::Bands Console::compute_bands(int rows, int panel_lines) {
+  Bands b;
+  const int avail = rows - kStatusInputRows;             // rows above status + input
+  const int cap = (rows * kPanelCapNum) / kPanelCapDen;  // 40% ceiling
+
+  // Panels keep the events region the majority owner: <= 40% of the screen.
+  int panel = panel_lines < 0 ? 0 : panel_lines;
+  if (panel > cap) {
+    panel = cap;
   }
-  return m_rows - 2 - panel;
+
+  // The console pane wants kConsolePaneRows but obeys the same 40% ceiling and,
+  // on a very short terminal, shrinks further so the events region survives —
+  // status/input are never sacrificed (they live in kStatusInputRows).
+  int console = kConsolePaneRows;
+  if (console > cap) {
+    console = cap;
+  }
+  if (console > avail - panel - kMinEventRows) {
+    console = avail - panel - kMinEventRows;
+  }
+  if (console < 0) {
+    console = 0;
+  }
+
+  b.panel = panel;
+  b.console = console;
+  b.events = avail - panel - console;  // remainder; >= kMinEventRows by construction
+  return b;
+}
+
+int Console::log_bottom() const {
+  return compute_bands(m_rows, static_cast<int>(m_panel.size())).events;
+}
+
+void Console::render_console() {
+  if (!m_active) {
+    return;
+  }
+  const Bands b = compute_bands(m_rows, static_cast<int>(m_panel.size()));
+  if (b.console <= 0) {
+    return;
+  }
+  char buf[32];
+  const int top = b.events + b.panel + 1;  // first console-pane row (the rule)
+
+  // Rule/label row: a dim ASCII rule that sets the pane apart from both the
+  // live events stream above and the panels — "-- console " then dashes.
+  std::string out;
+  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", top);
+  out += buf;
+  std::string rule = "-- console ";
+  rule.resize(static_cast<std::size_t>(m_cols), '-');
+  out += "\x1b[2m";
+  out += rule;
+  out += "\x1b[0m";
+
+  // Log rows: oldest at the top, newest just above the status bar. When the
+  // ring holds fewer lines than there are rows, blank rows pad the top.
+  const int log_rows = b.console - 1;  // the rule takes one row
+  const int filled = static_cast<int>(m_console.size());
+  const int blank = log_rows - filled;  // >0 pads the top; <0 drops the oldest
+  for (int i = 0; i < log_rows; ++i) {
+    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", top + 1 + i);
+    out += buf;
+    const int idx = i - blank;
+    if (idx >= 0 && idx < filled) {
+      std::string line = m_console[static_cast<std::size_t>(idx)];
+      if (static_cast<int>(line.size()) > m_cols) {
+        line.resize(static_cast<std::size_t>(m_cols));
+      }
+      out += line;
+    }
+  }
+  write_raw(out);
 }
 
 void Console::apply_layout() {
@@ -192,30 +258,29 @@ void Console::apply_layout() {
     return;
   }
   char buf[32];
-  const int bottom = log_bottom();
-  const int panel = m_rows - 2 - bottom;
+  const Bands b = compute_bands(m_rows, static_cast<int>(m_panel.size()));
+  const int bottom = b.events;  // scroll region 1..bottom
 
-  // A shrinking panel (closing a panel, or a vertical->side layout switch)
-  // vacates rows at the top of its old area: they rejoin the log region but
-  // still hold stale panel bytes. Clear them explicitly, or they ghost — two
-  // help panels, `panel close` residue. The freed rows carry no log content
-  // yet (they were the panel a moment ago), so clearing is safe.
+  // Rows that just moved out of the panel/console bands back into the (grown)
+  // events region still hold stale bytes: clear them or they ghost. Only rows
+  // below the OLD events boundary are touched, so emitted log lines — which
+  // live at rows <= the old boundary — are never wiped.
   std::string vacate;
-  for (int row = m_rows - 1 - m_panel_rows; row <= m_rows - 2 - panel; ++row) {
+  for (int row = m_events_bottom + 1; row <= bottom; ++row) {
     std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", row);
     vacate += buf;
   }
   if (!vacate.empty()) {
     write_raw(vacate);
   }
-  m_panel_rows = panel;
+  m_events_bottom = bottom;
 
-  // Scroll region = log pane only.
+  // Scroll region = events pane only.
   std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", bottom);
   write_raw(buf);
   // Panel rows (each cleared, truncated to the pane width).
   std::string out;
-  for (int i = 0; i < panel; ++i) {
+  for (int i = 0; i < b.panel; ++i) {
     std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", bottom + 1 + i);
     out += buf;
     std::string line =
@@ -223,11 +288,13 @@ void Console::apply_layout() {
     if (static_cast<int>(line.size()) > m_cols) {
       line.resize(static_cast<std::size_t>(m_cols));
     }
-    out += "\x1b[2m";  // dim: visually separate from the live log
+    out += "\x1b[2m";  // dim: visually separate from the live events stream
     out += line;
     out += "\x1b[0m";
   }
   write_raw(out);
+
+  render_console();
   set_status(m_status);
 }
 
@@ -274,6 +341,15 @@ void Console::emit(const std::string& line) {
   out += "\n";
   out += line;
   write_raw(out);
+}
+
+void Console::console_line(const std::string& line) {
+  // Newest line nearest the input: append, then drop the oldest past capacity.
+  m_console.push_back(line);
+  while (m_console.size() > static_cast<std::size_t>(kConsoleRows)) {
+    m_console.erase(m_console.begin());
+  }
+  render_console();  // repaint the pane in place (no terminal scroll)
 }
 
 void Console::set_status(const std::string& text) {
