@@ -489,6 +489,38 @@ void test_line_editor() {
   CHECK(ed.buffer() == "second");
 }
 
+void test_console_bands() {
+  // The four bands (events / panels / console pane / status+input) tile the
+  // screen: they sum to the height, never overlap, and always leave the events
+  // region and the status+input rows alive across a spread of sizes.
+  const int sizes[] = {5, 8, 10, 12, 24, 40, 80};
+  const int panel_requests[] = {0, 1, 3, 8, 30};
+  for (const int rows : sizes) {
+    for (const int req : panel_requests) {
+      const Console::Bands b = Console::compute_bands(rows, req);
+      CHECK(b.events >= Console::kMinEventRows);
+      CHECK(b.panel >= 0);
+      CHECK(b.console >= 0);
+      CHECK(b.events + b.panel + b.console + Console::kStatusInputRows == rows);
+      // Panels and the console pane never exceed the 40% ceiling.
+      const int cap = (rows * Console::kPanelCapNum) / Console::kPanelCapDen;
+      CHECK(b.panel <= cap);
+      CHECK(b.console <= cap);
+      CHECK(b.console <= Console::kConsolePaneRows);
+      CHECK(b.panel <= req);  // never invents panel rows the caller did not ask for
+    }
+  }
+
+  // console_line keeps at most kConsoleRows, dropping the oldest; newest last.
+  Console console;  // never init()'d: stays inactive, so no terminal writes
+  for (int i = 0; i < Console::kConsoleRows + 4; ++i) {
+    console.console_line("line" + std::to_string(i));
+  }
+  CHECK(static_cast<int>(console.console_ring().size()) == Console::kConsoleRows);
+  CHECK(console.console_ring().front() == "line4");  // oldest survivor
+  CHECK(console.console_ring().back() == "line9");   // newest
+}
+
 void test_help_command() {
   ShellFixture f;
   CHECK(f.run("help"));
@@ -1360,6 +1392,7 @@ int main() {
   test_shell_view_external_keys();
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
+  test_console_bands();
   test_help_command();
   test_help_panel_hook();
   test_panel_commands();
