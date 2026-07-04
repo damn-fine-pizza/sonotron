@@ -309,6 +309,14 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   std::uint64_t last_status_us = 0;
   bool running = true;
 
+  // Debounced variation/style stepping (host-live): the pending selection is
+  // applied ~500 ms after the LAST step key, so pressing fast skips the
+  // variations/styles in between. The shell owns the pending state + a
+  // generation counter; here we own only the clock.
+  constexpr std::uint64_t kStyleStepDebounceUs = 500'000;
+  std::uint32_t last_style_step_gen = shell.style_step_gen();
+  std::uint64_t last_style_step_us = 0;
+
   // One byte through the existing panel-key + line-editor path (H2). Returns
   // false when the loop should stop (quit). Both the plain-byte stream and the
   // translated kitty press bytes funnel through here so behaviour is identical.
@@ -553,6 +561,21 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       if (want_kitty != kitty_on) {
         kitty_on = want_kitty;
         kitty::set_progressive_enhancement(STDOUT_FILENO, kitty_on);
+      }
+    }
+
+    // Debounced variation/style step: reset the timer whenever the pending
+    // selection advanced (generation bumped), then apply once it has been
+    // quiet for kStyleStepDebounceUs.
+    {
+      const std::uint32_t gen = shell.style_step_gen();
+      const std::uint64_t now_us = monotonic_us();
+      if (gen != last_style_step_gen) {
+        last_style_step_gen = gen;
+        last_style_step_us = now_us;
+      }
+      if (shell.style_step_pending() && now_us - last_style_step_us > kStyleStepDebounceUs) {
+        shell.apply_style_step();
       }
     }
 

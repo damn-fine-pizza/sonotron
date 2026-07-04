@@ -112,6 +112,15 @@ class Shell {
   bool chooser_active() const { return m_chooser.has_value(); }
   const std::optional<StyleChooser>& chooser() const { return m_chooser; }
 
+  // Keyboard stepping of the arranger's variation (section) and style with a
+  // debounced auto-apply (host-live). The step keys mark a pending (style,
+  // section) selection and bump a generation counter, but do NOT switch the
+  // band immediately; main.cpp's live loop calls apply_style_step() ~500 ms
+  // after the LAST step so pressing fast skips intermediate variations.
+  std::uint32_t style_step_gen() const { return m_style_step_gen; }
+  bool style_step_pending() const { return m_style_step_pending; }
+  void apply_style_step();
+
   // Arrow/ESC drivers for the escape state machine in main.cpp (arrows arrive
   // as CSI escapes, not plain bytes). Each is a no-op unless the chooser is up.
   void chooser_nav_style(int delta);
@@ -213,6 +222,20 @@ class Shell {
   bool chooser_key(std::uint8_t byte);
   void chooser_apply(ChooserApply mode);
 
+  // Style/section keyboard stepping plumbing (host-live). style_step_key maps a
+  // byte to an axis+direction; style_step advances the pending selection on one
+  // axis (clamped, no wrap) and refreshes the on-screen display; seed_style_step
+  // primes the pending from where the band currently is; the step_pending_*
+  // helpers move within the builtin style/section lists (a style step re-clamps
+  // the section into the new style's section list).
+  enum class StyleStepAxis { kSection, kStyle };
+  bool style_step_key(std::uint8_t byte);
+  void style_step(StyleStepAxis axis, int delta);
+  void seed_style_step();
+  void step_pending_section(int delta);
+  void step_pending_style(int delta);
+  void render_style_step_menu();
+
   void refresh_piano_content();
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
@@ -245,6 +268,14 @@ class Shell {
   bool m_help_pinned = false;        // true while an explicit help <topic> shows
   // engaged = the CTRL+SPACE style/section chooser is up (owns every key).
   std::optional<StyleChooser> m_chooser;
+  // Debounced style/section keyboard stepping (host-live). The pending
+  // selection is (style index, section); m_style_step_gen drives the debounce
+  // clock in main.cpp, and m_style_step_pending marks a step not yet applied.
+  int m_step_style_index = 0;
+  SectionType m_step_section = SectionType::kVarA;
+  std::uint32_t m_style_step_gen = 0;
+  bool m_style_step_pending = false;
+  bool m_style_step_seeded = false;  // pending primed from the arranger yet?
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;

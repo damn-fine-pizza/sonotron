@@ -888,6 +888,116 @@ void test_style_chooser_wiring() {
   CHECK(f.shell.engine().arranger().current() == want2);
 }
 
+// Byte values of the four stepping keys (mirrors the shell's constexprs).
+constexpr std::uint8_t kStepSectionPrev = 0x2D;  // '-'
+constexpr std::uint8_t kStepSectionNext = 0x3D;  // '='
+constexpr std::uint8_t kStepStylePrev = 0x5F;    // '_'
+constexpr std::uint8_t kStepStyleNext = 0x2B;    // '+'
+
+void test_style_section_stepping() {
+  // Stepping the variation (section) in piano focus advances a PENDING
+  // selection with a debounced apply — no wrap at either end.
+  ShellFixture f;
+  CHECK(f.run("style load basic"));  // sections: Intro1 VarA VarB FillA Ending1
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);
+  CHECK(!f.shell.style_step_pending());
+  const std::uint32_t gen0 = f.shell.style_step_gen();
+
+  // '=' next: pending advances and the gen bumps, but the arranger does NOT
+  // switch yet (the apply is debounced).
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  CHECK(f.shell.style_step_pending());
+  CHECK(f.shell.style_step_gen() == gen0 + 1);
+  CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);
+
+  // Keep stepping to the last section, then '=' again CLAMPS (no wrap).
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // FillA
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // Ending1
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // clamp at Ending1
+  CHECK(f.shell.style_step_gen() == gen0 + 4);
+  CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);  // still unapplied
+
+  // Apply: transport stopped -> immediate; pending clears.
+  f.shell.apply_style_step();
+  CHECK(!f.shell.style_step_pending());
+  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding1);
+
+  // '-' from the last steps back; repeated '-' CLAMPS at the first section.
+  for (int i = 0; i < 10; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepSectionPrev));
+  }
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current() == SectionType::kIntro1);
+
+  // apply_style_step with nothing pending is a no-op (idempotent).
+  CHECK(!f.shell.style_step_pending());
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current() == SectionType::kIntro1);
+}
+
+void test_style_stepping_and_reclamp() {
+  // '_'/'+' step the STYLE (clamped, no wrap); a style step re-clamps the
+  // section into the new style's section list (same type kept when present).
+  ShellFixture f;
+  CHECK(f.run("style load basic"));  // builtin index 0
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);
+
+  // '_' at the first style CLAMPS (stays basic).
+  CHECK(f.shell.handle_ui_key(kStepStylePrev));
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);
+
+  // '+' walks to the last builtin, then clamps; unapplied until apply.
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount + 2; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepStyleNext));
+  }
+  CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);  // not applied
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current_style() ==
+        styles::kBuiltins[styles::kBuiltinCount - 1]);
+
+  // Section is re-clamped across a style step: move to Ending1, step style, and
+  // the section type survives into the new style (all builtins define it).
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // steps within the last style
+  // Drive to Ending1 explicitly.
+  for (int i = 0; i < 6; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  }
+  CHECK(f.shell.handle_ui_key(kStepStylePrev));  // back one style, section re-clamped
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding1);
+  CHECK(f.shell.engine().arranger().current_style() ==
+        styles::kBuiltins[styles::kBuiltinCount - 2]);
+}
+
+void test_style_step_in_chooser() {
+  // The same keys drive the chooser highlight while it is up, and still feed
+  // the debounced pending selection.
+  ShellFixture f;
+  CHECK(f.run("style load basic"));
+  constexpr std::uint8_t kOpenChooser = 0x60;  // backtick `
+  CHECK(f.shell.handle_ui_key(kOpenChooser));
+  CHECK(f.shell.chooser_active());
+  const std::uint32_t gen0 = f.shell.style_step_gen();
+
+  // '=' moves the chooser's section highlight and marks a pending step without
+  // applying (the chooser stays open; the arranger is untouched until apply).
+  const SectionType before = f.shell.engine().arranger().current();
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  CHECK(f.shell.chooser_active());
+  CHECK(f.shell.style_step_pending());
+  CHECK(f.shell.style_step_gen() == gen0 + 1);
+  CHECK(f.shell.engine().arranger().current() == before);  // debounced, not yet applied
+
+  // The pending mirrors the chooser's own selection; applying switches to it.
+  const SectionType want = f.shell.chooser()->selected_section();
+  f.shell.apply_style_step();
+  CHECK(!f.shell.style_step_pending());
+  CHECK(f.shell.engine().arranger().current() == want);
+}
+
 void test_theme_switch_restyles_titles() {
   // With colors on, a coloured theme wraps panel titles in SGR; with colors
   // off the same titles are plain — proving the switch is coherent.
@@ -1409,6 +1519,9 @@ int main() {
   test_contextual_panel();
   test_ctrl_p_play_stop();
   test_style_chooser_wiring();
+  test_style_section_stepping();
+  test_style_stepping_and_reclamp();
+  test_style_step_in_chooser();
   test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();

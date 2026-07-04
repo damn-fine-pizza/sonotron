@@ -378,6 +378,14 @@ constexpr std::uint8_t kCtrlChooser = 0x60;   // backtick `: style/section choos
 constexpr std::uint8_t kCtrlQuit = 0x03;      // CTRL+C: always quit the app (ISIG is off)
 constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+\: apply the chooser now
 
+// Variation/style stepping keys (docs/TUI_SPEC.md). `-`/`=` step the variation
+// (section); `_`/`+` (shift+`-`/`=`) step the style. All clamp (no wrap) and
+// only step a PENDING selection — the switch is debounced (see main.cpp).
+constexpr std::uint8_t kStepSectionPrev = 0x2D;  // '-'  previous variation
+constexpr std::uint8_t kStepSectionNext = 0x3D;  // '='  next variation
+constexpr std::uint8_t kStepStylePrev = 0x5F;    // '_'  previous style
+constexpr std::uint8_t kStepStyleNext = 0x2B;    // '+'  next style
+
 // Chooser edit bytes (raw control chars a plain TTY delivers).
 constexpr std::uint8_t kEnterCr = 0x0D;
 constexpr std::uint8_t kEnterLf = 0x0A;
@@ -1304,6 +1312,12 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return true;
   }
 
+  // Variation/style stepping (-/= sections, _/+ styles). Works in piano focus;
+  // the same keys also drive the chooser (chooser_key) while it is up.
+  if (style_step_key(byte)) {
+    return true;
+  }
+
   const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
 
   // Piano-focus shortcuts take priority over musical keys (none collide).
@@ -1494,6 +1508,12 @@ bool Shell::chooser_key(std::uint8_t byte) {
     chooser_apply(ChooserApply::kImmediate);
     return true;
   }
+  // Variation/style stepping drives the chooser highlight AND the debounced
+  // pending selection, so -/= and _/+ skip variations/styles the same way here
+  // as in piano focus.
+  if (style_step_key(byte)) {
+    return true;
+  }
   // A piano musical key sets the style's tonality (key root) live, so you can
   // audition the picked style/section in any key without leaving the chooser.
   if (const PianoKeyBinding* binding = piano_binding_for(byte)) {
@@ -1533,6 +1553,166 @@ void Shell::chooser_apply(ChooserApply mode) {
   }
   // The chooser STAYS open after applying, so you can keep switching styles and
   // sections in a row without reopening; close it explicitly with ` or ESC.
+  (void)push_panels();
+}
+
+bool Shell::style_step_key(std::uint8_t byte) {
+  switch (byte) {
+    case kStepSectionPrev:
+      style_step(StyleStepAxis::kSection, -1);
+      return true;
+    case kStepSectionNext:
+      style_step(StyleStepAxis::kSection, +1);
+      return true;
+    case kStepStylePrev:
+      style_step(StyleStepAxis::kStyle, -1);
+      return true;
+    case kStepStyleNext:
+      style_step(StyleStepAxis::kStyle, +1);
+      return true;
+    default:
+      return false;
+  }
+}
+
+void Shell::seed_style_step() {
+  // Start stepping where the band already is: the loaded built-in style (index
+  // 0 when nothing is loaded) and its active section.
+  m_step_style_index = 0;
+  if (const Style* loaded = m_engine.arranger().current_style(); loaded != nullptr) {
+    for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+      if (styles::kBuiltins[i] == loaded) {
+        m_step_style_index = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+  m_step_section = m_engine.arranger().current();
+  m_style_step_seeded = true;
+}
+
+void Shell::step_pending_section(int delta) {
+  // Move within the pending style's own section list, clamped (no wrap).
+  const Span<const StyleSection> sections = styles::kBuiltins[m_step_style_index]->sections;
+  const int count = static_cast<int>(sections.size());
+  int pos = 0;
+  for (int i = 0; i < count; ++i) {
+    if (sections[static_cast<std::size_t>(i)].type == m_step_section) {
+      pos = i;
+      break;
+    }
+  }
+  int next = pos + delta;
+  if (next < 0) {
+    next = 0;
+  } else if (next >= count) {
+    next = count > 0 ? count - 1 : 0;
+  }
+  if (count > 0) {
+    m_step_section = sections[static_cast<std::size_t>(next)].type;
+  }
+}
+
+void Shell::step_pending_style(int delta) {
+  const int count = static_cast<int>(styles::kBuiltinCount);
+  // Remember the section's position so it can be re-clamped by index if the new
+  // style lacks the current section type.
+  const Span<const StyleSection> old_sections = styles::kBuiltins[m_step_style_index]->sections;
+  int old_pos = 0;
+  for (int i = 0; i < static_cast<int>(old_sections.size()); ++i) {
+    if (old_sections[static_cast<std::size_t>(i)].type == m_step_section) {
+      old_pos = i;
+      break;
+    }
+  }
+
+  int next = m_step_style_index + delta;
+  if (next < 0) {
+    next = 0;
+  } else if (next >= count) {
+    next = count > 0 ? count - 1 : 0;
+  }
+  m_step_style_index = next;
+
+  // Re-clamp the section into the new style: keep the same type if it exists,
+  // else fall back to the same position clamped into the new section list.
+  const Span<const StyleSection> sections = styles::kBuiltins[m_step_style_index]->sections;
+  const int sec_count = static_cast<int>(sections.size());
+  bool found = false;
+  for (int i = 0; i < sec_count; ++i) {
+    if (sections[static_cast<std::size_t>(i)].type == m_step_section) {
+      found = true;
+      break;
+    }
+  }
+  if (!found && sec_count > 0) {
+    const int clamped = old_pos < sec_count ? old_pos : sec_count - 1;
+    m_step_section = sections[static_cast<std::size_t>(clamped)].type;
+  }
+}
+
+void Shell::style_step(StyleStepAxis axis, int delta) {
+  if (m_chooser.has_value()) {
+    // The chooser IS the styles+variations screen: drive its highlight, then
+    // mirror the selection into the debounced pending so the 500 ms apply lands
+    // on exactly what is shown.
+    if (axis == StyleStepAxis::kStyle) {
+      m_chooser->nav_style(delta);
+    } else {
+      m_chooser->nav_section(delta);
+    }
+    if (const StyleInfo* style = m_chooser->selected_style(); style != nullptr) {
+      m_step_style_index = style->index;
+    }
+    m_step_section = m_chooser->selected_section();
+    m_style_step_seeded = true;
+  } else {
+    if (!m_style_step_seeded) {
+      seed_style_step();
+    }
+    if (axis == StyleStepAxis::kStyle) {
+      step_pending_style(delta);
+    } else {
+      step_pending_section(delta);
+    }
+    render_style_step_menu();
+  }
+  ++m_style_step_gen;
+  m_style_step_pending = true;
+  (void)push_panels();
+}
+
+void Shell::render_style_step_menu() {
+  // INTERIM (piano focus, no chooser): there is no dedicated `styles` panel yet
+  // — that is a separate layout refactor — so the pending style+variation is
+  // rendered into the MENU panel (kHelp) as a compact block. It is pinned so the
+  // contextual sync does not clobber it on the same-tick push_panels().
+  // TODO: move this block to the dedicated `styles` panel once the layout
+  // refactor lands.
+  std::vector<std::string> lines;
+  lines.push_back("styles + variations (pending, applies after ~0.5s):");
+  lines.push_back(std::string("  style:     ") + styles::kBuiltins[m_step_style_index]->name);
+  lines.push_back(std::string("  variation: ") + section_type_name(m_step_section));
+  lines.push_back("  keys: -/= variation   _/+ style");
+  m_panels.set_content(PanelId::kHelp, lines);
+  m_help_pinned = true;
+}
+
+void Shell::apply_style_step() {
+  if (!m_style_step_pending) {
+    return;
+  }
+  // Same engine entry point chooser_apply uses; immediate=false so a running
+  // transport lands the switch on the next bar (the core forces immediate when
+  // stopped).
+  Command c;
+  c.op = Op::kDo;
+  c.param = Param::kStyleSwitch;
+  c.a = m_step_style_index;
+  c.b = static_cast<std::int32_t>(m_step_section);
+  c.c = 0;
+  m_engine.push_command(c, m_sink);
+  m_style_step_pending = false;
   (void)push_panels();
 }
 
