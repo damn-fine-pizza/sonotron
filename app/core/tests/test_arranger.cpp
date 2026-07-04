@@ -176,7 +176,7 @@ void test_style_warns() {
   b.cmd(Param::kStyleSection, 2);  // no style loaded
   b.cmd(Param::kStyleLoad, 0);
   b.cmd(Param::kStyleSection, 99);                                             // bogus section id
-  b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kVarC));  // absent
+  b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kBreak));  // absent
   b.cmd(Param::kStyleRoute, 99, 0, 0, Op::kSet);
   b.cmd(Param::kStyleRoute, 0, 9, 0, Op::kSet);  // bad port
   int warns = 0;
@@ -267,10 +267,10 @@ void test_seamless_style_switch() {
   CHECK(!changed_before_bar);  // seamless: not a mid-bar cut
   CHECK(changed_at_bar);       // applied on the downbeat
 
-  // Immediate switch + section fallback: basic has no varC, so it lands varA.
+  // Immediate switch + section fallback: basic has no break section, so it lands varA.
   Arranger f;
   CHECK(f.load_style(&twobar::kStyle));
-  CHECK(f.request_style(&styles::basic::kStyle, SectionType::kVarC, true));
+  CHECK(f.request_style(&styles::basic::kStyle, SectionType::kBreak, true));
   CHECK(f.current() == SectionType::kVarA);
 
   // A null style is refused.
@@ -346,12 +346,12 @@ void test_builtin_styles_registered() {
   const char* expected[] = {"basic",  "pop",   "rock",   "ballad", "funk",  "disco",
                             "house",  "swing", "bossa",  "samba",  "reggae", "country",
                             "blues",  "shuffle", "latin", "motown"};
-  // Every builtin must resolve the full ten-section vocabulary so the chooser
+  // Every builtin must resolve the full twelve-section vocabulary so the chooser
   // and the section stepper always have a consistent set to work with.
   const SectionType full_set[] = {
       SectionType::kIntro1, SectionType::kIntro2, SectionType::kVarA,   SectionType::kVarB,
-      SectionType::kFillA,  SectionType::kFillB,  SectionType::kFillC,  SectionType::kFillD,
-      SectionType::kEnding1, SectionType::kEnding2};
+      SectionType::kVarC,   SectionType::kVarD,   SectionType::kFillA,  SectionType::kFillB,
+      SectionType::kFillC,  SectionType::kFillD,  SectionType::kEnding1, SectionType::kEnding2};
   for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
     const Style* s = styles::kBuiltins[i];
     CHECK(s != nullptr);
