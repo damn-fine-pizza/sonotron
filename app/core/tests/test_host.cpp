@@ -929,7 +929,7 @@ void test_style_section_stepping() {
   // Stepping the variation (section) in piano focus advances a PENDING
   // selection with a debounced apply — no wrap at either end.
   ShellFixture f;
-  CHECK(f.run("style load basic"));  // sections: Intro1 VarA VarB FillA Ending1
+  CHECK(f.run("style load basic"));  // 10 sections: Intro1 Intro2 VarA VarB FillA-D Ending1 Ending2
   CHECK(f.run("panel focus piano"));
   CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);
   CHECK(!f.shell.style_step_pending());
@@ -942,20 +942,19 @@ void test_style_section_stepping() {
   CHECK(f.shell.style_step_gen() == gen0 + 1);
   CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);
 
-  // Keep stepping to the last section, then '=' again CLAMPS (no wrap).
-  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // FillA
-  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // Ending1
-  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // clamp at Ending1
-  CHECK(f.shell.style_step_gen() == gen0 + 4);
+  // Keep stepping past the end: '=' CLAMPS at the last section (Ending2), no wrap.
+  for (int i = 0; i < 12; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  }
   CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);  // still unapplied
 
-  // Apply: transport stopped -> immediate; pending clears.
+  // Apply: transport stopped -> immediate; pending clears; landed on the last.
   f.shell.apply_style_step();
   CHECK(!f.shell.style_step_pending());
-  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding1);
+  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding2);
 
-  // '-' from the last steps back; repeated '-' CLAMPS at the first section.
-  for (int i = 0; i < 10; ++i) {
+  // '-' from the last steps back; repeated '-' CLAMPS at the first section (Intro1).
+  for (int i = 0; i < 20; ++i) {
     CHECK(f.shell.handle_ui_key(kStepSectionPrev));
   }
   f.shell.apply_style_step();
@@ -989,16 +988,15 @@ void test_style_stepping_and_reclamp() {
   CHECK(f.shell.engine().arranger().current_style() ==
         styles::kBuiltins[styles::kBuiltinCount - 1]);
 
-  // Section is re-clamped across a style step: move to Ending1, step style, and
-  // the section type survives into the new style (all builtins define it).
-  CHECK(f.shell.handle_ui_key(kStepSectionNext));  // steps within the last style
-  // Drive to Ending1 explicitly.
-  for (int i = 0; i < 6; ++i) {
-    CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  // Section is re-clamped across a style step: drive to the last section
+  // (Ending2), step the style back one, and the section type survives into the
+  // new style (all builtins define the full section set).
+  for (int i = 0; i < 12; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepSectionNext));  // clamp at the last section
   }
   CHECK(f.shell.handle_ui_key(kStepStylePrev));  // back one style, section re-clamped
   f.shell.apply_style_step();
-  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding1);
+  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding2);
   CHECK(f.shell.engine().arranger().current_style() ==
         styles::kBuiltins[styles::kBuiltinCount - 2]);
 }
