@@ -26,6 +26,7 @@ struct PianoViewState {
   int base_octave = 4;       // piano_keys::kDefaultOctave
   std::uint8_t channel = 0;  // 0-based internal; displayed 1-based
   std::uint8_t velocity = 96;
+  int transpose = 0;  // semitones added to played notes; always shown in the header
   OctaveDisplayMode octave_display = OctaveDisplayMode::kAll;
 };
 

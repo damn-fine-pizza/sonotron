@@ -124,9 +124,10 @@ std::string key_label(const PianoViewState& state, std::uint8_t midi_note,
 
 std::string header_line(const PianoViewState& state) {
   char buf[128];
-  std::snprintf(buf, sizeof(buf), "Piano | keyboard | names:%s | oct:%d | ch:%u | vel:%u",
+  std::snprintf(buf, sizeof(buf), "Piano | keyboard | names:%s | oct:%d | ch:%u | vel:%u | tr:%+d",
                 naming_word(state.note_naming), state.base_octave,
-                static_cast<unsigned>(state.channel) + 1U, static_cast<unsigned>(state.velocity));
+                static_cast<unsigned>(state.channel) + 1U, static_cast<unsigned>(state.velocity),
+                state.transpose);
 
   return std::string(buf);
 }

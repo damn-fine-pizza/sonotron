@@ -1,5 +1,6 @@
 #include "shell.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -851,7 +852,8 @@ bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
 void Shell::print_line(const std::string& line) { print_lines({line}); }
 
 bool Shell::piano_midi_note(int semitone_from_base, std::uint8_t& out) const {
-  const int note = (m_piano.base_octave + 1) * kSemitonesPerOctave + semitone_from_base;
+  const int note =
+      (m_piano.base_octave + 1) * kSemitonesPerOctave + semitone_from_base + m_piano.transpose;
   if (note < 0 || note > kMidiNoteMax) {
     return false;
   }
@@ -1465,6 +1467,14 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     case '/': {
       std::string ignored;
       (void)cmd_piano({"piano", "octave", "up"}, ignored);
+      return true;
+    }
+    case '[':    // transpose down / up, clamped to +/- two octaves; the piano
+    case ']': {  // header always shows the current amount (even 0).
+      constexpr int kTransposeLimit = 24;
+      const int delta = upper == '[' ? -1 : 1;
+      m_piano.transpose = std::clamp(m_piano.transpose + delta, -kTransposeLimit, kTransposeLimit);
+      (void)push_panels();
       return true;
     }
     default:
