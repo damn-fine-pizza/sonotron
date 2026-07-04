@@ -28,9 +28,10 @@ enum class PanelId {
   kHelp,     // contextual menu / help (off by default)
   kFilter,   // event filter summary (off by default)
   kEmpty,    // blank spacer (off by default)
+  kParts,    // arranger style-parts mixer (role/voice/mute/solo/activity)
 };
 
-inline constexpr std::size_t kPanelCount = 8;
+inline constexpr std::size_t kPanelCount = 9;
 
 enum class PanelFocus {
   kRepl,
@@ -58,6 +59,7 @@ inline constexpr int kPianoHeight = 7;
 inline constexpr int kHelpHeight = 12;  // fixed panel below events: fit the contextual help
 inline constexpr int kFilterHeight = 3;
 inline constexpr int kEmptyHeight = 1;
+inline constexpr int kPartsHeight = 11;  // header + up to 8 parts + shortcut line
 
 inline constexpr int kMinCellWidth = 8;  // below this a title is barely legible
 }  // namespace panel_layout

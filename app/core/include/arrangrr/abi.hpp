@@ -79,6 +79,10 @@ enum class Param : std::uint16_t {
                            //     (channel_0based << 8). Sends a Program Change
                            //     so the arrangrr picks the voice, not just the
                            //     external synth.
+  kPartMute = 36,          // set: a = TrackRole, b = 0/1. Live mute of one
+                           //     arranger style part (the `parts` mixer).
+  kPartSolo = 37,          // set: a = TrackRole, b = 0/1. Solo: when any part
+                           //     is soloed, only soloed parts play.
 };
 
 struct Command {

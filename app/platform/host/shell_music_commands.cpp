@@ -221,6 +221,38 @@ bool Shell::cmd_program(const std::vector<std::string>& t, std::string& error) {
   return true;
 }
 
+bool Shell::cmd_part(const std::vector<std::string>& t, std::string& error) {
+  // part <role> mute|solo on|off   — the arranger-band mixer from the CLI.
+  if (t.size() < 4) {
+    error = "part <role> mute|solo on|off";
+    return false;
+  }
+  TrackRole role = TrackRole::kLead;
+  if (!parse_role(t[1], role)) {
+    error = "unknown role: " + t[1];
+    return false;
+  }
+  Param param = Param::kPartMute;
+  if (t[2] == "solo") {
+    param = Param::kPartSolo;
+  } else if (t[2] != "mute") {
+    error = "part <role> mute|solo on|off";
+    return false;
+  }
+  if (t[3] != "on" && t[3] != "off") {
+    error = "part <role> mute|solo on|off";
+    return false;
+  }
+  Command c;
+  c.op = Op::kSet;
+  c.param = param;
+  c.a = static_cast<std::int32_t>(role);
+  c.b = t[3] == "on" ? 1 : 0;
+  m_engine.push_command(c, m_sink);
+  (void)push_panels();
+  return true;
+}
+
 bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
   const std::string& verb = t[1];
 

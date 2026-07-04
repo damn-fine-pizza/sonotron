@@ -45,7 +45,7 @@ enum class PianoKeyMode { kMomentary, kToggle };
 // Which interactive mode the live TUI is in. Drives the contextual help
 // panel: its content follows the mode (commands in the REPL, piano keys in
 // play mode) unless the user pinned an explicit `help <topic>`.
-enum class UiMode { kRepl, kPiano, kStyles };
+enum class UiMode { kRepl, kPiano, kStyles, kParts };
 
 class Shell {
  public:
@@ -127,6 +127,13 @@ class Shell {
   // styles_focused() is the gate main.cpp and handle_ui_key check.
   bool styles_focused() const;
   const StyleChooser& chooser() const { return m_chooser; }
+
+  // The `parts` mixer: focused-panel gate (mirrors styles_focused) and its key
+  // handling. Arrow up/down (from main.cpp) move the selected part; m/s toggle
+  // its mute/solo. Voice is changed via the `program` command.
+  bool parts_focused() const;
+  void parts_select(int delta);
+  bool parts_key(std::uint8_t byte);
 
   // Gives focus to the styles panel (backtick shortcut) and seeds the chooser
   // highlight from the arranger's current style/section.
@@ -234,6 +241,7 @@ class Shell {
   bool seq_del(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_track(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_program(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_part(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
@@ -258,6 +266,9 @@ class Shell {
   void refresh_piano_content();
   void refresh_styles_content();
   void refresh_chords_content();  // live piano->chord readout (detect state + name)
+  void refresh_parts_content();   // arranger style-parts mixer
+
+  int m_parts_selected = 0;  // highlighted row in the parts mixer
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
   void sync_contextual_panel();

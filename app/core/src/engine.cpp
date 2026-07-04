@@ -51,6 +51,8 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kStyleSection:
     case Param::kStyleRoute:
     case Param::kStyleSwitch:
+    case Param::kPartMute:
+    case Param::kPartSolo:
       cmd_style(cmd, sink);
       break;
     case Param::kProgram:
@@ -430,6 +432,20 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       } else if (immediate) {
         sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
         apply_arranger_voices(sink);  // the new style's voices land with the cut
+      }
+      break;
+    }
+    case Param::kPartMute:
+    case Param::kPartSolo: {
+      if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc)) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        break;
+      }
+      const auto role = static_cast<TrackRole>(cmd.a);
+      if (cmd.param == Param::kPartMute) {
+        m_arranger.set_mute(role, cmd.b != 0);
+      } else {
+        m_arranger.set_solo(role, cmd.b != 0);
       }
       break;
     }

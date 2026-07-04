@@ -17,6 +17,7 @@ add_library(arrangrr_host STATIC
   gm_program.cpp
   panel_manager.cpp
   piano_view.cpp
+  parts_view.cpp
   midi_monitor.cpp
   ui_style.cpp
   style_chooser.cpp

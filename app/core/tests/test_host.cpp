@@ -377,6 +377,28 @@ void test_shell_chord_detect_panel() {
   CHECK(block_contains(panel, "detect: off"));
 }
 
+void test_shell_parts_command_and_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open parts"));
+  CHECK(block_contains(panel, "Drums"));
+  CHECK(block_contains(panel, "Bass"));
+  CHECK(block_contains(panel, "Pad"));
+  CHECK(block_contains(panel, "Arp"));
+  // Mute/solo via the CLI (the panel keys share this path).
+  CHECK(f.run("part bass mute on"));
+  CHECK(f.run("part drums solo on"));
+  CHECK(f.run("part pad mute off"));
+  // Errors.
+  CHECK(!f.run("part nope mute on"));  // unknown role
+  CHECK(!f.run("part bass flip on"));  // bad subcommand
+  CHECK(!f.run("part bass"));          // too few args
+}
+
 void test_gm_program_parsing() {
   CHECK(parse_gm_program("0") == 0);
   CHECK(parse_gm_program("127") == 127);
@@ -1682,6 +1704,7 @@ int main() {
   test_shell_chord_detect_panel();
   test_gm_program_parsing();
   test_shell_program_command();
+  test_shell_parts_command_and_panel();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();

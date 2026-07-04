@@ -54,6 +54,15 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  track mute|solo <name> on|off",
     };
   }
+  if (topic == "parts") {
+    return {
+        "help: parts  (the arranger band mixer; focus it, then:)",
+        "  up/down  select a part (Drums Perc Bass Chord1 Chord2 Pad Arp Phrase)",
+        "  m  mute the part      s  solo (only soloed parts play)",
+        "  voice: use the program command on the part's channel",
+        "  CLI: part <role> mute|solo on|off",
+    };
+  }
   if (topic == "program") {
     return {
         "help: program  (choose the GM voice, so arrangrr picks the sound)",
@@ -141,6 +150,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
       "  chord  - key, modes, play          (help chord)",
       "  seq    - chord progressions        (help seq)",
       "  style  - the arranger band         (help style)",
+      "  parts  - band mixer (mute/solo)    (help parts)",
       "  track  - step sequencer            (help track)",
       "  program- pick the GM voice         (help program)",
       "  midi   - ports, routing, panic     (help midi)",

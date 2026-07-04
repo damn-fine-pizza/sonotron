@@ -5,6 +5,8 @@
 #include <cctype>
 #include <cstdlib>
 
+#include "parts_view.hpp"
+
 // Live TUI key dispatch (handle_ui_key / piano_key_event) and the simulated
 // piano's note plumbing, plus the `piano` command. Bodies moved verbatim from
 // shell.cpp. Every piano note flows through the same feed_midi input path real
@@ -246,6 +248,40 @@ bool Shell::cmd_piano(const std::vector<std::string>& t, std::string& error) {
   return false;
 }
 
+bool Shell::parts_focused() const {
+  return m_panels.focus_kind() == PanelFocus::kPanel &&
+         m_panels.focused_panel() == PanelId::kParts;
+}
+
+void Shell::parts_select(int delta) {
+  m_parts_selected =
+      std::clamp(m_parts_selected + delta, 0, static_cast<int>(kMixerPartCount) - 1);
+  (void)push_panels();
+}
+
+bool Shell::parts_key(std::uint8_t byte) {
+  const TrackRole role = mixer_role(static_cast<std::size_t>(m_parts_selected));
+  const auto toggle = [&](Param param, bool on) {
+    Command c;
+    c.op = Op::kSet;
+    c.param = param;
+    c.a = static_cast<std::int32_t>(role);
+    c.b = on ? 1 : 0;
+    m_engine.push_command(c, m_sink);
+    (void)push_panels();
+  };
+  switch (byte) {
+    case 'm':
+      toggle(Param::kPartMute, !m_engine.arranger().muted(role));
+      return true;
+    case 's':
+      toggle(Param::kPartSolo, !m_engine.arranger().soloed(role));
+      return true;
+    default:
+      return true;  // the parts panel owns its keystrokes (like the styles panel)
+  }
+}
+
 bool Shell::handle_ui_key(std::uint8_t byte) {
   // CTRL+P (0x10) is a GLOBAL play/stop toggle — it works in every focus
   // (repl, piano, chooser) and on every terminal (a plain control byte, and
@@ -313,6 +349,12 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
   // the piano or the line editor.
   if (styles_focused()) {
     return chooser_key(byte);
+  }
+
+  // The parts mixer owns its keys while focused (m/s mute/solo; up/down arrows
+  // arrive via main.cpp). Swallow the rest so nothing leaks to the editor.
+  if (parts_focused()) {
+    return parts_key(byte);
   }
 
   // Every other shortcut/musical key needs a focused panel; with repl focus the

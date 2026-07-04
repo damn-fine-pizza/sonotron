@@ -152,6 +152,31 @@ void test_ntt_resolution_follows_chord() {
   CHECK(b.ons(2, 62) >= 1 && b.ons(2, 65) >= 1);  // Dm7 comp: 62 65 69 72
 }
 
+void test_part_mute_solo() {
+  {  // Mute silences one part; the others keep playing.
+    Band b;
+    b.setup_basic();
+    b.cmd(Param::kChordPlay, 60, -1, 100);  // C: tonal roles have a chord to sound
+    b.cmd(Param::kPartMute, static_cast<std::int32_t>(TrackRole::kBass), 1, 0, Op::kSet);
+    b.cmd(Param::kTransportStart);
+    b.advance(kTicksPerBar - 1);
+    CHECK(b.ons(1) == 0);  // bass muted
+    CHECK(b.ons(9) > 0);   // drums still groove
+    CHECK(b.ons(2) > 0);   // chord1 still comps
+  }
+  {  // Solo isolates: only the soloed part plays.
+    Band b;
+    b.setup_basic();
+    b.cmd(Param::kChordPlay, 60, -1, 100);
+    b.cmd(Param::kPartSolo, static_cast<std::int32_t>(TrackRole::kDrums), 1, 0, Op::kSet);
+    b.cmd(Param::kTransportStart);
+    b.advance(kTicksPerBar - 1);
+    CHECK(b.ons(9) > 0);   // drums soloed -> audible
+    CHECK(b.ons(1) == 0);  // bass silenced by the solo
+    CHECK(b.ons(2) == 0);  // chord1 silenced by the solo
+  }
+}
+
 void test_quantized_variation_switch() {
   Band b;
   b.setup_basic();
@@ -449,6 +474,7 @@ int main() {
   test_drums_play_without_chord_but_tonal_roles_wait();
   test_ntt_resolution_follows_chord();
   test_role_anchor_and_gm_voices();
+  test_part_mute_solo();
   test_quantized_variation_switch();
   test_fill_one_shot_returns_to_variation();
   test_intro_leads_to_variation();

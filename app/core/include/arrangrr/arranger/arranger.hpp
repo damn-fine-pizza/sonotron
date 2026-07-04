@@ -63,6 +63,68 @@ class Arranger {
     return true;
   }
 
+  // Per-part (per-role) live mute/solo, mirroring the step-track mixer: a muted
+  // role is silent; when ANY role is soloed, only soloed roles play. This is the
+  // arranger-band mixer behind the host `parts` panel.
+  void set_mute(TrackRole role, bool on) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx < kRoleCount) {
+      set_bit(m_muted, idx, on);
+    }
+  }
+  void set_solo(TrackRole role, bool on) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx < kRoleCount) {
+      set_bit(m_solo, idx, on);
+    }
+  }
+  constexpr bool muted(TrackRole role) const noexcept {
+    return bit(m_muted, static_cast<std::uint8_t>(role));
+  }
+  constexpr bool soloed(TrackRole role) const noexcept {
+    return bit(m_solo, static_cast<std::uint8_t>(role));
+  }
+  constexpr bool any_solo() const noexcept { return m_solo != 0; }
+
+  // A snapshot of one part for the host mixer: its route, its voice in the
+  // current section, and its mute/solo state. `present` is false when the
+  // current section has no pattern for this role (e.g. arp only in varC/varD).
+  struct PartInfo {
+    bool routed = false;
+    std::uint8_t port = 0;
+    std::uint8_t channel = 0;  // 0-based
+    std::int16_t gm_program = -1;
+    bool muted = false;
+    bool soloed = false;
+    bool present = false;
+  };
+  PartInfo part_info(TrackRole role) const noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    PartInfo info;
+    if (idx >= kRoleCount) {
+      return info;
+    }
+    const Route& r = m_routes[idx];
+    info.routed = r.enabled;
+    info.port = r.port;
+    info.channel = r.channel;
+    info.muted = bit(m_muted, idx);
+    info.soloed = bit(m_solo, idx);
+    if (m_style != nullptr) {
+      const StyleSection* section = m_style->find(m_current);
+      if (section != nullptr) {
+        for (const StylePattern& pattern : section->patterns) {
+          if (pattern.role == role) {
+            info.present = true;
+            info.gm_program = pattern.gm_program;
+            break;
+          }
+        }
+      }
+    }
+    return info;
+  }
+
   // Requests a section switch, applied at the next bar boundary (or at once
   // when the transport is not running — `immediate`).
   bool request(SectionType t, bool immediate) noexcept {
@@ -219,9 +281,10 @@ class Arranger {
       return result;
     }
     const std::uint16_t step = static_cast<std::uint16_t>(rel / kTicksPerStep);
+    const bool solo_active = any_solo();
     for (const StylePattern& pattern : section->patterns) {
       const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
-      if (!route.enabled) {
+      if (!route.enabled || part_silenced(pattern.role, solo_active)) {
         continue;
       }
       for (const StyleEvent& ev : pattern.events) {
@@ -249,6 +312,22 @@ class Arranger {
     std::uint8_t channel = 0;
     bool enabled = false;
   };
+
+  // A part plays unless it is muted, or a solo is active and it is not soloed.
+  bool part_silenced(TrackRole role, bool solo_active) const noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    return bit(m_muted, idx) || (solo_active && !bit(m_solo, idx));
+  }
+  static constexpr bool bit(std::uint16_t mask, std::uint8_t i) noexcept {
+    return (mask & static_cast<std::uint16_t>(1u << i)) != 0;
+  }
+  static void set_bit(std::uint16_t& mask, std::uint8_t i, bool on) noexcept {
+    if (on) {
+      mask = static_cast<std::uint16_t>(mask | (1u << i));
+    } else {
+      mask = static_cast<std::uint16_t>(mask & ~(1u << i));
+    }
+  }
 
   // NTT core (D24): chord-tone index -> concrete note. Bass anchors low
   // (octave 2), everything else around octave 4; indices past the shape wrap
@@ -298,6 +377,8 @@ class Arranger {
   bool m_pending_valid = false;
   Tick m_section_start = 0;
   Route m_routes[kRoleCount]{};
+  std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
+  std::uint16_t m_solo = 0;   // per-role solo bitmask
 };
 
 }  // namespace arrangrr

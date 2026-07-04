@@ -252,6 +252,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     shell.exec_line("panel open console", ignored);
     shell.exec_line("panel open styles", ignored);
     shell.exec_line("panel open chords", ignored);
+    shell.exec_line("panel open parts", ignored);
     shell.exec_line("panel open events", ignored);
     shell.exec_line("panel focus piano", ignored);  // start in play mode
 
@@ -436,6 +437,13 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
           break;
         default:
           break;
+      }
+    } else if (shell.parts_focused() && is_bare_arrow(final_byte)) {
+      // up/down move the selected part in the mixer; left/right are unused.
+      if (final_byte == 'A') {
+        shell.parts_select(-1);
+      } else if (final_byte == 'B') {
+        shell.parts_select(+1);
       }
     } else {
       replay_bytes(esc);
