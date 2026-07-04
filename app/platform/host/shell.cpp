@@ -375,7 +375,7 @@ constexpr int kDefaultPanelColumns = 80;
 // Global TUI shortcut bytes (raw control chars — work on every terminal).
 constexpr std::uint8_t kCtrlPlayStop = 0x10;  // CTRL+P: transport play/stop
 constexpr std::uint8_t kCtrlChooser = 0x60;     // backtick `: style/section chooser toggle
-constexpr std::uint8_t kCtrlCancelQuit = 0x03;  // CTRL+C: cancel chooser / quit (ISIG is off)
+constexpr std::uint8_t kCtrlQuit = 0x03;  // CTRL+C: always quit the app (ISIG is off)
 constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+\: apply the chooser now
 
 // Chooser edit bytes (raw control chars a plain TTY delivers).
@@ -1241,15 +1241,12 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
   }
 
   // CTRL+C (0x03): the terminal runs with ISIG off, so this is a raw byte, not
-  // SIGINT — we own it. In the chooser it cancels; otherwise it quits gracefully
-  // (same shutdown as `quit`) so the session is never a dead-end you can't leave.
-  if (byte == kCtrlCancelQuit) {
-    if (m_chooser.has_value()) {
-      close_chooser();
-    } else {
-      std::string ignored;
-      exec_line("quit", ignored);
-    }
+  // SIGINT — we own it. It ALWAYS quits the app, unconditionally, in every mode
+  // (chooser open or not) and never does anything else. Checked before the
+  // chooser swallow below so an open chooser can never intercept it.
+  if (byte == kCtrlQuit) {
+    std::string ignored;
+    exec_line("quit", ignored);
     return true;
   }
 
