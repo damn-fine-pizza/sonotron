@@ -67,23 +67,41 @@ void test_filter_resets_style_highlight() {
   CHECK(c.selected_style()->index == 213);
 }
 
-void test_nav_style_clamps_and_resets_section() {
-  StyleChooser c{make_styles()};
-  // Start on index 13 (2 sections), move section to the second one.
-  c.nav_section(1);
-  CHECK(c.selected_section() == SectionType::kVarB);
-
-  // Moving style must reset the section highlight to the new style's first.
-  c.nav_style(1);
-  CHECK(c.selected_style()->index == 113);
+void test_nav_style_preserves_section_by_type() {
+  StyleChooser c{make_styles()};  // 13{VarA,VarB} 113{VarA} 130{VarA,FillA} 213{Intro1,VarA}
+  // On 13, VarA sits at position 0.
+  CHECK(c.selected_section() == SectionType::kVarA);
+  // Jump to 213, where VarA sits at position 1: the section TYPE is preserved
+  // (not the numeric index) — the same variation stays highlighted.
+  c.nav_style(3);
+  CHECK(c.selected_style()->index == 213);
   CHECK(c.selected_section() == SectionType::kVarA);
 
-  // Clamp at the top: repeated up-moves rest on the first style.
-  c.nav_style(-10);
-  CHECK(c.selected_style()->index == 13);
-  // Clamp at the bottom: repeated down-moves rest on the last style.
-  c.nav_style(100);
-  CHECK(c.selected_style()->index == 213);
+  // Select VarB on 13, then move to 113 which lacks VarB -> clamps into its list.
+  StyleChooser d{make_styles()};
+  d.nav_section(1);
+  CHECK(d.selected_section() == SectionType::kVarB);
+  d.nav_style(1);  // 113 has only VarA
+  CHECK(d.selected_style()->index == 113);
+  CHECK(d.selected_section() == SectionType::kVarA);
+
+  // Clamp at the ends: repeated up/down rest on the first/last style.
+  d.nav_style(-10);
+  CHECK(d.selected_style()->index == 13);
+  d.nav_style(100);
+  CHECK(d.selected_style()->index == 213);
+}
+
+void test_select_absolute() {
+  StyleChooser c{make_styles()};
+  // Absolute placement by (style index, section type).
+  c.select(130, SectionType::kFillA);
+  CHECK(c.selected_style()->index == 130);
+  CHECK(c.selected_section() == SectionType::kFillA);
+  // A section absent from the target style clamps to that style's first.
+  c.select(113, SectionType::kFillA);
+  CHECK(c.selected_style()->index == 113);
+  CHECK(c.selected_section() == SectionType::kVarA);
 }
 
 void test_nav_section_clamps() {
@@ -128,7 +146,8 @@ int main() {
   test_non_digit_ignored();
   test_selected_null_when_no_match();
   test_filter_resets_style_highlight();
-  test_nav_style_clamps_and_resets_section();
+  test_nav_style_preserves_section_by_type();
+  test_select_absolute();
   test_nav_section_clamps();
   test_render_contents();
   test_render_no_match();

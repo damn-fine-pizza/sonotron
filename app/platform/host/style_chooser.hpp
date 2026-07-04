@@ -36,8 +36,16 @@ class StyleChooser {
 
   // Navigate within the FILTERED style list / the selected style's sections.
   // Both CLAMP at the ends (no wrap) so repeated keypresses rest on the edge.
+  // nav_style PRESERVES the highlighted section by TYPE across the change (the
+  // same variation stays selected in the new style); it clamps only when the
+  // new style lacks that section type.
   void nav_style(int delta);
   void nav_section(int delta);
+
+  // Absolute placement: highlight the (filtered) style whose StyleInfo.index is
+  // `style_index` and the section of that type, clamping when either is absent.
+  // Used to seed the chooser from the arranger's live style/section.
+  void select(int style_index, SectionType section);
 
   const std::string& filter() const { return m_filter; }
 

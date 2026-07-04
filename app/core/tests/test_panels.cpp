@@ -363,28 +363,33 @@ void test_ansi_visible_helpers() {
   CHECK(ansi::visible_length(ansi::visible_pad(colored, 6)) == 6);
 }
 
-void test_side_by_side_layout() {
+void test_grid_layout() {
   PanelManager pm;
-  pm.set_content(PanelId::kHelp, {"h1", "h2"});
   pm.set_content(PanelId::kPiano, {"p1", "p2"});
-  pm.open(PanelId::kHelp);
+  pm.set_content(PanelId::kConsole, {"c1", "c2"});
   pm.open(PanelId::kPiano);
-  pm.set_layout(PanelLayout::kSideBySide);
+  pm.open(PanelId::kConsole);
 
-  // Wide enough: two columns joined by the " | " gutter.
-  const std::vector<std::string> wide = pm.combined_lines(120);
+  // One per row (default): the grid tiles to EXACTLY `rows` lines, stacked.
+  const int rows = 14;
+  const std::vector<std::string> one = pm.combined_lines(80, rows);
+  CHECK(static_cast<int>(one.size()) == rows);
+  CHECK(any_line_contains(one, "-- piano"));
+  CHECK(any_line_contains(one, "-- console"));
+
+  // Two per row: the pair shares a single row joined by the " | " gutter.
+  pm.set_per_row(2);
+  const std::vector<std::string> two = pm.combined_lines(120, rows);
+  CHECK(static_cast<int>(two.size()) == rows);
   bool has_gutter = false;
-  for (const std::string& line : wide) {
+  for (const std::string& line : two) {
     has_gutter = has_gutter || line.find(" | ") != std::string::npos;
   }
   CHECK(has_gutter);
 
-  // Too narrow: falls back to the vertical stack (titles on their own lines).
-  const std::vector<std::string> narrow = pm.combined_lines(40);
-  CHECK(narrow[0] == "-- menu --");  // the first panel is the contextual MENU
-
-  pm.toggle_layout();  // back to vertical
-  CHECK(pm.layout() == PanelLayout::kVertical);
+  // toggle_layout flips back to one per row.
+  pm.toggle_layout();
+  CHECK(pm.per_row() == 1);
 }
 
 void test_active_note_tracker() {
@@ -688,7 +693,7 @@ int main() {
   test_gm_drum_names();
   test_ui_style();
   test_ansi_visible_helpers();
-  test_side_by_side_layout();
+  test_grid_layout();
   test_active_note_tracker();
   test_visual_event_buffer();
   test_midi_monitor_observe();

@@ -24,6 +24,7 @@
 #include "console.hpp"
 #include "jsonl.hpp"
 #include "kitty_keys.hpp"
+#include "rc_config.hpp"
 #include "shell.hpp"
 
 namespace {
@@ -184,7 +185,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
     const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
     if (tui) {
-      console.emit(line);
+      shell_ref->log_event(line);  // append to the scrolling events panel
     } else {
       std::puts(line.c_str());
     }
@@ -199,8 +200,9 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     return true;
   });
   if (tui) {
-    shell.set_print_hook([&](const std::string& line) { console.console_line(line); });
+    shell.set_print_hook([&](const std::string& line) { shell.console_output(line); });
     shell.set_width_provider([&]() { return console.columns(); });
+    shell.set_height_provider([&]() { return console.panel_rows(); });
     // Resize contract (H1): geometry changed -> panels re-render from state.
     console.set_resize_hook([&]() { shell.refresh_panels(); });
 
@@ -241,13 +243,21 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   shell.exec_line("thru in0 out0", ignored);
   std::printf("arrangrr live: ALSA ports in0/out0 (thru). Type commands; 'quit' to exit.\n");
 
-  // Help and piano panels are visible from the start, laid out as side-by-side
-  // columns (help | piano); the filter panel stays available via `panel open
-  // filter`. Panels only exist in the live TUI.
+  // Default-open panel set (bottom-to-top: piano, console, styles, chords,
+  // events); the menu/filter/empty panels stay available via `panel open ...`.
+  // Panels only exist in the live TUI. ~/.arrangrr.rc, if present, overrides the
+  // order/heights/layout.
   if (tui) {
-    shell.exec_line("panel open help", ignored);
     shell.exec_line("panel open piano", ignored);
-    shell.exec_line("panel layout side", ignored);
+    shell.exec_line("panel open console", ignored);
+    shell.exec_line("panel open styles", ignored);
+    shell.exec_line("panel open chords", ignored);
+    shell.exec_line("panel open events", ignored);
+
+    const char* home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0') {
+      shell.apply_rc(load_rc(std::string(home) + "/.arrangrr.rc"));
+    }
   }
 
   // Terminal-aware piano input (H3). Probe once for the kitty keyboard protocol;
@@ -259,7 +269,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     kitty_supported = detect_kitty_support(kitty_leftover);
     if (!kitty_supported) {
       shell.set_momentary_available(false);
-      console.emit(
+      shell.console_output(
           "terminal has no key-release support — piano uses toggle mode "
           "(press = on, press again = off)");
     }
@@ -330,9 +340,9 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       return false;
     }
     if (r.line) {
-      console.console_line("> " + *r.line);
+      shell.console_output("> " + *r.line);
       if (!shell.exec_line(*r.line, error)) {
-        console.console_line("error: " + error);
+        shell.console_output("error: " + error);
       }
       if (shell.quit_requested()) {
         running = false;
@@ -406,7 +416,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   auto finish_csi = [&](std::uint8_t final_byte) {
     if (final_byte == 'u') {
       dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
-    } else if (shell.chooser_active() && is_bare_arrow(final_byte)) {
+    } else if (shell.styles_focused() && is_bare_arrow(final_byte)) {
       // up/down move the style highlight; left/right the section highlight.
       switch (final_byte) {
         case 'A':
@@ -452,7 +462,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       // Two-byte escape that is not a CSI (Alt-key, lone ESC). With the chooser
       // up an ESC cancels it and the run is consumed; otherwise replay it whole.
       if (b != '[') {
-        if (shell.chooser_active()) {
+        if (shell.styles_focused()) {
           shell.chooser_cancel();
         } else {
           replay_bytes(esc);
@@ -556,7 +566,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
                                  shell.panels().focused_panel() == PanelId::kPiano;
       // The chooser needs plain-CSI arrows, so kitty is popped while it is up
       // (else arrows would arrive as CSI-u escapes the chooser never sees).
-      const bool want_kitty = kitty_supported && piano_focused && !shell.chooser_active() &&
+      const bool want_kitty = kitty_supported && piano_focused && !shell.styles_focused() &&
                               shell.piano_key_mode() == PianoKeyMode::kMomentary;
       if (want_kitty != kitty_on) {
         kitty_on = want_kitty;
@@ -579,11 +589,14 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       }
     }
 
-    // Status bar + input cursor upkeep (throttled to ~10 Hz).
+    // Panel grid + status bar + input cursor upkeep (throttled to ~10 Hz). The
+    // grid re-push here flushes the events panel's appended MIDI without a
+    // repaint per event.
     if (tui) {
       const std::uint64_t now_us = monotonic_us();
       if (now_us - last_status_us > 100'000) {
         last_status_us = now_us;
+        shell.refresh_panels();
         console.set_status(status_line(shell));
         console.render_input(editor);
       }

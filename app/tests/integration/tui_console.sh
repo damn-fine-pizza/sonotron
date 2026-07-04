@@ -24,7 +24,10 @@ rc=$?
 [ "$rc" -eq 0 ] || { echo "CLI exited rc=$rc"; tail -5 "$tmp/out"; exit 1; }
 
 grep -q $'\x1b\[7m' "$tmp/out" || { echo "status bar missing"; exit 1; }
-count=$(grep -c '> play D' "$tmp/out" || true)
+# The uniform panel grid repaints with cursor positioning (few newlines), so the
+# console echo of the typed + recalled command shows as repeated OCCURRENCES on
+# the same physical line rather than distinct grep lines: count occurrences.
+count=$(grep -o '> play D' "$tmp/out" | wc -l)
 [ "$count" -ge 2 ] || { echo "history recall missing (got $count)"; exit 1; }
 grep -q 'chord progressions' "$tmp/out" || { echo "help output missing"; exit 1; }
 grep -q 'stopped' "$tmp/out" || { echo "status text missing"; exit 1; }

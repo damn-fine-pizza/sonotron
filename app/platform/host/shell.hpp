@@ -22,6 +22,8 @@
 
 namespace arrangrr::host {
 
+struct RcConfig;  // rc_config.hpp — ~/.arrangrr.rc parse result
+
 struct PortDef {
   std::string name;  // user alias
   bool is_input = false;
@@ -60,6 +62,8 @@ class Shell {
   using PrintHook = std::function<void(const std::string&)>;
   // Supplies the current terminal width so panel renderers can adapt.
   using WidthProvider = std::function<int()>;
+  // Supplies the rows available to the panel grid (Console::panel_rows()).
+  using HeightProvider = std::function<int()>;
   // Sends raw bytes into the engine input path (used by the live backend).
   void feed_midi(std::uint8_t port, Span<const std::uint8_t> bytes) {
     m_engine.push_midi_in(port, bytes, m_sink);
@@ -70,6 +74,14 @@ class Shell {
   void set_panel_hook(PanelHook hook) { m_panel_hook = std::move(hook); }
   void set_print_hook(PrintHook hook) { m_print_hook = std::move(hook); }
   void set_width_provider(WidthProvider provider) { m_width_provider = std::move(provider); }
+  void set_height_provider(HeightProvider provider) { m_height_provider = std::move(provider); }
+
+  // Live-mode routing of output into the uniform panels. Events append to the
+  // scrolling kEvents panel (no immediate repaint — the ~100ms grid refresh
+  // flushes them); command echo / print output / errors append to the scrolling
+  // kConsole panel and repaint at once.
+  void log_event(const std::string& line);
+  void console_output(const std::string& line);
 
   // Seeds the help panel with startup guidance (e.g. a demo motd) and opens it.
   void show_motd(const std::vector<std::string>& lines);
@@ -106,11 +118,16 @@ class Shell {
 
   PianoKeyMode piano_key_mode() const { return m_piano_key_mode; }
 
-  // CTRL+SPACE style/section chooser (contextual menu, docs/TUI_SPEC.md). The
-  // chooser is engaged whenever the optional holds a value; while engaged
-  // handle_ui_key consumes every byte so nothing leaks to the piano/editor.
-  bool chooser_active() const { return m_chooser.has_value(); }
-  const std::optional<StyleChooser>& chooser() const { return m_chooser; }
+  // The style/section chooser dissolved into the always-present styles panel:
+  // it is ALWAYS constructed and always rendered. Interactions (digits, arrows,
+  // -/=, _/+, ENTER, musical keys) only fire when the styles panel is FOCUSED;
+  // styles_focused() is the gate main.cpp and handle_ui_key check.
+  bool styles_focused() const;
+  const StyleChooser& chooser() const { return m_chooser; }
+
+  // Gives focus to the styles panel (backtick shortcut) and seeds the chooser
+  // highlight from the arranger's current style/section.
+  void focus_styles();
 
   // Keyboard stepping of the arranger's variation (section) and style with a
   // debounced auto-apply (host-live). The step keys mark a pending (style,
@@ -122,10 +139,15 @@ class Shell {
   void apply_style_step();
 
   // Arrow/ESC drivers for the escape state machine in main.cpp (arrows arrive
-  // as CSI escapes, not plain bytes). Each is a no-op unless the chooser is up.
+  // as CSI escapes, not plain bytes). Each is a no-op unless the styles panel is
+  // focused; chooser_cancel drops focus back to the REPL.
   void chooser_nav_style(int delta);
   void chooser_nav_section(int delta);
   void chooser_cancel();
+
+  // Applies a ~/.arrangrr.rc configuration to the panels (order/heights/layout)
+  // and logs any warnings to the console panel.
+  void apply_rc(const RcConfig& rc);
 
   // Terminal-aware momentary lock (H3). The Shell itself stays agnostic — the
   // default is momentary-capable — and the live backend calls this after it has
@@ -212,31 +234,24 @@ class Shell {
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
   void open_help_topic(const std::string& topic);
 
-  // Style/section chooser plumbing (host-live). open_chooser builds the picker
-  // from styles::kBuiltins and pins it to the menu panel; chooser_key routes a
-  // consumed byte; chooser_apply resolves the selection into a kStyleSwitch.
-  void toggle_chooser();
-  void open_chooser();
-  void close_chooser();
+  // Style/section chooser plumbing (host-live). The chooser is always present
+  // and dissolves into the styles panel; seed_chooser_selection lands its
+  // highlight on the arranger's current style/section; chooser_key routes a
+  // consumed byte while the styles panel is focused; chooser_apply resolves the
+  // selection into a kStyleSwitch.
   void seed_chooser_selection();
   bool chooser_key(std::uint8_t byte);
   void chooser_apply(ChooserApply mode);
 
   // Style/section keyboard stepping plumbing (host-live). style_step_key maps a
-  // byte to an axis+direction; style_step advances the pending selection on one
-  // axis (clamped, no wrap) and refreshes the on-screen display; seed_style_step
-  // primes the pending from where the band currently is; the step_pending_*
-  // helpers move within the builtin style/section lists (a style step re-clamps
-  // the section into the new style's section list).
+  // byte to an axis+direction; style_step drives the chooser highlight and
+  // mirrors it into a debounced pending selection (clamped, no wrap).
   enum class StyleStepAxis { kSection, kStyle };
   bool style_step_key(std::uint8_t byte);
   void style_step(StyleStepAxis axis, int delta);
-  void seed_style_step();
-  void step_pending_section(int delta);
-  void step_pending_style(int delta);
-  void render_style_step_menu();
 
   void refresh_piano_content();
+  void refresh_styles_content();
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
   void sync_contextual_panel();
@@ -244,6 +259,7 @@ class Shell {
   void print_lines(const std::vector<std::string>& lines);
   void print_line(const std::string& line);
   int panel_columns() const;
+  int panel_rows_available() const;
   void toggle_piano_key(char key, int semitone_from_base);
   void piano_momentary_on(char key, int semitone_from_base);
   void piano_momentary_off(char key, int semitone_from_base);
@@ -261,13 +277,16 @@ class Shell {
   PanelHook m_panel_hook;
   PrintHook m_print_hook;
   WidthProvider m_width_provider;
+  HeightProvider m_height_provider;
   PanelManager m_panels;
   PianoViewState m_piano;
   UiStyle m_style;
   UiMode m_ui_mode = UiMode::kRepl;  // last mode the contextual panel synced to
   bool m_help_pinned = false;        // true while an explicit help <topic> shows
-  // engaged = the CTRL+SPACE style/section chooser is up (owns every key).
-  std::optional<StyleChooser> m_chooser;
+  // Always-present style/section chooser (dissolved into the styles panel).
+  StyleChooser m_chooser;
+  bool m_styles_was_focused = false;  // edge-detect panel focus to seed the chooser
+  bool m_await_panel_digit = false;   // a digit right after TAB jumps to panel #N
   // Debounced style/section keyboard stepping (host-live). The pending
   // selection is (style index, section); m_style_step_gen drives the debounce
   // clock in main.cpp, and m_style_step_pending marks a step not yet applied.
@@ -275,7 +294,6 @@ class Shell {
   SectionType m_step_section = SectionType::kVarA;
   std::uint32_t m_style_step_gen = 0;
   bool m_style_step_pending = false;
-  bool m_style_step_seeded = false;  // pending primed from the arranger yet?
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;

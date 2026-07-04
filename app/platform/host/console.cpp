@@ -6,6 +6,8 @@
 
 #include <cstdio>
 
+#include "ui_style.hpp"
+
 namespace arrangrr::host {
 
 namespace {
@@ -172,135 +174,29 @@ bool Console::init() {
   m_active = true;
   write_raw("\x1b[2J");  // clear screen once
   m_status = "arrangrr";
-  apply_layout();
+  paint_status();
   return true;
 }
 
-Console::Bands Console::compute_bands(int rows, int panel_lines) {
-  Bands b;
-  const int avail = rows - kStatusInputRows;             // rows above status + input
-  const int cap = (rows * kPanelCapNum) / kPanelCapDen;  // 40% ceiling
-
-  // Panels keep the events region the majority owner: <= 40% of the screen.
-  int panel = panel_lines < 0 ? 0 : panel_lines;
-  if (panel > cap) {
-    panel = cap;
-  }
-
-  // The console pane wants kConsolePaneRows but obeys the same 40% ceiling and,
-  // on a very short terminal, shrinks further so the events region survives —
-  // status/input are never sacrificed (they live in kStatusInputRows).
-  int console = kConsolePaneRows;
-  if (console > cap) {
-    console = cap;
-  }
-  if (console > avail - panel - kMinEventRows) {
-    console = avail - panel - kMinEventRows;
-  }
-  if (console < 0) {
-    console = 0;
-  }
-
-  b.panel = panel;
-  b.console = console;
-  b.events = avail - panel - console;  // remainder; >= kMinEventRows by construction
-  return b;
-}
-
-int Console::log_bottom() const {
-  return compute_bands(m_rows, static_cast<int>(m_panel.size())).events;
-}
-
-void Console::render_console() {
-  if (!m_active) {
-    return;
-  }
-  const Bands b = compute_bands(m_rows, static_cast<int>(m_panel.size()));
-  if (b.console <= 0) {
-    return;
-  }
-  char buf[32];
-  const int top = b.events + b.panel + 1;  // first console-pane row (the rule)
-
-  // Rule/label row: a dim ASCII rule that sets the pane apart from both the
-  // live events stream above and the panels — "-- console " then dashes.
-  std::string out;
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", top);
-  out += buf;
-  std::string rule = "-- console ";
-  rule.resize(static_cast<std::size_t>(m_cols), '-');
-  out += "\x1b[2m";
-  out += rule;
-  out += "\x1b[0m";
-
-  // Log rows: oldest at the top, newest just above the status bar. When the
-  // ring holds fewer lines than there are rows, blank rows pad the top.
-  const int log_rows = b.console - 1;  // the rule takes one row
-  const int filled = static_cast<int>(m_console.size());
-  const int blank = log_rows - filled;  // >0 pads the top; <0 drops the oldest
-  for (int i = 0; i < log_rows; ++i) {
-    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", top + 1 + i);
-    out += buf;
-    const int idx = i - blank;
-    if (idx >= 0 && idx < filled) {
-      std::string line = m_console[static_cast<std::size_t>(idx)];
-      if (static_cast<int>(line.size()) > m_cols) {
-        line.resize(static_cast<std::size_t>(m_cols));
-      }
-      out += line;
-    }
-  }
-  write_raw(out);
-}
-
-void Console::apply_layout() {
-  if (!m_active) {
-    return;
-  }
-  char buf[32];
-  const Bands b = compute_bands(m_rows, static_cast<int>(m_panel.size()));
-  const int bottom = b.events;  // scroll region 1..bottom
-
-  // Rows that just moved out of the panel/console bands back into the (grown)
-  // events region still hold stale bytes: clear them or they ghost. Only rows
-  // below the OLD events boundary are touched, so emitted log lines — which
-  // live at rows <= the old boundary — are never wiped.
-  std::string vacate;
-  for (int row = m_events_bottom + 1; row <= bottom; ++row) {
-    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", row);
-    vacate += buf;
-  }
-  if (!vacate.empty()) {
-    write_raw(vacate);
-  }
-  m_events_bottom = bottom;
-
-  // Scroll region = events pane only.
-  std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", bottom);
-  write_raw(buf);
-  // Panel rows (each cleared, truncated to the pane width).
-  std::string out;
-  for (int i = 0; i < b.panel; ++i) {
-    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", bottom + 1 + i);
-    out += buf;
-    std::string line =
-        i < static_cast<int>(m_panel.size()) ? m_panel[static_cast<std::size_t>(i)] : "";
-    if (static_cast<int>(line.size()) > m_cols) {
-      line.resize(static_cast<std::size_t>(m_cols));
-    }
-    out += "\x1b[2m";  // dim: visually separate from the live events stream
-    out += line;
-    out += "\x1b[0m";
-  }
-  write_raw(out);
-
-  render_console();
-  set_status(m_status);
-}
-
 void Console::set_panel(const std::vector<std::string>& lines) {
-  m_panel = lines;
-  apply_layout();
+  if (!m_active) {
+    return;
+  }
+  const int pr = panel_rows();
+  std::string out;
+  char buf[32];
+  // Paint the grid over rows 1..H-2. Each row is cleared first; PanelManager
+  // already fitted the lines to the column width (styles included), so we write
+  // them verbatim and only guard the width as a safety net.
+  for (int r = 0; r < pr; ++r) {
+    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", r + 1);
+    out += buf;
+    if (r < static_cast<int>(lines.size())) {
+      out += ansi::visible_truncate(lines[static_cast<std::size_t>(r)],
+                                    static_cast<std::size_t>(m_cols));
+    }
+  }
+  write_raw(out);
 }
 
 void Console::shutdown() {
@@ -308,7 +204,6 @@ void Console::shutdown() {
     return;
   }
   m_active = false;
-  write_raw("\x1b[r");  // reset scroll region
   char buf[16];
   std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\n", m_rows);
   write_raw(buf);
@@ -327,47 +222,8 @@ void Console::refresh_geometry() {
 
 void Console::write_raw(const std::string& s) { (void)!write(STDOUT_FILENO, s.data(), s.size()); }
 
-void Console::emit(const std::string& line) {
+void Console::paint_status() {
   if (!m_active) {
-    std::puts(line.c_str());
-    return;
-  }
-  // Print at the bottom of the scroll region (scrolls the pane), then leave
-  // the cursor there; the input line is repainted by render_input.
-  std::string out;
-  char buf[32];
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", log_bottom());
-  out += buf;
-  out += "\n";
-  out += line;
-  write_raw(out);
-}
-
-void Console::console_line(const std::string& line) {
-  // Newest line nearest the input: append, then drop the oldest past capacity.
-  m_console.push_back(line);
-  while (m_console.size() > static_cast<std::size_t>(kConsoleRows)) {
-    m_console.erase(m_console.begin());
-  }
-  render_console();  // repaint the pane in place (no terminal scroll)
-}
-
-void Console::set_status(const std::string& text) {
-  m_status = text;
-  if (!m_active) {
-    return;
-  }
-  const int prev_rows = m_rows;
-  const int prev_cols = m_cols;
-  refresh_geometry();
-  if (m_rows != prev_rows || m_cols != prev_cols) {
-    apply_layout();  // terminal resized: rebuild regions and repaint
-
-    // Panel content is regenerated from state at the new geometry (H1
-    // resize contract): the hook re-renders and re-pushes the panels.
-    if (m_resize_hook) {
-      m_resize_hook();
-    }
     return;
   }
   std::string out;
@@ -380,6 +236,27 @@ void Console::set_status(const std::string& text) {
   out += padded;
   out += "\x1b[0m";
   write_raw(out);
+}
+
+void Console::set_status(const std::string& text) {
+  m_status = text;
+  if (!m_active) {
+    return;
+  }
+  const int prev_rows = m_rows;
+  const int prev_cols = m_cols;
+  refresh_geometry();
+  if (m_rows != prev_rows || m_cols != prev_cols) {
+    // Terminal resized: clear and let the hook re-render + re-push the grid from
+    // state at the new geometry (resize contract), then repaint the status bar.
+    write_raw("\x1b[2J");
+    if (m_resize_hook) {
+      m_resize_hook();
+    }
+    paint_status();
+    return;
+  }
+  paint_status();
 }
 
 void Console::render_input(const LineEditor& ed) {
