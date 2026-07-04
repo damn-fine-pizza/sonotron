@@ -24,6 +24,7 @@ class Arranger {
 
   struct TickResult {
     bool section_changed = false;
+    bool style_changed = false;
     SectionType section = SectionType::kVarA;
     bool stop_transport = false;
   };
@@ -57,7 +58,7 @@ class Arranger {
     if (idx >= kRoleCount || port >= kMaxPorts || channel > 15) {
       return false;
     }
-    m_routes[idx] = Route{.port=port, .channel=channel, .enabled=true};
+    m_routes[idx] = Route{.port = port, .channel = channel, .enabled = true};
     return true;
   }
 
@@ -77,6 +78,37 @@ class Arranger {
       m_pending = t;
       m_pending_valid = true;
     }
+    return true;
+  }
+
+  // Requests a combined style + section switch. `immediate` applies it at once
+  // (a hard mid-bar cut); otherwise both land TOGETHER at the next bar boundary
+  // so live style changes stay seamless. The target section must exist in the
+  // new style, else it falls back to varA (every style is expected to define
+  // one). Returns false if the style is null or lacks even the fallback.
+  bool request_style(const Style* style, SectionType section, bool immediate) noexcept {
+    if (style == nullptr) {
+      return false;
+    }
+    const SectionType target = style->find(section) != nullptr ? section : SectionType::kVarA;
+    if (style->find(target) == nullptr) {
+      return false;
+    }
+
+    if (immediate) {
+      m_style = style;
+      m_current = target;
+      if (section_is_variation(target)) {
+        m_return_to = target;
+      }
+      m_pending_valid = false;
+      m_pending_style = nullptr;
+      return true;
+    }
+
+    m_pending_style = style;
+    m_pending = target;
+    m_pending_valid = true;
     return true;
   }
 
@@ -108,7 +140,15 @@ class Arranger {
       const bool section_end = pos == len;
       if (bar_boundary || section_end) {
         SectionType next = m_current;
+        bool style_switched = false;
         if (m_pending_valid) {
+          // A pending style change lands together with its section, so a live
+          // style switch is seamless (both on the same downbeat).
+          if (m_pending_style != nullptr && m_pending_style != m_style) {
+            m_style = m_pending_style;
+            style_switched = true;
+          }
+          m_pending_style = nullptr;
           next = m_pending;
           m_pending_valid = false;
         } else if (section_end) {
@@ -119,19 +159,23 @@ class Arranger {
             return result;
           }
         }
-        // The section clock restarts ONLY when the section wraps or actually
-        // changes: a mid-section bar boundary must not reset `pos`, or bars
-        // 2..N of a multi-bar section would never play.
-        if (section_end || next != m_current) {
+        // The section clock restarts when the section wraps, the section
+        // changes, OR the style changes (even to the same section type) — a
+        // mid-section bar boundary must not reset `pos`, or bars 2..N of a
+        // multi-bar section would never play.
+        if (section_end || next != m_current || style_switched) {
           m_section_start = transport_tick;
         }
-        if (next != m_current) {
+        if (next != m_current || style_switched) {
           m_current = next;
           if (section_is_variation(next)) {
             m_return_to = next;
           }
           result.section_changed = true;
+          result.style_changed = style_switched;
           result.section = next;
+          // Re-resolve against the (possibly new) style — required even when
+          // the section TYPE is unchanged but the style switched.
           section = m_style->find(m_current);
           if (section == nullptr) {
             return result;
@@ -200,6 +244,7 @@ class Arranger {
   }
 
   const Style* m_style = nullptr;
+  const Style* m_pending_style = nullptr;  // queued with m_pending for a seamless switch
   SectionType m_current = SectionType::kVarA;
   SectionType m_return_to = SectionType::kVarA;
   SectionType m_pending = SectionType::kVarA;

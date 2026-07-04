@@ -210,24 +210,23 @@ void test_multibar_section_plays_bar_two() {
   const ChordState no_chord{};
   StaticVector<std::uint32_t, 8> hits36, hits38;
   for (Tick t = 0; t < 4 * kTicksPerBar; ++t) {
-    a.on_tick(t, no_chord,
-              [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
-                if (msg.type() != midi::kNoteOn || delay != 0) {
-                  return;
-                }
-                if (msg.d1 == 36) {
-                  CHECK(hits36.push_back(t));
-                }
-                if (msg.d1 == 38) {
-                  CHECK(hits38.push_back(t));
-                }
-              });
+    a.on_tick(t, no_chord, [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
+      if (msg.type() != midi::kNoteOn || delay != 0) {
+        return;
+      }
+      if (msg.d1 == 36) {
+        CHECK(hits36.push_back(t));
+      }
+      if (msg.d1 == 38) {
+        CHECK(hits38.push_back(t));
+      }
+    });
   }
   // Two full cycles of a 2-bar section over 4 bars.
   CHECK(hits38.size() == 2 && hits38[0] == 0 && hits38[1] == 2 * kTicksPerBar);
   CHECK(hits36.size() == 2);
-  CHECK(hits36[0] == kTicksPerBar);          // bar 2 fires
-  CHECK(hits36[1] == 3 * kTicksPerBar);      // and again on the wrap
+  CHECK(hits36[0] == kTicksPerBar);      // bar 2 fires
+  CHECK(hits36[1] == 3 * kTicksPerBar);  // and again on the wrap
 }
 
 void test_immediate_switch_when_stopped() {
@@ -238,6 +237,42 @@ void test_immediate_switch_when_stopped() {
   CHECK(b.e.arranger().current() == SectionType::kVarB);
   const auto sec = b.sections();
   CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarB));
+}
+
+void test_seamless_style_switch() {
+  Arranger a;
+  CHECK(a.load_style(&styles::basic::kStyle));
+  a.on_transport_start();
+  const ChordState no_chord{};
+  auto sink = [](std::uint8_t, TickOffset, const MidiMessage&) {};
+
+  // Queue a live switch to a different style (both define varA). It must land
+  // TOGETHER on the next bar downbeat, never mid-bar.
+  CHECK(a.request_style(&twobar::kStyle, SectionType::kVarA, false));
+
+  bool changed_before_bar = false;
+  bool changed_at_bar = false;
+  for (Tick t = 0; t <= kTicksPerBar; ++t) {
+    const Arranger::TickResult r = a.on_tick(t, no_chord, sink);
+    if (r.style_changed) {
+      if (t < kTicksPerBar) {
+        changed_before_bar = true;
+      } else {
+        changed_at_bar = true;
+      }
+    }
+  }
+  CHECK(!changed_before_bar);  // seamless: not a mid-bar cut
+  CHECK(changed_at_bar);       // applied on the downbeat
+
+  // Immediate switch + section fallback: basic has no varC, so it lands varA.
+  Arranger f;
+  CHECK(f.load_style(&twobar::kStyle));
+  CHECK(f.request_style(&styles::basic::kStyle, SectionType::kVarC, true));
+  CHECK(f.current() == SectionType::kVarA);
+
+  // A null style is refused.
+  CHECK(!f.request_style(nullptr, SectionType::kVarA, true));
 }
 
 }  // namespace
@@ -253,6 +288,7 @@ int main() {
   test_style_warns();
   test_multibar_section_plays_bar_two();
   test_immediate_switch_when_stopped();
+  test_seamless_style_switch();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_arranger: all OK\n");
   }
