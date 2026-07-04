@@ -50,11 +50,20 @@ enum class MidiEventKindFilter {
   kNoteOff,
 };
 
+// Drums = GM percussion channel (ch10 1-based); melodic = everything else.
+enum class InstrumentFilter {
+  kAny,
+  kDrums,
+  kMelodic,
+};
+
 // Filters are data, never renderer logic. Empty optional = pass-through.
 struct MidiEventFilter {
   std::optional<std::uint8_t> channel;  // 0-based internal
   std::optional<std::uint8_t> port;
+  std::optional<std::uint8_t> velocity_min;  // note-ons below this are hidden
   MidiEventKindFilter event_kind = MidiEventKindFilter::kAny;
+  InstrumentFilter instrument = InstrumentFilter::kAny;
 };
 
 bool filter_passes(const MidiEventFilter& filter, const MidiLogEvent& event);
@@ -65,6 +74,7 @@ struct MidiViewOptions {
   bool show_velocity = true;
   bool show_channel = true;
   bool show_port = true;
+  bool show_drum_names = true;  // GM names on the percussion channel (H3)
 };
 
 struct ActiveNote {

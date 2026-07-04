@@ -57,6 +57,24 @@ const char* realtime_name(std::uint8_t status) {
 
 std::string format(const char* fmt, auto... args);
 
+// Human note-on/note-off lines gain the note name after the note number,
+// left-padded to a fixed column so "vel" stays aligned across GM drum names
+// and scientific pitches.
+constexpr int kNoteNameColumnWidth = 10;
+
+// Ch10 (0-based 9) prefers the GM drum name; every other channel, and any
+// ch10 note without a conventional GM name, falls back to the scientific
+// pitch name (e.g. "E3").
+std::string note_label(std::uint8_t channel, std::uint8_t note, bool prefer_flats) {
+  if (channel == kGmDrumChannelZeroBased) {
+    if (const char* drum = gm_drum_name(note)) {
+      return drum;
+    }
+  }
+
+  return note_name(note, {NoteNaming::kCde, prefer_flats, true});
+}
+
 const char* section_name(std::uint16_t code) {
   static constexpr const char* kNames[] = {
       "intro1", "intro2", "varA",  "varB",  "varC",    "varD",    "fillA",
@@ -194,11 +212,13 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
       }
       switch (m.type()) {
         case midi::kNoteOn:
-          return format("@%-8u p%u ch%-2u note-on  %3u vel %3u", ev.tick, ev.port, m.channel() + 1,
-                        m.d1, m.d2);
+          return format("@%-8u p%u ch%-2u note-on  %3u %-*s vel %3u", ev.tick, ev.port,
+                        m.channel() + 1, m.d1, kNoteNameColumnWidth,
+                        note_label(m.channel(), m.d1, prefer_flats).c_str(), m.d2);
         case midi::kNoteOff:
-          return format("@%-8u p%u ch%-2u note-off %3u vel %3u", ev.tick, ev.port, m.channel() + 1,
-                        m.d1, m.d2);
+          return format("@%-8u p%u ch%-2u note-off %3u %-*s vel %3u", ev.tick, ev.port,
+                        m.channel() + 1, m.d1, kNoteNameColumnWidth,
+                        note_label(m.channel(), m.d1, prefer_flats).c_str(), m.d2);
         case midi::kControlChange:
           return format("@%-8u p%u ch%-2u cc %3u = %3u", ev.tick, ev.port, m.channel() + 1, m.d1,
                         m.d2);

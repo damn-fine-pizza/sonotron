@@ -75,13 +75,10 @@ void test_keymap() {
   const auto& white = default_keymap_white();
   const auto& black = default_keymap_black();
   CHECK(white.size() == 11);
-  CHECK(black.size() == 6);
+  CHECK(black.size() == 7);
 
-  // No binding, white or black, may use the reserved 'P'/'p' key.
+  // 'P' is a black key (D#5), never a white key.
   for (const PianoKeyBinding& b : white) {
-    CHECK(b.key != 'P' && b.key != 'p');
-  }
-  for (const PianoKeyBinding& b : black) {
     CHECK(b.key != 'P' && b.key != 'p');
   }
 
@@ -89,6 +86,8 @@ void test_keymap() {
   CHECK(black[0].key == 'W' && black[0].semitone_from_base == 1);
   CHECK(white[1].key == 'S' && white[1].semitone_from_base == 2);
   CHECK(white[7].key == 'K' && white[7].semitone_from_base == 12);
+  // 'P' extends the black row to D#5 (base C4 + 15 semitones).
+  CHECK(black[6].key == 'P' && black[6].semitone_from_base == 15);
 }
 
 void test_keyboard_note_labels() {

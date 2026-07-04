@@ -72,6 +72,12 @@ void test_human_encoder() {
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 0)), "note-on"));
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_off(0, 60, 64), 0)), "note-off"));
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::cc(0, 7, 1), 0)), "cc"));
+
+  // H3 enrichment: note lines carry the note name; ch10 (0-based 9) shows the
+  // GM drum name, with a scientific-pitch fallback for notes without one.
+  CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 0)), "C4"));
+  CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(9, 36, 100), 0)), "Kick"));
+  CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(9, 60, 100), 0)), "C4"));
   CHECK(has(to_human(OutEvent::midi(0, {0xC0, 1, 0}, 0)), "status"));
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::realtime(midi::kClock), 0)), "clock"));
   CHECK(has(to_human(OutEvent::transport(1, 0)), "transport playing"));
@@ -736,20 +742,27 @@ void test_piano_key_dispatch() {
   CHECK(f.run("piano panic"));
   CHECK(f.shell.monitor().active_notes().size() == 0);
 
+  // 'P' is the D#5 black key = base C4 (60) + 15 = 75, through the normal path.
+  CHECK(f.run("piano channel 1"));
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key('p'));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.events.back().msg.d1 == 75);
+  CHECK(f.shell.handle_ui_key('p'));  // toggle release
+
   // Out-of-range: octave 9, ' = +17 semitones -> 137 -> rejected, no event.
   CHECK(f.run("piano octave 9"));
   const int before = f.note_ons();
   CHECK(f.shell.handle_ui_key('\''));
   CHECK(f.note_ons() == before);
 
-  // 'P' closes the piano panel and returns focus to the REPL.
-  CHECK(f.shell.handle_ui_key('p'));
-  CHECK(!f.shell.panels().visible(PanelId::kPiano));
+  // TAB is the way out: focus returns to the REPL, the panel stays open.
+  CHECK(f.shell.handle_ui_key('\t'));
   CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+  CHECK(f.shell.panels().visible(PanelId::kPiano));
 
-  // With REPL focus nothing is intercepted anymore.
+  // With REPL focus musical keys are no longer intercepted.
   CHECK(!f.shell.handle_ui_key('a'));
-  CHECK(!f.shell.handle_ui_key('\t'));
 }
 
 void test_piano_focus_shortcuts() {
@@ -765,10 +778,10 @@ void test_piano_focus_shortcuts() {
   CHECK(f.shell.handle_ui_key('v'));
   CHECK(f.shell.piano_state().view == PianoView::kKeyboard);
 
-  // [ ] change octave.
-  CHECK(f.shell.handle_ui_key('['));
+  // . / change octave (moved off [ ] so they never shadow a musical key).
+  CHECK(f.shell.handle_ui_key('.'));
   CHECK(f.shell.piano_state().base_octave == 3);
-  CHECK(f.shell.handle_ui_key(']'));
+  CHECK(f.shell.handle_ui_key('/'));
   CHECK(f.shell.piano_state().base_octave == 4);
 
   // C clears monitor buffers.
@@ -787,6 +800,30 @@ void test_piano_focus_shortcuts() {
   CHECK(f.shell.handle_ui_key('1'));
 }
 
+void test_tab_enters_piano_from_repl() {
+  ShellFixture f;
+  CHECK(f.run("panel open piano"));
+  // Merely opening a panel leaves focus on the REPL.
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+
+  // TAB from the REPL drops into the only visible panel = piano play mode.
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kPanel);
+  CHECK(f.shell.panels().focused_panel() == PanelId::kPiano);
+
+  // A musical key now sounds through the normal path.
+  CHECK(f.run("port open in in0"));
+  CHECK(f.run("port open out out0"));
+  CHECK(f.run("thru in0 out0"));
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.midi_count() >= 1);
+
+  // With nothing open, TAB falls through to the line editor.
+  ShellFixture g;
+  CHECK(!g.shell.handle_ui_key('\t'));
+}
+
 void test_panel_manager_state() {
   PanelManager pm;
   CHECK(!pm.any_visible());
@@ -798,14 +835,15 @@ void test_panel_manager_state() {
   pm.open(PanelId::kPiano);
   pm.set_content(PanelId::kPiano, {"p1"});
   CHECK(pm.visible(PanelId::kHelp) && pm.visible(PanelId::kPiano));
-  std::vector<std::string> combined = pm.combined_lines();
+  constexpr int kWide = 100;
+  std::vector<std::string> combined = pm.combined_lines(kWide);
   CHECK(combined.size() == 2 + 2 + 1);  // two titles + help(2) + piano(1)
 
   // An oversized panel is truncated with an honest marker; the panel below
   // stays visible (fairness cap).
   const std::vector<std::string> big(40, "x");
   pm.set_content(PanelId::kHelp, big);
-  combined = pm.combined_lines();
+  combined = pm.combined_lines(kWide);
   CHECK(block_contains(combined, "more lines)"));
   std::size_t help_lines = 0;
   for (const std::string& line : combined) {
@@ -915,6 +953,7 @@ int main() {
   test_filter_view_commands();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();
+  test_tab_enters_piano_from_repl();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
   test_line_editor();

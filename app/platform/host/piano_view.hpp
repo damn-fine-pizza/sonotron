@@ -34,10 +34,11 @@ struct PianoKeyBinding {
 };
 
 // Centralized computer-keyboard -> semitone map (single source of truth so the
-// renderer and any future input handler never diverge). 'P'/'p' is reserved and
-// intentionally never musical.
+// renderer and any future input handler never diverge). 'P' is the D#5 black
+// key (it sits above L/D5-;/E5); octave shift lives on '.'/'/' so no musical
+// key doubles as a shortcut.
 inline constexpr std::size_t kWhiteKeyCount = 11;
-inline constexpr std::size_t kBlackKeyCount = 6;
+inline constexpr std::size_t kBlackKeyCount = 7;
 
 const std::array<PianoKeyBinding, kWhiteKeyCount>& default_keymap_white();
 const std::array<PianoKeyBinding, kBlackKeyCount>& default_keymap_black();

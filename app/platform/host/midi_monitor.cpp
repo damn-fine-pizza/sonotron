@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdio>
 
+#include "note_names.hpp"
+
 namespace arrangrr::host {
 
 namespace {
@@ -78,6 +80,23 @@ bool filter_passes(const MidiEventFilter& filter, const MidiLogEvent& event) {
   // has no channel and passes the channel test untouched.
   if (filter.channel.has_value() && midi::is_channel_voice(event.msg.status) &&
       event.msg.channel() != *filter.channel) {
+    return false;
+  }
+
+  // Drums/melodic split follows the GM convention: percussion lives on ch10.
+  if (filter.instrument != InstrumentFilter::kAny && midi::is_channel_voice(event.msg.status)) {
+    const bool is_drums = event.msg.channel() == kGmDrumChannelZeroBased;
+    if (filter.instrument == InstrumentFilter::kDrums && !is_drums) {
+      return false;
+    }
+    if (filter.instrument == InstrumentFilter::kMelodic && is_drums) {
+      return false;
+    }
+  }
+
+  // The velocity floor hides soft note-ons; everything else is unaffected.
+  if (filter.velocity_min.has_value() && msg_is_note_on(event.msg) &&
+      event.msg.d2 < *filter.velocity_min) {
     return false;
   }
 

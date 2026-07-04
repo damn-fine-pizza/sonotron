@@ -398,12 +398,12 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
   if (topic == "piano") {
     return {
         "help: piano",
-        "  panel open piano | panel focus piano   focus grabs the keyboard",
-        "  white: A S D F G H J K L ; '           black: W E T Y U O",
+        "  panel open piano, then TAB to enter/leave play mode",
+        "  white: A S D F G H J K L ; '           black: W E T Y U O P",
         "  press = note-on, same key again = note-off (no key-release in ttys)",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
-        "  focus keys: TAB next | P close | N names | V view | C clear | [ ] oct",
+        "  play keys: TAB exit | N names | V view | C clear | . octave- | / octave+",
     };
   }
   if (topic == "notes") {
@@ -475,7 +475,7 @@ bool Shell::push_panels() {
     refresh_piano_content();
   }
 
-  return m_panel_hook && m_panel_hook(m_panels.combined_lines());
+  return m_panel_hook && m_panel_hook(m_panels.combined_lines(panel_columns()));
 }
 
 void Shell::refresh_panels() { (void)push_panels(); }
@@ -882,15 +882,22 @@ bool Shell::cmd_view(const std::vector<std::string>& t, std::string& error) {
 }
 
 bool Shell::handle_ui_key(std::uint8_t byte) {
-  // REPL focus: never intercept — typing must stay exactly as before.
-  if (m_panels.focus_kind() != PanelFocus::kPanel) {
-    return false;
-  }
-
+  // TAB cycles focus repl <-> visible panels, even FROM the repl: opening the
+  // piano and pressing TAB drops you straight into play mode. With no panel to
+  // focus it falls through so a lone TAB still reaches the editor.
   if (byte == '\t') {
+    if (m_panels.focus_kind() != PanelFocus::kPanel && !m_panels.any_visible()) {
+      return false;
+    }
     m_panels.focus_next();
     (void)push_panels();
     return true;
+  }
+
+  // Every other shortcut/musical key needs a focused panel; with repl focus the
+  // byte falls through to the line editor and typing stays exactly as before.
+  if (m_panels.focus_kind() != PanelFocus::kPanel) {
+    return false;
   }
 
   if (m_panels.focused_panel() != PanelId::kPiano) {
@@ -900,11 +907,9 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
   const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
 
   // Piano-focus shortcuts take priority over musical keys (none collide).
+  // TAB is the way out of play mode; 'P' is deliberately NOT a shortcut — it
+  // sits right next to 'O' (C#5) and a stray press must never close the panel.
   switch (upper) {
-    case 'P':
-      m_panels.close(PanelId::kPiano);
-      (void)push_panels();
-      return true;
     case 'N': {
       std::string ignored;
       (void)cmd_notes({"notes", "names", "toggle"}, ignored);
@@ -922,12 +927,12 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
       m_monitor.clear();
       (void)push_panels();
       return true;
-    case '[': {
+    case '.': {
       std::string ignored;
       (void)cmd_piano({"piano", "octave", "down"}, ignored);
       return true;
     }
-    case ']': {
+    case '/': {
       std::string ignored;
       (void)cmd_piano({"piano", "octave", "up"}, ignored);
       return true;

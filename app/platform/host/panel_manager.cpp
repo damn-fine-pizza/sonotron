@@ -1,5 +1,7 @@
 #include "panel_manager.hpp"
 
+#include "ui_style.hpp"
+
 namespace arrangrr::host {
 
 namespace {
@@ -121,31 +123,103 @@ PanelId PanelManager::focused_panel() const { return m_focused; }
 
 const std::vector<std::string>& PanelManager::content(PanelId id) const { return at(id).m_lines; }
 
-std::vector<std::string> PanelManager::combined_lines() const {
+void PanelManager::set_layout(PanelLayout layout) { m_layout = layout; }
+
+void PanelManager::toggle_layout() {
+  m_layout =
+      m_layout == PanelLayout::kVertical ? PanelLayout::kSideBySide : PanelLayout::kVertical;
+}
+
+PanelLayout PanelManager::layout() const { return m_layout; }
+
+// One panel's title rule + capped content: the unit both layouts compose.
+std::vector<std::string> PanelManager::panel_block(PanelId id) const {
+  const Panel& panel = at(id);
+  std::vector<std::string> out;
+
+  const bool focused = m_focus == PanelFocus::kPanel && m_focused == id;
+  out.push_back(title_rule(id, focused));
+
+  // Per-panel fairness cap: a long panel must not push its neighbours out of
+  // Console's shared panel area (its global cap still applies).
+  const std::size_t shown = panel.m_lines.size() > panel_layout::kMaxLinesPerPanel
+                                ? panel_layout::kMaxLinesPerPanel - 1
+                                : panel.m_lines.size();
+  for (std::size_t i = 0; i < shown; ++i) {
+    out.push_back(panel.m_lines[i]);
+  }
+  if (shown < panel.m_lines.size()) {
+    out.push_back("  ... (" + std::to_string(panel.m_lines.size() - shown) + " more lines)");
+  }
+
+  return out;
+}
+
+std::vector<std::string> PanelManager::stacked_lines() const {
   std::vector<std::string> out;
 
   for (PanelId id : kPanelOrder) {
-    const Panel& panel = at(id);
-    if (!panel.m_visible) {
+    if (!at(id).m_visible) {
       continue;
     }
 
-    const bool focused = m_focus == PanelFocus::kPanel && m_focused == id;
-    out.push_back(title_rule(id, focused));
-
-    // Per-panel fairness cap: a long panel must not push the ones below it
-    // out of Console's shared panel area (its global cap still applies).
-    const std::size_t shown = panel.m_lines.size() > panel_layout::kMaxLinesPerPanel
-                                  ? panel_layout::kMaxLinesPerPanel - 1
-                                  : panel.m_lines.size();
-    for (std::size_t i = 0; i < shown; ++i) {
-      out.push_back(panel.m_lines[i]);
-    }
-    if (shown < panel.m_lines.size()) {
-      out.push_back("  ... (" + std::to_string(panel.m_lines.size() - shown) + " more lines)");
-    }
+    const std::vector<std::string> block = panel_block(id);
+    out.insert(out.end(), block.begin(), block.end());
   }
   return out;
+}
+
+std::vector<std::string> PanelManager::side_by_side_lines(int terminal_columns) const {
+  // Collect the visible panels: the first two go in columns, the rest stack.
+  std::vector<PanelId> shown;
+  for (PanelId id : kPanelOrder) {
+    if (at(id).m_visible) {
+      shown.push_back(id);
+    }
+  }
+
+  const std::vector<std::string> left = panel_block(shown[0]);
+  const std::vector<std::string> right = panel_block(shown[1]);
+
+  const std::size_t width = static_cast<std::size_t>(terminal_columns);
+  const std::size_t column = (width - panel_layout::kSideGutterWidth) / 2;
+
+  std::vector<std::string> out;
+  const std::size_t rows = left.size() > right.size() ? left.size() : right.size();
+  for (std::size_t i = 0; i < rows; ++i) {
+    const std::string left_cell =
+        i < left.size() ? ansi::visible_truncate(left[i], column) : std::string();
+    const std::string right_cell =
+        i < right.size() ? ansi::visible_truncate(right[i], column) : std::string();
+
+    out.push_back(ansi::visible_pad(left_cell, column) + " | " + right_cell);
+  }
+
+  // A third visible panel stacks below the pair.
+  for (std::size_t p = 2; p < shown.size(); ++p) {
+    const std::vector<std::string> block = panel_block(shown[p]);
+    out.insert(out.end(), block.begin(), block.end());
+  }
+
+  return out;
+}
+
+std::vector<std::string> PanelManager::combined_lines(int terminal_columns) const {
+  // Side-by-side needs two visible panels and enough width; anything else
+  // falls back to the vertical stack (H3 resize contract).
+  std::size_t visible_count = 0;
+  for (const Panel& panel : m_panels) {
+    if (panel.m_visible) {
+      ++visible_count;
+    }
+  }
+
+  if (m_layout == PanelLayout::kSideBySide && visible_count >= 2 &&
+      terminal_columns >= panel_layout::kSideMinColumns) {
+    return side_by_side_lines(terminal_columns);
+  }
+
+  return stacked_lines();
 }
 
 std::vector<std::string> PanelManager::list_lines() const {
@@ -190,7 +264,8 @@ std::vector<std::string> PanelManager::status_lines() const {
     open = "none";
   }
 
-  return {"panel status: open [" + open + "]  " + focus + "  layout: vertical"};
+  const char* layout = m_layout == PanelLayout::kVertical ? "vertical" : "side";
+  return {"panel status: open [" + open + "]  " + focus + "  layout: " + layout};
 }
 
 }  // namespace arrangrr::host

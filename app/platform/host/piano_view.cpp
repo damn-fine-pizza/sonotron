@@ -83,6 +83,7 @@ constexpr std::array<PianoKeyBinding, kBlackKeyCount> kBlackKeys = {{
     {'Y', 8},
     {'U', 10},
     {'O', 13},
+    {'P', 15},
 }};
 
 int octave_of(std::uint8_t midi_note) { return midi_note / piano_keys::kSemitonesPerOctave - 1; }

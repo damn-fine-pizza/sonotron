@@ -25,4 +25,9 @@ std::string note_name(std::uint8_t midi_note, const NoteNameOptions& options);
 // Pitch class only; octave and include_octave are ignored.
 std::string pitch_class_name(std::uint8_t midi_note, const NoteNameOptions& options);
 
+// General MIDI percussion map (channel 10): returns nullptr when the note
+// has no conventional GM name.
+const char* gm_drum_name(std::uint8_t midi_note);
+inline constexpr std::uint8_t kGmDrumChannelZeroBased = 9;  // "ch10" 1-based
+
 }  // namespace arrangrr::host
