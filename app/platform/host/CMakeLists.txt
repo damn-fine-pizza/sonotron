@@ -3,6 +3,12 @@ find_package(ALSA REQUIRED)
 # Host layer as a library so unit tests can link shell/jsonl directly.
 add_library(arrangrr_host STATIC
   shell.cpp
+  shell_parse.cpp
+  shell_io_commands.cpp
+  shell_music_commands.cpp
+  shell_input.cpp
+  shell_view.cpp
+  shell_chooser.cpp
   jsonl.cpp
   alsa_midi.cpp
   console.cpp
