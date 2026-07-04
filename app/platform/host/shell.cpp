@@ -496,7 +496,41 @@ void Shell::refresh_piano_content() {
                                                            m_filter, m_view_options));
 }
 
+UiMode Shell::current_ui_mode() const {
+  if (m_panels.focus_kind() == PanelFocus::kPanel && m_panels.focused_panel() == PanelId::kPiano) {
+    return UiMode::kPiano;
+  }
+  return UiMode::kRepl;
+}
+
+std::vector<std::string> Shell::contextual_help_lines() const {
+  // The help panel IS the contextual menu: it teaches the keys of the mode
+  // you're in, and always the fundamental navigation shortcuts.
+  std::vector<std::string> lines =
+      current_ui_mode() == UiMode::kPiano ? build_help("piano") : build_help("");
+  lines.push_back("nav: TAB focus | CTRL+P play/stop | CTRL+SPACE style/section");
+  return lines;
+}
+
+void Shell::sync_contextual_panel() {
+  // A mode change unpins an explicit help topic so the contextual content
+  // resumes. The panel is not force-opened here (that would reshuffle the
+  // visible set and focus cycle); it simply reflects the mode whenever shown.
+  const UiMode mode = current_ui_mode();
+  if (mode != m_ui_mode) {
+    m_ui_mode = mode;
+    m_help_pinned = false;
+  }
+
+  if (!m_help_pinned) {
+    m_panels.set_content(PanelId::kHelp, contextual_help_lines());
+  }
+}
+
 bool Shell::push_panels() {
+  // The contextual menu content tracks the current mode before every render.
+  sync_contextual_panel();
+
   // Width-dependent content is regenerated from state on every push, so a
   // resize can never leave a stale layout behind (H1 resize contract).
   if (m_panels.visible(PanelId::kPiano)) {
@@ -516,6 +550,7 @@ void Shell::refresh_panels() { (void)push_panels(); }
 void Shell::show_motd(const std::vector<std::string>& lines) {
   m_panels.set_content(PanelId::kHelp, lines);
   m_panels.open(PanelId::kHelp);
+  m_help_pinned = true;  // the motd survives re-renders until the mode changes
 
   if (!push_panels()) {
     print_lines(lines);
@@ -526,6 +561,7 @@ void Shell::open_help_topic(const std::string& topic) {
   const std::vector<std::string> lines = build_help(topic);
   m_panels.set_content(PanelId::kHelp, lines);
   m_panels.open(PanelId::kHelp);
+  m_help_pinned = true;  // an explicit topic overrides the contextual content
 
   if (!push_panels()) {
     print_lines(lines);

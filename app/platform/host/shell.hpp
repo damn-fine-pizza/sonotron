@@ -39,6 +39,11 @@ struct PortDef {
 //                fallback for the plain-byte path in either mode.
 enum class PianoKeyMode { kMomentary, kToggle };
 
+// Which interactive mode the live TUI is in. Drives the contextual help
+// panel: its content follows the mode (commands in the REPL, piano keys in
+// play mode) unless the user pinned an explicit `help <topic>`.
+enum class UiMode { kRepl, kPiano };
+
 class Shell {
  public:
   using EventSink = std::function<void(const OutEvent&)>;
@@ -176,6 +181,9 @@ class Shell {
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
   void open_help_topic(const std::string& topic);
   void refresh_piano_content();
+  UiMode current_ui_mode() const;
+  std::vector<std::string> contextual_help_lines() const;
+  void sync_contextual_panel();
   bool push_panels();
   void print_lines(const std::vector<std::string>& lines);
   void print_line(const std::string& line);
@@ -200,6 +208,8 @@ class Shell {
   PanelManager m_panels;
   PianoViewState m_piano;
   UiStyle m_style;
+  UiMode m_ui_mode = UiMode::kRepl;  // last mode the contextual panel synced to
+  bool m_help_pinned = false;        // true while an explicit help <topic> shows
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;

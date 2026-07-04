@@ -730,6 +730,36 @@ void test_theme_colors_layout_commands() {
   CHECK(f.midi_count() == 0);
 }
 
+void test_contextual_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+
+  // Opening the help panel with no topic shows the contextual overview plus
+  // the always-present navigation footer.
+  CHECK(f.run("panel open help"));
+  CHECK(block_contains(panel, "nav: TAB focus"));
+  CHECK(block_contains(panel, "help  (help <topic>"));
+
+  // An explicit topic pins: it survives re-renders in the same mode.
+  CHECK(f.run("help chord"));
+  CHECK(block_contains(panel, "help: chord"));
+  CHECK(f.run("panel open piano"));  // a re-render, still REPL mode
+  CHECK(block_contains(panel, "help: chord"));
+
+  // Entering piano play mode unpins and the contextual content follows.
+  CHECK(f.run("panel focus piano"));
+  CHECK(block_contains(panel, "white: A S D F G H J K L"));
+  CHECK(block_contains(panel, "nav: TAB focus"));
+
+  // Back to the REPL: contextual overview returns.
+  CHECK(f.run("panel focus repl"));
+  CHECK(block_contains(panel, "help  (help <topic>"));
+}
+
 void test_ctrl_p_play_stop() {
   ShellFixture f;
   constexpr std::uint8_t kCtrlP = 0x10;
@@ -1142,6 +1172,7 @@ int main() {
   test_notes_names_commands();
   test_filter_view_commands();
   test_theme_colors_layout_commands();
+  test_contextual_panel();
   test_ctrl_p_play_stop();
   test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
