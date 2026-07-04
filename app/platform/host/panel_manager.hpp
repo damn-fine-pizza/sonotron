@@ -52,7 +52,7 @@ inline constexpr int kTwoPerRow = 2;
 // fill the remaining height regardless of these.
 inline constexpr int kEventsHeight = 6;
 inline constexpr int kConsoleHeight = 6;
-inline constexpr int kStylesHeight = 7;
+inline constexpr int kStylesHeight = 9;
 inline constexpr int kChordsHeight = 4;
 inline constexpr int kPianoHeight = 7;
 inline constexpr int kHelpHeight = 8;

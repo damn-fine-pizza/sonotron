@@ -118,6 +118,7 @@ PanelManager::PanelManager() {
   }
   at(PanelId::kEvents).m_scrolling = true;
   at(PanelId::kConsole).m_scrolling = true;
+  at(PanelId::kStyles).m_full_row = true;  // styles always takes a full grid row (even in layout2)
   m_order.assign(kDefaultOrder.begin(), kDefaultOrder.end());
 }
 
