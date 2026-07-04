@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -129,13 +130,50 @@ class Shell {
   int find_seq(const std::string& name) const;
   std::vector<std::string> build_help(const std::string& topic) const;
 
+  // exec_now dispatch is split into per-domain groups so each stays within the
+  // cognitive-complexity budget; the groups preserve the original matching
+  // order and guards, returning std::nullopt when the command is not theirs.
+  std::optional<bool> dispatch_ui(const std::vector<std::string>& tokens, const std::string& cmd,
+                                  std::string& error);
+  std::optional<bool> dispatch_midi(const std::vector<std::string>& tokens, const std::string& cmd,
+                                    std::string& error);
+  std::optional<bool> dispatch_music(const std::vector<std::string>& tokens, const std::string& cmd,
+                                     std::string& error);
+  std::optional<bool> dispatch_transport(const std::vector<std::string>& tokens,
+                                         const std::string& cmd, std::string& error);
+
+  bool cmd_help(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_panel(const std::vector<std::string>& tokens, std::string& error);
+  bool panel_layout(const std::vector<std::string>& tokens, std::string& error);
+  bool panel_target(const std::string& sub, const std::vector<std::string>& tokens,
+                    std::string& error);
   bool cmd_piano(const std::vector<std::string>& tokens, std::string& error);
+  bool piano_octave(const std::vector<std::string>& tokens, std::string& error);
+  bool piano_view(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_notes(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_filter(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_view(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_theme(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_colors(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_port(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_transport(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_route(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_thru(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_clock(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_midi_send(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_panic(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_key(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_play(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_chord(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_style(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_seq(const std::vector<std::string>& tokens, std::string& error);
+  bool seq_add(const std::vector<std::string>& tokens, std::string& error);
+  bool seq_transpose(const std::vector<std::string>& tokens, std::string& error);
+  bool seq_del(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_track(const std::vector<std::string>& tokens, std::string& error);
+  bool track_new(const std::vector<std::string>& tokens, std::string& error);
+  bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
+  bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
   void open_help_topic(const std::string& topic);
   void refresh_piano_content();
   bool push_panels();

@@ -529,6 +529,78 @@ void Shell::open_help_topic(const std::string& topic) {
   }
 }
 
+bool Shell::panel_layout(const std::vector<std::string>& t, std::string& error) {
+  if (t.size() < 3) {
+    error = "panel layout vertical|side|toggle";
+    return false;
+  }
+
+  if (t[2] == "vertical") {
+    m_panels.set_layout(PanelLayout::kVertical);
+  } else if (t[2] == "side") {
+    m_panels.set_layout(PanelLayout::kSideBySide);
+  } else if (t[2] == "toggle") {
+    m_panels.toggle_layout();
+  } else {
+    error = "panel layout vertical|side|toggle";
+    return false;
+  }
+
+  (void)push_panels();
+  return true;
+}
+
+bool Shell::panel_target(const std::string& sub, const std::vector<std::string>& t,
+                         std::string& error) {
+  if (t.size() < 3) {
+    error = "panel " + sub + ": missing panel name";
+    return false;
+  }
+  const std::string& target = t[2];
+
+  if (sub == "close" && target == "all") {
+    m_panels.close_all();
+    (void)push_panels();
+    return true;
+  }
+  if (sub == "focus" && (target == "repl" || target == "next")) {
+    if (target == "repl") {
+      m_panels.focus_repl();
+    } else {
+      m_panels.focus_next();
+    }
+    (void)push_panels();
+    return true;
+  }
+
+  PanelId id{};
+  if (!parse_panel_name(target, id)) {
+    error = "unknown panel '" + target + "' (help, piano, filter)";
+    return false;
+  }
+
+  if (sub == "open") {
+    m_panels.open(id);
+  } else if (sub == "close") {
+    m_panels.close(id);
+  } else if (sub == "toggle") {
+    m_panels.toggle(id);
+  } else {
+    m_panels.focus(id);
+  }
+
+  // A help panel opened before any `help <topic>` shows the overview.
+  if (m_panels.visible(PanelId::kHelp) && m_panels.content(PanelId::kHelp).empty()) {
+    m_panels.set_content(PanelId::kHelp, build_help(""));
+  }
+
+  const bool consumed = push_panels();
+  if (!consumed && m_panels.visible(id)) {
+    print_lines(m_panels.content(id));  // flat/script mode: show what opened
+  }
+  return true;
+}
+
 bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
   static const char* kUsage =
       "panel list | open|close|toggle <p> | close all | focus <p>|repl|next | status | help";
@@ -540,22 +612,7 @@ bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
   const std::string& sub = t[1];
 
   if (sub == "layout") {
-    if (t.size() < 3) {
-      error = "panel layout vertical|side|toggle";
-      return false;
-    }
-    if (t[2] == "vertical") {
-      m_panels.set_layout(PanelLayout::kVertical);
-    } else if (t[2] == "side") {
-      m_panels.set_layout(PanelLayout::kSideBySide);
-    } else if (t[2] == "toggle") {
-      m_panels.toggle_layout();
-    } else {
-      error = "panel layout vertical|side|toggle";
-      return false;
-    }
-    (void)push_panels();
-    return true;
+    return panel_layout(t, error);
   }
   if (sub == "list") {
     print_lines(m_panels.list_lines());
@@ -569,55 +626,8 @@ bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
     open_help_topic("panel");
     return true;
   }
-
   if (sub == "open" || sub == "close" || sub == "toggle" || sub == "focus") {
-    if (t.size() < 3) {
-      error = "panel " + sub + ": missing panel name";
-      return false;
-    }
-    const std::string& target = t[2];
-
-    if (sub == "close" && target == "all") {
-      m_panels.close_all();
-      (void)push_panels();
-      return true;
-    }
-    if (sub == "focus" && (target == "repl" || target == "next")) {
-      if (target == "repl") {
-        m_panels.focus_repl();
-      } else {
-        m_panels.focus_next();
-      }
-      (void)push_panels();
-      return true;
-    }
-
-    PanelId id{};
-    if (!parse_panel_name(target, id)) {
-      error = "unknown panel '" + target + "' (help, piano, filter)";
-      return false;
-    }
-
-    if (sub == "open") {
-      m_panels.open(id);
-    } else if (sub == "close") {
-      m_panels.close(id);
-    } else if (sub == "toggle") {
-      m_panels.toggle(id);
-    } else {
-      m_panels.focus(id);
-    }
-
-    // A help panel opened before any `help <topic>` shows the overview.
-    if (m_panels.visible(PanelId::kHelp) && m_panels.content(PanelId::kHelp).empty()) {
-      m_panels.set_content(PanelId::kHelp, build_help(""));
-    }
-
-    const bool consumed = push_panels();
-    if (!consumed && m_panels.visible(id)) {
-      print_lines(m_panels.content(id));  // flat/script mode: show what opened
-    }
-    return true;
+    return panel_target(sub, t, error);
   }
 
   error = kUsage;
@@ -747,6 +757,58 @@ void Shell::piano_all_notes_off() {
   (void)push_panels();
 }
 
+bool Shell::piano_octave(const std::vector<std::string>& t, std::string& error) {
+  if (t.size() < 3) {
+    error = "piano octave <N>|up|down";
+    return false;
+  }
+
+  int octave = m_piano.base_octave;
+  if (t[2] == "up") {
+    octave += 1;
+  } else if (t[2] == "down") {
+    octave -= 1;
+  } else {
+    char* end = nullptr;
+    octave = static_cast<int>(std::strtol(t[2].c_str(), &end, 10));
+    if (end == nullptr || *end != '\0') {
+      error = "piano octave: not a number: " + t[2];
+      return false;
+    }
+  }
+
+  if (octave < kPianoMinOctave || octave > kPianoMaxOctave) {
+    error = "piano octave: out of range " + std::to_string(kPianoMinOctave) + ".." +
+            std::to_string(kPianoMaxOctave);
+    return false;
+  }
+
+  m_piano.base_octave = octave;
+  (void)push_panels();
+  return true;
+}
+
+bool Shell::piano_view(const std::vector<std::string>& t, std::string& error) {
+  if (t.size() < 3) {
+    error = "piano view keyboard|active-notes|event-log";
+    return false;
+  }
+
+  if (t[2] == "keyboard") {
+    m_piano.view = PianoView::kKeyboard;
+  } else if (t[2] == "active-notes") {
+    m_piano.view = PianoView::kActiveNotes;
+  } else if (t[2] == "event-log") {
+    m_piano.view = PianoView::kEventLog;
+  } else {
+    error = "piano view: unknown view: " + t[2];
+    return false;
+  }
+
+  (void)push_panels();
+  return true;
+}
+
 bool Shell::cmd_piano(const std::vector<std::string>& t, std::string& error) {
   static const char* kUsage =
       "piano octave <N>|up|down | channel <1..16> | velocity <1..127> | "
@@ -759,34 +821,7 @@ bool Shell::cmd_piano(const std::vector<std::string>& t, std::string& error) {
   const std::string& sub = t[1];
 
   if (sub == "octave") {
-    if (t.size() < 3) {
-      error = "piano octave <N>|up|down";
-      return false;
-    }
-
-    int octave = m_piano.base_octave;
-    if (t[2] == "up") {
-      octave += 1;
-    } else if (t[2] == "down") {
-      octave -= 1;
-    } else {
-      char* end = nullptr;
-      octave = static_cast<int>(std::strtol(t[2].c_str(), &end, 10));
-      if (end == nullptr || *end != '\0') {
-        error = "piano octave: not a number: " + t[2];
-        return false;
-      }
-    }
-
-    if (octave < kPianoMinOctave || octave > kPianoMaxOctave) {
-      error = "piano octave: out of range " + std::to_string(kPianoMinOctave) + ".." +
-              std::to_string(kPianoMaxOctave);
-      return false;
-    }
-
-    m_piano.base_octave = octave;
-    (void)push_panels();
-    return true;
+    return piano_octave(t, error);
   }
 
   if (sub == "channel") {
@@ -820,22 +855,7 @@ bool Shell::cmd_piano(const std::vector<std::string>& t, std::string& error) {
   }
 
   if (sub == "view") {
-    if (t.size() < 3) {
-      error = "piano view keyboard|active-notes|event-log";
-      return false;
-    }
-    if (t[2] == "keyboard") {
-      m_piano.view = PianoView::kKeyboard;
-    } else if (t[2] == "active-notes") {
-      m_piano.view = PianoView::kActiveNotes;
-    } else if (t[2] == "event-log") {
-      m_piano.view = PianoView::kEventLog;
-    } else {
-      error = "piano view: unknown view: " + t[2];
-      return false;
-    }
-    (void)push_panels();
-    return true;
+    return piano_view(t, error);
   }
 
   if (sub == "panic") {
@@ -1317,614 +1337,707 @@ bool Shell::advance_to(std::uint64_t target, std::string& error) {
   return true;
 }
 
-bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
-  const std::string& cmd = t[0];
+bool Shell::cmd_help(const std::vector<std::string>& t, std::string& error) {
+  const std::string topic = t.size() >= 2 ? t[1] : "";
 
+  // Lifecycle moved under `panel ...` (H1): keep a migration hint alive.
+  if (topic == "open" || topic == "close") {
+    error = "help " + topic + " was removed: use panel open help / panel close help";
+    return false;
+  }
+
+  open_help_topic(topic);
+  return true;
+}
+
+bool Shell::cmd_port(const std::vector<std::string>& t, std::string& error) {
+  // port open in|out <name> [as <alias>]
+  const bool input = t[2] == "in";
+  if (!input && t[2] != "out") {
+    error = "port open in|out <name> [as <alias>]";
+    return false;
+  }
+  if (t.size() < 4) {
+    error = "port open: missing name";
+    return false;
+  }
+  std::string name = t[3];
+  if (t.size() >= 6 && t[4] == "as") {
+    name = t[5];
+  }
+  std::uint8_t& next = input ? m_next_in : m_next_out;
+  if (next >= kMaxPorts) {
+    error = "no free port slots";
+    return false;
+  }
+  const PortDef def{.name = name, .is_input = input, .index = next++};
+  m_ports.push_back(def);
+  if (m_port_hook) {
+    m_port_hook(def);
+  }
+  return true;
+}
+
+bool Shell::cmd_transport(const std::vector<std::string>& t, std::string& error) {
+  Command c;
+  if (t[1] == "start") {
+    c.param = Param::kTransportStart;
+  } else if (t[1] == "stop") {
+    c.param = Param::kTransportStop;
+  } else if (t[1] == "continue") {
+    c.param = Param::kTransportContinue;
+  } else if (t[1] == "tempo" && t.size() >= 3) {
+    std::uint32_t bpm = 0;
+    if (!parse_bpm_x100(t[2], bpm)) {
+      error = "bad tempo: " + t[2];
+      return false;
+    }
+    c.op = Op::kSet;
+    c.param = Param::kTransportTempo;
+    c.a = static_cast<std::int32_t>(bpm);
+  } else {
+    error = "transport start|stop|continue|tempo <bpm>";
+    return false;
+  }
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_route(const std::vector<std::string>& t, std::string& error) {
+  // route <in>[:ch] -> <out>[:ch]
+  std::string in_name, out_name;
+  int in_ch = -1, out_ch = -1;
+  if (!split_port_channel(t[1], in_name, in_ch) || !split_port_channel(t[3], out_name, out_ch)) {
+    error = "bad route channels";
+    return false;
+  }
+  const int in = find_port(in_name, true);
+  const int out = find_port(out_name, false);
+  if (in < 0 || out < 0) {
+    error = "unknown port in route";
+    return false;
+  }
+  Command c;
+  c.param = Param::kRouteAdd;
+  c.a = in | ((in_ch & 0xFF) << 8);
+  c.b = out | ((out_ch & 0xFF) << 8);
+  c.c = route_pass::kAll;
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_thru(const std::vector<std::string>& t, std::string& error) {
+  // thru <in> <out> — sugar for an all-pass route.
+  const int in = find_port(t[1], true);
+  const int out = find_port(t[2], false);
+  if (in < 0 || out < 0) {
+    error = "unknown port in thru";
+    return false;
+  }
+  Command c;
+  c.param = Param::kRouteAdd;
+  c.a = in | (0xFF << 8);   // any channel
+  c.b = out | (0xFF << 8);  // keep channel
+  c.c = route_pass::kAll;
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_clock(const std::vector<std::string>& t, std::string& error) {
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kClockOutMask;
+  if (t[2] == "none") {
+    c.a = 0;
+  } else {
+    const int out = find_port(t[2], false);
+    if (out < 0) {
+      error = "unknown clock port";
+      return false;
+    }
+    c.a = 1 << out;
+  }
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_midi_send(const std::vector<std::string>& t, std::string& error) {
+  const int port = find_port(t[2], true);
+  if (port < 0) {
+    error = "unknown input port: " + t[2];
+    return false;
+  }
+  std::vector<std::uint8_t> bytes;
+  for (std::size_t i = 3; i < t.size(); ++i) {
+    std::uint8_t b = 0;
+    if (!parse_hex_byte(t[i], b)) {
+      error = "bad hex byte: " + t[i];
+      return false;
+    }
+    bytes.push_back(b);
+  }
+  m_engine.push_midi_in(static_cast<std::uint8_t>(port),
+                        Span<const std::uint8_t>(bytes.data(), bytes.size()), m_sink);
+  return true;
+}
+
+bool Shell::cmd_panic(const std::vector<std::string>& /*t*/, std::string& /*error*/) {
+  Command c;
+  c.param = Param::kPanic;
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_key(const std::vector<std::string>& t, std::string& error) {
+  std::uint8_t root = 0;
+  Mode mode = Mode::kMajor;
+  if (!parse_pc(t[1], root)) {
+    error = "bad key root: " + t[1];
+    return false;
+  }
+  if (!parse_mode(t[2], mode)) {
+    error = "bad mode: " + t[2];
+    return false;
+  }
+  m_prefer_flats = key_prefers_flats(root, mode);
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kKeySet;
+  c.a = root;
+  c.b = static_cast<std::int32_t>(mode);
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_play(const std::vector<std::string>& t, std::string& error) {
+  const std::size_t base = t[0] == "play" ? 1 : 2;
+  // Up to 4 note tokens (shell mode voicings), then [quality] [velocity].
+  std::int32_t packed = 0;
+  int note_count = 0;
+  std::size_t next = base;
+  std::uint8_t note = 0;
+  while (next < t.size() && note_count < 4 && parse_note(t[next], note)) {
+    if (note == 0) {
+      error = "note 0 (C-1) cannot be packed; use 1..127";
+      return false;
+    }
+    packed |= static_cast<std::int32_t>(note) << (8 * note_count);
+    ++note_count;
+    ++next;
+  }
+  if (note_count == 0) {
+    error = "bad note: " + t[base];
+    return false;
+  }
+  std::int8_t quality = -1;
+  std::uint64_t vel = 100;
+  if (next < t.size() && parse_quality(t[next], quality)) {
+    ++next;
+  }
+  if (next < t.size() && (!parse_u64(t[next], vel) || vel < 1 || vel > 127)) {
+    error = "bad velocity: " + t[next];
+    return false;
+  }
+  Command c;
+  c.param = Param::kChordPlay;
+  c.a = packed;
+  c.b = quality;
+  c.c = static_cast<std::int32_t>(vel);
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
+  if (t[1] == "mode" && t.size() >= 3) {
+    std::int32_t mode = -1;
+    if (t[2] == "diatonic") {
+      mode = 0;
+    } else if (t[2] == "single") {
+      mode = 1;
+    } else if (t[2] == "shell") {
+      mode = 2;
+    }
+    if (mode < 0) {
+      error = "chord mode diatonic|single|shell";
+      return false;
+    }
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kChordMode;
+    c.a = mode;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (t[1] == "stop") {
+    Command c;
+    c.param = Param::kChordStop;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (t[1] == "hold" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kChordHold;
+    c.a = t[2] == "on" ? 1 : 0;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (t[1] == "out" && t.size() >= 3) {
+    std::string port_name;
+    int channel = -1;
+    if (!split_port_channel(t[2], port_name, channel)) {
+      error = "bad chord destination: " + t[2];
+      return false;
+    }
+    const int port = find_port(port_name, false);
+    if (port < 0) {
+      error = "unknown output port: " + port_name;
+      return false;
+    }
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kChordOut;
+    c.a = port | ((channel < 0 ? 0 : channel) << 8);
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  error = "chord play|stop|hold|out ...";
+  return false;
+}
+
+bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
+  const std::string& verb = t[1];
+  Command c;
+  if (verb == "load" && t.size() >= 3) {
+    // Built-in styles resolve by name host-side (D26).
+    std::int32_t index = -1;
+    if (t[2] == "basic") {
+      index = 0;
+    }
+    if (index < 0) {
+      error = "unknown style: " + t[2];
+      return false;
+    }
+    c.param = Param::kStyleLoad;
+    c.a = index;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "route" && t.size() >= 4) {
+    TrackRole role = TrackRole::kLead;
+    if (!parse_role(t[2], role)) {
+      error = "unknown role: " + t[2];
+      return false;
+    }
+    std::string port_name;
+    int channel = -1;
+    if (!split_port_channel(t[3], port_name, channel)) {
+      error = "bad destination: " + t[3];
+      return false;
+    }
+    const int port = find_port(port_name, false);
+    if (port < 0) {
+      error = "unknown output port: " + port_name;
+      return false;
+    }
+    c.op = Op::kSet;
+    c.param = Param::kStyleRoute;
+    c.a = static_cast<std::int32_t>(role);
+    c.b = port | ((channel < 0 ? 0 : channel) << 8);
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "section" && t.size() >= 3) {
+    SectionType type = SectionType::kVarA;
+    if (!parse_section(t[2], type)) {
+      error = "unknown section: " + t[2];
+      return false;
+    }
+    c.param = Param::kStyleSection;
+    c.a = static_cast<std::int32_t>(type);
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  error = "style load|route|section ...";
+  return false;
+}
+
+bool Shell::seq_add(const std::vector<std::string>& t, std::string& error) {
+  // seq add <note> [quality] [Nbars|Nbeats]
+  std::uint8_t note = 0;
+  if (!parse_note(t[2], note)) {
+    error = "bad note: " + t[2];
+    return false;
+  }
+  std::int8_t quality = -1;
+  std::uint64_t dur = kTicksPerBar;
+  std::size_t next = 3;
+  if (next < t.size() && parse_quality(t[next], quality)) {
+    ++next;
+  }
+  if (next < t.size() && !parse_duration(t[next], dur)) {
+    error = "bad duration (Nbars/Nbeats): " + t[next];
+    return false;
+  }
+  Command c;
+  c.param = Param::kSeqAdd;
+  c.a = note;
+  c.b = (quality + 1) | (100 << 8);
+  c.c = static_cast<std::int32_t>(dur);
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::seq_del(const std::vector<std::string>& t, std::string& error) {
+  std::uint64_t idx = 0;
+  if (!parse_u64(t[2], idx) || idx < 1) {
+    error = "bad step index: " + t[2];
+    return false;
+  }
+  Command c;
+  c.param = Param::kSeqDel;
+  c.a = static_cast<std::int32_t>(idx - 1);  // CLI is 1-based
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::seq_transpose(const std::vector<std::string>& t, std::string& error) {
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kSeqTranspose;
+  if (t[2] == "to" && t.size() >= 4) {
+    std::uint8_t root = 0;
+    if (!parse_pc(t[3], root)) {
+      error = "bad key root: " + t[3];
+      return false;
+    }
+    Mode mode = Mode::kMajor;
+    c.a = root;
+    c.b = (t.size() >= 5 && parse_mode(t[4], mode)) ? static_cast<std::int32_t>(mode) : -1;
+    // Spelling follows the new key when the mode is known.
+    if (c.b >= 0) {
+      m_prefer_flats = key_prefers_flats(root, mode);
+    }
+  } else {
+    char* end = nullptr;
+    const long delta = std::strtol(t[2].c_str(), &end, 10);
+    if (end == nullptr || *end != '\0' || delta == 0 || delta < -11 || delta > 11) {
+      error = "bad transpose (use to <root> or +/-N): " + t[2];
+      return false;
+    }
+    c.a = -1;
+    c.c = static_cast<std::int32_t>(delta);
+  }
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_seq(const std::vector<std::string>& t, std::string& error) {
+  const std::string& verb = t[1];
+  Command c;
+
+  if (verb == "new" && t.size() >= 3) {
+    // The name table must never diverge from the core pool: check the
+    // bound BEFORE registering (the core would warn and drop it).
+    if (m_seqs.size() >= kMaxChordSequences) {
+      error = "sequence pool is full";
+      return false;
+    }
+    c.param = Param::kSeqNew;
+    m_engine.push_command(c, m_sink);
+    m_seqs.push_back(t[2]);
+    return true;
+  }
+  if (verb == "use" && t.size() >= 3) {
+    const int idx = find_seq(t[2]);
+    if (idx < 0) {
+      error = "unknown sequence: " + t[2];
+      return false;
+    }
+    c.param = Param::kSeqUse;
+    c.idx = static_cast<std::uint16_t>(idx);
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "rec") {
+    c.param = Param::kSeqRec;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "stop") {
+    c.param = Param::kSeqStop;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "add" && t.size() >= 3) {
+    return seq_add(t, error);
+  }
+  if (verb == "loop" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
+    c.op = Op::kSet;
+    c.param = Param::kSeqLoop;
+    c.a = t[2] == "on" ? 1 : 0;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "play") {
+    c.param = Param::kSeqPlay;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  if (verb == "transpose" && t.size() >= 3) {
+    return seq_transpose(t, error);
+  }
+  if (verb == "del" && t.size() >= 3) {
+    return seq_del(t, error);
+  }
+  if (verb == "clear") {
+    c.param = Param::kSeqClear;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+  error = "seq new|use|rec|stop|add|loop|play|transpose|del|clear ...";
+  return false;
+}
+
+bool Shell::track_new(const std::vector<std::string>& t, std::string& error) {
+  // track new <name> <out-port>[:ch] [role]
+  std::string port_name;
+  int channel = -1;
+  if (!split_port_channel(t[3], port_name, channel)) {
+    error = "bad track destination: " + t[3];
+    return false;
+  }
+  const int port = find_port(port_name, false);
+  if (port < 0) {
+    error = "unknown output port: " + port_name;
+    return false;
+  }
+  TrackRole role = TrackRole::kLead;
+  if (t.size() >= 5 && !parse_role(t[4], role)) {
+    error = "unknown role: " + t[4];
+    return false;
+  }
+  // The name table must never diverge from the core pool: check the
+  // bound BEFORE registering (the core would warn and drop it).
+  if (m_tracks.size() >= kMaxTracks) {
+    error = "track pool is full";
+    return false;
+  }
+  Command c;
+  c.param = Param::kTrackNew;
+  c.a = static_cast<std::int32_t>(role);
+  c.b = port | ((channel < 0 ? 0 : channel) << 8);
+  m_engine.push_command(c, m_sink);
+  m_tracks.push_back(t[2]);
+  return true;
+}
+
+bool Shell::track_step(const std::vector<std::string>& t, int track, std::string& error) {
+  // track step <name> <step#> <note|clear> [vel] [gate]
+  std::uint64_t step = 0;
+  if (!parse_u64(t[3], step) || step < 1 || step > kMaxStepsPerTrack) {
+    error = "bad step number: " + t[3];
+    return false;
+  }
+  Command c;
+  c.param = Param::kTrackStep;
+  c.idx = static_cast<std::uint16_t>(track);
+  c.a = static_cast<std::int32_t>(step - 1);  // CLI is 1-based
+  if (t[4] == "clear") {
+    c.b = 0;
+    c.c = 0;
+  } else {
+    std::uint8_t note = 0;
+    std::uint64_t vel = 100, gate = kTicksPerStep / 2;
+    if (!parse_note(t[4], note)) {
+      error = "bad note: " + t[4];
+      return false;
+    }
+    if (t.size() >= 6 && (!parse_u64(t[5], vel) || vel < 1 || vel > 127)) {
+      error = "bad velocity: " + t[5];
+      return false;
+    }
+    if (t.size() >= 7 && (!parse_u64(t[6], gate) || gate == 0 || gate > 0xFFFF)) {
+      error = "bad gate: " + t[6];
+      return false;
+    }
+    c.b = note | (static_cast<std::int32_t>(vel) << 8);
+    c.c = static_cast<std::int32_t>(gate);
+  }
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+bool Shell::cmd_track(const std::vector<std::string>& t, std::string& error) {
+  const std::string& verb = t[1];
+
+  if (verb == "new" && t.size() >= 4) {
+    return track_new(t, error);
+  }
+
+  const int track = find_track(t[2]);
+  if (track < 0) {
+    error = "unknown track: " + t[2];
+    return false;
+  }
+
+  if (verb == "step" && t.size() >= 5) {
+    return track_step(t, track, error);
+  }
+
+  if (verb == "length" && t.size() >= 4) {
+    std::uint64_t steps = 0;
+    if (!parse_u64(t[3], steps)) {
+      error = "bad length: " + t[3];
+      return false;
+    }
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kTrackLength;
+    c.idx = static_cast<std::uint16_t>(track);
+    c.a = static_cast<std::int32_t>(steps);
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+
+  if ((verb == "mute" || verb == "solo") && t.size() >= 4) {
+    if (t[3] != "on" && t[3] != "off") {
+      error = "track mute|solo <name> on|off";
+      return false;
+    }
+    Command c;
+    c.op = Op::kSet;
+    c.param = verb == "mute" ? Param::kTrackMute : Param::kTrackSolo;
+    c.idx = static_cast<std::uint16_t>(track);
+    c.a = t[3] == "on" ? 1 : 0;
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+
+  error = "track new|step|length|mute|solo ...";
+  return false;
+}
+
+bool Shell::cmd_advance(const std::vector<std::string>& t, std::string& error) {
+  // advance <ticks> | advance <N>bars
+  std::string arg = t[1];
+  std::uint64_t n = 0;
+  std::uint64_t mult = 1;
+  if (arg.size() > 4 && arg.substr(arg.size() - 4) == "bars") {
+    mult = kTicksPerBar;
+    arg = arg.substr(0, arg.size() - 4);
+  }
+  if (!parse_u64(arg, n)) {
+    error = "bad advance amount";
+    return false;
+  }
+  return advance_to(m_engine.now() + n * mult, error);
+}
+
+std::optional<bool> Shell::dispatch_ui(const std::vector<std::string>& t, const std::string& cmd,
+                                       std::string& error) {
   if (cmd == "quit" || cmd == "exit") {
     m_quit = true;
     return true;
   }
-
   if (cmd == "help") {
-    const std::string topic = t.size() >= 2 ? t[1] : "";
-
-    // Lifecycle moved under `panel ...` (H1): keep a migration hint alive.
-    if (topic == "open" || topic == "close") {
-      error = "help " + topic + " was removed: use panel open help / panel close help";
-      return false;
-    }
-
-    open_help_topic(topic);
-    return true;
+    return cmd_help(t, error);
   }
-
   if (cmd == "panel") {
     return cmd_panel(t, error);
   }
-
   if (cmd == "piano") {
     return cmd_piano(t, error);
   }
-
   if (cmd == "notes") {
     return cmd_notes(t, error);
   }
-
   if (cmd == "filter") {
     return cmd_filter(t, error);
   }
-
   if (cmd == "view") {
     return cmd_view(t, error);
   }
-
   if (cmd == "theme") {
     return cmd_theme(t, error);
   }
-
   if (cmd == "colors") {
     return cmd_colors(t, error);
   }
+  return std::nullopt;
+}
 
+std::optional<bool> Shell::dispatch_midi(const std::vector<std::string>& t, const std::string& cmd,
+                                         std::string& error) {
   if (cmd == "port" && t.size() >= 3 && t[1] == "open") {
-    // port open in|out <name> [as <alias>]
-    const bool input = t[2] == "in";
-    if (!input && t[2] != "out") {
-      error = "port open in|out <name> [as <alias>]";
-      return false;
-    }
-    if (t.size() < 4) {
-      error = "port open: missing name";
-      return false;
-    }
-    std::string name = t[3];
-    if (t.size() >= 6 && t[4] == "as") {
-      name = t[5];
-    }
-    std::uint8_t& next = input ? m_next_in : m_next_out;
-    if (next >= kMaxPorts) {
-      error = "no free port slots";
-      return false;
-    }
-    const PortDef def{.name = name, .is_input = input, .index = next++};
-    m_ports.push_back(def);
-    if (m_port_hook) {
-      m_port_hook(def);
-    }
-    return true;
+    return cmd_port(t, error);
   }
-
-  if (cmd == "transport" && t.size() >= 2) {
-    Command c;
-    if (t[1] == "start") {
-      c.param = Param::kTransportStart;
-    } else if (t[1] == "stop") {
-      c.param = Param::kTransportStop;
-    } else if (t[1] == "continue") {
-      c.param = Param::kTransportContinue;
-    } else if (t[1] == "tempo" && t.size() >= 3) {
-      std::uint32_t bpm = 0;
-      if (!parse_bpm_x100(t[2], bpm)) {
-        error = "bad tempo: " + t[2];
-        return false;
-      }
-      c.op = Op::kSet;
-      c.param = Param::kTransportTempo;
-      c.a = static_cast<std::int32_t>(bpm);
-    } else {
-      error = "transport start|stop|continue|tempo <bpm>";
-      return false;
-    }
-    m_engine.push_command(c, m_sink);
-    return true;
-  }
-
   if (cmd == "route" && t.size() == 4 && t[2] == "->") {
-    // route <in>[:ch] -> <out>[:ch]
-    std::string in_name, out_name;
-    int in_ch = -1, out_ch = -1;
-    if (!split_port_channel(t[1], in_name, in_ch) || !split_port_channel(t[3], out_name, out_ch)) {
-      error = "bad route channels";
-      return false;
-    }
-    const int in = find_port(in_name, true);
-    const int out = find_port(out_name, false);
-    if (in < 0 || out < 0) {
-      error = "unknown port in route";
-      return false;
-    }
-    Command c;
-    c.param = Param::kRouteAdd;
-    c.a = in | ((in_ch & 0xFF) << 8);
-    c.b = out | ((out_ch & 0xFF) << 8);
-    c.c = route_pass::kAll;
-    m_engine.push_command(c, m_sink);
-    return true;
+    return cmd_route(t, error);
   }
-
   if (cmd == "thru" && t.size() >= 3) {
-    // thru <in> <out> — sugar for an all-pass route.
-    const int in = find_port(t[1], true);
-    const int out = find_port(t[2], false);
-    if (in < 0 || out < 0) {
-      error = "unknown port in thru";
-      return false;
-    }
-    Command c;
-    c.param = Param::kRouteAdd;
-    c.a = in | (0xFF << 8);   // any channel
-    c.b = out | (0xFF << 8);  // keep channel
-    c.c = route_pass::kAll;
-    m_engine.push_command(c, m_sink);
-    return true;
+    return cmd_thru(t, error);
   }
-
   if (cmd == "clock" && t.size() >= 3 && t[1] == "out") {
-    Command c;
-    c.op = Op::kSet;
-    c.param = Param::kClockOutMask;
-    if (t[2] == "none") {
-      c.a = 0;
-    } else {
-      const int out = find_port(t[2], false);
-      if (out < 0) {
-        error = "unknown clock port";
-        return false;
-      }
-      c.a = 1 << out;
-    }
-    m_engine.push_command(c, m_sink);
-    return true;
+    return cmd_clock(t, error);
   }
-
   if (cmd == "midi" && t.size() >= 4 && t[1] == "send") {
-    const int port = find_port(t[2], true);
-    if (port < 0) {
-      error = "unknown input port: " + t[2];
-      return false;
-    }
-    std::vector<std::uint8_t> bytes;
-    for (std::size_t i = 3; i < t.size(); ++i) {
-      std::uint8_t b = 0;
-      if (!parse_hex_byte(t[i], b)) {
-        error = "bad hex byte: " + t[i];
-        return false;
-      }
-      bytes.push_back(b);
-    }
-    m_engine.push_midi_in(static_cast<std::uint8_t>(port),
-                          Span<const std::uint8_t>(bytes.data(), bytes.size()), m_sink);
-    return true;
+    return cmd_midi_send(t, error);
   }
-
-  if (cmd == "key" && t.size() >= 3) {
-    std::uint8_t root = 0;
-    Mode mode = Mode::kMajor;
-    if (!parse_pc(t[1], root)) {
-      error = "bad key root: " + t[1];
-      return false;
-    }
-    if (!parse_mode(t[2], mode)) {
-      error = "bad mode: " + t[2];
-      return false;
-    }
-    m_prefer_flats = key_prefers_flats(root, mode);
-    Command c;
-    c.op = Op::kSet;
-    c.param = Param::kKeySet;
-    c.a = root;
-    c.b = static_cast<std::int32_t>(mode);
-    m_engine.push_command(c, m_sink);
-    return true;
-  }
-
-  if ((cmd == "play" && t.size() >= 2) || (cmd == "chord" && t.size() >= 3 && t[1] == "play")) {
-    const std::size_t base = cmd == "play" ? 1 : 2;
-    // Up to 4 note tokens (shell mode voicings), then [quality] [velocity].
-    std::int32_t packed = 0;
-    int note_count = 0;
-    std::size_t next = base;
-    std::uint8_t note = 0;
-    while (next < t.size() && note_count < 4 && parse_note(t[next], note)) {
-      if (note == 0) {
-        error = "note 0 (C-1) cannot be packed; use 1..127";
-        return false;
-      }
-      packed |= static_cast<std::int32_t>(note) << (8 * note_count);
-      ++note_count;
-      ++next;
-    }
-    if (note_count == 0) {
-      error = "bad note: " + t[base];
-      return false;
-    }
-    std::int8_t quality = -1;
-    std::uint64_t vel = 100;
-    if (next < t.size() && parse_quality(t[next], quality)) {
-      ++next;
-    }
-    if (next < t.size() && (!parse_u64(t[next], vel) || vel < 1 || vel > 127)) {
-      error = "bad velocity: " + t[next];
-      return false;
-    }
-    Command c;
-    c.param = Param::kChordPlay;
-    c.a = packed;
-    c.b = quality;
-    c.c = static_cast<std::int32_t>(vel);
-    m_engine.push_command(c, m_sink);
-    return true;
-  }
-
-  if (cmd == "chord" && t.size() >= 2) {
-    if (t[1] == "mode" && t.size() >= 3) {
-      std::int32_t mode = -1;
-      if (t[2] == "diatonic") {
-        mode = 0;
-      } else if (t[2] == "single") {
-        mode = 1;
-      } else if (t[2] == "shell") {
-        mode = 2;
-      }
-      if (mode < 0) {
-        error = "chord mode diatonic|single|shell";
-        return false;
-      }
-      Command c;
-      c.op = Op::kSet;
-      c.param = Param::kChordMode;
-      c.a = mode;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (t[1] == "stop") {
-      Command c;
-      c.param = Param::kChordStop;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (t[1] == "hold" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
-      Command c;
-      c.op = Op::kSet;
-      c.param = Param::kChordHold;
-      c.a = t[2] == "on" ? 1 : 0;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (t[1] == "out" && t.size() >= 3) {
-      std::string port_name;
-      int channel = -1;
-      if (!split_port_channel(t[2], port_name, channel)) {
-        error = "bad chord destination: " + t[2];
-        return false;
-      }
-      const int port = find_port(port_name, false);
-      if (port < 0) {
-        error = "unknown output port: " + port_name;
-        return false;
-      }
-      Command c;
-      c.op = Op::kSet;
-      c.param = Param::kChordOut;
-      c.a = port | ((channel < 0 ? 0 : channel) << 8);
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    error = "chord play|stop|hold|out ...";
-    return false;
-  }
-
-  if (cmd == "style" && t.size() >= 2) {
-    const std::string& verb = t[1];
-    Command c;
-    if (verb == "load" && t.size() >= 3) {
-      // Built-in styles resolve by name host-side (D26).
-      std::int32_t index = -1;
-      if (t[2] == "basic") {
-        index = 0;
-      }
-      if (index < 0) {
-        error = "unknown style: " + t[2];
-        return false;
-      }
-      c.param = Param::kStyleLoad;
-      c.a = index;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "route" && t.size() >= 4) {
-      TrackRole role = TrackRole::kLead;
-      if (!parse_role(t[2], role)) {
-        error = "unknown role: " + t[2];
-        return false;
-      }
-      std::string port_name;
-      int channel = -1;
-      if (!split_port_channel(t[3], port_name, channel)) {
-        error = "bad destination: " + t[3];
-        return false;
-      }
-      const int port = find_port(port_name, false);
-      if (port < 0) {
-        error = "unknown output port: " + port_name;
-        return false;
-      }
-      c.op = Op::kSet;
-      c.param = Param::kStyleRoute;
-      c.a = static_cast<std::int32_t>(role);
-      c.b = port | ((channel < 0 ? 0 : channel) << 8);
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "section" && t.size() >= 3) {
-      SectionType type = SectionType::kVarA;
-      if (!parse_section(t[2], type)) {
-        error = "unknown section: " + t[2];
-        return false;
-      }
-      c.param = Param::kStyleSection;
-      c.a = static_cast<std::int32_t>(type);
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    error = "style load|route|section ...";
-    return false;
-  }
-
-  if (cmd == "seq" && t.size() >= 2) {
-    const std::string& verb = t[1];
-    Command c;
-
-    if (verb == "new" && t.size() >= 3) {
-      // The name table must never diverge from the core pool: check the
-      // bound BEFORE registering (the core would warn and drop it).
-      if (m_seqs.size() >= kMaxChordSequences) {
-        error = "sequence pool is full";
-        return false;
-      }
-      c.param = Param::kSeqNew;
-      m_engine.push_command(c, m_sink);
-      m_seqs.push_back(t[2]);
-      return true;
-    }
-    if (verb == "use" && t.size() >= 3) {
-      const int idx = find_seq(t[2]);
-      if (idx < 0) {
-        error = "unknown sequence: " + t[2];
-        return false;
-      }
-      c.param = Param::kSeqUse;
-      c.idx = static_cast<std::uint16_t>(idx);
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "rec") {
-      c.param = Param::kSeqRec;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "stop") {
-      c.param = Param::kSeqStop;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "add" && t.size() >= 3) {
-      // seq add <note> [quality] [Nbars|Nbeats]
-      std::uint8_t note = 0;
-      if (!parse_note(t[2], note)) {
-        error = "bad note: " + t[2];
-        return false;
-      }
-      std::int8_t quality = -1;
-      std::uint64_t dur = kTicksPerBar;
-      std::size_t next = 3;
-      if (next < t.size() && parse_quality(t[next], quality)) {
-        ++next;
-      }
-      if (next < t.size() && !parse_duration(t[next], dur)) {
-        error = "bad duration (Nbars/Nbeats): " + t[next];
-        return false;
-      }
-      c.param = Param::kSeqAdd;
-      c.a = note;
-      c.b = (quality + 1) | (100 << 8);
-      c.c = static_cast<std::int32_t>(dur);
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "loop" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
-      c.op = Op::kSet;
-      c.param = Param::kSeqLoop;
-      c.a = t[2] == "on" ? 1 : 0;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "play") {
-      c.param = Param::kSeqPlay;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "transpose" && t.size() >= 3) {
-      c.op = Op::kSet;
-      c.param = Param::kSeqTranspose;
-      if (t[2] == "to" && t.size() >= 4) {
-        std::uint8_t root = 0;
-        if (!parse_pc(t[3], root)) {
-          error = "bad key root: " + t[3];
-          return false;
-        }
-        Mode mode = Mode::kMajor;
-        c.a = root;
-        c.b = (t.size() >= 5 && parse_mode(t[4], mode)) ? static_cast<std::int32_t>(mode) : -1;
-        // Spelling follows the new key when the mode is known.
-        if (c.b >= 0) {
-          m_prefer_flats = key_prefers_flats(root, mode);
-        }
-      } else {
-        char* end = nullptr;
-        const long delta = std::strtol(t[2].c_str(), &end, 10);
-        if (end == nullptr || *end != '\0' || delta == 0 || delta < -11 || delta > 11) {
-          error = "bad transpose (use to <root> or +/-N): " + t[2];
-          return false;
-        }
-        c.a = -1;
-        c.c = static_cast<std::int32_t>(delta);
-      }
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "del" && t.size() >= 3) {
-      std::uint64_t idx = 0;
-      if (!parse_u64(t[2], idx) || idx < 1) {
-        error = "bad step index: " + t[2];
-        return false;
-      }
-      c.param = Param::kSeqDel;
-      c.a = static_cast<std::int32_t>(idx - 1);  // CLI is 1-based
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    if (verb == "clear") {
-      c.param = Param::kSeqClear;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-    error = "seq new|use|rec|stop|add|loop|play|transpose|del|clear ...";
-    return false;
-  }
-
-  if (cmd == "track" && t.size() >= 3) {
-    const std::string& verb = t[1];
-
-    if (verb == "new" && t.size() >= 4) {
-      // track new <name> <out-port>[:ch] [role]
-      std::string port_name;
-      int channel = -1;
-      if (!split_port_channel(t[3], port_name, channel)) {
-        error = "bad track destination: " + t[3];
-        return false;
-      }
-      const int port = find_port(port_name, false);
-      if (port < 0) {
-        error = "unknown output port: " + port_name;
-        return false;
-      }
-      TrackRole role = TrackRole::kLead;
-      if (t.size() >= 5 && !parse_role(t[4], role)) {
-        error = "unknown role: " + t[4];
-        return false;
-      }
-      // The name table must never diverge from the core pool: check the
-      // bound BEFORE registering (the core would warn and drop it).
-      if (m_tracks.size() >= kMaxTracks) {
-        error = "track pool is full";
-        return false;
-      }
-      Command c;
-      c.param = Param::kTrackNew;
-      c.a = static_cast<std::int32_t>(role);
-      c.b = port | ((channel < 0 ? 0 : channel) << 8);
-      m_engine.push_command(c, m_sink);
-      m_tracks.push_back(t[2]);
-      return true;
-    }
-
-    const int track = find_track(t[2]);
-    if (track < 0) {
-      error = "unknown track: " + t[2];
-      return false;
-    }
-
-    if (verb == "step" && t.size() >= 5) {
-      // track step <name> <step#> <note|clear> [vel] [gate]
-      std::uint64_t step = 0;
-      if (!parse_u64(t[3], step) || step < 1 || step > kMaxStepsPerTrack) {
-        error = "bad step number: " + t[3];
-        return false;
-      }
-      Command c;
-      c.param = Param::kTrackStep;
-      c.idx = static_cast<std::uint16_t>(track);
-      c.a = static_cast<std::int32_t>(step - 1);  // CLI is 1-based
-      if (t[4] == "clear") {
-        c.b = 0;
-        c.c = 0;
-      } else {
-        std::uint8_t note = 0;
-        std::uint64_t vel = 100, gate = kTicksPerStep / 2;
-        if (!parse_note(t[4], note)) {
-          error = "bad note: " + t[4];
-          return false;
-        }
-        if (t.size() >= 6 && (!parse_u64(t[5], vel) || vel < 1 || vel > 127)) {
-          error = "bad velocity: " + t[5];
-          return false;
-        }
-        if (t.size() >= 7 && (!parse_u64(t[6], gate) || gate == 0 || gate > 0xFFFF)) {
-          error = "bad gate: " + t[6];
-          return false;
-        }
-        c.b = note | (static_cast<std::int32_t>(vel) << 8);
-        c.c = static_cast<std::int32_t>(gate);
-      }
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-
-    if (verb == "length" && t.size() >= 4) {
-      std::uint64_t steps = 0;
-      if (!parse_u64(t[3], steps)) {
-        error = "bad length: " + t[3];
-        return false;
-      }
-      Command c;
-      c.op = Op::kSet;
-      c.param = Param::kTrackLength;
-      c.idx = static_cast<std::uint16_t>(track);
-      c.a = static_cast<std::int32_t>(steps);
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-
-    if ((verb == "mute" || verb == "solo") && t.size() >= 4) {
-      if (t[3] != "on" && t[3] != "off") {
-        error = "track mute|solo <name> on|off";
-        return false;
-      }
-      Command c;
-      c.op = Op::kSet;
-      c.param = verb == "mute" ? Param::kTrackMute : Param::kTrackSolo;
-      c.idx = static_cast<std::uint16_t>(track);
-      c.a = t[3] == "on" ? 1 : 0;
-      m_engine.push_command(c, m_sink);
-      return true;
-    }
-
-    error = "track new|step|length|mute|solo ...";
-    return false;
-  }
-
   if (cmd == "panic") {
-    Command c;
-    c.param = Param::kPanic;
-    m_engine.push_command(c, m_sink);
-    return true;
+    return cmd_panic(t, error);
   }
+  return std::nullopt;
+}
 
+std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, const std::string& cmd,
+                                          std::string& error) {
+  if (cmd == "key" && t.size() >= 3) {
+    return cmd_key(t, error);
+  }
+  if ((cmd == "play" && t.size() >= 2) || (cmd == "chord" && t.size() >= 3 && t[1] == "play")) {
+    return cmd_play(t, error);
+  }
+  if (cmd == "chord" && t.size() >= 2) {
+    return cmd_chord(t, error);
+  }
+  if (cmd == "style" && t.size() >= 2) {
+    return cmd_style(t, error);
+  }
+  if (cmd == "seq" && t.size() >= 2) {
+    return cmd_seq(t, error);
+  }
+  if (cmd == "track" && t.size() >= 3) {
+    return cmd_track(t, error);
+  }
+  return std::nullopt;
+}
+
+std::optional<bool> Shell::dispatch_transport(const std::vector<std::string>& t,
+                                              const std::string& cmd, std::string& error) {
+  if (cmd == "transport" && t.size() >= 2) {
+    return cmd_transport(t, error);
+  }
   if (cmd == "advance" && t.size() >= 2) {
-    // advance <ticks> | advance <N>bars
-    std::string arg = t[1];
-    std::uint64_t n = 0;
-    std::uint64_t mult = 1;
-    if (arg.size() > 4 && arg.substr(arg.size() - 4) == "bars") {
-      mult = kTicksPerBar;
-      arg = arg.substr(0, arg.size() - 4);
-    }
-    if (!parse_u64(arg, n)) {
-      error = "bad advance amount";
-      return false;
-    }
-    return advance_to(m_engine.now() + n * mult, error);
+    return cmd_advance(t, error);
+  }
+  return std::nullopt;
+}
+
+bool Shell::exec_now(const std::vector<std::string>& t, std::string& error) {
+  const std::string& cmd = t[0];
+
+  if (const std::optional<bool> r = dispatch_ui(t, cmd, error)) {
+    return *r;
+  }
+  if (const std::optional<bool> r = dispatch_midi(t, cmd, error)) {
+    return *r;
+  }
+  if (const std::optional<bool> r = dispatch_music(t, cmd, error)) {
+    return *r;
+  }
+  if (const std::optional<bool> r = dispatch_transport(t, cmd, error)) {
+    return *r;
   }
 
   error = "unknown command: " + cmd;
