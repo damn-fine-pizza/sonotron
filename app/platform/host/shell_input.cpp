@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdlib>
 
+#include "arp_view.hpp"
 #include "groove_view.hpp"
 #include "parts_view.hpp"
 
@@ -339,6 +340,60 @@ bool Shell::groove_key(std::uint8_t byte) {
   return true;  // the groove panel owns its keystrokes
 }
 
+bool Shell::arp_panel_focused() const {
+  return m_panels.focus_kind() == PanelFocus::kPanel &&
+         m_panels.focused_panel() == PanelId::kArp;
+}
+
+void Shell::arp_select(int delta) {
+  m_arp_selected = std::clamp(m_arp_selected + delta, 0, static_cast<int>(kArpRowCount) - 1);
+  (void)push_panels();
+}
+
+void Shell::arp_adjust(int delta) {
+  const ArpeggiatorParams& p = m_engine.arp().params();
+  const bool enabled = m_engine.arp_enabled();
+  ArpField field = ArpField::kEnabled;
+  std::int32_t value = 0;
+  switch (static_cast<ArpRow>(m_arp_selected)) {
+    case ArpRow::kEnabled:
+      field = ArpField::kEnabled;
+      value = enabled ? 0 : 1;  // left/right both toggle
+      break;
+    case ArpRow::kRate:
+      field = ArpField::kRate;
+      value = std::clamp(static_cast<int>(p.rate) + delta, 0, kArpRateCount - 1);
+      break;
+    case ArpRow::kDirection:
+      field = ArpField::kDirection;
+      value = std::clamp(static_cast<int>(p.direction) + delta, 0, kArpDirectionCount - 1);
+      break;
+    case ArpRow::kOctaves:
+      field = ArpField::kOctaves;
+      value = std::clamp(static_cast<int>(p.octaves) + delta, 1, 4);
+      break;
+    case ArpRow::kGate:
+      field = ArpField::kGate;
+      value = std::clamp(static_cast<int>(p.gate) + delta * 10, 0, 100);
+      break;
+    case ArpRow::kLatch:
+      field = ArpField::kLatch;
+      value = p.latch ? 0 : 1;  // toggle
+      break;
+  }
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kArp;
+  c.a = static_cast<std::int32_t>(field);
+  c.b = value;
+  m_engine.push_command(c, m_sink);
+  (void)push_panels();
+}
+
+bool Shell::arp_panel_key(std::uint8_t /*byte*/) {
+  return true;  // the arp panel owns its keystrokes; adjust is via arrows
+}
+
 bool Shell::handle_ui_key(std::uint8_t byte) {
   // CTRL+P (0x10) is a GLOBAL play/stop toggle — it works in every focus
   // (repl, piano, chooser) and on every terminal (a plain control byte, and
@@ -416,6 +471,10 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
 
   if (groove_focused()) {
     return groove_key(byte);
+  }
+
+  if (arp_panel_focused()) {
+    return arp_panel_key(byte);
   }
 
   // Every other shortcut/musical key needs a focused panel; with repl focus the

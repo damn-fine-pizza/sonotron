@@ -45,7 +45,7 @@ enum class PianoKeyMode { kMomentary, kToggle };
 // Which interactive mode the live TUI is in. Drives the contextual help
 // panel: its content follows the mode (commands in the REPL, piano keys in
 // play mode) unless the user pinned an explicit `help <topic>`.
-enum class UiMode { kRepl, kPiano, kStyles, kParts, kGroove };
+enum class UiMode { kRepl, kPiano, kStyles, kParts, kGroove, kArp };
 
 class Shell {
  public:
@@ -141,6 +141,13 @@ class Shell {
   void groove_select(int delta);
   void groove_adjust(int delta);
   bool groove_key(std::uint8_t byte);
+
+  // The `arp` panel: focus gate + key handling (arrow up/down select, left/right
+  // adjust a parameter via kArp commands).
+  bool arp_panel_focused() const;
+  void arp_select(int delta);
+  void arp_adjust(int delta);
+  bool arp_panel_key(std::uint8_t byte);
 
   // Gives focus to the styles panel (backtick shortcut) and seeds the chooser
   // highlight from the arranger's current style/section.
@@ -250,6 +257,7 @@ class Shell {
   bool cmd_program(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_part(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_groove(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_arp(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
@@ -276,9 +284,11 @@ class Shell {
   void refresh_chords_content();  // live piano->chord readout (detect state + name)
   void refresh_parts_content();   // arranger style-parts mixer
   void refresh_groove_content();  // groove feel parameters
+  void refresh_arp_content();     // live arpeggiator parameters
 
   int m_parts_selected = 0;   // highlighted row in the parts mixer
   int m_groove_selected = 0;  // highlighted row in the groove panel
+  int m_arp_selected = 0;     // highlighted row in the arp panel
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
   void sync_contextual_panel();

@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/abi.hpp"
+#include "arrangrr/arp/arpeggiator.hpp"
 #include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/chord/chord_detector.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
@@ -51,9 +52,17 @@ class Engine {
     }
     for (std::uint8_t byte : bytes) {
       m_parsers[port].feed(byte, [&](const MidiMessage& msg) {
-        m_router.route(port, msg, [&](std::uint8_t out_port, const MidiMessage& routed) {
-          schedule_or_warn(out_port, m_now, routed, sink);
-        });
+        // The arpeggiator CAPTURES notes on its input port (they feed the arp
+        // instead of routing straight through); non-note messages and other
+        // ports route normally. Chord detection still OBSERVES either way.
+        const bool arp_captures = m_arp_enabled && port == m_arp_in_port && is_note_message(msg);
+        if (arp_captures) {
+          observe_arp_input(msg);
+        } else {
+          m_router.route(port, msg, [&](std::uint8_t out_port, const MidiMessage& routed) {
+            schedule_or_warn(out_port, m_now, routed, sink);
+          });
+        }
         if (m_chord_detect && port == m_chord_detect_port) {
           observe_chord_input(msg);
         }
@@ -61,6 +70,26 @@ class Engine {
     }
     flush(sink);
   }
+
+  // Live arpeggiator control: enable + input port (the keyboard it listens to).
+  void set_arp_enabled(bool enabled, std::uint8_t in_port) noexcept {
+    if (in_port < kMaxPorts) {
+      m_arp_in_port = in_port;
+    }
+    if (!enabled && m_arp_enabled) {
+      m_arp.panic();  // dropping the effect clears the held set
+    }
+    m_arp_enabled = enabled;
+  }
+  constexpr bool arp_enabled() const noexcept { return m_arp_enabled; }
+  void set_arp_out(std::uint8_t port, std::uint8_t channel) noexcept {
+    if (port < kMaxPorts && channel <= 15) {
+      m_arp_out_port = port;
+      m_arp_out_channel = channel;
+    }
+  }
+  const ArpeggiatorEngine& arp() const noexcept { return m_arp; }
+  ArpeggiatorEngine& arp() noexcept { return m_arp; }
 
   // Live piano->chord (kChordDetect): whether held notes on the detect port
   // re-harmonize the arranger. `port` selects which input keyboard is the
@@ -105,6 +134,7 @@ class Engine {
         fire_timeline(m_transport.tick(), sink);
         fire_chord_seq(m_transport.tick(), sink);
         fire_arranger(m_transport.tick(), sink);
+        fire_arp(m_transport.tick(), sink);
       }
       flush(sink);
     }
@@ -119,6 +149,7 @@ class Engine {
   void cmd_track(const Command& cmd, EventSink sink);
   void cmd_style(const Command& cmd, EventSink sink);
   void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
+  void cmd_arp(const Command& cmd, EventSink sink);    // live arpeggiator
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
@@ -231,6 +262,35 @@ class Engine {
     }
   }
 
+  static bool is_note_message(const MidiMessage& msg) {
+    return msg.type() == midi::kNoteOn || msg.type() == midi::kNoteOff;
+  }
+
+  // Feeds a captured keyboard note into the live arpeggiator. A NoteOn vel 0 is
+  // a release. The arp then plays the held set rhythmically from fire_arp.
+  void observe_arp_input(const MidiMessage& msg) {
+    if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
+      m_arp.note_on(msg.d1, msg.d2);
+    } else {
+      m_arp.note_off(msg.d1);
+    }
+  }
+
+  // Clock-driven arpeggiator: on each transport tick it may emit the next arp
+  // note on its output route (note-off follows after the gate).
+  void fire_arp(Tick transport_tick, EventSink sink) {
+    if (!m_arp_enabled) {
+      return;
+    }
+    m_arp.on_tick(transport_tick,
+                  [&](std::uint8_t note, std::uint8_t velocity, TickOffset gate) {
+                    schedule_pattern(m_arp_out_port, 0,
+                                     MidiMessage::note_on(m_arp_out_channel, note, velocity), sink);
+                    schedule_pattern(m_arp_out_port, gate,
+                                     MidiMessage::note_off(m_arp_out_channel, note), sink);
+                  });
+  }
+
   Tick m_now = 0;
   Transport m_transport;
   MidiParser m_parsers[kMaxPorts];
@@ -242,6 +302,11 @@ class Engine {
   ChordDetector m_detector;                 // live piano->chord held-note set
   bool m_chord_detect = false;              // kChordDetect: detection enabled
   std::uint8_t m_chord_detect_port = 0;     // input port feeding the detector
+  ArpeggiatorEngine m_arp;                  // live keyboard arpeggiator
+  bool m_arp_enabled = false;               // kArp: capture + play the input port
+  std::uint8_t m_arp_in_port = 0;           // keyboard the arp listens to
+  std::uint8_t m_arp_out_port = 0;          // where the arp plays
+  std::uint8_t m_arp_out_channel = 0;       // 0-based
   NoteTracker m_tracker;
   OutScheduler<kSchedulerCapacity> m_scheduler;
   std::uint8_t m_clock_out_mask = 0;  // off by default; enabled via kClockOutMask

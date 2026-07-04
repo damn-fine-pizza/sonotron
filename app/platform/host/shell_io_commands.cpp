@@ -54,6 +54,14 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  track mute|solo <name> on|off",
     };
   }
+  if (topic == "arp") {
+    return {
+        "help: arp  (live arpeggiator; hold keys with the transport running)",
+        "  focus the panel: up/down select | left/right adjust | TAB exit",
+        "  arp on|off | rate 1/4..1/32 | dir up|down|updown|downup|as-played|random",
+        "  arp octaves 1-4 | gate 0-100 | latch on|off | seed <n> | out <port>[:ch]",
+    };
+  }
   if (topic == "groove") {
     return {
         "help: groove  (the arranger feel as parameters; focus it, then:)",
@@ -160,6 +168,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
       "  style  - the arranger band         (help style)",
       "  parts  - band mixer (mute/solo)    (help parts)",
       "  groove - feel: swing/humanize      (help groove)",
+      "  arp    - live arpeggiator          (help arp)",
       "  track  - step sequencer            (help track)",
       "  program- pick the GM voice         (help program)",
       "  midi   - ports, routing, panic     (help midi)",

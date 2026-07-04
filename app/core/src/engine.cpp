@@ -28,6 +28,10 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kChordDetect:
       cmd_chord(cmd, sink);
       break;
+    case Param::kArp:
+    case Param::kArpOut:
+      cmd_arp(cmd, sink);
+      break;
     case Param::kSeqNew:
     case Param::kSeqUse:
     case Param::kSeqRec:
@@ -115,6 +119,7 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
         schedule_or_warn(port, m_now, msg, sink);
       });
       m_detector.clear();  // every key is up now; the latched chord stays (memory)
+      m_arp.panic();       // drop any held/latched arp notes
       flush(sink);
       break;
     case Param::kRouteAdd: {
@@ -488,6 +493,28 @@ void Engine::cmd_voice(const Command& cmd, EventSink sink) {
   schedule_or_warn(port, m_now, MidiMessage::program(channel, static_cast<std::uint8_t>(cmd.a)),
                    sink);
   flush(sink);
+}
+
+// Live arpeggiator: kArp sets one field (kEnabled toggles capture on the input
+// port; the rest are engine params); kArpOut sets the output route.
+void Engine::cmd_arp(const Command& cmd, EventSink sink) {
+  if (cmd.param == Param::kArpOut) {
+    const auto port = static_cast<std::uint8_t>(cmd.a & 0xFF);
+    const auto channel = static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF);
+    if (port >= kMaxPorts || channel > 15) {
+      sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    } else {
+      set_arp_out(port, channel);
+    }
+    return;
+  }
+  if (cmd.a < 0 || cmd.a >= kArpFieldCount) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  } else if (static_cast<ArpField>(cmd.a) == ArpField::kEnabled) {
+    set_arp_enabled(cmd.b != 0, m_arp_in_port);
+  } else {
+    m_arp.set_field(static_cast<ArpField>(cmd.a), cmd.b);
+  }
 }
 
 }  // namespace arrangrr

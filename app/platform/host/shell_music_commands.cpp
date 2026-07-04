@@ -292,6 +292,89 @@ bool Shell::cmd_groove(const std::vector<std::string>& t, std::string& error) {
   return true;
 }
 
+bool Shell::cmd_arp(const std::vector<std::string>& t, std::string& error) {
+  const std::string& sub = t[1];
+  auto send = [&](ArpField field, std::int32_t value) {
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kArp;
+    c.a = static_cast<std::int32_t>(field);
+    c.b = value;
+    m_engine.push_command(c, m_sink);
+  };
+  if (sub == "on" || sub == "off") {
+    send(ArpField::kEnabled, sub == "on" ? 1 : 0);
+    console_output(sub == "on" ? "arp: on (hold keys with transport running)" : "arp: off");
+    (void)push_panels();
+    return true;
+  }
+  if (sub == "out" && t.size() >= 3) {
+    std::string port_name;
+    int channel = -1;
+    if (!split_port_channel(t[2], port_name, channel)) {
+      error = "bad arp destination: " + t[2];
+      return false;
+    }
+    const int port = find_port(port_name, false);
+    if (port < 0) {
+      error = "unknown output port: " + port_name;
+      return false;
+    }
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kArpOut;
+    c.a = port | ((channel < 0 ? 0 : channel) << 8);
+    m_engine.push_command(c, m_sink);
+    (void)push_panels();
+    return true;
+  }
+  if (t.size() < 3) {
+    error = "arp on|off | rate|dir|octaves|gate|latch|seed <v> | out <port>[:ch]";
+    return false;
+  }
+  const std::string& v = t[2];
+  if (sub == "rate") {
+    int r = (v == "1/4") ? 0 : (v == "1/8") ? 1 : (v == "1/16") ? 2 : (v == "1/32") ? 3 : -1;
+    if (r < 0) {
+      error = "arp rate 1/4|1/8|1/16|1/32";
+      return false;
+    }
+    send(ArpField::kRate, r);
+  } else if (sub == "dir" || sub == "direction") {
+    int d = (v == "up")           ? 0
+            : (v == "down")       ? 1
+            : (v == "updown")     ? 2
+            : (v == "downup")     ? 3
+            : (v == "as-played")  ? 4
+            : (v == "random")     ? 5
+                                  : -1;
+    if (d < 0) {
+      error = "arp dir up|down|updown|downup|as-played|random";
+      return false;
+    }
+    send(ArpField::kDirection, d);
+  } else if (sub == "octaves" || sub == "gate" || sub == "seed") {
+    std::uint64_t n = 0;
+    if (!parse_u64(v, n)) {
+      error = "bad value: " + v;
+      return false;
+    }
+    send(sub == "octaves" ? ArpField::kOctaves : sub == "gate" ? ArpField::kGate : ArpField::kSeed,
+         static_cast<std::int32_t>(n));
+  } else if (sub == "latch") {
+    if (v != "on" && v != "off") {
+      error = "arp latch on|off";
+      return false;
+    }
+    send(ArpField::kLatch, v == "on" ? 1 : 0);
+  } else {
+    error = "unknown arp field: " + sub;
+    return false;
+  }
+  (void)push_panels();
+  return true;
+}
+
 bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
   const std::string& verb = t[1];
 

@@ -399,6 +399,33 @@ void test_shell_parts_command_and_panel() {
   CHECK(!f.run("part bass"));          // too few args
 }
 
+void test_shell_arp_command_and_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open arp"));
+  CHECK(block_contains(panel, "rate"));
+  CHECK(block_contains(panel, "direction"));
+  CHECK(f.run("arp on"));
+  CHECK(f.run("arp rate 1/8"));
+  CHECK(block_contains(panel, "1/8"));
+  CHECK(f.run("arp dir updown"));
+  CHECK(block_contains(panel, "up-down"));
+  CHECK(f.run("arp octaves 3"));
+  CHECK(f.run("arp gate 50"));
+  CHECK(f.run("arp latch on"));
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("arp out synth:2"));
+  CHECK(f.run("arp off"));
+  // Errors.
+  CHECK(!f.run("arp rate 1/3"));      // bad rate
+  CHECK(!f.run("arp dir sideways"));  // bad direction
+  CHECK(!f.run("arp nope 1"));        // unknown field
+}
+
 void test_shell_groove_command_and_panel() {
   ShellFixture f;
   std::vector<std::string> panel;
@@ -1725,6 +1752,7 @@ int main() {
   test_shell_program_command();
   test_shell_parts_command_and_panel();
   test_shell_groove_command_and_panel();
+  test_shell_arp_command_and_panel();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();

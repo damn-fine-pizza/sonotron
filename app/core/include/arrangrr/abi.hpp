@@ -85,6 +85,10 @@ enum class Param : std::uint16_t {
                            //     is soloed, only soloed parts play.
   kGroove = 38,            // set: a = GrooveField (swing/humanize/accent/grid/
                            //     seed), b = value. The global groove feel.
+  kArp = 39,               // set: a = ArpField (enabled/rate/direction/octaves/
+                           //     gate/latch/seed), b = value. Live arpeggiator.
+  kArpOut = 40,            // set: a = port | (channel_0based << 8). Where the
+                           //     arpeggiator plays.
 };
 
 struct Command {

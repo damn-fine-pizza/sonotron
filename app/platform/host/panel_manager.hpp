@@ -30,9 +30,10 @@ enum class PanelId {
   kEmpty,    // blank spacer (off by default)
   kParts,    // arranger style-parts mixer (role/voice/mute/solo/activity)
   kGroove,   // groove feel parameters (swing/humanize/accent)
+  kArp,      // live arpeggiator parameters
 };
 
-inline constexpr std::size_t kPanelCount = 10;
+inline constexpr std::size_t kPanelCount = 11;
 
 enum class PanelFocus {
   kRepl,
@@ -62,6 +63,7 @@ inline constexpr int kFilterHeight = 3;
 inline constexpr int kEmptyHeight = 1;
 inline constexpr int kPartsHeight = 11;   // header + up to 8 parts + shortcut line
 inline constexpr int kGrooveHeight = 8;   // title + 5 params + shortcut line
+inline constexpr int kArpHeight = 9;      // title + 6 params + shortcut line
 
 inline constexpr int kMinCellWidth = 8;  // below this a title is barely legible
 }  // namespace panel_layout

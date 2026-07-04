@@ -463,6 +463,24 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
         default:
           break;
       }
+    } else if (shell.arp_panel_focused() && is_bare_arrow(final_byte)) {
+      // up/down select an arp parameter; left/right adjust it.
+      switch (final_byte) {
+        case 'A':
+          shell.arp_select(-1);
+          break;
+        case 'B':
+          shell.arp_select(+1);
+          break;
+        case 'C':
+          shell.arp_adjust(+1);
+          break;
+        case 'D':
+          shell.arp_adjust(-1);
+          break;
+        default:
+          break;
+      }
     } else {
       replay_bytes(esc);
     }
