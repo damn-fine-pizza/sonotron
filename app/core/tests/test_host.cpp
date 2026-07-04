@@ -102,6 +102,15 @@ struct ShellFixture {
   }
 };
 
+bool block_contains(const std::vector<std::string>& lines, const std::string& needle) {
+  for (const std::string& line : lines) {
+    if (line.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void test_shell_happy_path() {
   ShellFixture f;
   CHECK(f.run("# comment only"));
@@ -520,36 +529,30 @@ void test_line_editor() {
   CHECK(ed.buffer() == "second");
 }
 
-void test_console_bands() {
-  // The four bands (events / panels / console pane / status+input) tile the
-  // screen: they sum to the height, never overlap, and always leave the events
-  // region and the status+input rows alive across a spread of sizes.
-  const int sizes[] = {5, 8, 10, 12, 24, 40, 80};
-  const int panel_requests[] = {0, 1, 3, 8, 30};
-  for (const int rows : sizes) {
-    for (const int req : panel_requests) {
-      const Console::Bands b = Console::compute_bands(rows, req);
-      CHECK(b.events >= Console::kMinEventRows);
-      CHECK(b.panel >= 0);
-      CHECK(b.console >= 0);
-      CHECK(b.events + b.panel + b.console + Console::kStatusInputRows == rows);
-      // Panels and the console pane never exceed the 40% ceiling.
-      const int cap = (rows * Console::kPanelCapNum) / Console::kPanelCapDen;
-      CHECK(b.panel <= cap);
-      CHECK(b.console <= cap);
-      CHECK(b.console <= Console::kConsolePaneRows);
-      CHECK(b.panel <= req);  // never invents panel rows the caller did not ask for
-    }
+void test_console_geometry() {
+  // panel_rows() is the pane the grid paints into: everything above the fixed
+  // status + input pair. An inactive console keeps the default 24 rows.
+  Console console;  // never init()'d: stays inactive, so no terminal writes
+  CHECK(console.panel_rows() == 24 - Console::kStatusInputRows);
+
+  // The uniform grid tiles to EXACTLY the requested rows (no bands, no scroll
+  // region), and an all-hidden manager clears the pane (empty block).
+  PanelManager pm;
+  CHECK(pm.combined_lines(80, 12).empty());  // nothing open -> hidden
+  pm.open(PanelId::kEvents);
+  for (const int rows : {5, 8, 12, 24, 40}) {
+    CHECK(static_cast<int>(pm.combined_lines(80, rows).size()) == rows);
   }
 
-  // console_line keeps at most kConsoleRows, dropping the oldest; newest last.
-  Console console;  // never init()'d: stays inactive, so no terminal writes
-  for (int i = 0; i < Console::kConsoleRows + 4; ++i) {
-    console.console_line("line" + std::to_string(i));
+  // Scrolling panels keep a bounded backlog and render only their cell tail, so
+  // a long log reads like a scroll without a real scroll region.
+  for (int i = 0; i < 40; ++i) {
+    pm.append_line(PanelId::kEvents, "line" + std::to_string(i));
   }
-  CHECK(static_cast<int>(console.console_ring().size()) == Console::kConsoleRows);
-  CHECK(console.console_ring().front() == "line4");  // oldest survivor
-  CHECK(console.console_ring().back() == "line9");   // newest
+  const std::vector<std::string> grid = pm.combined_lines(80, 6);  // title + 5 content rows
+  CHECK(static_cast<int>(grid.size()) == 6);
+  CHECK(block_contains(grid, "line39"));  // newest tail line is shown
+  CHECK(!block_contains(grid, "line0"));  // oldest is scrolled off
 }
 
 void test_help_command() {
@@ -569,15 +572,6 @@ void test_help_command() {
   CHECK(f.events.empty());  // help never touches the engine
 }
 
-bool block_contains(const std::vector<std::string>& lines, const std::string& needle) {
-  for (const std::string& line : lines) {
-    if (line.find(needle) != std::string::npos) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void test_help_panel_hook() {
   ShellFixture f;
   std::vector<std::string> panel{"sentinel"};
@@ -591,8 +585,8 @@ void test_help_panel_hook() {
   // combined block: title rule first, topic content after it.
   CHECK(f.run("help chord"));
   CHECK(calls == 1 && panel.size() >= 2);
-  CHECK(panel[0] == "-- menu --");  // the panel is the contextual MENU now
-  CHECK(panel[1] == "help: chord");
+  CHECK(panel[0].find("-- menu") != std::string::npos);  // the panel is the contextual MENU
+  CHECK(block_contains(panel, "help: chord"));
   // Lifecycle now lives under `panel ...`.
   CHECK(f.run("panel close help"));
   CHECK(calls == 2 && panel.empty());
@@ -620,44 +614,51 @@ void test_panel_commands() {
     return true;
   });
 
-  // Coexistence: menu and piano stack in one combined block, menu first.
+  // Index of the first line whose text contains `needle` (or size() if none).
+  auto line_index = [&](const char* needle) {
+    for (std::size_t i = 0; i < panel.size(); ++i) {
+      if (panel[i].find(needle) != std::string::npos) {
+        return i;
+      }
+    }
+    return panel.size();
+  };
+
+  // Coexistence: menu and piano share the grid; menu is higher in the order so
+  // it paints above the piano (earlier in the top-to-bottom block).
   CHECK(f.run("panel open piano"));
-  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(block_contains(panel, "-- piano"));
   CHECK(f.run("help chord"));
-  CHECK(block_contains(panel, "-- menu --") && block_contains(panel, "-- piano --"));
-  const auto help_pos =
-      std::find(panel.begin(), panel.end(), std::string("-- menu --")) - panel.begin();
-  const auto piano_pos =
-      std::find(panel.begin(), panel.end(), std::string("-- piano --")) - panel.begin();
-  CHECK(help_pos < piano_pos);
+  CHECK(block_contains(panel, "-- menu") && block_contains(panel, "-- piano"));
+  CHECK(line_index("-- menu") < line_index("-- piano"));
 
   // Rename + alias: `panel open menu` is canonical, `panel open help` still
-  // targets the same panel, and the title renders "-- menu --".
+  // targets the same panel, and the title renders "-- menu ...".
   CHECK(f.run("panel close all"));
   CHECK(f.run("panel open menu"));
-  CHECK(block_contains(panel, "-- menu --"));
+  CHECK(block_contains(panel, "-- menu"));
   CHECK(f.run("panel close all"));
   CHECK(f.run("panel open help"));  // backward-compatible alias
-  CHECK(block_contains(panel, "-- menu --"));
+  CHECK(block_contains(panel, "-- menu"));
   CHECK(f.run("panel open piano"));  // restore the state the toggle test expects
 
   // toggle / close all.
   CHECK(f.run("panel toggle piano"));
-  CHECK(!block_contains(panel, "-- piano --"));
+  CHECK(!block_contains(panel, "-- piano"));
   CHECK(f.run("panel toggle piano"));
-  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(block_contains(panel, "-- piano"));
   CHECK(f.run("panel close all"));
   CHECK(panel.empty());
 
   // Focus: focusing opens, the title carries the '*' marker, repl clears it.
   CHECK(f.run("panel focus piano"));
-  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(block_contains(panel, "-- piano* "));
   CHECK(f.run("panel focus repl"));
-  CHECK(block_contains(panel, "-- piano --") && !block_contains(panel, "-- piano* --"));
+  CHECK(block_contains(panel, "-- piano") && !block_contains(panel, "-- piano* "));
   CHECK(f.run("panel focus next"));
-  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(block_contains(panel, "-- piano* "));
   CHECK(f.run("panel focus next"));  // past the last visible -> back to repl
-  CHECK(!block_contains(panel, "-- piano* --"));
+  CHECK(!block_contains(panel, "-- piano* "));
 
   // Errors: unknown panel / unknown subcommand / missing argument.
   CHECK(!f.run("panel open nonsense"));
@@ -790,13 +791,13 @@ void test_theme_colors_layout_commands() {
   CHECK(!f.run("colors maybe"));
   CHECK(!f.run("colors"));
 
-  // panel layout: vertical / side / toggle.
-  CHECK(f.run("panel layout side"));
-  CHECK(f.shell.panels().layout() == PanelLayout::kSideBySide);
-  CHECK(f.run("panel layout vertical"));
-  CHECK(f.shell.panels().layout() == PanelLayout::kVertical);
+  // panel layout: 1 / 2 / toggle (panels per row).
+  CHECK(f.run("panel layout 2"));
+  CHECK(f.shell.panels().per_row() == 2);
+  CHECK(f.run("panel layout 1"));
+  CHECK(f.shell.panels().per_row() == 1);
   CHECK(f.run("panel layout toggle"));
-  CHECK(f.shell.panels().layout() == PanelLayout::kSideBySide);
+  CHECK(f.shell.panels().per_row() == 2);
   CHECK(!f.run("panel layout diagonal"));
   CHECK(!f.run("panel layout"));
 
@@ -851,44 +852,44 @@ void test_ctrl_p_play_stop() {
   CHECK(f.midi_count() == 0);
 }
 
-void test_style_chooser_wiring() {
+void test_styles_panel_chooser() {
   ShellFixture f;
   std::vector<std::string> panel;
   f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
     panel = lines;
     return true;
   });
-  constexpr std::uint8_t kCtrlChooser = 0x60;   // backtick `
+  CHECK(f.run("style load basic"));
+  constexpr std::uint8_t kBacktick = 0x60;      // focus shortcut for the styles panel
   constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+backslash: apply now
   constexpr std::uint8_t kEnter = 0x0D;
 
-  // CTRL+SPACE opens from REPL focus; a second press cancels.
-  CHECK(!f.shell.chooser_active());
-  CHECK(f.shell.handle_ui_key(kCtrlChooser));
-  CHECK(f.shell.chooser_active());
-  CHECK(f.shell.handle_ui_key(kCtrlChooser));
-  CHECK(!f.shell.chooser_active());
+  // Backtick (`) is a FOCUS SHORTCUT: it gives focus to the styles panel and
+  // opens it (the chooser dissolved into the always-present styles panel).
+  CHECK(!f.shell.styles_focused());
+  CHECK(f.shell.handle_ui_key(kBacktick));
+  CHECK(f.shell.styles_focused());
+  CHECK(f.shell.panels().visible(PanelId::kStyles));
 
-  // It also opens from piano focus (global, like CTRL+P).
-  CHECK(f.run("panel focus piano"));
-  CHECK(f.shell.handle_ui_key(kCtrlChooser));
-  CHECK(f.shell.chooser_active());
-
-  // A digit feeds the filter (asserted through the const chooser accessor).
-  CHECK(f.shell.handle_ui_key('0'));
-  CHECK(f.shell.chooser().has_value() && f.shell.chooser()->filter() == "0");
-
-  // The chooser render appears in the menu panel while active.
+  // The styles panel renders the chooser: style:/section:/hint + a `key:` line.
   f.shell.refresh_panels();
-  CHECK(block_contains(panel, "-- menu"));
+  CHECK(block_contains(panel, "-- styles"));
   CHECK(block_contains(panel, "ENTER next-bar"));
+  CHECK(block_contains(panel, "key:"));
 
-  // ENTER applies but the chooser STAYS OPEN, so you can switch again right
-  // away; the transport is stopped so the engine switches immediately.
-  const SectionType want = f.shell.chooser()->selected_section();
+  // A digit feeds the filter only while the styles panel is focused.
+  CHECK(f.shell.handle_ui_key('0'));
+  CHECK(f.shell.chooser().filter() == "0");
+  CHECK(f.shell.handle_ui_key(0x7F));  // backspace clears the filter
+  CHECK(f.shell.chooser().filter().empty());
+
+  // Move the section highlight, then CTRL+\ applies immediately (transport
+  // stopped) and KEEPS focus on the styles panel.
+  f.shell.chooser_nav_section(+1);
+  const SectionType want = f.shell.chooser().selected_section();
   f.events.clear();
-  CHECK(f.shell.handle_ui_key(kEnter));
-  CHECK(f.shell.chooser_active());  // applying keeps the chooser open
+  CHECK(f.shell.handle_ui_key(kCtrlApplyNow));
+  CHECK(f.shell.styles_focused());  // applying keeps focus
   CHECK(f.shell.engine().arranger().current() == want);
   bool saw_section = false;
   for (const OutEvent& e : f.events) {
@@ -896,27 +897,66 @@ void test_style_chooser_wiring() {
   }
   CHECK(saw_section);
 
-  // Backtick again toggles it closed.
-  CHECK(f.shell.handle_ui_key(kCtrlChooser));
-  CHECK(!f.shell.chooser_active());
+  // ENTER also applies and stays focused.
+  f.shell.chooser_nav_section(+1);
+  const SectionType want2 = f.shell.chooser().selected_section();
+  CHECK(f.shell.handle_ui_key(kEnter));
+  CHECK(f.shell.styles_focused());
+  CHECK(f.shell.engine().arranger().current() == want2);
 
-  // Cancel path: reopen, cancel — active goes false and no switch is issued.
-  CHECK(f.shell.handle_ui_key(kCtrlChooser));
-  CHECK(f.shell.chooser_active());
+  // ESC (chooser_cancel) drops focus back to the REPL without a switch.
   f.events.clear();
   f.shell.chooser_cancel();
-  CHECK(!f.shell.chooser_active());
+  CHECK(!f.shell.styles_focused());
   CHECK(f.events.empty());
 
-  // Arrow nav + CTRL+\ (apply now): move the section highlight, then apply —
-  // this too keeps the chooser open.
-  CHECK(f.shell.handle_ui_key(kCtrlChooser));
-  CHECK(f.shell.handle_ui_key('0'));
-  f.shell.chooser_nav_section(+1);
-  const SectionType want2 = f.shell.chooser()->selected_section();
-  CHECK(f.shell.handle_ui_key(kCtrlApplyNow));
-  CHECK(f.shell.chooser_active());  // apply-now also stays open
-  CHECK(f.shell.engine().arranger().current() == want2);
+  // Backtick from piano focus jumps straight to the styles panel.
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key(kBacktick));
+  CHECK(f.shell.styles_focused());
+}
+
+void test_ctrl_z_layout() {
+  // CTRL+Z (0x1A) toggles the grid between 1 and 2 panels per row (global).
+  ShellFixture f;
+  constexpr std::uint8_t kCtrlZ = 0x1A;
+  CHECK(f.shell.panels().per_row() == 1);
+  CHECK(f.shell.handle_ui_key(kCtrlZ));
+  CHECK(f.shell.panels().per_row() == 2);
+  CHECK(f.shell.handle_ui_key(kCtrlZ));
+  CHECK(f.shell.panels().per_row() == 1);
+}
+
+void test_styles_key_line() {
+  // The styles panel carries a live `key:` line read from the chord engine.
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open styles"));
+  CHECK(f.run("key F major"));
+  f.shell.refresh_panels();
+  CHECK(block_contains(panel, "key: F major"));
+  CHECK(f.run("key A minor"));
+  f.shell.refresh_panels();
+  CHECK(block_contains(panel, "key: A minor"));
+}
+
+void test_tab_number_focus() {
+  // TAB followed by a digit focuses the panel at that 1-based grid position.
+  ShellFixture f;
+  CHECK(f.run("panel open piano"));   // grid position 1 (bottom)
+  CHECK(f.run("panel open styles"));  // grid position 2
+  // TAB arms the jump; the next digit selects the panel.
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.handle_ui_key('2'));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kPanel);
+  CHECK(f.shell.panels().focused_panel() == PanelId::kStyles);
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.handle_ui_key('1'));
+  CHECK(f.shell.panels().focused_panel() == PanelId::kPiano);
 }
 
 // Byte values of the four stepping keys (mirrors the shell's constexprs).
@@ -926,52 +966,61 @@ constexpr std::uint8_t kStepStylePrev = 0x5F;    // '_'
 constexpr std::uint8_t kStepStyleNext = 0x2B;    // '+'
 
 void test_style_section_stepping() {
-  // Stepping the variation (section) in piano focus advances a PENDING
-  // selection with a debounced apply — no wrap at either end.
+  // Stepping the variation (section) while the styles panel is focused advances
+  // a PENDING selection with a debounced apply — no wrap at either end. Derives
+  // first/last from the loaded style so it holds for any section vocabulary.
   ShellFixture f;
-  CHECK(f.run("style load basic"));  // 10 sections: Intro1 Intro2 VarA VarB FillA-D Ending1 Ending2
-  CHECK(f.run("panel focus piano"));
-  CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);
+  CHECK(f.run("style load basic"));
+  const auto& sections = styles::kBuiltins[0]->sections;
+  const SectionType first = sections[0].type;
+  const SectionType last = sections[sections.size() - 1].type;
+  const int section_count = static_cast<int>(sections.size());
+
+  // Focusing the styles panel seeds the chooser from the arranger.
+  CHECK(f.run("panel focus styles"));
+  CHECK(f.shell.styles_focused());
   CHECK(!f.shell.style_step_pending());
   const std::uint32_t gen0 = f.shell.style_step_gen();
 
   // '=' next: pending advances and the gen bumps, but the arranger does NOT
   // switch yet (the apply is debounced).
+  const SectionType before = f.shell.engine().arranger().current();
   CHECK(f.shell.handle_ui_key(kStepSectionNext));
   CHECK(f.shell.style_step_pending());
   CHECK(f.shell.style_step_gen() == gen0 + 1);
-  CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);
+  CHECK(f.shell.engine().arranger().current() == before);
 
-  // Keep stepping past the end: '=' CLAMPS at the last section (Ending2), no wrap.
-  for (int i = 0; i < 12; ++i) {
+  // Keep stepping past the end: '=' CLAMPS at the last section (no wrap).
+  for (int i = 0; i < section_count + 2; ++i) {
     CHECK(f.shell.handle_ui_key(kStepSectionNext));
   }
-  CHECK(f.shell.engine().arranger().current() == SectionType::kVarA);  // still unapplied
+  CHECK(f.shell.engine().arranger().current() == before);  // still unapplied
 
-  // Apply: transport stopped -> immediate; pending clears; landed on the last.
+  // Apply: transport stopped -> immediate; pending clears; lands on the last.
   f.shell.apply_style_step();
   CHECK(!f.shell.style_step_pending());
-  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding2);
+  CHECK(f.shell.engine().arranger().current() == last);
 
-  // '-' from the last steps back; repeated '-' CLAMPS at the first section (Intro1).
-  for (int i = 0; i < 20; ++i) {
+  // '-' steps back; repeated '-' CLAMPS at the first section.
+  for (int i = 0; i < section_count + 5; ++i) {
     CHECK(f.shell.handle_ui_key(kStepSectionPrev));
   }
   f.shell.apply_style_step();
-  CHECK(f.shell.engine().arranger().current() == SectionType::kIntro1);
+  CHECK(f.shell.engine().arranger().current() == first);
 
   // apply_style_step with nothing pending is a no-op (idempotent).
   CHECK(!f.shell.style_step_pending());
   f.shell.apply_style_step();
-  CHECK(f.shell.engine().arranger().current() == SectionType::kIntro1);
+  CHECK(f.shell.engine().arranger().current() == first);
 }
 
 void test_style_stepping_and_reclamp() {
-  // '_'/'+' step the STYLE (clamped, no wrap); a style step re-clamps the
-  // section into the new style's section list (same type kept when present).
+  // '_'/'+' step the STYLE (clamped, no wrap); a style step preserves the
+  // selected variation by type into the new style (see the StyleChooser unit
+  // test for the preserve-by-type guarantee itself).
   ShellFixture f;
   CHECK(f.run("style load basic"));  // builtin index 0
-  CHECK(f.run("panel focus piano"));
+  CHECK(f.run("panel focus styles"));
   CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);
 
   // '_' at the first style CLAMPS (stays basic).
@@ -988,40 +1037,34 @@ void test_style_stepping_and_reclamp() {
   CHECK(f.shell.engine().arranger().current_style() ==
         styles::kBuiltins[styles::kBuiltinCount - 1]);
 
-  // Section is re-clamped across a style step: drive to the last section
-  // (Ending2), step the style back one, and the section type survives into the
-  // new style (all builtins define the full section set).
-  for (int i = 0; i < 12; ++i) {
-    CHECK(f.shell.handle_ui_key(kStepSectionNext));  // clamp at the last section
-  }
-  CHECK(f.shell.handle_ui_key(kStepStylePrev));  // back one style, section re-clamped
+  // Step the style back one: whatever section the chooser shows is exactly what
+  // gets applied, and the style lands one before the last.
+  CHECK(f.shell.handle_ui_key(kStepStylePrev));
+  const SectionType shown = f.shell.chooser().selected_section();
   f.shell.apply_style_step();
-  CHECK(f.shell.engine().arranger().current() == SectionType::kEnding2);
+  CHECK(f.shell.engine().arranger().current() == shown);
   CHECK(f.shell.engine().arranger().current_style() ==
         styles::kBuiltins[styles::kBuiltinCount - 2]);
 }
 
-void test_style_step_in_chooser() {
-  // The same keys drive the chooser highlight while it is up, and still feed
-  // the debounced pending selection.
+void test_step_mirrors_chooser() {
+  // Stepping while the styles panel is focused drives the chooser highlight and
+  // feeds the debounced pending selection; applying switches to exactly what is
+  // shown.
   ShellFixture f;
   CHECK(f.run("style load basic"));
-  constexpr std::uint8_t kOpenChooser = 0x60;  // backtick `
-  CHECK(f.shell.handle_ui_key(kOpenChooser));
-  CHECK(f.shell.chooser_active());
+  CHECK(f.run("panel focus styles"));
+  CHECK(f.shell.styles_focused());
   const std::uint32_t gen0 = f.shell.style_step_gen();
 
-  // '=' moves the chooser's section highlight and marks a pending step without
-  // applying (the chooser stays open; the arranger is untouched until apply).
   const SectionType before = f.shell.engine().arranger().current();
   CHECK(f.shell.handle_ui_key(kStepSectionNext));
-  CHECK(f.shell.chooser_active());
+  CHECK(f.shell.styles_focused());
   CHECK(f.shell.style_step_pending());
   CHECK(f.shell.style_step_gen() == gen0 + 1);
   CHECK(f.shell.engine().arranger().current() == before);  // debounced, not yet applied
 
-  // The pending mirrors the chooser's own selection; applying switches to it.
-  const SectionType want = f.shell.chooser()->selected_section();
+  const SectionType want = f.shell.chooser().selected_section();
   f.shell.apply_style_step();
   CHECK(!f.shell.style_step_pending());
   CHECK(f.shell.engine().arranger().current() == want);
@@ -1355,30 +1398,33 @@ void test_panel_manager_state() {
   CHECK(!pm.any_visible());
   CHECK(pm.focus_kind() == PanelFocus::kRepl);
 
-  // Open + content + stacking.
+  // Open + content + grid composition.
   pm.set_content(PanelId::kHelp, {"h1", "h2"});
   pm.open(PanelId::kHelp);
   pm.open(PanelId::kPiano);
   pm.set_content(PanelId::kPiano, {"p1"});
   CHECK(pm.visible(PanelId::kHelp) && pm.visible(PanelId::kPiano));
-  constexpr int kWide = 100;
-  std::vector<std::string> combined = pm.combined_lines(kWide);
-  CHECK(combined.size() == 2 + 2 + 1);  // two titles + help(2) + piano(1)
 
-  // An oversized panel is truncated with an honest marker; the panel below
-  // stays visible (fairness cap).
-  const std::vector<std::string> big(40, "x");
-  pm.set_content(PanelId::kHelp, big);
-  combined = pm.combined_lines(kWide);
-  CHECK(block_contains(combined, "more lines)"));
-  std::size_t help_lines = 0;
-  for (const std::string& line : combined) {
-    if (line == "x") {
-      ++help_lines;
-    }
-  }
-  CHECK(help_lines < big.size());
-  CHECK(block_contains(combined, "-- piano --"));
+  // The grid tiles to EXACTLY the requested rows and carries both titles and
+  // their content; menu is higher in the order so it paints above the piano.
+  constexpr int kWide = 100;
+  constexpr int kRows = 20;
+  const std::vector<std::string> grid = pm.combined_lines(kWide, kRows);
+  CHECK(static_cast<int>(grid.size()) == kRows);
+  CHECK(block_contains(grid, "-- menu"));
+  CHECK(block_contains(grid, "-- piano"));
+  CHECK(block_contains(grid, "h1") && block_contains(grid, "p1"));
+
+  // Panel numbers appear in the titles (1-based grid position, bottom-to-top:
+  // piano is [1], menu is [2]).
+  CHECK(block_contains(grid, "[1]") && block_contains(grid, "[2]"));
+  CHECK(pm.panel_number(PanelId::kPiano) == 1);
+  CHECK(pm.panel_number(PanelId::kHelp) == 2);
+
+  // TAB+number: focus_number targets the visible panel at that grid slot.
+  CHECK(pm.focus_number(2));
+  CHECK(pm.focus_kind() == PanelFocus::kPanel && pm.focused_panel() == PanelId::kHelp);
+  CHECK(!pm.focus_number(9));  // out of range: unchanged
 
   // Closing the focused panel returns focus to the REPL.
   pm.focus(PanelId::kPiano);
@@ -1391,6 +1437,8 @@ void test_panel_manager_state() {
   CHECK(parse_panel_name("filter", id) && id == PanelId::kFilter);
   CHECK(parse_panel_name("menu", id) && id == PanelId::kHelp);
   CHECK(parse_panel_name("help", id) && id == PanelId::kHelp);
+  CHECK(parse_panel_name("styles", id) && id == PanelId::kStyles);
+  CHECK(parse_panel_name("events", id) && id == PanelId::kEvents);
   CHECK(!parse_panel_name("bogus", id));
 }
 
@@ -1537,7 +1585,7 @@ int main() {
   test_shell_view_external_keys();
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
-  test_console_bands();
+  test_console_geometry();
   test_help_command();
   test_help_panel_hook();
   test_panel_commands();
@@ -1548,10 +1596,13 @@ int main() {
   test_theme_colors_layout_commands();
   test_contextual_panel();
   test_ctrl_p_play_stop();
-  test_style_chooser_wiring();
+  test_ctrl_z_layout();
+  test_styles_key_line();
+  test_tab_number_focus();
+  test_styles_panel_chooser();
   test_style_section_stepping();
   test_style_stepping_and_reclamp();
-  test_style_step_in_chooser();
+  test_step_mirrors_chooser();
   test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();

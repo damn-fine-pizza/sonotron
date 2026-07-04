@@ -4,9 +4,48 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "note_names.hpp"
+#include "rc_config.hpp"
+
 namespace arrangrr::host {
 
 namespace {
+
+// Builds the selectable style list from the built-ins the core matches by
+// index; each style advertises exactly the sections it defines. Used to seed
+// the always-present chooser.
+std::vector<StyleInfo> build_style_infos() {
+  std::vector<StyleInfo> infos;
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+    const Style* style = styles::kBuiltins[i];
+    StyleInfo info{.index = static_cast<int>(i), .name = style->name, .sections = {}};
+    for (const StyleSection& section : style->sections) {
+      info.sections.push_back(section.type);
+    }
+    infos.push_back(std::move(info));
+  }
+  return infos;
+}
+
+const char* mode_label(Mode mode) {
+  switch (mode) {
+    case Mode::kMajor:
+      return "major";
+    case Mode::kMinor:
+      return "minor";
+    case Mode::kDorian:
+      return "dorian";
+    case Mode::kPhrygian:
+      return "phrygian";
+    case Mode::kLydian:
+      return "lydian";
+    case Mode::kMixolydian:
+      return "mixolydian";
+    case Mode::kLocrian:
+      return "locrian";
+  }
+  return "?";
+}
 
 std::vector<std::string> tokenize(const std::string& line) {
   std::vector<std::string> out;
@@ -369,13 +408,15 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
   return true;
 }
 
-// Panel width used when no live terminal is attached (script/flat mode).
+// Panel geometry used when no live terminal is attached (script/flat mode).
 constexpr int kDefaultPanelColumns = 80;
+constexpr int kDefaultPanelRows = 24;
 
 // Global TUI shortcut bytes (raw control chars — work on every terminal).
 constexpr std::uint8_t kCtrlPlayStop = 0x10;  // CTRL+P: transport play/stop
-constexpr std::uint8_t kCtrlChooser = 0x60;   // backtick `: style/section chooser toggle
+constexpr std::uint8_t kCtrlChooser = 0x60;   // backtick `: focus the styles panel
 constexpr std::uint8_t kCtrlQuit = 0x03;      // CTRL+C: always quit the app (ISIG is off)
+constexpr std::uint8_t kCtrlLayout = 0x1A;    // CTRL+Z: toggle 1<->2 panels per row
 constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+\: apply the chooser now
 
 // Variation/style stepping keys (docs/TUI_SPEC.md). `-`/`=` step the variation
@@ -430,8 +471,10 @@ Shell::Shell(EventSink sink)
     : m_sink([this, user = std::move(sink)](const OutEvent& ev) {
         m_monitor.observe(ev, m_pending_source_key);
         user(ev);
-      }) {
+      }),
+      m_chooser(build_style_infos()) {
   m_panels.set_content(PanelId::kFilter, {"filter: channel|port|event|clear (help filter)"});
+  m_panels.set_content(PanelId::kChords, {"(chord detection: not wired yet)"});
 }
 
 std::vector<std::string> Shell::build_help(const std::string& topic) const {
@@ -568,9 +611,36 @@ int Shell::panel_columns() const {
   return kDefaultPanelColumns;
 }
 
+int Shell::panel_rows_available() const {
+  if (m_height_provider) {
+    return m_height_provider();
+  }
+  return kDefaultPanelRows;
+}
+
 void Shell::refresh_piano_content() {
-  m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, panel_columns(), m_monitor,
-                                                           m_filter, m_view_options, m_style));
+  // The piano regenerates at its CELL width (half the terminal in a two-per-row
+  // grid), so its compact/minimal tiers pick the layout that fits.
+  const int width = m_panels.cell_width(PanelId::kPiano, panel_columns());
+  m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, width, m_monitor, m_filter,
+                                                           m_view_options, m_style));
+}
+
+void Shell::refresh_styles_content() {
+  // The styles panel IS the chooser: current style/section (bold+colour on the
+  // selection) plus a live `key:` line read from the chord engine. The key line
+  // sits just above the (least-important) hint line so it survives a short cell.
+  std::vector<std::string> lines = m_chooser.render(m_piano.note_naming, m_style);
+  const Key& key = m_engine.chords().key();
+  const NoteNameOptions opts{
+      .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
+  std::string key_line = "key: " + pitch_class_name(key.root_pc, opts) + " " + mode_label(key.mode);
+  if (lines.empty()) {
+    lines.push_back(std::move(key_line));
+  } else {
+    lines.insert(lines.end() - 1, std::move(key_line));  // before the hint line
+  }
+  m_panels.set_content(PanelId::kStyles, std::move(lines));
 }
 
 UiMode Shell::current_ui_mode() const {
@@ -590,38 +660,49 @@ std::vector<std::string> Shell::contextual_help_lines() const {
 }
 
 void Shell::sync_contextual_panel() {
-  // The menu panel IS the contextual menu: while the chooser is engaged it
-  // shows the live picker; otherwise it follows the interactive mode.
-  if (m_chooser.has_value()) {
-    m_panels.set_content(PanelId::kHelp, m_chooser->render(m_piano.note_naming, m_style));
-    return;
-  }
-
-  // A mode change unpins an explicit help topic so the contextual content
-  // resumes. The panel is not force-opened here (that would reshuffle the
-  // visible set and focus cycle); it simply reflects the mode whenever shown.
+  // The menu (help) panel follows the interactive mode unless a `help <topic>`
+  // is pinned. A mode change unpins so the contextual content resumes. The panel
+  // is not force-opened here (that would reshuffle the visible set / focus cycle).
   const UiMode mode = current_ui_mode();
   if (mode != m_ui_mode) {
     m_ui_mode = mode;
     m_help_pinned = false;
   }
-
   if (!m_help_pinned) {
     m_panels.set_content(PanelId::kHelp, contextual_help_lines());
   }
 }
 
 bool Shell::push_panels() {
-  // The contextual menu content tracks the current mode before every render.
-  sync_contextual_panel();
+  // Seed the chooser from the arranger the moment a panel is focused (fresh from
+  // the REPL), so stepping/navigation start where the band actually is.
+  const bool panel_focused = m_panels.focus_kind() == PanelFocus::kPanel;
+  if (panel_focused && !m_styles_was_focused) {
+    seed_chooser_selection();
+  }
+  m_styles_was_focused = panel_focused;
 
-  // Width-dependent content is regenerated from state on every push, so a
-  // resize can never leave a stale layout behind (H1 resize contract).
+  // Content that depends on state/width/naming is regenerated on every push, so
+  // a resize can never leave a stale layout behind (H1 resize contract).
+  sync_contextual_panel();
+  refresh_styles_content();  // the styles panel always reflects the chooser + key
   if (m_panels.visible(PanelId::kPiano)) {
     refresh_piano_content();
   }
 
-  return m_panel_hook && m_panel_hook(m_panels.combined_lines(panel_columns(), m_style));
+  return m_panel_hook &&
+         m_panel_hook(m_panels.combined_lines(panel_columns(), panel_rows_available(), m_style));
+}
+
+void Shell::log_event(const std::string& line) {
+  // Append only: the ~100ms grid refresh in main.cpp flushes the events panel,
+  // so a burst of MIDI never triggers a repaint per event.
+  m_panels.append_line(PanelId::kEvents, line);
+}
+
+void Shell::console_output(const std::string& line) {
+  m_panels.append_line(PanelId::kConsole, line);
+  (void)push_panels();  // command output repaints at once
 }
 
 void Shell::configure_terminal(bool is_tty, bool utf8) {
@@ -653,19 +734,20 @@ void Shell::open_help_topic(const std::string& topic) {
 }
 
 bool Shell::panel_layout(const std::vector<std::string>& t, std::string& error) {
+  static const char* kUsage = "panel layout 1|2|toggle";
   if (t.size() < 3) {
-    error = "panel layout vertical|side|toggle";
+    error = kUsage;
     return false;
   }
 
-  if (t[2] == "vertical") {
-    m_panels.set_layout(PanelLayout::kVertical);
-  } else if (t[2] == "side") {
-    m_panels.set_layout(PanelLayout::kSideBySide);
+  if (t[2] == "1") {
+    m_panels.set_per_row(panel_layout::kOnePerRow);
+  } else if (t[2] == "2") {
+    m_panels.set_per_row(panel_layout::kTwoPerRow);
   } else if (t[2] == "toggle") {
     m_panels.toggle_layout();
   } else {
-    error = "panel layout vertical|side|toggle";
+    error = kUsage;
     return false;
   }
 
@@ -698,7 +780,7 @@ bool Shell::panel_target(const std::string& sub, const std::vector<std::string>&
 
   PanelId id{};
   if (!parse_panel_name(target, id)) {
-    error = "unknown panel '" + target + "' (menu, piano, filter)";
+    error = "unknown panel '" + target + "' (events console styles chords piano menu filter empty)";
     return false;
   }
 
@@ -1258,31 +1340,52 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return true;
   }
 
-  // Backtick (`) toggles the style/section chooser. A plain printable byte —
-  // reliably delivered by every terminal (unlike CTRL+SPACE = NUL) and unused by
-  // any command — so it works globally from repl OR piano focus; a second press
-  // cancels.
-  if (byte == kCtrlChooser) {
-    toggle_chooser();
+  // CTRL+Z (0x1A) toggles the grid between 1 and 2 panels per row (global). A
+  // raw control byte the line editor ignores, so it works from any focus.
+  if (byte == kCtrlLayout) {
+    m_panels.toggle_layout();
+    console_output("layout: " + std::to_string(m_panels.per_row()) + " per row");
     return true;
   }
 
-  // While the chooser is engaged it owns every byte (digits/backspace/apply and
-  // anything else swallowed) so nothing leaks to the piano or the line editor.
-  if (m_chooser.has_value()) {
-    return chooser_key(byte);
+  // TAB+digit: a digit typed immediately after TAB focuses panel #N directly.
+  // Resolved before every other route so it wins over the styles filter etc.
+  const bool await_digit = m_await_panel_digit;
+  m_await_panel_digit = false;
+  if (await_digit && byte >= '0' && byte <= '9') {
+    m_panels.focus_number(byte - '0');
+    (void)push_panels();
+    return true;
+  }
+
+  // Backtick (`) is now a FOCUS SHORTCUT: it gives focus to the styles panel
+  // (equivalent to TABbing to it). A plain printable byte, reliably delivered by
+  // every terminal and unused by any command, so it works from any focus.
+  if (byte == kCtrlChooser) {
+    focus_styles();
+    return true;
   }
 
   // TAB cycles focus repl <-> visible panels, even FROM the repl: opening the
-  // piano and pressing TAB drops you straight into play mode. With no panel to
-  // focus it falls through so a lone TAB still reaches the editor.
+  // piano and pressing TAB drops you straight into play mode. Handled BEFORE the
+  // styles routing below so TAB always escapes the styles panel. With no panel
+  // to focus it falls through so a lone TAB still reaches the editor. It also
+  // arms the TAB+digit jump for the next byte.
   if (byte == '\t') {
     if (m_panels.focus_kind() != PanelFocus::kPanel && !m_panels.any_visible()) {
       return false;
     }
     m_panels.focus_next();
+    m_await_panel_digit = true;
     (void)push_panels();
     return true;
+  }
+
+  // The styles panel absorbed the chooser: while it is focused it owns every
+  // other byte (digits/backspace/apply/steps/musical keys) so nothing leaks to
+  // the piano or the line editor.
+  if (styles_focused()) {
+    return chooser_key(byte);
   }
 
   // Every other shortcut/musical key needs a focused panel; with repl focus the
@@ -1425,78 +1528,45 @@ bool Shell::piano_key_event(char key, bool pressed) {
   return true;
 }
 
-void Shell::toggle_chooser() {
-  if (m_chooser.has_value()) {
-    close_chooser();
-  } else {
-    open_chooser();
-  }
+bool Shell::styles_focused() const {
+  return m_panels.focus_kind() == PanelFocus::kPanel &&
+         m_panels.focused_panel() == PanelId::kStyles;
 }
 
-void Shell::open_chooser() {
-  // Build the selectable style list from the built-ins the core matches by
-  // index; each style advertises exactly the sections it defines.
-  std::vector<StyleInfo> infos;
-  for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
-    const Style* style = styles::kBuiltins[i];
-    StyleInfo info{.index = static_cast<int>(i), .name = style->name, .sections = {}};
-    for (const StyleSection& section : style->sections) {
-      info.sections.push_back(section.type);
-    }
-    infos.push_back(std::move(info));
-  }
-  m_chooser.emplace(std::move(infos));
-  seed_chooser_selection();
-
-  // Pin the chooser to the menu panel and make sure it is visible; push_panels
-  // re-syncs the content (sync_contextual_panel renders the chooser while up).
-  m_panels.open(PanelId::kHelp);
+void Shell::focus_styles() {
+  // Backtick shortcut: focus the styles panel (opens it) and seed the chooser
+  // from the arranger. push_panels seeds on the repl->panel focus edge.
+  m_panels.focus(PanelId::kStyles);
   (void)push_panels();
 }
 
 void Shell::seed_chooser_selection() {
-  // Open the chooser where the band already is: put the arrows on the loaded
-  // style and its current section, so opening with ` lands on the right place.
-  if (!m_chooser.has_value()) {
-    return;
-  }
-  // Style highlight -> the loaded built-in (nav_style clamps from position 0).
+  // Land the chooser where the band already is: the loaded built-in style and
+  // its current section.
+  int idx = 0;
   if (const Style* loaded = m_engine.arranger().current_style(); loaded != nullptr) {
     for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
       if (styles::kBuiltins[i] == loaded) {
-        m_chooser->nav_style(static_cast<int>(i));
+        idx = static_cast<int>(i);
         break;
       }
     }
   }
-  // Section highlight -> the current section. Done AFTER the style, because a
-  // style change resets the section highlight back to the style's first.
-  const StyleInfo* style = m_chooser->selected_style();
-  if (style == nullptr) {
-    return;
-  }
   const SectionType current = m_engine.arranger().current();
-  for (std::size_t i = 0; i < style->sections.size(); ++i) {
-    if (style->sections[i] == current) {
-      m_chooser->nav_section(static_cast<int>(i));
-      return;
-    }
-  }
-}
-
-void Shell::close_chooser() {
-  m_chooser.reset();
-  (void)push_panels();  // the menu panel resumes its normal contextual content
+  m_chooser.select(idx, current);
+  // Mirror into the debounced pending so a following step continues from here.
+  m_step_style_index = idx;
+  m_step_section = current;
 }
 
 bool Shell::chooser_key(std::uint8_t byte) {
   if (byte >= kAsciiDigitLow && byte <= kAsciiDigitHigh) {
-    m_chooser->feed_digit(static_cast<char>(byte));
+    m_chooser.feed_digit(static_cast<char>(byte));
     (void)push_panels();
     return true;
   }
   if (byte == kBackspaceDel || byte == kBackspaceBs) {
-    m_chooser->backspace();
+    m_chooser.backspace();
     (void)push_panels();
     return true;
   }
@@ -1509,13 +1579,12 @@ bool Shell::chooser_key(std::uint8_t byte) {
     return true;
   }
   // Variation/style stepping drives the chooser highlight AND the debounced
-  // pending selection, so -/= and _/+ skip variations/styles the same way here
-  // as in piano focus.
+  // pending selection: -/= step the variation, _/+ the style.
   if (style_step_key(byte)) {
     return true;
   }
   // A piano musical key sets the style's tonality (key root) live, so you can
-  // audition the picked style/section in any key without leaving the chooser.
+  // audition the picked style/section in any key without leaving the panel.
   if (const PianoKeyBinding* binding = piano_binding_for(byte)) {
     constexpr std::uint8_t kPitchClasses = 12;
     std::uint8_t note = 0;
@@ -1532,27 +1601,24 @@ bool Shell::chooser_key(std::uint8_t byte) {
     }
     return true;
   }
-  // Every other byte is swallowed while the chooser is up.
+  // Every other byte is swallowed while the styles panel is focused.
   return true;
 }
 
 void Shell::chooser_apply(ChooserApply mode) {
-  if (!m_chooser.has_value()) {
-    return;
-  }
-  if (const StyleInfo* style = m_chooser->selected_style(); style != nullptr) {
+  if (const StyleInfo* style = m_chooser.selected_style(); style != nullptr) {
     // Same engine entry point cmd_style uses (m_sink); the core forces
     // immediate when the transport is stopped regardless of the flag.
     Command c;
     c.op = Op::kDo;
     c.param = Param::kStyleSwitch;
     c.a = style->index;
-    c.b = static_cast<std::int32_t>(m_chooser->selected_section());
+    c.b = static_cast<std::int32_t>(m_chooser.selected_section());
     c.c = mode == ChooserApply::kImmediate ? 1 : 0;
     m_engine.push_command(c, m_sink);
   }
-  // The chooser STAYS open after applying, so you can keep switching styles and
-  // sections in a row without reopening; close it explicitly with ` or ESC.
+  // Applying keeps the styles panel focused, so you can keep switching styles
+  // and sections in a row.
   (void)push_panels();
 }
 
@@ -1575,127 +1641,23 @@ bool Shell::style_step_key(std::uint8_t byte) {
   }
 }
 
-void Shell::seed_style_step() {
-  // Start stepping where the band already is: the loaded built-in style (index
-  // 0 when nothing is loaded) and its active section.
-  m_step_style_index = 0;
-  if (const Style* loaded = m_engine.arranger().current_style(); loaded != nullptr) {
-    for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
-      if (styles::kBuiltins[i] == loaded) {
-        m_step_style_index = static_cast<int>(i);
-        break;
-      }
-    }
-  }
-  m_step_section = m_engine.arranger().current();
-  m_style_step_seeded = true;
-}
-
-void Shell::step_pending_section(int delta) {
-  // Move within the pending style's own section list, clamped (no wrap).
-  const Span<const StyleSection> sections = styles::kBuiltins[m_step_style_index]->sections;
-  const int count = static_cast<int>(sections.size());
-  int pos = 0;
-  for (int i = 0; i < count; ++i) {
-    if (sections[static_cast<std::size_t>(i)].type == m_step_section) {
-      pos = i;
-      break;
-    }
-  }
-  int next = pos + delta;
-  if (next < 0) {
-    next = 0;
-  } else if (next >= count) {
-    next = count > 0 ? count - 1 : 0;
-  }
-  if (count > 0) {
-    m_step_section = sections[static_cast<std::size_t>(next)].type;
-  }
-}
-
-void Shell::step_pending_style(int delta) {
-  const int count = static_cast<int>(styles::kBuiltinCount);
-  // Remember the section's position so it can be re-clamped by index if the new
-  // style lacks the current section type.
-  const Span<const StyleSection> old_sections = styles::kBuiltins[m_step_style_index]->sections;
-  int old_pos = 0;
-  for (int i = 0; i < static_cast<int>(old_sections.size()); ++i) {
-    if (old_sections[static_cast<std::size_t>(i)].type == m_step_section) {
-      old_pos = i;
-      break;
-    }
-  }
-
-  int next = m_step_style_index + delta;
-  if (next < 0) {
-    next = 0;
-  } else if (next >= count) {
-    next = count > 0 ? count - 1 : 0;
-  }
-  m_step_style_index = next;
-
-  // Re-clamp the section into the new style: keep the same type if it exists,
-  // else fall back to the same position clamped into the new section list.
-  const Span<const StyleSection> sections = styles::kBuiltins[m_step_style_index]->sections;
-  const int sec_count = static_cast<int>(sections.size());
-  bool found = false;
-  for (int i = 0; i < sec_count; ++i) {
-    if (sections[static_cast<std::size_t>(i)].type == m_step_section) {
-      found = true;
-      break;
-    }
-  }
-  if (!found && sec_count > 0) {
-    const int clamped = old_pos < sec_count ? old_pos : sec_count - 1;
-    m_step_section = sections[static_cast<std::size_t>(clamped)].type;
-  }
-}
-
 void Shell::style_step(StyleStepAxis axis, int delta) {
-  if (m_chooser.has_value()) {
-    // The chooser IS the styles+variations screen: drive its highlight, then
-    // mirror the selection into the debounced pending so the 500 ms apply lands
-    // on exactly what is shown.
-    if (axis == StyleStepAxis::kStyle) {
-      m_chooser->nav_style(delta);
-    } else {
-      m_chooser->nav_section(delta);
-    }
-    if (const StyleInfo* style = m_chooser->selected_style(); style != nullptr) {
-      m_step_style_index = style->index;
-    }
-    m_step_section = m_chooser->selected_section();
-    m_style_step_seeded = true;
+  // The always-present chooser IS the styles+variations screen: drive its
+  // highlight, then mirror the selection into the debounced pending so the
+  // ~500 ms apply lands on exactly what is shown. nav_style preserves the
+  // variation by type across a style change (no jump back to the first).
+  if (axis == StyleStepAxis::kStyle) {
+    m_chooser.nav_style(delta);
   } else {
-    if (!m_style_step_seeded) {
-      seed_style_step();
-    }
-    if (axis == StyleStepAxis::kStyle) {
-      step_pending_style(delta);
-    } else {
-      step_pending_section(delta);
-    }
-    render_style_step_menu();
+    m_chooser.nav_section(delta);
   }
+  if (const StyleInfo* style = m_chooser.selected_style(); style != nullptr) {
+    m_step_style_index = style->index;
+  }
+  m_step_section = m_chooser.selected_section();
   ++m_style_step_gen;
   m_style_step_pending = true;
   (void)push_panels();
-}
-
-void Shell::render_style_step_menu() {
-  // INTERIM (piano focus, no chooser): there is no dedicated `styles` panel yet
-  // — that is a separate layout refactor — so the pending style+variation is
-  // rendered into the MENU panel (kHelp) as a compact block. It is pinned so the
-  // contextual sync does not clobber it on the same-tick push_panels().
-  // TODO: move this block to the dedicated `styles` panel once the layout
-  // refactor lands.
-  std::vector<std::string> lines;
-  lines.push_back("styles + variations (pending, applies after ~0.5s):");
-  lines.push_back(std::string("  style:     ") + styles::kBuiltins[m_step_style_index]->name);
-  lines.push_back(std::string("  variation: ") + section_type_name(m_step_section));
-  lines.push_back("  keys: -/= variation   _/+ style");
-  m_panels.set_content(PanelId::kHelp, lines);
-  m_help_pinned = true;
 }
 
 void Shell::apply_style_step() {
@@ -1717,23 +1679,54 @@ void Shell::apply_style_step() {
 }
 
 void Shell::chooser_nav_style(int delta) {
-  if (m_chooser.has_value()) {
-    m_chooser->nav_style(delta);
+  // Arrow up/down while the styles panel is focused: move the style highlight
+  // (variation preserved by type). ENTER applies; arrows do not auto-switch.
+  if (styles_focused()) {
+    m_chooser.nav_style(delta);
     (void)push_panels();
   }
 }
 
 void Shell::chooser_nav_section(int delta) {
-  if (m_chooser.has_value()) {
-    m_chooser->nav_section(delta);
+  if (styles_focused()) {
+    m_chooser.nav_section(delta);
     (void)push_panels();
   }
 }
 
 void Shell::chooser_cancel() {
-  if (m_chooser.has_value()) {
-    close_chooser();
+  // ESC while the styles panel is focused drops focus back to the REPL.
+  if (styles_focused()) {
+    m_panels.focus_repl();
+    (void)push_panels();
   }
+}
+
+void Shell::apply_rc(const RcConfig& rc) {
+  if (rc.has_layout) {
+    m_panels.set_per_row(rc.per_row);
+  }
+  if (!rc.order.empty()) {
+    std::vector<PanelId> ids;
+    ids.reserve(rc.order.size());
+    for (const RcPanel& entry : rc.order) {
+      ids.push_back(entry.id);
+    }
+    m_panels.set_order(ids);
+    m_panels.close_all();
+    for (const RcPanel& entry : rc.order) {
+      m_panels.open(entry.id);
+      m_panels.set_full_row(entry.id, entry.full_row);
+      if (entry.height > 0) {
+        m_panels.set_height(entry.id, entry.height);
+      }
+    }
+    m_panels.open(PanelId::kStyles);  // the styles panel is always present
+  }
+  for (const std::string& warning : rc.warnings) {
+    console_output("rc: " + warning);
+  }
+  (void)push_panels();
 }
 
 int Shell::find_seq(const std::string& name) const {

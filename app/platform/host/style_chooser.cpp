@@ -95,17 +95,53 @@ void StyleChooser::backspace() {
 void StyleChooser::nav_style(int delta) {
   const auto count = static_cast<int>(filtered_indices().size());
   const int next = clamp_index(m_style_pos + delta, count);
-  if (next != m_style_pos) {
-    m_style_pos = next;
-    // Changing style resets the section highlight to that style's first.
-    m_section_pos = 0;
+  if (next == m_style_pos) {
+    return;
   }
+  // Preserve the highlighted variation across the style change: remember its
+  // TYPE, move, then re-find that type in the new style (all builtins share the
+  // same section vocabulary, so this normally succeeds; clamp if it does not).
+  const SectionType keep = selected_section();
+  m_style_pos = next;
+  const StyleInfo* style = selected_style();
+  if (style == nullptr || style->sections.empty()) {
+    m_section_pos = 0;
+    return;
+  }
+  for (std::size_t i = 0; i < style->sections.size(); ++i) {
+    if (style->sections[i] == keep) {
+      m_section_pos = static_cast<int>(i);
+      return;
+    }
+  }
+  m_section_pos = clamp_index(m_section_pos, static_cast<int>(style->sections.size()));
 }
 
 void StyleChooser::nav_section(int delta) {
   const StyleInfo* style = selected_style();
   const int count = style == nullptr ? 0 : static_cast<int>(style->sections.size());
   m_section_pos = clamp_index(m_section_pos + delta, count);
+}
+
+void StyleChooser::select(int style_index, SectionType section) {
+  const std::vector<std::size_t> indices = filtered_indices();
+  for (std::size_t pos = 0; pos < indices.size(); ++pos) {
+    if (m_styles[indices[pos]].index == style_index) {
+      m_style_pos = static_cast<int>(pos);
+      break;
+    }
+  }
+  m_section_pos = 0;
+  const StyleInfo* style = selected_style();
+  if (style == nullptr) {
+    return;
+  }
+  for (std::size_t i = 0; i < style->sections.size(); ++i) {
+    if (style->sections[i] == section) {
+      m_section_pos = static_cast<int>(i);
+      return;
+    }
+  }
 }
 
 std::vector<StyleInfo> StyleChooser::filtered() const {

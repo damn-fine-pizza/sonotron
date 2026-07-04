@@ -43,31 +43,14 @@ class LineEditor {
 };
 
 // Terminal renderer. Layout, top to bottom over H rows:
-//   [ events scroll region ] [ panels ] [ console pane ] [ status ] [ input ]
-// The events stream (MIDI) scrolls in the DECSTBM region at the top; panels
-// and the console pane are repainted bands (never terminal-scrolled); the
+//   [ panel grid: rows 1..H-2 ] [ status bar: H-1 ] [ input line: H ]
+// The whole area above the status bar is one uniform panel grid, composed by
+// PanelManager and painted verbatim here (no scroll region, no bands): the
+// events/console SCROLLING now lives in PanelManager's per-panel backlogs. The
 // status bar (inverse video) and the persistent input line anchor the bottom.
 class Console {
  public:
-  // Row budget below the events region, from the bottom up.
-  static constexpr int kStatusInputRows = 2;                 // status bar + input line
-  static constexpr int kConsoleRows = 6;                     // console ring capacity (log lines)
-  static constexpr int kConsolePaneRows = kConsoleRows + 1;  // + one rule/label row
-  static constexpr int kMinEventRows = 1;                    // events region never fully starved
-  static constexpr int kPanelCapNum = 2;                     // panels/console pane <= 40% of H
-  static constexpr int kPanelCapDen = 5;
-
-  // Row heights of the four stacked bands above the input line. events + panel
-  // + console + kStatusInputRows always sums to the terminal height, so the
-  // bands tile the screen without overlap.
-  struct Bands {
-    int events = 0;   // top scroll region (rows 1..events)
-    int panel = 0;    // panel band
-    int console = 0;  // console pane band (rule + log lines)
-  };
-  // Pure geometry: split `rows` into bands given the desired panel height.
-  // Static + side-effect-free so it is unit-testable without a terminal.
-  static Bands compute_bands(int rows, int panel_lines);
+  static constexpr int kStatusInputRows = 2;  // status bar + input line
 
   Console();
   ~Console();
@@ -75,44 +58,37 @@ class Console {
   Console(const Console&) = delete;
   Console& operator=(const Console&) = delete;
 
-  bool init();      // enters raw mode + scroll region; false if not a tty
+  bool init();      // enters raw mode; false if not a tty
   void shutdown();  // restores everything (idempotent)
 
-  void emit(const std::string& line);          // into the EVENTS stream (top)
-  void console_line(const std::string& line);  // into the CONSOLE pane (bottom)
-  void set_status(const std::string& text);    // repaint the status bar (and
-                                               // re-layout after a resize)
-  void render_input(const LineEditor& ed);     // repaint prompt + buffer + cursor
+  void set_status(const std::string& text);  // repaint the status bar (and
+                                             // re-layout after a resize)
+  void render_input(const LineEditor& ed);   // repaint prompt + buffer + cursor
 
-  // Persistent panel between the events pane and the console pane (help lives
-  // here). Empty vector hides it. The events pane always keeps the majority of
-  // the screen: overlong panels are truncated to <= 40%.
+  // Paints the composed panel grid over rows 1..H-2. `lines` is expected to be
+  // exactly panel_rows() long (PanelManager fits it to width + height); shorter
+  // input clears the remaining rows, longer input is clamped.
   void set_panel(const std::vector<std::string>& lines);
+
+  // Rows available to the panel grid (everything above the status/input pair).
+  int panel_rows() const { return m_rows > kStatusInputRows ? m_rows - kStatusInputRows : 0; }
 
   // Current terminal width; panel renderers regenerate content from state
   // through the resize hook, which fires after every geometry change.
   int columns() const { return m_cols; }
   void set_resize_hook(std::function<void()> hook) { m_resize_hook = std::move(hook); }
 
-  // Console ring inspection (tests only).
-  const std::vector<std::string>& console_ring() const { return m_console; }
-
  private:
   void refresh_geometry();
-  void apply_layout();     // scroll region + panel + console + status repaint
-  void render_console();   // repaint the console pane band in place
-  int log_bottom() const;  // bottom row of the events scroll region
   int status_row() const { return m_rows - 1; }
   int input_row() const { return m_rows; }
   void write_raw(const std::string& s);
+  void paint_status();
 
   bool m_active = false;
   int m_rows = 24;
   int m_cols = 80;
   std::string m_status;
-  std::vector<std::string> m_panel;
-  std::vector<std::string> m_console;  // bounded command-I/O ring (<= kConsoleRows)
-  int m_events_bottom = 0;             // events-region bottom last drawn — clears ghosts on shrink
   std::function<void()> m_resize_hook;
 };
 

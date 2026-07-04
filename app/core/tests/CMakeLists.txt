@@ -20,3 +20,6 @@ target_link_libraries(test_panels PRIVATE arrangrr_host)
 
 arrangrr_test(test_style_chooser)
 target_link_libraries(test_style_chooser PRIVATE arrangrr_host)
+
+arrangrr_test(test_rc_config)
+target_link_libraries(test_rc_config PRIVATE arrangrr_host)
