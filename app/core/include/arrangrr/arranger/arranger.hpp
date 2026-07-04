@@ -122,6 +122,12 @@ class Arranger {
   // One transport tick. Resolution order matters upstream: feed the chord
   // AFTER the chord sequencer has fired this tick, so bar downbeats resolve
   // against the fresh chord.
+  //
+  // Deliberately over the cognitive-complexity threshold: this is the realtime
+  // core heartbeat (bar-boundary detection, pending style/section switches,
+  // one-shot transitions, grid firing). Splitting it would scatter the tight
+  // timing logic across functions for no readability gain and real risk.
+  // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   TickResult on_tick(Tick transport_tick, const ChordState& chord, ScheduleFn schedule) {
     TickResult result;
     if (m_style == nullptr) {

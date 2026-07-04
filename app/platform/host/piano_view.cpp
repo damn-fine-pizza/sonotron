@@ -54,6 +54,9 @@ constexpr std::size_t kBarReleasedDashes = 3;  // released bar: "---o    "
 // Event-log view: most-recent lines that pass the filter.
 constexpr std::size_t kEventLogRows = 8;
 
+// "source:note" column width in the keyboard events strip (e.g. "p0ch10:F#2").
+constexpr std::size_t kEventLabelWidth = 12;
+
 }  // namespace monitor_view
 
 namespace {
@@ -371,10 +374,15 @@ std::string format_event_line(const PianoViewState& state, const PianoVisualEven
     tail = format_duration_ticks(event.end_tick - event.start_tick);
   }
 
+  // Pad the "source:note" field to a fixed width so every event row columns
+  // up regardless of key vs port/channel origin or note-name length.
+  std::string label = source + ":" + compact_note_name(event.note, state.note_naming);
+  if (label.size() < monitor_view::kEventLabelWidth) {
+    label.resize(monitor_view::kEventLabelWidth, ' ');
+  }
+
   std::string line = "  ";
-  line += source;
-  line += ':';
-  line += compact_note_name(event.note, state.note_naming);
+  line += label;
   line += "  ";
   line += bar;
   line += ' ';
