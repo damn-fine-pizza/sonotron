@@ -1,5 +1,7 @@
 #include "arrangrr/arranger/arranger.hpp"
 
+#include <string_view>
+
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
 #include "test.hpp"
@@ -337,6 +339,46 @@ void test_style_switch_bad_index_warns() {
   CHECK(b.e.arranger().current() == SectionType::kVarA);
 }
 
+void test_builtin_styles_registered() {
+  // The four builtins exist in order with the expected names.
+  CHECK(styles::kBuiltinCount == 4);
+  const char* expected[] = {"basic", "pop", "rock", "ballad"};
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+    const Style* s = styles::kBuiltins[i];
+    CHECK(s != nullptr);
+    CHECK(std::string_view(s->name) == std::string_view(expected[i]));
+    // Every builtin shares the base section vocabulary.
+    CHECK(s->find(SectionType::kIntro1) != nullptr);
+    CHECK(s->find(SectionType::kVarA) != nullptr);
+    CHECK(s->find(SectionType::kVarB) != nullptr);
+    CHECK(s->find(SectionType::kFillA) != nullptr);
+    CHECK(s->find(SectionType::kEnding1) != nullptr);
+  }
+}
+
+void test_builtin_styles_play_roles() {
+  // Each builtin, loaded and ticked over one bar, emits drum, bass and chord
+  // events through the normal path.
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+    Band b;
+    b.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+    b.cmd(Param::kStyleLoad, i);
+    b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8), 0,
+          Op::kSet);
+    b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0,
+          Op::kSet);
+    b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8), 0,
+          Op::kSet);
+    b.cmd(Param::kChordPlay, 60, static_cast<std::int8_t>(ChordQuality::kMaj7), 100);
+    b.cmd(Param::kTransportStart);
+    b.ev.clear();
+    b.advance(kTicksPerBar);
+    CHECK(b.ons(9) > 0);  // drums groove
+    CHECK(b.ons(1) > 0);  // bass follows the chord
+    CHECK(b.ons(2) > 0);  // chord comps
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -355,6 +397,8 @@ int main() {
   test_style_switch_next_bar_when_playing();
   test_style_switch_immediate_while_playing();
   test_style_switch_bad_index_warns();
+  test_builtin_styles_registered();
+  test_builtin_styles_play_roles();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_arranger: all OK\n");
   }
