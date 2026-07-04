@@ -374,7 +374,8 @@ constexpr int kDefaultPanelColumns = 80;
 
 // Global TUI shortcut bytes (raw control chars — work on every terminal).
 constexpr std::uint8_t kCtrlPlayStop = 0x10;  // CTRL+P: transport play/stop
-constexpr std::uint8_t kCtrlChooser = 0x00;   // CTRL+SPACE: style/section chooser
+constexpr std::uint8_t kCtrlChooser = 0x60;     // backtick `: style/section chooser toggle
+constexpr std::uint8_t kCtrlCancelQuit = 0x03;  // CTRL+C: cancel chooser / quit (ISIG is off)
 constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+\: apply the chooser now
 
 // Chooser edit bytes (raw control chars a plain TTY delivers).
@@ -497,7 +498,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  toggle: press = note-on, same key again = note-off",
         "  play keys: TAB exit | N names | V view | C clear | Z layout",
         "             . octave- | / octave+",
-        "  CTRL+P play/stop (global) | CTRL+SPACE style/section chooser",
+        "  CTRL+P play/stop (global) | ` style/section chooser | CTRL+C quit",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
     };
@@ -576,7 +577,7 @@ std::vector<std::string> Shell::contextual_help_lines() const {
   // you're in, and always the fundamental navigation shortcuts.
   std::vector<std::string> lines =
       current_ui_mode() == UiMode::kPiano ? build_help("piano") : build_help("");
-  lines.push_back("nav: TAB focus | CTRL+P play/stop | CTRL+SPACE style/section");
+  lines.push_back("nav: TAB focus | CTRL+P play/stop | ` style/section | CTRL+C quit");
   return lines;
 }
 
@@ -1239,8 +1240,23 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return true;
   }
 
-  // CTRL+SPACE toggles the style/section chooser. Global like CTRL+P: it opens
-  // from repl OR piano focus, and a second press cancels.
+  // CTRL+C (0x03): the terminal runs with ISIG off, so this is a raw byte, not
+  // SIGINT — we own it. In the chooser it cancels; otherwise it quits gracefully
+  // (same shutdown as `quit`) so the session is never a dead-end you can't leave.
+  if (byte == kCtrlCancelQuit) {
+    if (m_chooser.has_value()) {
+      close_chooser();
+    } else {
+      std::string ignored;
+      exec_line("quit", ignored);
+    }
+    return true;
+  }
+
+  // Backtick (`) toggles the style/section chooser. A plain printable byte —
+  // reliably delivered by every terminal (unlike CTRL+SPACE = NUL) and unused by
+  // any command — so it works globally from repl OR piano focus; a second press
+  // cancels.
   if (byte == kCtrlChooser) {
     toggle_chooser();
     return true;

@@ -827,7 +827,7 @@ void test_style_chooser_wiring() {
     panel = lines;
     return true;
   });
-  constexpr std::uint8_t kCtrlChooser = 0x00;   // CTRL+SPACE
+  constexpr std::uint8_t kCtrlChooser = 0x60;  // backtick `
   constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+backslash: apply now
   constexpr std::uint8_t kEnter = 0x0D;
 
