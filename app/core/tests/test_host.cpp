@@ -1202,6 +1202,68 @@ void test_shell_pending_order_same_tick() {
   CHECK(f.events[1].msg.d1 == 62);
 }
 
+void test_shell_style_listing() {
+  ShellFixture f;
+  std::vector<std::string> out;
+  f.shell.set_print_hook([&](const std::string& line) { out.push_back(line); });
+  auto listed = [&](const char* needle) {
+    for (const std::string& line : out) {
+      if (line.find(needle) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // `style list` names every builtin.
+  CHECK(f.run("style list"));
+  CHECK(listed("basic"));
+
+  // `style section list` lists the current style's sections and marks the
+  // active one (varA right after load).
+  out.clear();
+  CHECK(f.run("style load basic"));
+  CHECK(f.run("style section list"));
+  CHECK(listed("varA"));
+  CHECK(listed("varB"));
+  CHECK(listed("fillA"));
+  CHECK(listed("ending1"));
+  CHECK(listed("(current)"));  // varA is active right after load
+
+  // The marker follows the active section (immediate while stopped).
+  out.clear();
+  CHECK(f.run("style section varB"));
+  CHECK(f.shell.engine().arranger().current() == SectionType::kVarB);
+  CHECK(f.run("style section list"));
+  CHECK(listed("varB"));
+  CHECK(listed("(current)"));
+
+  // `style <name> section list` lists a named builtin (case-insensitive).
+  out.clear();
+  CHECK(f.run("style BASIC section list"));
+  CHECK(listed("varA"));
+  CHECK(listed("ending1"));
+
+  // Unknown style name errors.
+  CHECK(!f.run("style nope section list"));
+
+  // Listing never emits MIDI.
+  CHECK(f.midi_count() == 0);
+}
+
+void test_shell_view_external_keys() {
+  // No view-options accessor is exposed (shell.hpp is owned elsewhere), so the
+  // test pins the command grammar: on/off flip the overlay, everything else is
+  // a clear error.
+  ShellFixture f;
+  CHECK(f.run("view external-keys off"));
+  CHECK(f.run("view external-keys on"));
+  CHECK(f.run("view external-keys off"));  // idempotent re-toggle
+  CHECK(!f.run("view external-keys maybe"));
+  CHECK(!f.run("view external-keys"));  // missing on|off
+  CHECK(f.midi_count() == 0);           // a view toggle never touches the engine
+}
+
 }  // namespace
 
 int main() {
@@ -1219,6 +1281,8 @@ int main() {
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();
+  test_shell_style_listing();
+  test_shell_view_external_keys();
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
   test_help_command();
