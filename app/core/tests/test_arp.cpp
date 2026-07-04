@@ -180,10 +180,10 @@ void test_arp_engine_live() {
     const std::uint8_t b[3] = {status, d1, d2};
     e.push_midi_in(0, Span<const std::uint8_t>(b, 3), sink);
   };
-  feed(0x90, 60, 100);  // hold C E G on input port 0
+  cmd(Param::kTransportStart, 0, 0);  // the arp only captures while playing
+  feed(0x90, 60, 100);                // hold C E G on input port 0
   feed(0x90, 64, 100);
   feed(0x90, 67, 100);
-  cmd(Param::kTransportStart, 0, 0);
   e.advance_ticks(480 * 4, sink);
 
   int arp_ons = 0;
@@ -200,6 +200,116 @@ void test_arp_engine_live() {
   CHECK(first == 60);   // up direction starts on the lowest held note
 }
 
+// With the arp enabled but the transport STOPPED, keyboard notes on the arp
+// input port must still ROUTE through (the arp only arpeggiates while playing,
+// so it must not swallow the keyboard when it is idle — otherwise held keys
+// light up but never sound). See the "keys light up but don't sound" bug.
+void test_arp_stopped_passes_through() {
+  Engine e;
+  StaticVector<OutEvent, 64> ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  auto cmd = [&](Op op, Param p, std::int32_t a, std::int32_t b, std::int32_t c) {
+    Command k{.op = op, .param = p, .idx = 0, .a = a, .b = b, .c = c};
+    e.push_command(k, sink);
+  };
+
+  // Route input port 0 -> output port 1 (pass everything) so a passthrough note
+  // is observable at the sink.
+  cmd(Op::kDo, Param::kRouteAdd, 0 | ((-1 & 0xFF) << 8), 1 | ((-1 & 0xFF) << 8),
+      static_cast<std::int32_t>(route_pass::kAll));
+  cmd(Op::kSet, Param::kArp, static_cast<std::int32_t>(ArpField::kEnabled), 1, 0);
+  CHECK(e.arp_enabled());
+  CHECK(!e.transport().playing());  // transport is stopped
+
+  const std::uint8_t on[3] = {0x90, 60, 100};
+  e.push_midi_in(0, Span<const std::uint8_t>(on, 3), sink);
+
+  // The note must reach the routed output, not be captured by the idle arp.
+  bool routed = false;
+  for (const OutEvent& o : ev) {
+    if (o.kind == OutEvent::Kind::kMidi && o.port == 1 && o.msg.type() == midi::kNoteOn &&
+        o.msg.d1 == 60) {
+      routed = true;
+    }
+  }
+  CHECK(routed);
+}
+
+// Terminal key auto-repeat re-fires note-on for a still-held key. With latch
+// OFF, N repeated note-ons followed by a SINGLE note-off must return the arp to
+// idle (a distinct-note set, not a raw counter, so repeats cannot strand it).
+void test_arp_autorepeat_single_release() {
+  ArpeggiatorEngine a;
+  a.set_params(make(ArpDirection::kUp));  // latch defaults off
+  for (int i = 0; i < 20; ++i) {
+    a.note_on(60, 100);  // auto-repeat stream for one physically-held key
+  }
+  CHECK(a.held_count() == 1);  // deduplicated
+  CHECK(a.active());
+  a.note_off(60);  // the single real release
+  CHECK(!a.active());  // idle again — not stranded by the repeats
+  CHECK(a.held_count() == 0);
+  Caps c;
+  collect(a, 0, 240 * 4, c);
+  CHECK(c.size() == 0);  // nothing fires
+}
+
+// Auto-repeat under latch: a burst of repeats for the same key, then a full
+// release, must NOT leave physical bookkeeping stuck. A subsequent fresh press
+// starts a NEW chord (physical_empty() honest despite the repeats).
+void test_arp_autorepeat_latch_reset() {
+  ArpeggiatorEngine a;
+  ArpeggiatorParams p = make(ArpDirection::kUp);
+  p.latch = true;
+  a.set_params(p);
+  for (int i = 0; i < 10; ++i) {
+    a.note_on(60, 100);
+  }
+  a.note_off(60);       // all keys physically up
+  CHECK(a.active());    // latched: still sounding
+  a.note_on(64, 100);   // a genuinely fresh press starts a new chord
+  CHECK(a.held_count() == 1);
+  Caps c;
+  collect(a, 0, 240, c);
+  CHECK(c[0].note == 64);
+}
+
+// `arp off` (set_arp_enabled false -> panic) must immediately stop output even
+// while the transport keeps running.
+void test_arp_disable_stops_output() {
+  Engine e;
+  StaticVector<OutEvent, 256> ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  auto cmd = [&](Param p, std::int32_t a, std::int32_t b) {
+    Command c{.op = Op::kSet, .param = p, .idx = 0, .a = a, .b = b, .c = 0};
+    e.push_command(c, sink);
+  };
+  cmd(Param::kArpOut, 0, 0);
+  cmd(Param::kArp, static_cast<std::int32_t>(ArpField::kRate),
+      static_cast<std::int32_t>(ArpRate::kEighth));
+  cmd(Param::kArp, static_cast<std::int32_t>(ArpField::kEnabled), 1);
+  Command start{.op = Op::kDo, .param = Param::kTransportStart, .idx = 0, .a = 0, .b = 0, .c = 0};
+  e.push_command(start, sink);
+
+  const std::uint8_t on[3] = {0x90, 60, 100};
+  e.push_midi_in(0, Span<const std::uint8_t>(on, 3), sink);  // captured while playing
+  e.advance_ticks(480 * 2, sink);
+
+  // Disable the arp; from here on it must emit nothing more.
+  cmd(Param::kArp, static_cast<std::int32_t>(ArpField::kEnabled), 0);
+  const std::size_t after_disable = ev.size();
+  e.advance_ticks(480 * 4, sink);  // keep the transport running
+
+  int new_note_ons = 0;
+  for (std::size_t i = after_disable; i < ev.size(); ++i) {
+    if (ev[i].kind == OutEvent::Kind::kMidi && ev[i].msg.type() == midi::kNoteOn &&
+        ev[i].msg.d2 > 0) {
+      ++new_note_ons;
+    }
+  }
+  CHECK(new_note_ons == 0);  // silenced immediately, no machine-gun after off
+}
+
 }  // namespace
 
 int main() {
@@ -213,5 +323,9 @@ int main() {
   test_arp_no_latch_release_stops();
   test_arp_random_deterministic();
   test_arp_engine_live();
-  return 0;
+  test_arp_stopped_passes_through();
+  test_arp_autorepeat_single_release();
+  test_arp_autorepeat_latch_reset();
+  test_arp_disable_stops_output();
+  return arrangrr::test::failures();
 }

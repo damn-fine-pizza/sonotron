@@ -55,7 +55,12 @@ class Engine {
         // The arpeggiator CAPTURES notes on its input port (they feed the arp
         // instead of routing straight through); non-note messages and other
         // ports route normally. Chord detection still OBSERVES either way.
-        const bool arp_captures = m_arp_enabled && port == m_arp_in_port && is_note_message(msg);
+        // Capture ONLY while the transport is playing: the arp only sounds from
+        // fire_arp (which runs when playing), so if it swallowed the keyboard
+        // with the transport stopped the held keys would light up but never
+        // sound. Stopped => notes pass through and play normally.
+        const bool arp_captures =
+            m_arp_enabled && m_transport.playing() && port == m_arp_in_port && is_note_message(msg);
         if (arp_captures) {
           observe_arp_input(msg);
         } else {
