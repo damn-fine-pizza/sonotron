@@ -58,6 +58,10 @@ struct StylePattern {
   TrackRole role;
   RolePolicy policy;
   Span<const StyleEvent> events;
+  // Default GM voice for this role, emitted as a Program Change when the style
+  // loads (on the role's route). -1 = leave the synth's current voice. Kept
+  // last with a default so existing designated initializers stay valid.
+  std::int16_t gm_program = -1;
 };
 
 struct StyleSection {

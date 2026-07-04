@@ -120,6 +120,28 @@ class Arranger {
     }
   }
 
+  // Emits a Program Change for each routed role of the current section that
+  // declares a default GM voice (StylePattern.gm_program >= 0), so loading a
+  // style also picks its instruments. Unrouted roles are skipped (no known
+  // destination). Call once after a style loads.
+  void emit_voices(ScheduleFn schedule) const {
+    if (m_style == nullptr) {
+      return;
+    }
+    const StyleSection* section = m_style->find(m_current);
+    if (section == nullptr) {
+      return;
+    }
+    for (const StylePattern& pattern : section->patterns) {
+      const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
+      if (route.enabled && pattern.gm_program >= 0 && pattern.gm_program <= 127) {
+        schedule(route.port, 0,
+                 MidiMessage::program(route.channel,
+                                      static_cast<std::uint8_t>(pattern.gm_program)));
+      }
+    }
+  }
+
   // One transport tick. Resolution order matters upstream: feed the chord
   // AFTER the chord sequencer has fired this tick, so bar downbeats resolve
   // against the fresh chord.
@@ -245,10 +267,28 @@ class Arranger {
     }
     const std::uint8_t wrap = static_cast<std::uint8_t>(ev.tone / shape.count);
     const std::uint8_t offset = shape.offsets[ev.tone % shape.count];
-    const int anchor = (pattern.role == TrackRole::kBass ? 36 : 60) + chord.root_pc;
+    const int anchor = kRoleAnchor[static_cast<std::uint8_t>(pattern.role)] + chord.root_pc;
     const int note = anchor + offset + 12 * (ev.octave + wrap);
     return (note < 0 || note > 127) ? -1 : note;
   }
+
+  // Default register anchor per role (MIDI note of chord-tone 0 at octave 0),
+  // so stacked tonal roles don't all pile into one octave = timbral mush. Bass
+  // sits low; pad fills the gap under the mid comp; arp/lead/phrase sit above.
+  // StyleEvent.octave still fine-tunes per pattern; kFixed roles ignore this.
+  // kBass(36) and kChord1(60) keep their historical registers.
+  static constexpr int kRoleAnchor[kRoleCount] = {
+      60,  // kDrums  (fixed; unused)
+      60,  // kPerc   (fixed; unused)
+      36,  // kBass
+      60,  // kChord1
+      60,  // kChord2
+      48,  // kPad
+      72,  // kArp
+      72,  // kPhrase
+      72,  // kLead
+      60,  // kCc     (unused)
+  };
 
   const Style* m_style = nullptr;
   const Style* m_pending_style = nullptr;  // queued with m_pending for a seamless switch

@@ -120,6 +120,17 @@ class Engine {
   void cmd_style(const Command& cmd, EventSink sink);
   void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
 
+  // Emits the loaded style's default per-role GM voices on their routes. Cheap
+  // and idempotent (re-sending a Program Change is a no-op on the synth), so it
+  // is safe to call after a style load, a style switch, or a route change —
+  // covering both "route before load" and "route after load" orders.
+  void apply_arranger_voices(EventSink sink) {
+    m_arranger.emit_voices([&](std::uint8_t port, TickOffset, const MidiMessage& msg) {
+      schedule_or_warn(port, m_now, msg, sink);
+    });
+    flush(sink);
+  }
+
   void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
     if (!m_scheduler.schedule(port, tick, msg)) {
       sink(OutEvent::warn(WarnCode::kSchedulerFull, m_now));

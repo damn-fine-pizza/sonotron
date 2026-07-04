@@ -403,6 +403,8 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
     case Param::kStyleLoad:
       if (cmd.a < 0 || !m_arranger.load(static_cast<std::uint8_t>(cmd.a))) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        apply_arranger_voices(sink);  // pick the style's default voices
       }
       break;
     case Param::kStyleSection:
@@ -427,6 +429,7 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else if (immediate) {
         sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+        apply_arranger_voices(sink);  // the new style's voices land with the cut
       }
       break;
     }
@@ -437,6 +440,8 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) ||
           !m_arranger.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        apply_arranger_voices(sink);  // a role just gained a route: voice it now
       }
       break;
     }

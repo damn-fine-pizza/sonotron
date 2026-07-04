@@ -12,6 +12,64 @@ using namespace arrangrr;
 
 using Events = StaticVector<OutEvent, 512>;
 
+// A minimal style exercising a NEW role (kPad) with a default GM voice, to test
+// the per-role register anchor and gm_program emission independently of the
+// (not-yet-enriched) builtins.
+constexpr StyleEvent kVoiceBass[] = {{.step = 0, .tone = 0, .octave = 0, .vel = 100, .gate = 200}};
+constexpr StyleEvent kVoicePad[] = {{.step = 0, .tone = 0, .octave = 0, .vel = 70, .gate = 3600}};
+constexpr StylePattern kVoicePatterns[] = {
+    {.role = TrackRole::kBass, .policy = RolePolicy::kChordTone,
+     .events = Span<const StyleEvent>(kVoiceBass), .gm_program = 33},  // Fingered Bass
+    {.role = TrackRole::kPad, .policy = RolePolicy::kChordTone,
+     .events = Span<const StyleEvent>(kVoicePad), .gm_program = 89},  // Pad 2 (warm)
+};
+constexpr StyleSection kVoiceSections[] = {
+    {.type = SectionType::kVarA, .bars = 1, .patterns = Span<const StylePattern>(kVoicePatterns)}};
+constexpr Style kVoiceTestStyle{.name = "voicetest",
+                                .sections = Span<const StyleSection>(kVoiceSections)};
+
+void test_role_anchor_and_gm_voices() {
+  Arranger arr;
+  CHECK(arr.load_style(&kVoiceTestStyle));
+  CHECK(arr.set_route(TrackRole::kBass, 0, 0));  // port 0, channel 1 (0-based 0)
+  CHECK(arr.set_route(TrackRole::kPad, 0, 4));   // port 0, channel 5 (0-based 4)
+
+  // emit_voices: one Program Change per routed role that declares a voice.
+  int pc_bass = -1;
+  int pc_pad = -1;
+  arr.emit_voices([&](std::uint8_t, TickOffset, const MidiMessage& m) {
+    if ((m.status & 0xF0) == 0xC0) {
+      if ((m.status & 0x0F) == 0) {
+        pc_bass = m.d1;
+      }
+      if ((m.status & 0x0F) == 4) {
+        pc_pad = m.d1;
+      }
+    }
+  });
+  CHECK(pc_bass == 33);
+  CHECK(pc_pad == 89);
+
+  // Per-role anchor: over C major, bass root sits at 36 (C2), pad root at the
+  // new pad register 48 (C3) — not piled onto the mid comp octave.
+  const ChordState chord{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  arr.on_transport_start();
+  bool bass_c2 = false;
+  bool pad_c3 = false;
+  arr.on_tick(0, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
+    if (m.type() == midi::kNoteOn) {
+      if (m.channel() == 0 && m.d1 == 36) {
+        bass_c2 = true;
+      }
+      if (m.channel() == 4 && m.d1 == 48) {
+        pad_c3 = true;
+      }
+    }
+  });
+  CHECK(bass_c2);
+  CHECK(pad_c3);
+}
+
 struct Band {
   Engine e;
   Events ev;
@@ -390,6 +448,7 @@ void test_builtin_styles_play_roles() {
 int main() {
   test_drums_play_without_chord_but_tonal_roles_wait();
   test_ntt_resolution_follows_chord();
+  test_role_anchor_and_gm_voices();
   test_quantized_variation_switch();
   test_fill_one_shot_returns_to_variation();
   test_intro_leads_to_variation();
