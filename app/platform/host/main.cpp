@@ -23,6 +23,7 @@
 #include "arrangrr/common/time.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
+#include "kitty_keys.hpp"
 #include "shell.hpp"
 
 namespace {
@@ -190,6 +191,59 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   std::string stdin_acc;  // partial-line accumulator (flat mode)
   std::uint64_t last_status_us = 0;
   bool running = true;
+
+  // One byte through the existing panel-key + line-editor path (H2). Returns
+  // false when the loop should stop (quit). Both the plain-byte stream and the
+  // translated kitty press bytes funnel through here so behaviour is identical.
+  auto feed_editor_byte = [&](std::uint8_t byte) -> bool {
+    if (shell.handle_ui_key(byte)) {
+      return true;
+    }
+    const LineEditor::Result r = editor.feed(byte);
+    if (r.quit) {
+      running = false;
+      return false;
+    }
+    if (r.line) {
+      console.emit("> " + *r.line);
+      if (!shell.exec_line(*r.line, error)) {
+        console.emit("error: " + error);
+      }
+      if (shell.quit_requested()) {
+        running = false;
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // A complete kitty key escape (body = the bytes between "\x1b[" and 'u').
+  // Musical keys drive true momentary press/release; everything else (TAB,
+  // SPACE, N/V/C/./ shortcuts, Enter...) falls back to the normal byte path on
+  // key-down so the piano's own shortcuts keep working while the protocol is on.
+  auto dispatch_kitty = [&](std::string_view body) {
+    const std::optional<KittyKeyEvent> ev = parse_kitty_key(body);
+    if (!ev || ev->code > 0x7F) {
+      return;  // malformed, or a non-ASCII functional key we do not translate
+    }
+    const char key = static_cast<char>(ev->code);
+    if (ev->type == KittyKeyEvent::Type::kRelease) {
+      shell.piano_key_event(key, false);
+      return;
+    }
+    // Press or autorepeat: try the piano first, then the normal byte path.
+    if (!shell.piano_key_event(key, true)) {
+      (void)feed_editor_byte(static_cast<std::uint8_t>(key));
+    }
+  };
+
+  // Escape-sequence framing state, persistent across read() boundaries so a
+  // sequence split over two reads still frames correctly. `kitty_on` mirrors
+  // whether the protocol is currently pushed (piano focus only, TTY only).
+  std::string esc;
+  bool in_esc = false;
+  bool kitty_on = false;
+
   while (running && !shell.quit_requested()) {
     struct pollfd fds[16];
     int n = 0;
@@ -234,28 +288,56 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       if (got <= 0) {
         running = false;
       } else if (tui) {
-        for (ssize_t i = 0; i < got; ++i) {
-          // UI key dispatch runs before the line editor (H2): with panel
-          // focus the byte drives panels/piano; with REPL focus it falls
-          // through and typing behaves exactly as before.
-          if (shell.handle_ui_key(static_cast<std::uint8_t>(buf[i]))) {
+        // Frame kitty key escapes (\x1b[ ... u) out of the byte stream; feed
+        // everything else through the H2 panel-key + line-editor path. UI key
+        // dispatch runs before the line editor: with panel focus the byte
+        // drives panels/piano; with REPL focus it falls through and typing
+        // behaves exactly as before.
+        for (ssize_t i = 0; i < got && running; ++i) {
+          const std::uint8_t b = static_cast<std::uint8_t>(buf[i]);
+
+          if (in_esc) {
+            esc.push_back(static_cast<char>(b));
+            if (esc.size() == 2) {
+              // Two-byte escape that is not a CSI (Alt-key, lone ESC): replay
+              // it through the normal path so nothing is swallowed.
+              if (b != '[') {
+                for (const char c : esc) {
+                  if (!feed_editor_byte(static_cast<std::uint8_t>(c))) {
+                    break;
+                  }
+                }
+                esc.clear();
+                in_esc = false;
+              }
+              continue;
+            }
+            // Inside a CSI: a final byte in 0x40..0x7E terminates it.
+            if (b >= 0x40 && b <= 0x7E) {
+              if (b == 'u') {
+                dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
+              } else {
+                // Arrows / home / end etc.: replay so the line editor sees them.
+                for (const char c : esc) {
+                  if (!feed_editor_byte(static_cast<std::uint8_t>(c))) {
+                    break;
+                  }
+                }
+              }
+              esc.clear();
+              in_esc = false;
+            }
             continue;
           }
-          const LineEditor::Result r = editor.feed(static_cast<std::uint8_t>(buf[i]));
-          if (r.quit) {
-            running = false;
-            break;
+
+          if (b == 0x1B) {
+            in_esc = true;
+            esc.clear();
+            esc.push_back(static_cast<char>(b));
+            continue;
           }
-          if (r.line) {
-            console.emit("> " + *r.line);
-            if (!shell.exec_line(*r.line, error)) {
-              console.emit("error: " + error);
-            }
-            if (shell.quit_requested()) {
-              running = false;
-              break;
-            }
-          }
+
+          (void)feed_editor_byte(b);
         }
         console.render_input(editor);
       } else {
@@ -276,6 +358,23 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       }
     }
 
+    // Kitty keyboard protocol, scoped to piano focus only. Enabling it globally
+    // would reroute EVERY REPL keystroke (including arrows/history/editing)
+    // through CSI-u escapes, so we push the flags only while the piano panel is
+    // focused — where true key-release matters — and pop them the instant focus
+    // leaves. Gated behind `tui` (isatty), so scripts/pipes never see a byte of
+    // it; terminals without the protocol silently ignore the flags and the
+    // plain-byte toggle fallback keeps the piano playable.
+    if (tui) {
+      const bool piano_focused =
+          shell.panels().focus_kind() == PanelFocus::kPanel &&
+          shell.panels().focused_panel() == PanelId::kPiano;
+      if (piano_focused != kitty_on) {
+        kitty_on = piano_focused;
+        kitty::set_progressive_enhancement(STDOUT_FILENO, kitty_on);
+      }
+    }
+
     // Status bar + input cursor upkeep (throttled to ~10 Hz).
     if (tui) {
       const std::uint64_t now_us = monotonic_us();
@@ -287,6 +386,9 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     }
   }
   close(tfd);
+  if (tui && kitty_on) {
+    kitty::set_progressive_enhancement(STDOUT_FILENO, false);  // pop before restoring the tty
+  }
   console.shutdown();
   return 0;
 }

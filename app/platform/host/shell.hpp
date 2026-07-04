@@ -26,6 +26,18 @@ struct PortDef {
   std::uint8_t index = 0;  // core port index
 };
 
+// Piano key-input policy (docs/TUI_SPEC.md §2).
+//   kMomentary — note sounds while the key is physically held; note-off on
+//                release. This needs true key-release events, which only the
+//                kitty keyboard protocol delivers (a plain TTY has none), so it
+//                is honoured through Shell::piano_key_event() fed by the parsed
+//                kitty escapes. On terminals without the protocol only plain
+//                bytes arrive and the piano degrades to kToggle (see below).
+//   kToggle    — press = note-on, press the same key again = note-off. The only
+//                policy a plain raw-mode TTY can implement honestly, and the
+//                fallback for the plain-byte path in either mode.
+enum class PianoKeyMode { kMomentary, kToggle };
+
 class Shell {
  public:
   using EventSink = std::function<void(const OutEvent&)>;
@@ -65,8 +77,22 @@ class Shell {
 
   // Live TUI key dispatch (H2): consumes the byte when a panel has focus.
   // Returns false with REPL focus so typing stays exactly as before —
-  // panel focus is entered only via `panel focus ...` commands.
+  // panel focus is entered only via `panel focus ...` commands. In piano
+  // focus SPACE (0x20) toggles the key mode (momentary <-> toggle) and is
+  // never a musical note; plain musical bytes always take the toggle path so
+  // the piano is never dead on a terminal without key-release events.
   bool handle_ui_key(std::uint8_t byte);
+
+  // True key press/release from the kitty keyboard protocol (H3): drives
+  // momentary polyphony when the piano is focused. `pressed` = true is a
+  // key-down (or autorepeat — idempotent, never a double note-on), false is a
+  // key-up. In kToggle mode a press behaves like handle_ui_key and a release
+  // is ignored. Returns true when the key mapped to a musical key and was
+  // consumed; false lets the caller fall back to the normal byte path (so
+  // non-musical kitty keys — TAB, SPACE, shortcuts — still work).
+  bool piano_key_event(char key, bool pressed);
+
+  PianoKeyMode piano_key_mode() const { return m_piano_key_mode; }
 
   Engine& engine() { return m_engine; }
   const Engine& engine() const { return m_engine; }
@@ -110,7 +136,15 @@ class Shell {
   void print_line(const std::string& line);
   int panel_columns() const;
   void toggle_piano_key(char key, int semitone_from_base);
+  void piano_momentary_on(char key, int semitone_from_base);
+  void piano_momentary_off(char key, int semitone_from_base);
   void piano_all_notes_off();
+
+  // Shared piano note plumbing (used by both the toggle and momentary paths).
+  const PianoKeyBinding* piano_binding_for(std::uint8_t byte) const;
+  bool piano_midi_note(int semitone_from_base, std::uint8_t& out) const;
+  bool piano_note_held(std::uint8_t midi_note) const;
+  void piano_send_note(char key, std::uint8_t midi_note, bool note_on);
 
   Engine m_engine;
   EventSink m_sink;
@@ -123,7 +157,8 @@ class Shell {
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;
-  ActiveNoteTracker m_piano_held;  // toggle policy: press = on, again = off
+  ActiveNoteTracker m_piano_held;  // notes the piano is currently sounding
+  PianoKeyMode m_piano_key_mode = PianoKeyMode::kMomentary;  // default: momentary
   char m_pending_source_key = 0;   // annotates monitor events while feeding
   std::vector<PortDef> m_ports;
   std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)

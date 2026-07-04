@@ -6,6 +6,7 @@ add_library(arrangrr_host STATIC
   jsonl.cpp
   alsa_midi.cpp
   console.cpp
+  kitty_keys.cpp
   note_names.cpp
   panel_manager.cpp
   piano_view.cpp
