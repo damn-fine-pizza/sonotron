@@ -64,13 +64,27 @@ std::optional<KittyKeyEvent> parse_kitty_key(std::string_view body) {
     return std::nullopt;
   }
 
-  // Section 1 = modifiers[:event-type]. Absent event-type means a press.
+  // Section 1 = modifiers[:event-type]. Absent event-type means a press; the
+  // modifiers sub-field is the raw bitmask plus one (so "5" = 0x4 = ctrl), and
+  // its absence means no modifiers.
   KittyKeyEvent::Type type = KittyKeyEvent::Type::kPress;
+  std::uint8_t modifiers = 0;
   if (first_semi != std::string_view::npos) {
     std::string_view rest = body.substr(first_semi + 1);
     const std::size_t second_semi = rest.find(';');
     const std::string_view mod_section =
         second_semi == std::string_view::npos ? rest : rest.substr(0, second_semi);
+
+    const std::string_view mod_value = first_subfield(mod_section);
+    if (!mod_value.empty()) {
+      std::uint32_t raw = 0;
+      if (!parse_decimal(mod_value, raw)) {
+        return std::nullopt;
+      }
+      if (raw > 0) {
+        modifiers = static_cast<std::uint8_t>(raw - 1);
+      }
+    }
 
     const std::size_t mod_colon = mod_section.find(':');
     if (mod_colon != std::string_view::npos) {
@@ -94,7 +108,32 @@ std::optional<KittyKeyEvent> parse_kitty_key(std::string_view body) {
     }
   }
 
-  return KittyKeyEvent{code, type};
+  return KittyKeyEvent{.code = code, .type = type, .modifiers = modifiers};
+}
+
+std::optional<std::uint8_t> control_byte_for(std::uint32_t code, std::uint8_t modifiers) {
+  // Only Ctrl chords carry a control byte, and only over ASCII.
+  constexpr std::uint32_t kAsciiMax = 0x7F;
+  if ((modifiers & kitty::kModCtrl) == 0 || code > kAsciiMax) {
+    return std::nullopt;
+  }
+
+  constexpr std::uint32_t kCaseBit = 0x20;   // 'a' - 'A'; clears to uppercase
+  constexpr std::uint32_t kCtrlMask = 0x1F;  // uppercase letter -> control byte
+  constexpr std::uint8_t kCtrlSpace = 0x00;
+  constexpr std::uint8_t kCtrlBackslash = 0x1C;
+
+  const bool is_letter = (code >= 'A' && code <= 'Z') || (code >= 'a' && code <= 'z');
+  if (is_letter) {
+    return static_cast<std::uint8_t>((code & ~kCaseBit) & kCtrlMask);
+  }
+  if (code == ' ') {
+    return kCtrlSpace;
+  }
+  if (code == '\\') {
+    return kCtrlBackslash;
+  }
+  return std::nullopt;
 }
 
 }  // namespace arrangrr::host

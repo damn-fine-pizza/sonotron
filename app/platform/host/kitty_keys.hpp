@@ -44,6 +44,24 @@ inline constexpr unsigned kPushFlags = kFlagDisambiguate | kFlagReportEvents | k
 inline constexpr std::string_view kEnable = "\x1b[>11u";
 inline constexpr std::string_view kDisable = "\x1b[<1u";
 
+// Startup capability probe (host-only). We ask the terminal two questions in
+// one round trip:
+//   kQueryFlags              CSI ? u    "report your current keyboard flags"
+//   kQueryDeviceAttributes   CSI c      Primary Device Attributes
+// A terminal that implements the kitty protocol answers kQueryFlags with a
+// CSI ? <flags> u report; one that does not simply ignores it. EVERY terminal
+// answers Device Attributes with CSI ? ... c, so that reply is our reliable
+// "the terminal has finished talking" sentinel: read until the DA reply lands,
+// then a kitty-flags reply seen alongside it means the protocol is supported.
+inline constexpr std::string_view kQueryFlags = "\x1b[?u";
+inline constexpr std::string_view kQueryDeviceAttributes = "\x1b[c";
+
+// Modifier bitmask bits (kitty spec, "Modifiers"). The wire field is the
+// bitmask PLUS ONE, so a decoded value of 0 means "no modifiers".
+inline constexpr std::uint8_t kModShift = 0x1;
+inline constexpr std::uint8_t kModAlt = 0x2;
+inline constexpr std::uint8_t kModCtrl = 0x4;
+
 // Writes the enable (push) or disable (pop) sequence to `fd`. The caller is
 // responsible for gating this behind isatty so scripts/pipes stay byte-for-byte
 // unchanged; on a terminal that does not implement the protocol the sequence is
@@ -53,12 +71,15 @@ void set_progressive_enhancement(int fd, bool enable);
 }  // namespace kitty
 
 // One parsed kitty key event. `code` is the key's base unicode code point
-// (e.g. 97 = 'a'); `type` distinguishes press / autorepeat / release.
+// (e.g. 97 = 'a'); `type` distinguishes press / autorepeat / release;
+// `modifiers` is the DECODED modifier bitmask (kitty::kMod* bits) — the raw
+// wire value minus one, so 0 means no modifiers.
 struct KittyKeyEvent {
   enum class Type { kPress, kRepeat, kRelease };
 
   std::uint32_t code = 0;
   Type type = Type::kPress;
+  std::uint8_t modifiers = 0;
 };
 
 // Parses the body of a kitty key escape sequence — the bytes between the
@@ -72,5 +93,15 @@ struct KittyKeyEvent {
 // Returns nullopt for anything that is not a well-formed kitty key event (a
 // plain letter, an empty body, a non-numeric code, an unknown event type).
 std::optional<KittyKeyEvent> parse_kitty_key(std::string_view csi_body);
+
+// Maps a Ctrl-modified ASCII key to the control byte a plain raw-mode TTY would
+// have delivered for it — the bridge that lets kitty-protocol Ctrl chords reach
+// the same handler as their plain-byte equivalents. Returns nullopt when the
+// Ctrl bit is not set or the key has no control byte. `modifiers` is a decoded
+// bitmask (kitty::kMod*). Pure and unit-testable, no I/O.
+//   letter A..Z / a..z + Ctrl -> upper & 0x1f   (e.g. 'p' -> 0x10)
+//   space + Ctrl              -> 0x00
+//   backslash '\\' + Ctrl     -> 0x1c
+std::optional<std::uint8_t> control_byte_for(std::uint32_t code, std::uint8_t modifiers);
 
 }  // namespace arrangrr::host

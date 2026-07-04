@@ -105,6 +105,15 @@ class Shell {
 
   PianoKeyMode piano_key_mode() const { return m_piano_key_mode; }
 
+  // Terminal-aware momentary lock (H3). The Shell itself stays agnostic — the
+  // default is momentary-capable — and the live backend calls this after it has
+  // probed the terminal. Passing false (no key-release support) downgrades any
+  // current momentary mode to toggle and makes the SPACE mode-switch refuse to
+  // go back to momentary, so the piano can never enter a mode the terminal
+  // cannot honour.
+  void set_momentary_available(bool available);
+  bool momentary_available() const { return m_momentary_available; }
+
   Engine& engine() { return m_engine; }
   const Engine& engine() const { return m_engine; }
   const std::vector<PortDef>& ports() const { return m_ports; }
@@ -215,7 +224,8 @@ class Shell {
   MidiViewOptions m_view_options;
   ActiveNoteTracker m_piano_held;  // notes the piano is currently sounding
   PianoKeyMode m_piano_key_mode = PianoKeyMode::kMomentary;  // default: momentary
-  char m_pending_source_key = 0;  // annotates monitor events while feeding
+  bool m_momentary_available = true;  // cleared when the terminal has no key-release
+  char m_pending_source_key = 0;      // annotates monitor events while feeding
   std::vector<PortDef> m_ports;
   std::vector<std::string> m_tracks;  // name -> index (D26: names live host-side)
   std::vector<std::string> m_seqs;

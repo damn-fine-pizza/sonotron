@@ -943,11 +943,68 @@ void test_kitty_key_parser() {
   auto shifted = parse_kitty_key("59:58;2:3");  // ';' key, shift modifier, release
   CHECK(shifted.has_value() && shifted->code == 59 && shifted->type == Type::kRelease);
 
+  // Modifiers are decoded as the wire value minus one: 5 -> ctrl, 2 -> shift,
+  // 1 (or absent) -> none. This is what lets Ctrl chords be told apart.
+  auto ctrl_p = parse_kitty_key("112;5u");  // CTRL+P
+  CHECK(ctrl_p.has_value() && ctrl_p->code == 112 && (ctrl_p->modifiers & kitty::kModCtrl) != 0);
+  CHECK((shifted->modifiers & kitty::kModShift) != 0);
+  auto plain_a = parse_kitty_key("97;1u");
+  CHECK(plain_a.has_value() && plain_a->code == 97 && plain_a->modifiers == 0);
+  auto bare = parse_kitty_key("97");  // no section -> no modifiers
+  CHECK(bare.has_value() && bare->modifiers == 0);
+
   // Malformed / non-events -> nullopt (a plain letter is not a kitty event).
   CHECK(!parse_kitty_key("a").has_value());
   CHECK(!parse_kitty_key("").has_value());
   CHECK(!parse_kitty_key(";1").has_value());      // no key code
   CHECK(!parse_kitty_key("97;1:9").has_value());  // unknown event type
+}
+
+void test_control_byte_for() {
+  const std::uint8_t ctrl = kitty::kModCtrl;
+
+  // The three chords that were being mis-read as musical keys.
+  auto p = control_byte_for('p', ctrl);
+  CHECK(p.has_value() && *p == 0x10);  // CTRL+P -> play/stop byte
+  auto space = control_byte_for(' ', ctrl);
+  CHECK(space.has_value() && *space == 0x00);
+  auto backslash = control_byte_for('\\', ctrl);
+  CHECK(backslash.has_value() && *backslash == 0x1c);
+
+  // Case-insensitive: 'P' and 'p' map to the same control byte.
+  auto upper_p = control_byte_for('P', ctrl);
+  CHECK(upper_p.has_value() && *upper_p == 0x10);
+
+  // No ctrl bit -> not a control chord; a ctrl-digit has no control byte.
+  CHECK(!control_byte_for('a', 0).has_value());
+  CHECK(!control_byte_for('a', kitty::kModShift).has_value());
+  CHECK(!control_byte_for('1', ctrl).has_value());
+}
+
+void test_momentary_lock() {
+  PianoFixture f;  // starts in piano focus
+  CHECK(f.shell.momentary_available());
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // With momentary available, SPACE cycles momentary <-> toggle freely.
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // Locking momentary out downgrades the live mode to toggle at once...
+  f.shell.set_momentary_available(false);
+  CHECK(!f.shell.momentary_available());
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+
+  // ...and SPACE can no longer switch back to momentary.
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+
+  // Re-enabling restores the SPACE switch.
+  f.shell.set_momentary_available(true);
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
 }
 
 void test_piano_momentary_mode() {
@@ -1178,6 +1235,8 @@ int main() {
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();
   test_kitty_key_parser();
+  test_control_byte_for();
+  test_momentary_lock();
   test_piano_momentary_mode();
   test_piano_space_toggles_mode();
   test_piano_plain_bytes_always_toggle();
