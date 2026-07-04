@@ -193,6 +193,7 @@ class Shell {
   bool cmd_colors(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_port(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_transport(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_bpm(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_route(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_thru(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_clock(const std::vector<std::string>& tokens, std::string& error);
