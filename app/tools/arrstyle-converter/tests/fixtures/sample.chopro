@@ -1,0 +1,13 @@
+{title: Twelve Bar Demo}
+{key: G}
+{tempo: 128}
+
+{start_of_verse}
+[G]Well I woke up this [G7]morning | [C]feeling kind of [C]blue |
+[G]nothing going [G]right and | [D7]nothing much to [G]do |
+{end_of_verse}
+
+{comment: Turnaround}
+[Am7]soft [D7sus4]lift [Gmaj7]home [E7/G#]out
+
+{unknowndirective: whatever}
