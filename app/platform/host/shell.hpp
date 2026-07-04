@@ -45,7 +45,7 @@ enum class PianoKeyMode { kMomentary, kToggle };
 // Which interactive mode the live TUI is in. Drives the contextual help
 // panel: its content follows the mode (commands in the REPL, piano keys in
 // play mode) unless the user pinned an explicit `help <topic>`.
-enum class UiMode { kRepl, kPiano, kStyles, kParts };
+enum class UiMode { kRepl, kPiano, kStyles, kParts, kGroove };
 
 class Shell {
  public:
@@ -134,6 +134,13 @@ class Shell {
   bool parts_focused() const;
   void parts_select(int delta);
   bool parts_key(std::uint8_t byte);
+
+  // The `groove` panel: focus gate + key handling. Arrow up/down move the
+  // selected parameter; left/right adjust it (via kGroove commands).
+  bool groove_focused() const;
+  void groove_select(int delta);
+  void groove_adjust(int delta);
+  bool groove_key(std::uint8_t byte);
 
   // Gives focus to the styles panel (backtick shortcut) and seeds the chooser
   // highlight from the arranger's current style/section.
@@ -242,6 +249,7 @@ class Shell {
   bool cmd_track(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_program(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_part(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_groove(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
@@ -267,8 +275,10 @@ class Shell {
   void refresh_styles_content();
   void refresh_chords_content();  // live piano->chord readout (detect state + name)
   void refresh_parts_content();   // arranger style-parts mixer
+  void refresh_groove_content();  // groove feel parameters
 
-  int m_parts_selected = 0;  // highlighted row in the parts mixer
+  int m_parts_selected = 0;   // highlighted row in the parts mixer
+  int m_groove_selected = 0;  // highlighted row in the groove panel
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
   void sync_contextual_panel();

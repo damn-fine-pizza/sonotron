@@ -18,6 +18,7 @@ add_library(arrangrr_host STATIC
   panel_manager.cpp
   piano_view.cpp
   parts_view.cpp
+  groove_view.cpp
   midi_monitor.cpp
   ui_style.cpp
   style_chooser.cpp

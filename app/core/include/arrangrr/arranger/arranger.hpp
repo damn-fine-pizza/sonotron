@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "arrangrr/arranger/groove.hpp"
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/chord/theory.hpp"  // ChordState, ChordShape, theory::shape_of
 #include "arrangrr/common/function_ref.hpp"
@@ -85,6 +86,12 @@ class Arranger {
     return bit(m_solo, static_cast<std::uint8_t>(role));
   }
   constexpr bool any_solo() const noexcept { return m_solo != 0; }
+
+  // Global groove feel (the `groove` panel). set_groove_field clamps per field.
+  void set_groove_field(GrooveField field, std::int32_t value) noexcept {
+    groove::set_field(m_groove, field, value);
+  }
+  constexpr const GrooveParams& groove_params() const noexcept { return m_groove; }
 
   // A snapshot of one part for the host mixer: its route, its voice in the
   // current section, and its mute/solo state. `present` is false when the
@@ -295,9 +302,14 @@ class Arranger {
         if (note < 0) {
           continue;
         }
-        schedule(route.port, 0,
-                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(note), ev.vel));
-        schedule(route.port, static_cast<TickOffset>(ev.gate),
+        // Groove: swing/accent/humanize reshape the event's timing and velocity
+        // (deterministic; drums swing too, downbeats stay put). The note-off
+        // shifts with the note-on so the gate length is preserved.
+        const GrooveOut g = groove::apply(m_groove, static_cast<std::uint8_t>(pattern.role), step,
+                                          transport_tick, ev.vel);
+        schedule(route.port, g.timing_offset,
+                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(note), g.velocity));
+        schedule(route.port, static_cast<TickOffset>(ev.gate) + g.timing_offset,
                  MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(note)));
       }
     }
@@ -379,6 +391,7 @@ class Arranger {
   Route m_routes[kRoleCount]{};
   std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
   std::uint16_t m_solo = 0;   // per-role solo bitmask
+  GrooveParams m_groove;      // global groove feel applied to every part
 };
 
 }  // namespace arrangrr

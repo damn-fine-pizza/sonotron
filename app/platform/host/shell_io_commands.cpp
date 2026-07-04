@@ -54,6 +54,14 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  track mute|solo <name> on|off",
     };
   }
+  if (topic == "groove") {
+    return {
+        "help: groove  (the arranger feel as parameters; focus it, then:)",
+        "  up/down  select | left/right adjust | r  reseed humanize",
+        "  swing (off-beat push) · humanize-t/v (wobble) · accent · grid (8/16)",
+        "  CLI: groove <swing|humanize-t|humanize-v|accent|grid|seed> <value>",
+    };
+  }
   if (topic == "parts") {
     return {
         "help: parts  (the arranger band mixer; focus it, then:)",
@@ -151,6 +159,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
       "  seq    - chord progressions        (help seq)",
       "  style  - the arranger band         (help style)",
       "  parts  - band mixer (mute/solo)    (help parts)",
+      "  groove - feel: swing/humanize      (help groove)",
       "  track  - step sequencer            (help track)",
       "  program- pick the GM voice         (help program)",
       "  midi   - ports, routing, panic     (help midi)",

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "groove_view.hpp"
 #include "note_names.hpp"
 #include "parts_view.hpp"
 
@@ -169,6 +170,13 @@ void Shell::refresh_parts_content() {
                                                            m_parts_selected, cols, m_style));
 }
 
+void Shell::refresh_groove_content() {
+  const int cols = m_panels.cell_width(PanelId::kGroove, panel_columns());
+  m_groove_selected = std::clamp(m_groove_selected, 0, static_cast<int>(kGrooveRowCount) - 1);
+  m_panels.set_content(PanelId::kGroove, render_groove_panel(m_engine.arranger().groove_params(),
+                                                             m_groove_selected, cols, m_style));
+}
+
 void Shell::refresh_chords_content() {
   // The chords panel reports the live piano->chord state: whether detection is
   // armed and the chord the arranger is currently harmonizing against (set by
@@ -197,6 +205,9 @@ UiMode Shell::current_ui_mode() const {
     if (m_panels.focused_panel() == PanelId::kParts) {
       return UiMode::kParts;
     }
+    if (m_panels.focused_panel() == PanelId::kGroove) {
+      return UiMode::kGroove;
+    }
   }
   return UiMode::kRepl;
 }
@@ -208,6 +219,7 @@ std::vector<std::string> Shell::contextual_help_lines() const {
   std::vector<std::string> lines = mode == UiMode::kPiano    ? build_help("piano")
                                    : mode == UiMode::kStyles ? build_help("styles")
                                    : mode == UiMode::kParts  ? build_help("parts")
+                                   : mode == UiMode::kGroove ? build_help("groove")
                                                              : build_help("");
   lines.push_back("nav: TAB focus | CTRL+P play/stop | ` style/section | CTRL+C quit");
   return lines;
@@ -248,6 +260,9 @@ bool Shell::push_panels() {
   }
   if (m_panels.visible(PanelId::kParts)) {
     refresh_parts_content();
+  }
+  if (m_panels.visible(PanelId::kGroove)) {
+    refresh_groove_content();
   }
 
   return m_panel_hook &&
@@ -467,6 +482,9 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   }
   if (cmd == "part" && t.size() >= 2) {
     return cmd_part(t, error);
+  }
+  if (cmd == "groove" && t.size() >= 2) {
+    return cmd_groove(t, error);
   }
   return std::nullopt;
 }

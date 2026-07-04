@@ -11,7 +11,8 @@ namespace {
 // User-facing names, indexed by PanelId. "menu" is the help panel's name;
 // "help" survives as a parse-only alias (see parse_panel_name).
 constexpr std::array<const char*, kPanelCount> kPanelNames = {
-    "events", "console", "styles", "chords", "piano", "menu", "filter", "empty", "parts",
+    "events", "console", "styles", "chords", "piano",
+    "menu",   "filter",  "empty",  "parts",  "groove",
 };
 
 // Fallback bottom-to-top grid order (also the focus_next cycle order): the
@@ -20,8 +21,8 @@ constexpr std::array<const char*, kPanelCount> kPanelNames = {
 // — the MIDI log is the panel worth maximizing; the menu sits just under it at
 // its declared height.
 constexpr std::array<PanelId, kPanelCount> kDefaultOrder = {
-    PanelId::kPiano,  PanelId::kConsole, PanelId::kStyles, PanelId::kParts, PanelId::kChords,
-    PanelId::kHelp,   PanelId::kEvents,  PanelId::kFilter, PanelId::kEmpty,
+    PanelId::kPiano,  PanelId::kConsole, PanelId::kStyles, PanelId::kParts,  PanelId::kGroove,
+    PanelId::kChords, PanelId::kHelp,    PanelId::kEvents, PanelId::kFilter, PanelId::kEmpty,
 };
 
 constexpr std::size_t index_of(PanelId id) { return static_cast<std::size_t>(id); }
@@ -46,6 +47,8 @@ int default_height(PanelId id) {
       return panel_layout::kEmptyHeight;
     case PanelId::kParts:
       return panel_layout::kPartsHeight;
+    case PanelId::kGroove:
+      return panel_layout::kGrooveHeight;
   }
   return panel_layout::kEmptyHeight;
 }

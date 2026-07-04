@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdlib>
 
+#include "groove_view.hpp"
 #include "parts_view.hpp"
 
 // Live TUI key dispatch (handle_ui_key / piano_key_event) and the simulated
@@ -282,6 +283,62 @@ bool Shell::parts_key(std::uint8_t byte) {
   }
 }
 
+bool Shell::groove_focused() const {
+  return m_panels.focus_kind() == PanelFocus::kPanel &&
+         m_panels.focused_panel() == PanelId::kGroove;
+}
+
+void Shell::groove_select(int delta) {
+  m_groove_selected =
+      std::clamp(m_groove_selected + delta, 0, static_cast<int>(kGrooveRowCount) - 1);
+  (void)push_panels();
+}
+
+void Shell::groove_adjust(int delta) {
+  const GrooveField field = groove_row_field(static_cast<std::size_t>(m_groove_selected));
+  const GrooveParams& p = m_engine.arranger().groove_params();
+  std::int32_t next = 0;
+  switch (field) {
+    case GrooveField::kSwing:
+      next = std::clamp(static_cast<int>(p.swing) + delta * 10, 0, 100);
+      break;
+    case GrooveField::kHumanizeTiming:
+      next = std::clamp(static_cast<int>(p.humanize_timing) + delta * 10, 0, 100);
+      break;
+    case GrooveField::kHumanizeVelocity:
+      next = std::clamp(static_cast<int>(p.humanize_velocity) + delta * 10, 0, 100);
+      break;
+    case GrooveField::kAccent:
+      next = std::clamp(static_cast<int>(p.accent) + delta * 10, 0, 100);
+      break;
+    case GrooveField::kSwingGrid:
+      next = (p.swing_grid == 16) ? 8 : 16;  // left/right both toggle
+      break;
+    case GrooveField::kSeed:
+      return;
+  }
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kGroove;
+  c.a = static_cast<std::int32_t>(field);
+  c.b = next;
+  m_engine.push_command(c, m_sink);
+  (void)push_panels();
+}
+
+bool Shell::groove_key(std::uint8_t byte) {
+  if (byte == 'r') {  // reseed: a new deterministic humanize pattern
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kGroove;
+    c.a = static_cast<std::int32_t>(GrooveField::kSeed);
+    c.b = static_cast<std::int32_t>(m_engine.arranger().groove_params().seed + 1);
+    m_engine.push_command(c, m_sink);
+    (void)push_panels();
+  }
+  return true;  // the groove panel owns its keystrokes
+}
+
 bool Shell::handle_ui_key(std::uint8_t byte) {
   // CTRL+P (0x10) is a GLOBAL play/stop toggle — it works in every focus
   // (repl, piano, chooser) and on every terminal (a plain control byte, and
@@ -355,6 +412,10 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
   // arrive via main.cpp). Swallow the rest so nothing leaks to the editor.
   if (parts_focused()) {
     return parts_key(byte);
+  }
+
+  if (groove_focused()) {
+    return groove_key(byte);
   }
 
   // Every other shortcut/musical key needs a focused panel; with repl focus the

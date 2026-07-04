@@ -53,6 +53,7 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kStyleSwitch:
     case Param::kPartMute:
     case Param::kPartSolo:
+    case Param::kGroove:
       cmd_style(cmd, sink);
       break;
     case Param::kProgram:
@@ -449,6 +450,13 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       }
       break;
     }
+    case Param::kGroove:
+      if (cmd.a < 0 || cmd.a >= kGrooveFieldCount) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        m_arranger.set_groove_field(static_cast<GrooveField>(cmd.a), cmd.b);
+      }
+      break;
     case Param::kStyleRoute:
     default: {
       const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);

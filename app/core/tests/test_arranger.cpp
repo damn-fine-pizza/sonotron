@@ -152,6 +152,56 @@ void test_ntt_resolution_follows_chord() {
   CHECK(b.ons(2, 62) >= 1 && b.ons(2, 65) >= 1);  // Dm7 comp: 62 65 69 72
 }
 
+void test_groove_apply() {
+  GrooveParams p;
+  // No groove: passthrough.
+  GrooveOut g = groove::apply(p, 0, 2, 480, 100);
+  CHECK(g.timing_offset == 0);
+  CHECK(g.velocity == 100);
+
+  // Swing pushes the off-8th (step 2) late; the downbeat (0) and on-8ths stay.
+  p = GrooveParams{};
+  p.swing = 100;
+  CHECK(groove::apply(p, 0, 0, 0, 100).timing_offset == 0);
+  CHECK(groove::apply(p, 0, 2, 0, 100).timing_offset > 0);
+  CHECK(groove::apply(p, 0, 4, 0, 100).timing_offset == 0);
+  // Swing grid 16 delays the odd 16ths instead.
+  p.swing_grid = 16;
+  CHECK(groove::apply(p, 0, 1, 0, 100).timing_offset > 0);
+
+  // Accent lifts beat 1, softens beat 2.
+  p = GrooveParams{};
+  p.accent = 100;
+  CHECK(groove::apply(p, 0, 0, 0, 80).velocity > 80);
+  CHECK(groove::apply(p, 0, 4, 0, 80).velocity < 80);
+
+  // Humanize is deterministic: same seed+position => identical result.
+  p = GrooveParams{};
+  p.humanize_velocity = 100;
+  p.humanize_timing = 100;
+  const GrooveOut a1 = groove::apply(p, 3, 5, 720, 90);
+  const GrooveOut a2 = groove::apply(p, 3, 5, 720, 90);
+  CHECK(a1.velocity == a2.velocity && a1.timing_offset == a2.timing_offset);
+  GrooveParams q = p;
+  q.seed = 999;
+  const GrooveOut b = groove::apply(q, 3, 5, 720, 90);
+  CHECK(b.velocity != a1.velocity || b.timing_offset != a1.timing_offset);
+
+  // Velocity always clamped into 1..127.
+  CHECK(groove::apply(p, 0, 3, 111, 1).velocity >= 1);
+  CHECK(groove::apply(p, 0, 0, 222, 127).velocity <= 127);
+}
+
+void test_groove_command() {
+  Band b;
+  b.setup_basic();
+  b.cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kSwing), 60, 0, Op::kSet);
+  CHECK(b.e.arranger().groove_params().swing == 60);
+  b.cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kAccent), 200, 0, Op::kSet);
+  CHECK(b.e.arranger().groove_params().accent == 100);  // clamped
+  b.cmd(Param::kGroove, 99, 10, 0, Op::kSet);           // bad field -> warn, no change
+}
+
 void test_part_mute_solo() {
   {  // Mute silences one part; the others keep playing.
     Band b;
@@ -474,6 +524,8 @@ int main() {
   test_drums_play_without_chord_but_tonal_roles_wait();
   test_ntt_resolution_follows_chord();
   test_role_anchor_and_gm_voices();
+  test_groove_apply();
+  test_groove_command();
   test_part_mute_solo();
   test_quantized_variation_switch();
   test_fill_one_shot_returns_to_variation();

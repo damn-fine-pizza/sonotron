@@ -83,6 +83,8 @@ enum class Param : std::uint16_t {
                            //     arranger style part (the `parts` mixer).
   kPartSolo = 37,          // set: a = TrackRole, b = 0/1. Solo: when any part
                            //     is soloed, only soloed parts play.
+  kGroove = 38,            // set: a = GrooveField (swing/humanize/accent/grid/
+                           //     seed), b = value. The global groove feel.
 };
 
 struct Command {

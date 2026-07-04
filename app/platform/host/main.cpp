@@ -445,6 +445,24 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       } else if (final_byte == 'B') {
         shell.parts_select(+1);
       }
+    } else if (shell.groove_focused() && is_bare_arrow(final_byte)) {
+      // up/down select a groove parameter; left/right adjust it.
+      switch (final_byte) {
+        case 'A':
+          shell.groove_select(-1);
+          break;
+        case 'B':
+          shell.groove_select(+1);
+          break;
+        case 'C':
+          shell.groove_adjust(+1);
+          break;
+        case 'D':
+          shell.groove_adjust(-1);
+          break;
+        default:
+          break;
+      }
     } else {
       replay_bytes(esc);
     }

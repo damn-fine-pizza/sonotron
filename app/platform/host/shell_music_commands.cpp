@@ -253,6 +253,45 @@ bool Shell::cmd_part(const std::vector<std::string>& t, std::string& error) {
   return true;
 }
 
+bool Shell::cmd_groove(const std::vector<std::string>& t, std::string& error) {
+  // groove <field> <value>   — the arranger feel from the CLI.
+  if (t.size() < 3) {
+    error = "groove <swing|humanize-t|humanize-v|accent|grid|seed> <value>";
+    return false;
+  }
+  GrooveField field = GrooveField::kSwing;
+  const std::string& f = t[1];
+  if (f == "swing") {
+    field = GrooveField::kSwing;
+  } else if (f == "humanize-t" || f == "humanize-timing") {
+    field = GrooveField::kHumanizeTiming;
+  } else if (f == "humanize-v" || f == "humanize-velocity") {
+    field = GrooveField::kHumanizeVelocity;
+  } else if (f == "accent") {
+    field = GrooveField::kAccent;
+  } else if (f == "grid") {
+    field = GrooveField::kSwingGrid;
+  } else if (f == "seed") {
+    field = GrooveField::kSeed;
+  } else {
+    error = "unknown groove field: " + f;
+    return false;
+  }
+  std::uint64_t value = 0;
+  if (!parse_u64(t[2], value)) {
+    error = "bad value: " + t[2];
+    return false;
+  }
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kGroove;
+  c.a = static_cast<std::int32_t>(field);
+  c.b = static_cast<std::int32_t>(value);
+  m_engine.push_command(c, m_sink);
+  (void)push_panels();
+  return true;
+}
+
 bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
   const std::string& verb = t[1];
 

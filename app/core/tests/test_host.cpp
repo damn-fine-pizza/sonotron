@@ -399,6 +399,25 @@ void test_shell_parts_command_and_panel() {
   CHECK(!f.run("part bass"));          // too few args
 }
 
+void test_shell_groove_command_and_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open groove"));
+  CHECK(block_contains(panel, "swing"));
+  CHECK(block_contains(panel, "accent"));
+  CHECK(f.run("groove swing 60"));
+  CHECK(block_contains(panel, "60%"));
+  CHECK(f.run("groove humanize-t 30"));
+  CHECK(f.run("groove accent 100"));
+  CHECK(f.run("groove grid 16"));
+  CHECK(!f.run("groove nope 10"));  // unknown field
+  CHECK(!f.run("groove swing"));    // missing value
+}
+
 void test_gm_program_parsing() {
   CHECK(parse_gm_program("0") == 0);
   CHECK(parse_gm_program("127") == 127);
@@ -1705,6 +1724,7 @@ int main() {
   test_gm_program_parsing();
   test_shell_program_command();
   test_shell_parts_command_and_panel();
+  test_shell_groove_command_and_panel();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();
