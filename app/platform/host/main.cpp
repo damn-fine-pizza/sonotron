@@ -72,6 +72,87 @@ std::uint64_t monotonic_us() {
          static_cast<std::uint64_t>(ts.tv_nsec) / 1000u;
 }
 
+// Scans `s` for a CSI query reply `ESC [ ? ... <terminator>` where terminator
+// is the sequence's final byte (0x40..0x7E). Kitty's keyboard-flags reply ends
+// in 'u'; a Primary Device Attributes reply ends in 'c'.
+bool has_csi_query_reply(const std::string& s, char terminator) {
+  for (std::size_t i = 0; i + 2 < s.size(); ++i) {
+    if (s[i] != 0x1B || s[i + 1] != '[' || s[i + 2] != '?') {
+      continue;
+    }
+    for (std::size_t j = i + 3; j < s.size(); ++j) {
+      const char c = s[j];
+      if (c >= 0x40 && c <= 0x7E) {  // CSI final byte terminates the sequence
+        if (c == terminator) {
+          return true;
+        }
+        break;
+      }
+    }
+  }
+  return false;
+}
+
+// Returns `s` with every terminal-originated CSI-private reply
+// (ESC [ ? ... <final>) removed. Whatever remains is real user input that a
+// fast pipe delivered inside the probe window and must not be lost.
+std::string strip_csi_query_replies(const std::string& s) {
+  std::string out;
+  for (std::size_t i = 0; i < s.size();) {
+    if (i + 2 < s.size() && s[i] == 0x1B && s[i + 1] == '[' && s[i + 2] == '?') {
+      std::size_t j = i + 3;
+      while (j < s.size() && !(s[j] >= 0x40 && s[j] <= 0x7E)) {
+        ++j;
+      }
+      if (j < s.size()) {
+        i = j + 1;  // drop the whole sequence including its final byte
+        continue;
+      }
+      out.append(s, i, s.size() - i);  // incomplete tail: keep verbatim
+      break;
+    }
+    out.push_back(s[i]);
+    ++i;
+  }
+  return out;
+}
+
+// Probes whether the terminal implements the kitty keyboard protocol. Writes a
+// keyboard-flags query immediately followed by a Device Attributes query, then
+// reads stdin (raw mode, VMIN=0) until the DA reply lands or a short timeout
+// elapses. DA is answered by every terminal, so its reply is the "done talking"
+// sentinel; a kitty-flags reply seen alongside it means the protocol is live.
+// The replies are consumed here so they never leak into the input stream; any
+// non-reply bytes read alongside them are returned in `leftover` for replay.
+// Must run after raw mode is set and before the REPL starts reading stdin.
+bool detect_kitty_support(std::string& leftover) {
+  (void)!write(STDOUT_FILENO, kitty::kQueryFlags.data(), kitty::kQueryFlags.size());
+  (void)!write(STDOUT_FILENO, kitty::kQueryDeviceAttributes.data(),
+               kitty::kQueryDeviceAttributes.size());
+
+  constexpr int kProbeTimeoutMs = 150;
+  std::string acc;
+  for (;;) {
+    pollfd fd{};
+    fd.fd = STDIN_FILENO;
+    fd.events = POLLIN;
+    if (poll(&fd, 1, kProbeTimeoutMs) <= 0) {
+      break;  // timeout or error: assume no support
+    }
+    char buf[256];
+    const ssize_t got = read(STDIN_FILENO, buf, sizeof(buf));
+    if (got <= 0) {
+      break;
+    }
+    acc.append(buf, static_cast<std::size_t>(got));
+    if (has_csi_query_reply(acc, 'c')) {
+      break;  // the terminal has answered Device Attributes; it is done
+    }
+  }
+  leftover = strip_csi_query_replies(acc);
+  return has_csi_query_reply(acc, 'u');
+}
+
 std::string status_line(const Shell& shell) {
   const Engine& e = shell.engine();
   const Position pos = e.transport().position();
@@ -160,11 +241,28 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   shell.exec_line("thru in0 out0", ignored);
   std::printf("arrangrr live: ALSA ports in0/out0 (thru). Type commands; 'quit' to exit.\n");
 
-  // Piano and filter panels are visible from the start (help opens on demand
-  // via `help <topic>` / --motd). Panels only exist in the live TUI.
+  // Help and piano panels are visible from the start, laid out as side-by-side
+  // columns (help | piano); the filter panel stays available via `panel open
+  // filter`. Panels only exist in the live TUI.
   if (tui) {
-    shell.exec_line("panel open filter", ignored);
+    shell.exec_line("panel open help", ignored);
     shell.exec_line("panel open piano", ignored);
+    shell.exec_line("panel layout side", ignored);
+  }
+
+  // Terminal-aware piano input (H3). Probe once for the kitty keyboard protocol;
+  // without it there is no key-release event, so momentary mode is impossible
+  // and we say so plainly rather than pretending to hold notes.
+  bool kitty_supported = false;
+  std::string kitty_leftover;  // real input the probe read past the replies
+  if (tui) {
+    kitty_supported = detect_kitty_support(kitty_leftover);
+    if (!kitty_supported) {
+      shell.set_momentary_available(false);
+      console.emit(
+          "terminal has no key-release support — piano uses toggle mode "
+          "(press = on, press again = off)");
+    }
   }
 
   // --init FILE: run a setup script, then stay interactive.
@@ -201,6 +299,9 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     std::printf("arrangrr> ");
     std::fflush(stdout);
   } else {
+    // Seed the status bar up front so it reflects the (stopped) transport even
+    // if a fast-piped session quits before the loop's first throttled refresh.
+    console.set_status(status_line(shell));
     console.render_input(editor);
   }
 
@@ -239,8 +340,22 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   // key-down so the piano's own shortcuts keep working while the protocol is on.
   auto dispatch_kitty = [&](std::string_view body) {
     const std::optional<KittyKeyEvent> ev = parse_kitty_key(body);
-    if (!ev || ev->code > 0x7F) {
-      return;  // malformed, or a non-ASCII functional key we do not translate
+    if (!ev) {
+      return;  // malformed
+    }
+    // Ctrl chords (CTRL+P, CTRL+SPACE, CTRL+\) arrive as kitty escapes with a
+    // modifier field that the piano must never see as a plain letter. Translate
+    // them back to the control byte a raw TTY would have delivered and route
+    // through the normal key path — on key-down only, so a single physical
+    // press is a single action (repeat/release would double-toggle).
+    if (const std::optional<std::uint8_t> ctrl = control_byte_for(ev->code, ev->modifiers)) {
+      if (ev->type == KittyKeyEvent::Type::kPress) {
+        (void)feed_editor_byte(*ctrl);
+      }
+      return;
+    }
+    if (ev->code > 0x7F) {
+      return;  // a non-ASCII functional key we do not translate
     }
     const char key = static_cast<char>(ev->code);
     if (ev->type == KittyKeyEvent::Type::kRelease) {
@@ -259,6 +374,67 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   std::string esc;
   bool in_esc = false;
   bool kitty_on = false;
+
+  // Replays a raw byte run through the line-editor path verbatim (used for
+  // escapes we don't translate: arrows, Alt-chords, a lone ESC).
+  auto replay_bytes = [&](std::string_view bytes) {
+    for (const char c : bytes) {
+      if (!feed_editor_byte(static_cast<std::uint8_t>(c))) {
+        break;
+      }
+    }
+  };
+
+  // Finishes the in-progress CSI in `esc`: a 'u' terminator is a kitty key
+  // event, anything else is a line-editor escape (arrows/home/end).
+  auto finish_csi = [&](std::uint8_t final_byte) {
+    if (final_byte == 'u') {
+      dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
+    } else {
+      replay_bytes(esc);
+    }
+    esc.clear();
+    in_esc = false;
+  };
+
+  // One TUI input byte through the escape-framing state machine: kitty key
+  // escapes (\x1b[ ... u) route to dispatch_kitty; everything else (plain keys,
+  // arrows, Alt-chords, lone ESC) replays through the H2 panel-key + line-editor
+  // path. Shared by the main read loop and the startup-probe leftover replay.
+  auto feed_tui_byte = [&](std::uint8_t b) {
+    if (!in_esc) {
+      if (b == 0x1B) {
+        in_esc = true;
+        esc.clear();
+        esc.push_back(static_cast<char>(b));
+      } else {
+        (void)feed_editor_byte(b);
+      }
+      return;
+    }
+
+    esc.push_back(static_cast<char>(b));
+    if (esc.size() == 2) {
+      // Two-byte escape that is not a CSI (Alt-key, lone ESC): replay it whole.
+      if (b != '[') {
+        replay_bytes(esc);
+        esc.clear();
+        in_esc = false;
+      }
+      return;
+    }
+    // Inside a CSI: a final byte in 0x40..0x7E terminates it.
+    if (b >= 0x40 && b <= 0x7E) {
+      finish_csi(b);
+    }
+  };
+
+  // Any real keystrokes the kitty probe read past the terminal's replies (a
+  // fast pipe can deliver typed input inside the probe window) are replayed
+  // now, in order, so nothing typed at startup is lost.
+  for (std::size_t i = 0; i < kitty_leftover.size() && running; ++i) {
+    feed_tui_byte(static_cast<std::uint8_t>(kitty_leftover[i]));
+  }
 
   while (running && !shell.quit_requested()) {
     struct pollfd fds[16];
@@ -304,56 +480,11 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
       if (got <= 0) {
         running = false;
       } else if (tui) {
-        // Frame kitty key escapes (\x1b[ ... u) out of the byte stream; feed
-        // everything else through the H2 panel-key + line-editor path. UI key
-        // dispatch runs before the line editor: with panel focus the byte
-        // drives panels/piano; with REPL focus it falls through and typing
+        // UI key dispatch runs before the line editor: with panel focus the
+        // byte drives panels/piano; with REPL focus it falls through and typing
         // behaves exactly as before.
         for (ssize_t i = 0; i < got && running; ++i) {
-          const std::uint8_t b = static_cast<std::uint8_t>(buf[i]);
-
-          if (in_esc) {
-            esc.push_back(static_cast<char>(b));
-            if (esc.size() == 2) {
-              // Two-byte escape that is not a CSI (Alt-key, lone ESC): replay
-              // it through the normal path so nothing is swallowed.
-              if (b != '[') {
-                for (const char c : esc) {
-                  if (!feed_editor_byte(static_cast<std::uint8_t>(c))) {
-                    break;
-                  }
-                }
-                esc.clear();
-                in_esc = false;
-              }
-              continue;
-            }
-            // Inside a CSI: a final byte in 0x40..0x7E terminates it.
-            if (b >= 0x40 && b <= 0x7E) {
-              if (b == 'u') {
-                dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
-              } else {
-                // Arrows / home / end etc.: replay so the line editor sees them.
-                for (const char c : esc) {
-                  if (!feed_editor_byte(static_cast<std::uint8_t>(c))) {
-                    break;
-                  }
-                }
-              }
-              esc.clear();
-              in_esc = false;
-            }
-            continue;
-          }
-
-          if (b == 0x1B) {
-            in_esc = true;
-            esc.clear();
-            esc.push_back(static_cast<char>(b));
-            continue;
-          }
-
-          (void)feed_editor_byte(b);
+          feed_tui_byte(static_cast<std::uint8_t>(buf[i]));
         }
         console.render_input(editor);
       } else {
@@ -376,16 +507,18 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
 
     // Kitty keyboard protocol, scoped to piano focus only. Enabling it globally
     // would reroute EVERY REPL keystroke (including arrows/history/editing)
-    // through CSI-u escapes, so we push the flags only while the piano panel is
-    // focused — where true key-release matters — and pop them the instant focus
-    // leaves. Gated behind `tui` (isatty), so scripts/pipes never see a byte of
-    // it; terminals without the protocol silently ignore the flags and the
-    // plain-byte toggle fallback keeps the piano playable.
+    // through CSI-u escapes, so we push the flags only when the terminal is
+    // known to support it AND the piano panel is focused AND we are in momentary
+    // mode — the only situation where true key-release matters — and pop them
+    // the instant any of those stops holding. Gated behind `tui` (isatty), so
+    // scripts/pipes never see a byte of it.
     if (tui) {
       const bool piano_focused = shell.panels().focus_kind() == PanelFocus::kPanel &&
                                  shell.panels().focused_panel() == PanelId::kPiano;
-      if (piano_focused != kitty_on) {
-        kitty_on = piano_focused;
+      const bool want_kitty =
+          kitty_supported && piano_focused && shell.piano_key_mode() == PianoKeyMode::kMomentary;
+      if (want_kitty != kitty_on) {
+        kitty_on = want_kitty;
         kitty::set_progressive_enhancement(STDOUT_FILENO, kitty_on);
       }
     }

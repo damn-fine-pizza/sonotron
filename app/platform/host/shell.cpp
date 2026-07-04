@@ -424,14 +424,14 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
     return {
         "help: piano",
         "  panel open piano, then TAB to enter/leave play mode",
-        "  white: A S D F G H J K L ; '           black: W E T Y U O P",
-        "  SPACE toggles key mode: momentary (default) <-> toggle",
-        "  momentary: hold to sound, release to stop (needs a kitty-protocol",
-        "             terminal: kitty/foot/ghostty/wezterm/recent xterm)",
-        "  toggle:    press = note-on, same key again = note-off (any terminal)",
+        "  white: A S D F G H J K L ; '     black: W E T Y U O P (P = D#5)",
+        "  SPACE key mode: momentary (hold; needs kitty terminal) <-> toggle (any)",
+        "  toggle: press = note-on, same key again = note-off",
+        "  play keys: TAB exit | N names | V view | C clear | Z layout",
+        "             . octave- | / octave+",
+        "  CTRL+P play/stop (global) | CTRL+SPACE style/section chooser",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
-        "  play keys: TAB exit | N names | V view | C clear | . octave- | / octave+",
     };
   }
   if (topic == "notes") {
@@ -1176,13 +1176,19 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
   }
 
   // SPACE flips the key mode (momentary <-> toggle). It is a mode switch only
-  // in piano focus and is never a musical note.
+  // in piano focus and is never a musical note. Momentary needs true key-release
+  // events, so on a terminal that cannot deliver them the switch stays honest:
+  // toggle -> momentary is refused with a one-line explanation.
   if (byte == ' ') {
-    m_piano_key_mode = m_piano_key_mode == PianoKeyMode::kMomentary ? PianoKeyMode::kToggle
-                                                                    : PianoKeyMode::kMomentary;
-    print_line(m_piano_key_mode == PianoKeyMode::kMomentary
-                   ? "piano: momentary key mode (hold to sound; needs a kitty-protocol terminal)"
-                   : "piano: toggle key mode (press = on, same key again = off)");
+    if (m_piano_key_mode == PianoKeyMode::kMomentary) {
+      m_piano_key_mode = PianoKeyMode::kToggle;
+      print_line("piano: toggle key mode (press = on, same key again = off)");
+    } else if (!m_momentary_available) {
+      print_line("this terminal can't do momentary (no key-release) — toggle only");
+    } else {
+      m_piano_key_mode = PianoKeyMode::kMomentary;
+      print_line("piano: momentary key mode (hold to sound; needs a kitty-protocol terminal)");
+    }
     return true;
   }
 
@@ -1254,6 +1260,15 @@ const PianoKeyBinding* Shell::piano_binding_for(std::uint8_t byte) const {
     }
   }
   return nullptr;
+}
+
+void Shell::set_momentary_available(bool available) {
+  m_momentary_available = available;
+  // No key-release support means momentary is a lie; drop to toggle now so the
+  // piano reflects what the terminal can actually do.
+  if (!available && m_piano_key_mode == PianoKeyMode::kMomentary) {
+    m_piano_key_mode = PianoKeyMode::kToggle;
+  }
 }
 
 bool Shell::piano_key_event(char key, bool pressed) {
