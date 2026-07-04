@@ -172,7 +172,7 @@ void test_triad_wrap_and_route_gating() {
 
 void test_style_warns() {
   Band b;
-  b.cmd(Param::kStyleLoad, 7);     // no such builtin
+  b.cmd(Param::kStyleLoad, 99);    // no such builtin (past the 16 registered)
   b.cmd(Param::kStyleSection, 2);  // no style loaded
   b.cmd(Param::kStyleLoad, 0);
   b.cmd(Param::kStyleSection, 99);                                             // bogus section id
@@ -324,7 +324,7 @@ void test_style_switch_bad_index_warns() {
   Band b;
   b.setup_basic();
   b.ev.clear();
-  b.cmd(Param::kStyleSwitch, 7, static_cast<std::int32_t>(SectionType::kVarA), 1);   // no style 7
+  b.cmd(Param::kStyleSwitch, 99, static_cast<std::int32_t>(SectionType::kVarA), 1);  // no style 99
   b.cmd(Param::kStyleSwitch, -1, static_cast<std::int32_t>(SectionType::kVarA), 1);  // negative
   b.cmd(Param::kStyleSwitch, 0, 99, 1);                                              // bad section
   int warns = 0;
@@ -340,19 +340,25 @@ void test_style_switch_bad_index_warns() {
 }
 
 void test_builtin_styles_registered() {
-  // The four builtins exist in order with the expected names.
-  CHECK(styles::kBuiltinCount == 4);
-  const char* expected[] = {"basic", "pop", "rock", "ballad"};
+  // Sixteen builtins exist in order: the original four first, then the twelve
+  // genre styles.
+  CHECK(styles::kBuiltinCount == 16);
+  const char* expected[] = {"basic",  "pop",   "rock",   "ballad", "funk",  "disco",
+                            "house",  "swing", "bossa",  "samba",  "reggae", "country",
+                            "blues",  "shuffle", "latin", "motown"};
+  // Every builtin must resolve the full ten-section vocabulary so the chooser
+  // and the section stepper always have a consistent set to work with.
+  const SectionType full_set[] = {
+      SectionType::kIntro1, SectionType::kIntro2, SectionType::kVarA,   SectionType::kVarB,
+      SectionType::kFillA,  SectionType::kFillB,  SectionType::kFillC,  SectionType::kFillD,
+      SectionType::kEnding1, SectionType::kEnding2};
   for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
     const Style* s = styles::kBuiltins[i];
     CHECK(s != nullptr);
     CHECK(std::string_view(s->name) == std::string_view(expected[i]));
-    // Every builtin shares the base section vocabulary.
-    CHECK(s->find(SectionType::kIntro1) != nullptr);
-    CHECK(s->find(SectionType::kVarA) != nullptr);
-    CHECK(s->find(SectionType::kVarB) != nullptr);
-    CHECK(s->find(SectionType::kFillA) != nullptr);
-    CHECK(s->find(SectionType::kEnding1) != nullptr);
+    for (SectionType t : full_set) {
+      CHECK(s->find(t) != nullptr);
+    }
   }
 }
 
