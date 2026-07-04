@@ -892,8 +892,8 @@ The user's target shape for the musical core is **six modules**: Arranger, Seque
 
 Order implied by the gap table above — each item unblocks the next, and every item keeps the D32 constraints (no heap, deterministic where it matters, static pools):
 
-1. **Finish the 8 style parts** (Pad/Perc/Chord2/Arp across all 16 styles) — closes the Style-engine gap already in progress; makes a played chord audible across the bar, not just on stabs.
-2. **Groove engine** (swing/velocity-feel/ghost-notes/humanize as tunable **parameters**, seeded PRNG per D16) — replaces today's hand-authored feel with something a Controller-row knob can actually drive; unblocks the Controller/input "timing-feel" gap.
+1. ✅ **DONE — 8 style parts** (Pad/Perc/Chord2/Arp across all 16 styles) — closed the Style-engine gap; a played chord is now audible across the bar (held pad), not just on stabs. Shipped with the `parts` mixer panel (per-role mute/solo/voice/activity) and per-role register anchors + default GM voices (D36).
+2. ✅ **DONE — Groove engine** (swing/accent/humanize as tunable **parameters**, deterministic seeded position-hash per D16) — `arranger/groove.hpp` post-processes every arranger event; ABI `kGroove`; shipped with the `groove` panel. Per-part groove (currently global) and ghost-note/quantize-strength are the remaining refinements.
 3. **ArpeggiatorEngine** (the three integration modes: style part, track MIDI-FX, live-keyboard effect) — the single biggest module gap (~5% done); reusable so it isn't rebuilt three times.
 4. **Scenes / song mode** — snapshot + chain sections/patterns/mutes/routing over time (§17/§26.8); needed before "Controller: scene control" or "Sequencer: song mode" can mean anything.
 5. **Advanced step-sequencer params** (probability/ratchet/tie/rest/micro-timing/conditional-trig/euclidean/rotation, deterministic seed) — the Elektron-style "parameter locks" from §8.5, still entirely absent from `Step`.
