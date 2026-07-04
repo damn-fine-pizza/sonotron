@@ -730,6 +730,24 @@ void test_theme_colors_layout_commands() {
   CHECK(f.midi_count() == 0);
 }
 
+void test_ctrl_p_play_stop() {
+  ShellFixture f;
+  constexpr std::uint8_t kCtrlP = 0x10;
+  CHECK(!f.shell.engine().transport().playing());
+
+  CHECK(f.shell.handle_ui_key(kCtrlP));  // -> play
+  CHECK(f.shell.engine().transport().playing());
+  CHECK(f.shell.handle_ui_key(kCtrlP));  // -> stop
+  CHECK(!f.shell.engine().transport().playing());
+
+  // Global: works with piano focus too, and never leaks a note.
+  CHECK(f.run("panel focus piano"));
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key(kCtrlP));
+  CHECK(f.shell.engine().transport().playing());
+  CHECK(f.midi_count() == 0);
+}
+
 void test_theme_switch_restyles_titles() {
   // With colors on, a coloured theme wraps panel titles in SGR; with colors
   // off the same titles are plain — proving the switch is coherent.
@@ -1124,6 +1142,7 @@ int main() {
   test_notes_names_commands();
   test_filter_view_commands();
   test_theme_colors_layout_commands();
+  test_ctrl_p_play_stop();
   test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();

@@ -314,6 +314,9 @@ bool parse_hex_byte(const std::string& s, std::uint8_t& out) {
 // Panel width used when no live terminal is attached (script/flat mode).
 constexpr int kDefaultPanelColumns = 80;
 
+// Global TUI shortcut bytes (raw control chars — work on every terminal).
+constexpr std::uint8_t kCtrlPlayStop = 0x10;  // CTRL+P: transport play/stop
+
 // The simulated piano feeds the same input port real hardware uses (in0).
 constexpr std::uint8_t kPianoInputPort = 0;
 constexpr std::uint8_t kPianoReleaseVelocity = 64;
@@ -1104,6 +1107,16 @@ bool Shell::cmd_colors(const std::vector<std::string>& t, std::string& error) {
 }
 
 bool Shell::handle_ui_key(std::uint8_t byte) {
+  // CTRL+P (0x10) is a GLOBAL play/stop toggle — it works in every focus
+  // (repl, piano, chooser) and on every terminal (a plain control byte, and
+  // the LineEditor ignores it). Stop when playing, else resume (continue from
+  // the current position; from tick 0 that is a play-from-the-top).
+  if (byte == kCtrlPlayStop) {
+    std::string ignored;
+    exec_line(m_engine.transport().playing() ? "transport stop" : "transport continue", ignored);
+    return true;
+  }
+
   // TAB cycles focus repl <-> visible panels, even FROM the repl: opening the
   // piano and pressing TAB drops you straight into play mode. With no panel to
   // focus it falls through so a lone TAB still reaches the editor.
