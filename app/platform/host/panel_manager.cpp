@@ -15,10 +15,13 @@ constexpr std::array<const char*, kPanelCount> kPanelNames = {
 };
 
 // Fallback bottom-to-top grid order (also the focus_next cycle order): the
-// default-open set sits at the bottom, extras above.
+// default-open set sits at the bottom, extras above. Events is kept LAST of the
+// open set so it lands at the TOP row, which flexes to fill the leftover height
+// — the MIDI log is the panel worth maximizing; the menu sits just under it at
+// its declared height.
 constexpr std::array<PanelId, kPanelCount> kDefaultOrder = {
-    PanelId::kPiano,  PanelId::kConsole, PanelId::kStyles, PanelId::kChords,
-    PanelId::kEvents, PanelId::kHelp,    PanelId::kFilter, PanelId::kEmpty,
+    PanelId::kPiano, PanelId::kConsole, PanelId::kStyles, PanelId::kChords,
+    PanelId::kHelp,  PanelId::kEvents,  PanelId::kFilter, PanelId::kEmpty,
 };
 
 constexpr std::size_t index_of(PanelId id) { return static_cast<std::size_t>(id); }

@@ -55,7 +55,7 @@ inline constexpr int kConsoleHeight = 6;
 inline constexpr int kStylesHeight = 9;
 inline constexpr int kChordsHeight = 4;
 inline constexpr int kPianoHeight = 7;
-inline constexpr int kHelpHeight = 8;
+inline constexpr int kHelpHeight = 12;  // fixed panel below events: fit the contextual help
 inline constexpr int kFilterHeight = 3;
 inline constexpr int kEmptyHeight = 1;
 
