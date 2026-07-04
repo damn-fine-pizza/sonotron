@@ -385,11 +385,37 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     }
   };
 
+  // Bare CSI arrow: body is exactly "\x1b[" (esc is ESC '[' <final>, size 3).
+  constexpr std::size_t kBareCsiSize = 3;
+  auto is_bare_arrow = [&](std::uint8_t final_byte) {
+    return esc.size() == kBareCsiSize &&
+           (final_byte == 'A' || final_byte == 'B' || final_byte == 'C' || final_byte == 'D');
+  };
+
   // Finishes the in-progress CSI in `esc`: a 'u' terminator is a kitty key
-  // event, anything else is a line-editor escape (arrows/home/end).
+  // event; a bare arrow drives the chooser while it is up; anything else is a
+  // line-editor escape (arrows/home/end).
   auto finish_csi = [&](std::uint8_t final_byte) {
     if (final_byte == 'u') {
       dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
+    } else if (shell.chooser_active() && is_bare_arrow(final_byte)) {
+      // up/down move the style highlight; left/right the section highlight.
+      switch (final_byte) {
+        case 'A':
+          shell.chooser_nav_style(-1);
+          break;
+        case 'B':
+          shell.chooser_nav_style(+1);
+          break;
+        case 'C':
+          shell.chooser_nav_section(+1);
+          break;
+        case 'D':
+          shell.chooser_nav_section(-1);
+          break;
+        default:
+          break;
+      }
     } else {
       replay_bytes(esc);
     }
@@ -415,9 +441,14 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
 
     esc.push_back(static_cast<char>(b));
     if (esc.size() == 2) {
-      // Two-byte escape that is not a CSI (Alt-key, lone ESC): replay it whole.
+      // Two-byte escape that is not a CSI (Alt-key, lone ESC). With the chooser
+      // up an ESC cancels it and the run is consumed; otherwise replay it whole.
       if (b != '[') {
-        replay_bytes(esc);
+        if (shell.chooser_active()) {
+          shell.chooser_cancel();
+        } else {
+          replay_bytes(esc);
+        }
         esc.clear();
         in_esc = false;
       }
@@ -515,8 +546,10 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     if (tui) {
       const bool piano_focused = shell.panels().focus_kind() == PanelFocus::kPanel &&
                                  shell.panels().focused_panel() == PanelId::kPiano;
-      const bool want_kitty =
-          kitty_supported && piano_focused && shell.piano_key_mode() == PianoKeyMode::kMomentary;
+      // The chooser needs plain-CSI arrows, so kitty is popped while it is up
+      // (else arrows would arrive as CSI-u escapes the chooser never sees).
+      const bool want_kitty = kitty_supported && piano_focused && !shell.chooser_active() &&
+                              shell.piano_key_mode() == PianoKeyMode::kMomentary;
       if (want_kitty != kitty_on) {
         kitty_on = want_kitty;
         kitty::set_progressive_enhancement(STDOUT_FILENO, kitty_on);

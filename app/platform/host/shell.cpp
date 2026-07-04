@@ -374,6 +374,16 @@ constexpr int kDefaultPanelColumns = 80;
 
 // Global TUI shortcut bytes (raw control chars — work on every terminal).
 constexpr std::uint8_t kCtrlPlayStop = 0x10;  // CTRL+P: transport play/stop
+constexpr std::uint8_t kCtrlChooser = 0x00;   // CTRL+SPACE: style/section chooser
+constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+\: apply the chooser now
+
+// Chooser edit bytes (raw control chars a plain TTY delivers).
+constexpr std::uint8_t kEnterCr = 0x0D;
+constexpr std::uint8_t kEnterLf = 0x0A;
+constexpr std::uint8_t kBackspaceDel = 0x7F;
+constexpr std::uint8_t kBackspaceBs = 0x08;
+constexpr std::uint8_t kAsciiDigitLow = '0';
+constexpr std::uint8_t kAsciiDigitHigh = '9';
 
 // The simulated piano feeds the same input port real hardware uses (in0).
 constexpr std::uint8_t kPianoInputPort = 0;
@@ -471,11 +481,11 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
     return {
         "help: panel",
         "  panel list                       panels and their state",
-        "  panel open|close|toggle <p>      p: help piano filter",
+        "  panel open|close|toggle <p>      p: menu piano filter (help = menu alias)",
         "  panel close all",
         "  panel focus <p>|repl|next        focus bookkeeping (key dispatch: H2)",
         "  panel status | panel help",
-        "  help <topic> fills and opens the help panel",
+        "  help <topic> fills and opens the menu panel",
     };
   }
   if (topic == "piano") {
@@ -571,6 +581,13 @@ std::vector<std::string> Shell::contextual_help_lines() const {
 }
 
 void Shell::sync_contextual_panel() {
+  // The menu panel IS the contextual menu: while the chooser is engaged it
+  // shows the live picker; otherwise it follows the interactive mode.
+  if (m_chooser.has_value()) {
+    m_panels.set_content(PanelId::kHelp, m_chooser->render(m_piano.note_naming));
+    return;
+  }
+
   // A mode change unpins an explicit help topic so the contextual content
   // resumes. The panel is not force-opened here (that would reshuffle the
   // visible set and focus cycle); it simply reflects the mode whenever shown.
@@ -672,7 +689,7 @@ bool Shell::panel_target(const std::string& sub, const std::vector<std::string>&
 
   PanelId id{};
   if (!parse_panel_name(target, id)) {
-    error = "unknown panel '" + target + "' (help, piano, filter)";
+    error = "unknown panel '" + target + "' (menu, piano, filter)";
     return false;
   }
 
@@ -1222,6 +1239,19 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return true;
   }
 
+  // CTRL+SPACE toggles the style/section chooser. Global like CTRL+P: it opens
+  // from repl OR piano focus, and a second press cancels.
+  if (byte == kCtrlChooser) {
+    toggle_chooser();
+    return true;
+  }
+
+  // While the chooser is engaged it owns every byte (digits/backspace/apply and
+  // anything else swallowed) so nothing leaks to the piano or the line editor.
+  if (m_chooser.has_value()) {
+    return chooser_key(byte);
+  }
+
   // TAB cycles focus repl <-> visible panels, even FROM the repl: opening the
   // piano and pressing TAB drops you straight into play mode. With no panel to
   // focus it falls through so a lone TAB still reaches the editor.
@@ -1366,6 +1396,120 @@ bool Shell::piano_key_event(char key, bool pressed) {
     piano_momentary_off(binding->key, binding->semitone_from_base);
   }
   return true;
+}
+
+void Shell::toggle_chooser() {
+  if (m_chooser.has_value()) {
+    close_chooser();
+  } else {
+    open_chooser();
+  }
+}
+
+void Shell::open_chooser() {
+  // Build the selectable style list from the built-ins the core matches by
+  // index; each style advertises exactly the sections it defines.
+  std::vector<StyleInfo> infos;
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+    const Style* style = styles::kBuiltins[i];
+    StyleInfo info{.index = static_cast<int>(i), .name = style->name, .sections = {}};
+    for (const StyleSection& section : style->sections) {
+      info.sections.push_back(section.type);
+    }
+    infos.push_back(std::move(info));
+  }
+  m_chooser.emplace(std::move(infos));
+  seed_chooser_selection();
+
+  // Pin the chooser to the menu panel and make sure it is visible; push_panels
+  // re-syncs the content (sync_contextual_panel renders the chooser while up).
+  m_panels.open(PanelId::kHelp);
+  (void)push_panels();
+}
+
+void Shell::seed_chooser_selection() {
+  // Best-effort: highlight the arranger's current section on the first style so
+  // the chooser opens where the band already is. Style highlight stays at the
+  // first match (only one built-in today); the section nudges from position 0.
+  if (!m_chooser.has_value()) {
+    return;
+  }
+  const StyleInfo* style = m_chooser->selected_style();
+  if (style == nullptr) {
+    return;
+  }
+  const SectionType current = m_engine.arranger().current();
+  for (std::size_t i = 0; i < style->sections.size(); ++i) {
+    if (style->sections[i] == current) {
+      m_chooser->nav_section(static_cast<int>(i));  // from 0 -> i (clamped)
+      return;
+    }
+  }
+}
+
+void Shell::close_chooser() {
+  m_chooser.reset();
+  (void)push_panels();  // the menu panel resumes its normal contextual content
+}
+
+bool Shell::chooser_key(std::uint8_t byte) {
+  if (byte >= kAsciiDigitLow && byte <= kAsciiDigitHigh) {
+    m_chooser->feed_digit(static_cast<char>(byte));
+    (void)push_panels();
+    return true;
+  }
+  if (byte == kBackspaceDel || byte == kBackspaceBs) {
+    m_chooser->backspace();
+    (void)push_panels();
+    return true;
+  }
+  if (byte == kEnterCr || byte == kEnterLf) {
+    chooser_apply(ChooserApply::kNextBar);
+    return true;
+  }
+  if (byte == kCtrlApplyNow) {
+    chooser_apply(ChooserApply::kImmediate);
+    return true;
+  }
+  // Every other byte is swallowed while the chooser is up.
+  return true;
+}
+
+void Shell::chooser_apply(ChooserApply mode) {
+  if (m_chooser.has_value()) {
+    if (const StyleInfo* style = m_chooser->selected_style(); style != nullptr) {
+      // Same engine entry point cmd_style uses (m_sink); the core forces
+      // immediate when the transport is stopped regardless of the flag.
+      Command c;
+      c.op = Op::kDo;
+      c.param = Param::kStyleSwitch;
+      c.a = style->index;
+      c.b = static_cast<std::int32_t>(m_chooser->selected_section());
+      c.c = mode == ChooserApply::kImmediate ? 1 : 0;
+      m_engine.push_command(c, m_sink);
+    }
+  }
+  close_chooser();
+}
+
+void Shell::chooser_nav_style(int delta) {
+  if (m_chooser.has_value()) {
+    m_chooser->nav_style(delta);
+    (void)push_panels();
+  }
+}
+
+void Shell::chooser_nav_section(int delta) {
+  if (m_chooser.has_value()) {
+    m_chooser->nav_section(delta);
+    (void)push_panels();
+  }
+}
+
+void Shell::chooser_cancel() {
+  if (m_chooser.has_value()) {
+    close_chooser();
+  }
 }
 
 int Shell::find_seq(const std::string& name) const {
