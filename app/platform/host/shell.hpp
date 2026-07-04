@@ -10,6 +10,7 @@
 #include "midi_monitor.hpp"
 #include "panel_manager.hpp"
 #include "piano_view.hpp"
+#include "style_chooser.hpp"
 
 // Host shell: resolves L2/L1 text lines into binary core commands (D26) and
 // owns everything the core must not know about — port names, pending
@@ -105,6 +106,18 @@ class Shell {
 
   PianoKeyMode piano_key_mode() const { return m_piano_key_mode; }
 
+  // CTRL+SPACE style/section chooser (contextual menu, docs/TUI_SPEC.md). The
+  // chooser is engaged whenever the optional holds a value; while engaged
+  // handle_ui_key consumes every byte so nothing leaks to the piano/editor.
+  bool chooser_active() const { return m_chooser.has_value(); }
+  const std::optional<StyleChooser>& chooser() const { return m_chooser; }
+
+  // Arrow/ESC drivers for the escape state machine in main.cpp (arrows arrive
+  // as CSI escapes, not plain bytes). Each is a no-op unless the chooser is up.
+  void chooser_nav_style(int delta);
+  void chooser_nav_section(int delta);
+  void chooser_cancel();
+
   // Terminal-aware momentary lock (H3). The Shell itself stays agnostic — the
   // default is momentary-capable — and the live backend calls this after it has
   // probed the terminal. Passing false (no key-release support) downgrades any
@@ -189,6 +202,17 @@ class Shell {
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);
   void open_help_topic(const std::string& topic);
+
+  // Style/section chooser plumbing (host-live). open_chooser builds the picker
+  // from styles::kBuiltins and pins it to the menu panel; chooser_key routes a
+  // consumed byte; chooser_apply resolves the selection into a kStyleSwitch.
+  void toggle_chooser();
+  void open_chooser();
+  void close_chooser();
+  void seed_chooser_selection();
+  bool chooser_key(std::uint8_t byte);
+  void chooser_apply(ChooserApply mode);
+
   void refresh_piano_content();
   UiMode current_ui_mode() const;
   std::vector<std::string> contextual_help_lines() const;
@@ -219,6 +243,8 @@ class Shell {
   UiStyle m_style;
   UiMode m_ui_mode = UiMode::kRepl;  // last mode the contextual panel synced to
   bool m_help_pinned = false;        // true while an explicit help <topic> shows
+  // engaged = the CTRL+SPACE style/section chooser is up (owns every key).
+  std::optional<StyleChooser> m_chooser;
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;

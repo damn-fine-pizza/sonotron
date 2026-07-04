@@ -6,7 +6,11 @@ namespace arrangrr::host {
 
 namespace {
 
-constexpr std::array<const char*, kPanelCount> kPanelNames = {"help", "piano", "filter"};
+// The first panel is the contextual MENU (help is one of the things it shows);
+// "-- menu --" is its title. "help" survives as a backward-compatible alias in
+// parse_panel_name so `panel open help` and the `help <topic>` command still
+// target it.
+constexpr std::array<const char*, kPanelCount> kPanelNames = {"menu", "piano", "filter"};
 
 // Fixed vertical stacking order (also the focus_next cycle order).
 constexpr std::array<PanelId, kPanelCount> kPanelOrder = {
@@ -35,6 +39,11 @@ std::string title_rule(PanelId id, bool focused, const UiStyle& style) {
 const char* panel_name(PanelId id) { return kPanelNames[index_of(id)]; }
 
 bool parse_panel_name(const std::string& name, PanelId& out) {
+  // "help" is a backward-compatible alias for the renamed "menu" panel.
+  if (name == "help") {
+    out = PanelId::kHelp;
+    return true;
+  }
   for (std::size_t i = 0; i < kPanelCount; ++i) {
     if (name == kPanelNames[i]) {
       out = kPanelOrder[i];

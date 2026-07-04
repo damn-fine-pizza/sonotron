@@ -528,7 +528,7 @@ void test_help_panel_hook() {
   // combined block: title rule first, topic content after it.
   CHECK(f.run("help chord"));
   CHECK(calls == 1 && panel.size() >= 2);
-  CHECK(panel[0] == "-- help --");
+  CHECK(panel[0] == "-- menu --");  // the panel is the contextual MENU now
   CHECK(panel[1] == "help: chord");
   // Lifecycle now lives under `panel ...`.
   CHECK(f.run("panel close help"));
@@ -557,16 +557,26 @@ void test_panel_commands() {
     return true;
   });
 
-  // Coexistence: help and piano stack in one combined block, help first.
+  // Coexistence: menu and piano stack in one combined block, menu first.
   CHECK(f.run("panel open piano"));
   CHECK(block_contains(panel, "-- piano --"));
   CHECK(f.run("help chord"));
-  CHECK(block_contains(panel, "-- help --") && block_contains(panel, "-- piano --"));
+  CHECK(block_contains(panel, "-- menu --") && block_contains(panel, "-- piano --"));
   const auto help_pos =
-      std::find(panel.begin(), panel.end(), std::string("-- help --")) - panel.begin();
+      std::find(panel.begin(), panel.end(), std::string("-- menu --")) - panel.begin();
   const auto piano_pos =
       std::find(panel.begin(), panel.end(), std::string("-- piano --")) - panel.begin();
   CHECK(help_pos < piano_pos);
+
+  // Rename + alias: `panel open menu` is canonical, `panel open help` still
+  // targets the same panel, and the title renders "-- menu --".
+  CHECK(f.run("panel close all"));
+  CHECK(f.run("panel open menu"));
+  CHECK(block_contains(panel, "-- menu --"));
+  CHECK(f.run("panel close all"));
+  CHECK(f.run("panel open help"));  // backward-compatible alias
+  CHECK(block_contains(panel, "-- menu --"));
+  CHECK(f.run("panel open piano"));  // restore the state the toggle test expects
 
   // toggle / close all.
   CHECK(f.run("panel toggle piano"));
@@ -776,6 +786,69 @@ void test_ctrl_p_play_stop() {
   CHECK(f.shell.handle_ui_key(kCtrlP));
   CHECK(f.shell.engine().transport().playing());
   CHECK(f.midi_count() == 0);
+}
+
+void test_style_chooser_wiring() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  constexpr std::uint8_t kCtrlChooser = 0x00;   // CTRL+SPACE
+  constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+backslash: apply now
+  constexpr std::uint8_t kEnter = 0x0D;
+
+  // CTRL+SPACE opens from REPL focus; a second press cancels.
+  CHECK(!f.shell.chooser_active());
+  CHECK(f.shell.handle_ui_key(kCtrlChooser));
+  CHECK(f.shell.chooser_active());
+  CHECK(f.shell.handle_ui_key(kCtrlChooser));
+  CHECK(!f.shell.chooser_active());
+
+  // It also opens from piano focus (global, like CTRL+P).
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key(kCtrlChooser));
+  CHECK(f.shell.chooser_active());
+
+  // A digit feeds the filter (asserted through the const chooser accessor).
+  CHECK(f.shell.handle_ui_key('0'));
+  CHECK(f.shell.chooser().has_value() && f.shell.chooser()->filter() == "0");
+
+  // The chooser render appears in the menu panel while active.
+  f.shell.refresh_panels();
+  CHECK(block_contains(panel, "-- menu"));
+  CHECK(block_contains(panel, "ENTER next-bar"));
+
+  // ENTER applies: the transport is stopped so the engine switches immediately;
+  // arranger.current() becomes the highlighted section and a section event flows.
+  const SectionType want = f.shell.chooser()->selected_section();
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key(kEnter));
+  CHECK(!f.shell.chooser_active());  // applying closes the chooser
+  CHECK(f.shell.engine().arranger().current() == want);
+  bool saw_section = false;
+  for (const OutEvent& e : f.events) {
+    saw_section = saw_section || e.kind == OutEvent::Kind::kSection;
+  }
+  CHECK(saw_section);
+
+  // ESC path: reopen, cancel — active goes false and no switch is issued.
+  CHECK(f.shell.handle_ui_key(kCtrlChooser));
+  CHECK(f.shell.chooser_active());
+  f.events.clear();
+  f.shell.chooser_cancel();
+  CHECK(!f.shell.chooser_active());
+  CHECK(f.events.empty());
+
+  // Arrow nav + CTRL+\ (apply now): move the section highlight, then apply.
+  CHECK(f.shell.handle_ui_key(kCtrlChooser));
+  CHECK(f.shell.handle_ui_key('0'));
+  f.shell.chooser_nav_section(+1);
+  const SectionType want2 = f.shell.chooser()->selected_section();
+  CHECK(f.shell.handle_ui_key(kCtrlApplyNow));
+  CHECK(!f.shell.chooser_active());
+  CHECK(f.shell.engine().arranger().current() == want2);
 }
 
 void test_theme_switch_restyles_titles() {
@@ -1137,9 +1210,11 @@ void test_panel_manager_state() {
   pm.close(PanelId::kPiano);
   CHECK(pm.focus_kind() == PanelFocus::kRepl);
 
-  // Name round-trip.
+  // Name round-trip. "menu" is canonical; "help" stays a backward-compat alias.
   PanelId id{};
   CHECK(parse_panel_name("filter", id) && id == PanelId::kFilter);
+  CHECK(parse_panel_name("menu", id) && id == PanelId::kHelp);
+  CHECK(parse_panel_name("help", id) && id == PanelId::kHelp);
   CHECK(!parse_panel_name("bogus", id));
 }
 
@@ -1231,6 +1306,7 @@ int main() {
   test_theme_colors_layout_commands();
   test_contextual_panel();
   test_ctrl_p_play_stop();
+  test_style_chooser_wiring();
   test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();

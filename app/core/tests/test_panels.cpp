@@ -381,7 +381,7 @@ void test_side_by_side_layout() {
 
   // Too narrow: falls back to the vertical stack (titles on their own lines).
   const std::vector<std::string> narrow = pm.combined_lines(40);
-  CHECK(narrow[0] == "-- help --");
+  CHECK(narrow[0] == "-- menu --");  // the first panel is the contextual MENU
 
   pm.toggle_layout();  // back to vertical
   CHECK(pm.layout() == PanelLayout::kVertical);
