@@ -83,6 +83,7 @@ class Console {
   int m_cols = 80;
   std::string m_status;
   std::vector<std::string> m_panel;
+  int m_panel_rows = 0;  // panel height last drawn — clears ghosts when it shrinks
   std::function<void()> m_resize_hook;
 };
 

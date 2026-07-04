@@ -20,9 +20,13 @@ constexpr unsigned kMidiChannelCount = 16;
 
 }  // namespace piano_keys
 
-// A key is "active" when a note it maps to is currently held; the marker set is
-// indexed by MIDI note number so the check is a flat lookup.
-using ActiveNoteMask = std::array<bool, piano_keys::kMidiNoteCount>;
+// Who is sounding a given MIDI note right now: nothing, the user's piano keys,
+// or the arranger/sequencer (external). Distinguished so the keyboard can show
+// both but tell them apart (by colour) — see key_glyph.
+enum class ActiveSource : std::uint8_t { kNone, kPiano, kOther };
+
+// Indexed by MIDI note number so the check is a flat lookup.
+using ActiveNoteMask = std::array<ActiveSource, piano_keys::kMidiNoteCount>;
 
 // The named constants are the source of truth for the struct defaults.
 static_assert(PianoViewState{}.base_octave == piano_keys::kDefaultOctave);
@@ -199,16 +203,24 @@ std::size_t max_label_width(const std::array<std::string, kWhiteKeyCount>& white
   return width;
 }
 
-// Wraps a computer-key glyph as "*A*" when its note is currently held, then
-// styles the marked glyph with kPianoActiveKey. With colours off the style is a
-// no-op, so the result is the plain "*A*".
-std::string key_glyph(char key, bool active, const UiStyle& style) {
-  std::string glyph(1, key);
-  if (active) {
-    glyph = style.apply(UiRole::kPianoActiveKey, "*" + glyph + "*");
+// Renders a computer-key glyph, marking it when its note is sounding. With
+// colours ON the single char is styled in place (piano = kPianoActiveKey,
+// arranger = kMidiNoteOn) — SAME width, so the grid never shifts or truncates.
+// With colours OFF there is no colour to tell sources apart, so only the user's
+// own keys get the width-changing "*A*" marker; external notes stay plain.
+std::string key_glyph(char key, ActiveSource source, const UiStyle& style) {
+  const std::string glyph(1, key);
+  if (source == ActiveSource::kNone) {
+    return glyph;
   }
 
-  return glyph;
+  const UiRole role =
+      source == ActiveSource::kPiano ? UiRole::kPianoActiveKey : UiRole::kMidiNoteOn;
+  if (style.colors_enabled()) {
+    return style.apply(role, glyph);  // one visible column, colour-marked
+  }
+
+  return source == ActiveSource::kPiano ? "*" + glyph + "*" : glyph;
 }
 
 // Builds the four keyboard rows (black keys, black labels, white keys, white
@@ -297,9 +309,16 @@ std::vector<std::string> render_minimal_keys(const PianoViewState& state, int te
       entry += '/';
       entry += key_label(state, midi, mode);
       std::size_t entry_visible = entry.size();
-      if (active[midi]) {
-        entry = style.apply(UiRole::kPianoActiveKey, "*" + entry + "*");
-        entry_visible += 2;  // the surrounding "*...*" markers
+      const ActiveSource src = active[midi];
+      if (src != ActiveSource::kNone) {
+        const UiRole role =
+            src == ActiveSource::kPiano ? UiRole::kPianoActiveKey : UiRole::kMidiNoteOn;
+        if (style.colors_enabled()) {
+          entry = style.apply(role, entry);  // same visible width
+        } else if (src == ActiveSource::kPiano) {
+          entry = "*" + entry + "*";
+          entry_visible += 2;  // the surrounding "*...*" markers
+        }
       }
 
       const bool row_has_entries = row_visible > kIndent;
@@ -351,15 +370,23 @@ std::string compact_note_name(std::uint8_t midi_note, NoteNaming naming) {
       midi_note, NoteNameOptions{.naming = naming, .prefer_flats = false, .include_octave = true});
 }
 
-// Which computer-keyboard keys are lit right now, indexed by MIDI note.
-ActiveNoteMask active_note_mask(const MidiMonitor& monitor) {
+// Which MIDI notes are sounding right now and by whom, indexed by note. Piano
+// keys (source_key != 0) always light; the arranger/sequencer output
+// (source_key == 0) lights only when `show_external` is on, so pressing play
+// does not make the whole chord look pressed unless the user asked to see it.
+ActiveNoteMask active_note_mask(const MidiMonitor& monitor, bool show_external) {
   ActiveNoteMask mask{};
 
   const ActiveNoteTracker& tracker = monitor.active_notes();
   for (std::size_t i = 0; i < tracker.size(); ++i) {
-    const std::uint8_t note = tracker.notes()[i].note;
-    if (note < piano_keys::kMidiNoteCount) {
-      mask[note] = true;
+    const ActiveNote& n = tracker.notes()[i];
+    if (n.note >= piano_keys::kMidiNoteCount) {
+      continue;
+    }
+    if (n.source_key != 0) {
+      mask[n.note] = ActiveSource::kPiano;
+    } else if (show_external && mask[n.note] == ActiveSource::kNone) {
+      mask[n.note] = ActiveSource::kOther;
     }
   }
 
@@ -451,7 +478,7 @@ std::vector<std::string> render_keyboard(const PianoViewState& state, int termin
     lines.push_back(format_event_line(state, recent[i], options, style));
   }
 
-  const ActiveNoteMask active = active_note_mask(monitor);
+  const ActiveNoteMask active = active_note_mask(monitor, options.show_external_keys);
 
   std::vector<std::string> keys;
   if (terminal_columns >= piano_layout::kWideMinColumns) {

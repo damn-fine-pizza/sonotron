@@ -192,12 +192,28 @@ void Console::apply_layout() {
     return;
   }
   char buf[32];
-  // Scroll region = log pane only.
-  std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", log_bottom());
-  write_raw(buf);
-  // Panel rows (each cleared, truncated to the pane width).
   const int bottom = log_bottom();
   const int panel = m_rows - 2 - bottom;
+
+  // A shrinking panel (closing a panel, or a vertical->side layout switch)
+  // vacates rows at the top of its old area: they rejoin the log region but
+  // still hold stale panel bytes. Clear them explicitly, or they ghost — two
+  // help panels, `panel close` residue. The freed rows carry no log content
+  // yet (they were the panel a moment ago), so clearing is safe.
+  std::string vacate;
+  for (int row = m_rows - 1 - m_panel_rows; row <= m_rows - 2 - panel; ++row) {
+    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", row);
+    vacate += buf;
+  }
+  if (!vacate.empty()) {
+    write_raw(vacate);
+  }
+  m_panel_rows = panel;
+
+  // Scroll region = log pane only.
+  std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", bottom);
+  write_raw(buf);
+  // Panel rows (each cleared, truncated to the pane width).
   std::string out;
   for (int i = 0; i < panel; ++i) {
     std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", bottom + 1 + i);

@@ -74,7 +74,8 @@ struct MidiViewOptions {
   bool show_velocity = true;
   bool show_channel = true;
   bool show_port = true;
-  bool show_drum_names = true;  // GM names on the percussion channel (H3)
+  bool show_drum_names = true;     // GM names on the percussion channel (H3)
+  bool show_external_keys = true;  // light arranger/seq notes on the keyboard too
 };
 
 struct ActiveNote {
