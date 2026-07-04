@@ -198,6 +198,31 @@ void PanelManager::focus_next() {
   m_focused = vis.front();
 }
 
+void PanelManager::focus_prev() {
+  const std::vector<PanelId> vis = visible_order();
+  if (vis.empty()) {
+    focus_repl();
+    return;
+  }
+  // Reverse cycle: repl -> last visible -> ... -> first visible -> repl.
+  if (m_focus != PanelFocus::kPanel) {
+    m_focus = PanelFocus::kPanel;
+    m_focused = vis.back();
+    return;
+  }
+  for (std::size_t i = 0; i < vis.size(); ++i) {
+    if (vis[i] == m_focused) {
+      if (i > 0) {
+        m_focused = vis[i - 1];
+      } else {
+        focus_repl();
+      }
+      return;
+    }
+  }
+  m_focused = vis.back();
+}
+
 bool PanelManager::focus_number(int n) {
   const std::vector<PanelId> vis = visible_order();
   if (n < 1 || n > static_cast<int>(vis.size())) {

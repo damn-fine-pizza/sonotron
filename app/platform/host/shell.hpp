@@ -45,7 +45,7 @@ enum class PianoKeyMode { kMomentary, kToggle };
 // Which interactive mode the live TUI is in. Drives the contextual help
 // panel: its content follows the mode (commands in the REPL, piano keys in
 // play mode) unless the user pinned an explicit `help <topic>`.
-enum class UiMode { kRepl, kPiano };
+enum class UiMode { kRepl, kPiano, kStyles };
 
 class Shell {
  public:
@@ -106,6 +106,9 @@ class Shell {
   // never a musical note; plain musical bytes always take the toggle path so
   // the piano is never dead on a terminal without key-release events.
   bool handle_ui_key(std::uint8_t byte);
+
+  // SHIFT+TAB from the live loop: step the focus cycle backwards.
+  void focus_prev();
 
   // True key press/release from the kitty keyboard protocol (H3): drives
   // momentary polyphony when the piano is focused. `pressed` = true is a

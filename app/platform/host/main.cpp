@@ -253,6 +253,7 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     shell.exec_line("panel open styles", ignored);
     shell.exec_line("panel open chords", ignored);
     shell.exec_line("panel open events", ignored);
+    shell.exec_line("panel focus piano", ignored);  // start in play mode
 
     const char* home = std::getenv("HOME");
     if (home != nullptr && *home != '\0') {
@@ -416,6 +417,8 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   auto finish_csi = [&](std::uint8_t final_byte) {
     if (final_byte == 'u') {
       dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
+    } else if (final_byte == 'Z' && esc.size() == kBareCsiSize) {
+      shell.focus_prev();  // SHIFT+TAB (CSI Z): reverse focus cycle
     } else if (shell.styles_focused() && is_bare_arrow(final_byte)) {
       // up/down move the style highlight; left/right the section highlight.
       switch (final_byte) {

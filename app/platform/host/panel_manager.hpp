@@ -89,6 +89,7 @@ class PanelManager {
   void focus_repl();
   // Cycles repl -> first visible panel -> ... -> repl (bottom-to-top order).
   void focus_next();
+  void focus_prev();  // reverse of focus_next (SHIFT+TAB)
   // Focuses the visible panel at 1-based grid position `n` (TAB+digit). Returns
   // false when no visible panel holds that number.
   bool focus_number(int n);

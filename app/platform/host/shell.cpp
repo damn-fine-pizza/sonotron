@@ -558,10 +558,20 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "  SPACE key mode: momentary (hold; needs kitty terminal) <-> toggle (any)",
         "  toggle: press = note-on, same key again = note-off",
         "  play keys: TAB exit | N names | V view | C clear | Z layout",
-        "             . octave- | / octave+",
+        "             . octave- | / octave+ | [ ] transpose",
         "  CTRL+P play/stop (global) | ` style/section chooser | CTRL+C quit",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
+    };
+  }
+  if (topic == "styles") {
+    return {
+        "help: styles  (` focuses this panel; TAB cycles here too)",
+        "  up/down: style       left/right: section (variation)",
+        "  - / = : prev / next variation        _ / + : prev / next style",
+        "  digits: filter styles by number      piano keys: set the tonality",
+        "  ENTER: apply next bar                CTRL+\\ : apply now",
+        "  steps are debounced ~0.5s (skip fast); the selection stays put",
     };
   }
   if (topic == "notes") {
@@ -653,9 +663,19 @@ void Shell::refresh_styles_content() {
   m_panels.set_content(PanelId::kStyles, std::move(lines));
 }
 
+void Shell::focus_prev() {
+  m_panels.focus_prev();
+  (void)push_panels();
+}
+
 UiMode Shell::current_ui_mode() const {
-  if (m_panels.focus_kind() == PanelFocus::kPanel && m_panels.focused_panel() == PanelId::kPiano) {
-    return UiMode::kPiano;
+  if (m_panels.focus_kind() == PanelFocus::kPanel) {
+    if (m_panels.focused_panel() == PanelId::kPiano) {
+      return UiMode::kPiano;
+    }
+    if (m_panels.focused_panel() == PanelId::kStyles) {
+      return UiMode::kStyles;
+    }
   }
   return UiMode::kRepl;
 }
@@ -663,8 +683,10 @@ UiMode Shell::current_ui_mode() const {
 std::vector<std::string> Shell::contextual_help_lines() const {
   // The help panel IS the contextual menu: it teaches the keys of the mode
   // you're in, and always the fundamental navigation shortcuts.
-  std::vector<std::string> lines =
-      current_ui_mode() == UiMode::kPiano ? build_help("piano") : build_help("");
+  const UiMode mode = current_ui_mode();
+  std::vector<std::string> lines = mode == UiMode::kPiano    ? build_help("piano")
+                                   : mode == UiMode::kStyles ? build_help("styles")
+                                                             : build_help("");
   lines.push_back("nav: TAB focus | CTRL+P play/stop | ` style/section | CTRL+C quit");
   return lines;
 }
