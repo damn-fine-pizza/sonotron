@@ -7,8 +7,10 @@
 #include "arrangrr/abi.hpp"
 #include "midi_monitor.hpp"
 #include "note_names.hpp"
+#include "panel_manager.hpp"
 #include "piano_view.hpp"
 #include "test.hpp"
+#include "ui_style.hpp"
 
 namespace {
 
@@ -246,6 +248,134 @@ void test_filter_passes() {
   CHECK(!filter_passes(off_kind, on));
   CHECK(filter_passes(off_kind, off));
   CHECK(filter_passes(off_kind, on_vel0));
+
+  // H3: drums (GM ch10 = 0-based 9), melodic, and a velocity floor.
+  MidiLogEvent drum{};
+  drum.msg = MidiMessage::note_on(kGmDrumChannelZeroBased, 36, 100);
+  MidiLogEvent soft{};
+  soft.msg = MidiMessage::note_on(0, 60, 40);
+
+  MidiEventFilter drums_only{};
+  drums_only.instrument = InstrumentFilter::kDrums;
+  CHECK(filter_passes(drums_only, drum));
+  CHECK(!filter_passes(drums_only, on));  // melodic channel excluded
+
+  MidiEventFilter melodic_only{};
+  melodic_only.instrument = InstrumentFilter::kMelodic;
+  CHECK(filter_passes(melodic_only, on));
+  CHECK(!filter_passes(melodic_only, drum));
+
+  MidiEventFilter vel80{};
+  vel80.velocity_min = std::uint8_t{80};
+  CHECK(filter_passes(vel80, on));     // vel 100 >= 80
+  CHECK(!filter_passes(vel80, soft));  // vel 40 hidden
+  CHECK(filter_passes(vel80, off));    // the floor never hides note-offs
+}
+
+void test_gm_drum_names() {
+  CHECK(std::string(gm_drum_name(36)) == "Kick");
+  CHECK(std::string(gm_drum_name(38)) == "Snare");
+  CHECK(std::string(gm_drum_name(42)) == "Closed HH");
+  CHECK(gm_drum_name(34) == nullptr);  // below the GM range
+  CHECK(gm_drum_name(60) == nullptr);  // in range but no conventional name
+  CHECK(gm_drum_name(200) == nullptr);
+}
+
+void test_ui_style() {
+  // Default construction: no TTY, so colors are OFF and every role returns the
+  // text verbatim (no escape sequences leak into scripts/pipes).
+  UiStyle off;
+  CHECK(!off.colors_enabled());
+  for (std::size_t i = 0; i < kUiRoleCount; ++i) {
+    CHECK(off.apply(static_cast<UiRole>(i), "x") == "x");
+  }
+
+  // Mode resolution: kAuto follows the TTY probe; kOn/kOff override it.
+  UiStyle s;
+  s.set_terminal_is_tty(true);
+  CHECK(s.colors_enabled());  // auto + tty
+  s.set_color_mode(ColorMode::kOff);
+  CHECK(!s.colors_enabled());
+  s.set_color_mode(ColorMode::kOn);
+  UiStyle no_tty;
+  no_tty.set_color_mode(ColorMode::kOn);
+  CHECK(no_tty.colors_enabled());  // kOn overrides the missing TTY
+
+  // With colors on, apply wraps in SGR and always closes with a reset.
+  const std::string styled = s.apply(UiRole::kPianoActiveKey, "A");
+  CHECK(styled.find(ansi::kEscape) != std::string::npos);
+  CHECK(styled.find("A") != std::string::npos);
+  CHECK(styled.size() > 1 && styled.substr(styled.size() - ansi::kReset.size()) == ansi::kReset);
+
+  // mono theme uses attributes only — never a colour code (30..47).
+  CHECK(s.set_theme("mono"));
+  const std::string mono_drum = s.apply(UiRole::kMidiDrum, "Kick");
+  CHECK(mono_drum.find("[3") == std::string::npos);  // no 3x foreground
+  CHECK(mono_drum.find("[4") == std::string::npos);  // no 4x background
+
+  // Theme catalogue + rejection of an unknown name (state unchanged).
+  const std::vector<std::string> names = UiStyle::theme_names();
+  for (const char* want : {"default", "mono", "high-contrast", "dark", "light", "matrix"}) {
+    bool found = false;
+    for (const std::string& n : names) {
+      found = found || n == want;
+    }
+    CHECK(found);
+  }
+  CHECK(!s.set_theme("nonexistent"));
+  CHECK(s.theme_name() == "mono");  // unchanged after a failed set
+
+  // Unicode resolution mirrors colour resolution.
+  UiStyle u;
+  u.set_terminal_utf8(true);
+  CHECK(u.unicode_enabled());  // auto + utf8
+  u.set_unicode_mode(UnicodeMode::kOff);
+  CHECK(!u.unicode_enabled());
+}
+
+void test_ansi_visible_helpers() {
+  UiStyle s;
+  s.set_terminal_is_tty(true);
+  s.set_color_mode(ColorMode::kOn);
+  const std::string colored = s.apply(UiRole::kError, "abc");
+
+  // Visible width ignores the SGR bytes.
+  CHECK(ansi::visible_length("abc") == 3);
+  CHECK(ansi::visible_length(colored) == 3);
+
+  // Truncation counts visible columns and keeps styling closed.
+  CHECK(ansi::visible_truncate("abcdef", 3) == "abc");
+  const std::string cut = ansi::visible_truncate(colored, 2);
+  CHECK(ansi::visible_length(cut) == 2);
+  CHECK(cut.substr(cut.size() - ansi::kReset.size()) == ansi::kReset);
+
+  // Padding measures visible columns, not raw bytes.
+  CHECK(ansi::visible_pad("ab", 5) == "ab   ");
+  CHECK(ansi::visible_length(ansi::visible_pad(colored, 6)) == 6);
+}
+
+void test_side_by_side_layout() {
+  PanelManager pm;
+  pm.set_content(PanelId::kHelp, {"h1", "h2"});
+  pm.set_content(PanelId::kPiano, {"p1", "p2"});
+  pm.open(PanelId::kHelp);
+  pm.open(PanelId::kPiano);
+  pm.set_layout(PanelLayout::kSideBySide);
+
+  // Wide enough: two columns joined by the " | " gutter.
+  const std::vector<std::string> wide = pm.combined_lines(120);
+  bool has_gutter = false;
+  for (const std::string& line : wide) {
+    has_gutter = has_gutter || line.find(" | ") != std::string::npos;
+  }
+  CHECK(has_gutter);
+
+  // Too narrow: falls back to the vertical stack (titles on their own lines).
+  const std::vector<std::string> narrow = pm.combined_lines(40);
+  CHECK(narrow[0] == "-- help --");
+
+  pm.toggle_layout();  // back to vertical
+  CHECK(pm.layout() == PanelLayout::kVertical);
 }
 
 void test_active_note_tracker() {
@@ -461,6 +591,10 @@ int main() {
   test_lines_never_exceed_width();
   test_format_duration_ticks();
   test_filter_passes();
+  test_gm_drum_names();
+  test_ui_style();
+  test_ansi_visible_helpers();
+  test_side_by_side_layout();
   test_active_note_tracker();
   test_visual_event_buffer();
   test_midi_monitor_observe();

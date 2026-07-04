@@ -676,10 +676,85 @@ void test_filter_view_commands() {
   CHECK(f.run("view show-octaves boundary"));
   CHECK(f.run("view show-octaves all"));
   CHECK(f.run("view show-octaves none"));
+  CHECK(f.run("view show drum-names off"));
   CHECK(f.run("view clear"));
   CHECK(!f.run("view show nonsense on"));
   CHECK(!f.run("view show velocity maybe"));
   CHECK(!f.run("view"));
+
+  // H3 filters: drums / melodic / velocity floor.
+  CHECK(f.run("filter drums"));
+  CHECK(f.run("filter melodic"));
+  CHECK(f.run("filter velocity >= 80"));
+  CHECK(!f.run("filter velocity >= 999"));
+  CHECK(!f.run("filter velocity 80"));  // missing >=
+  CHECK(f.run("filter clear"));
+  CHECK(f.midi_count() == 0);  // filters never touch the engine
+}
+
+void test_theme_colors_layout_commands() {
+  ShellFixture f;
+
+  // theme: list / current / set, with a clear rejection of an unknown name.
+  CHECK(f.run("theme list"));
+  CHECK(f.run("theme current"));
+  CHECK(f.run("theme set mono"));
+  CHECK(f.shell.ui_style().theme_name() == "mono");
+  CHECK(f.run("theme set dark"));
+  CHECK(f.run("theme set high-contrast"));
+  CHECK(!f.run("theme set nonexistent"));
+  CHECK(f.shell.ui_style().theme_name() == "high-contrast");  // unchanged
+  CHECK(!f.run("theme bogus"));
+  CHECK(!f.run("theme"));
+
+  // colors: on / off / toggle.
+  CHECK(f.run("colors on"));
+  CHECK(f.shell.ui_style().colors_enabled());
+  CHECK(f.run("colors off"));
+  CHECK(!f.shell.ui_style().colors_enabled());
+  CHECK(f.run("colors toggle"));
+  CHECK(f.shell.ui_style().colors_enabled());
+  CHECK(!f.run("colors maybe"));
+  CHECK(!f.run("colors"));
+
+  // panel layout: vertical / side / toggle.
+  CHECK(f.run("panel layout side"));
+  CHECK(f.shell.panels().layout() == PanelLayout::kSideBySide);
+  CHECK(f.run("panel layout vertical"));
+  CHECK(f.shell.panels().layout() == PanelLayout::kVertical);
+  CHECK(f.run("panel layout toggle"));
+  CHECK(f.shell.panels().layout() == PanelLayout::kSideBySide);
+  CHECK(!f.run("panel layout diagonal"));
+  CHECK(!f.run("panel layout"));
+
+  CHECK(f.midi_count() == 0);
+}
+
+void test_theme_switch_restyles_titles() {
+  // With colors on, a coloured theme wraps panel titles in SGR; with colors
+  // off the same titles are plain — proving the switch is coherent.
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("colors on"));
+  CHECK(f.run("theme set default"));
+  CHECK(f.run("panel open piano"));
+
+  bool any_escape = false;
+  for (const std::string& line : panel) {
+    any_escape = any_escape || line.find('\x1b') != std::string::npos;
+  }
+  CHECK(any_escape);
+
+  CHECK(f.run("colors off"));
+  bool still_escape = false;
+  for (const std::string& line : panel) {
+    still_escape = still_escape || line.find('\x1b') != std::string::npos;
+  }
+  CHECK(!still_escape);  // colors off -> no escapes anywhere
 }
 
 // A fixture with the default thru wiring, so piano input becomes visible
@@ -1048,6 +1123,8 @@ int main() {
   test_piano_commands();
   test_notes_names_commands();
   test_filter_view_commands();
+  test_theme_colors_layout_commands();
+  test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();
   test_kitty_key_parser();

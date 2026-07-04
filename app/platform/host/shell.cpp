@@ -539,6 +539,24 @@ bool Shell::cmd_panel(const std::vector<std::string>& t, std::string& error) {
   }
   const std::string& sub = t[1];
 
+  if (sub == "layout") {
+    if (t.size() < 3) {
+      error = "panel layout vertical|side|toggle";
+      return false;
+    }
+    if (t[2] == "vertical") {
+      m_panels.set_layout(PanelLayout::kVertical);
+    } else if (t[2] == "side") {
+      m_panels.set_layout(PanelLayout::kSideBySide);
+    } else if (t[2] == "toggle") {
+      m_panels.toggle_layout();
+    } else {
+      error = "panel layout vertical|side|toggle";
+      return false;
+    }
+    (void)push_panels();
+    return true;
+  }
   if (sub == "list") {
     print_lines(m_panels.list_lines());
     return true;
@@ -661,8 +679,12 @@ void Shell::toggle_piano_key(char key, int semitone_from_base) {
     return;
   }
 
-  if (!m_piano_held.note_on(
-          {kPianoInputPort, m_piano.channel, midi_note, m_piano.velocity, key, 0})) {
+  if (!m_piano_held.note_on({.port = kPianoInputPort,
+                             .channel = m_piano.channel,
+                             .note = midi_note,
+                             .velocity = m_piano.velocity,
+                             .source_key = key,
+                             .start_tick = 0})) {
     print_line("piano: too many held notes");
     return;
   }
@@ -684,8 +706,12 @@ void Shell::piano_momentary_on(char key, int semitone_from_base) {
     return;
   }
 
-  if (!m_piano_held.note_on(
-          {kPianoInputPort, m_piano.channel, midi_note, m_piano.velocity, key, 0})) {
+  if (!m_piano_held.note_on({.port = kPianoInputPort,
+                             .channel = m_piano.channel,
+                             .note = midi_note,
+                             .velocity = m_piano.velocity,
+                             .source_key = key,
+                             .start_tick = 0})) {
     print_line("piano: too many held notes");
     return;
   }
@@ -896,6 +922,32 @@ bool Shell::cmd_filter(const std::vector<std::string>& t, std::string& error) {
     return true;
   }
 
+  if (t[1] == "drums") {
+    m_filter.instrument = InstrumentFilter::kDrums;
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "melodic") {
+    m_filter.instrument = InstrumentFilter::kMelodic;
+    (void)push_panels();
+    return true;
+  }
+
+  if (t[1] == "velocity") {
+    // filter velocity >= N  (only note-ons below N are hidden)
+    int vel = 0;
+    const bool ok = t.size() >= 4 && t[2] == ">=" && parse_int(t[3], vel) &&
+                    vel >= kMidiVelocityMin && vel <= kMidiVelocityMax;
+    if (!ok) {
+      error = "filter velocity >= <1..127>";
+      return false;
+    }
+    m_filter.velocity_min = static_cast<std::uint8_t>(vel);
+    (void)push_panels();
+    return true;
+  }
+
   error = kUsage;
   return false;
 }
@@ -1086,6 +1138,10 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     }
     case 'C':
       m_monitor.clear();
+      (void)push_panels();
+      return true;
+    case 'Z':
+      m_panels.toggle_layout();
       (void)push_panels();
       return true;
     case '.': {
