@@ -493,7 +493,7 @@ int Shell::panel_columns() const {
 
 void Shell::refresh_piano_content() {
   m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, panel_columns(), m_monitor,
-                                                           m_filter, m_view_options));
+                                                           m_filter, m_view_options, m_style));
 }
 
 UiMode Shell::current_ui_mode() const {

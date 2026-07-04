@@ -134,28 +134,50 @@ std::string header_line(const PianoViewState& state) {
   return std::string(buf);
 }
 
-// A single output row that grows on demand; text is stamped at absolute
-// columns so the row composer never hand-concatenates spacing.
+// A single output row that grows on demand; tokens are stamped at absolute
+// VISIBLE columns so the composer never hand-concatenates spacing. Each cell
+// holds one visible column's bytes: a plain " " by default, or a whole token
+// (possibly SGR-wrapped) on the first column it occupies, with the remaining
+// columns it spans left empty. Positioning therefore uses ansi::visible_length,
+// never std::string::size(), so styled tokens never misalign their neighbours.
 struct TextRow {
-  std::string text;
+  std::vector<std::string> cells;
 
-  void put(std::size_t col, char ch) {
-    if (text.size() <= col) {
-      text.resize(col + 1, ' ');
-    }
-    text[col] = ch;
-  }
-
-  void put(std::size_t col, const std::string& s) {
-    for (std::size_t i = 0; i < s.size(); ++i) {
-      put(col + i, s[i]);
+  void ensure(std::size_t col) {
+    if (cells.size() <= col) {
+      cells.resize(col + 1, " ");
     }
   }
 
-  void put_centered(std::size_t center, const std::string& s) {
-    const std::size_t half = s.size() / 2;
+  // Place `token` (visible width `width`) starting at visible column `col`.
+  void put(std::size_t col, const std::string& token, std::size_t width) {
+    if (width == 0) {
+      return;
+    }
+    ensure(col + width - 1);
+    cells[col] = token;
+    for (std::size_t i = 1; i < width; ++i) {
+      cells[col + i].clear();  // spanned column: contributes no bytes
+    }
+  }
+
+  void put(std::size_t col, const std::string& token) {
+    put(col, token, ansi::visible_length(token));
+  }
+
+  void put_centered(std::size_t center, const std::string& token) {
+    const std::size_t width = ansi::visible_length(token);
+    const std::size_t half = width / 2;
     const std::size_t start = center >= half ? center - half : 0;
-    put(start, s);
+    put(start, token, width);
+  }
+
+  std::string str() const {
+    std::string out;
+    for (const std::string& cell : cells) {
+      out += cell;
+    }
+    return out;
   }
 };
 
@@ -177,11 +199,13 @@ std::size_t max_label_width(const std::array<std::string, kWhiteKeyCount>& white
   return width;
 }
 
-// Wraps a computer-key glyph as "*A*" when its note is currently held.
-std::string key_glyph(char key, bool active) {
+// Wraps a computer-key glyph as "*A*" when its note is currently held, then
+// styles the marked glyph with kPianoActiveKey. With colours off the style is a
+// no-op, so the result is the plain "*A*".
+std::string key_glyph(char key, bool active, const UiStyle& style) {
   std::string glyph(1, key);
   if (active) {
-    glyph = "*" + glyph + "*";
+    glyph = style.apply(UiRole::kPianoActiveKey, "*" + glyph + "*");
   }
 
   return glyph;
@@ -191,7 +215,7 @@ std::string key_glyph(char key, bool active) {
 // labels) for the wide/compact tiers. `gap` is the only tier-dependent input;
 // `active` marks which MIDI notes are currently held.
 std::vector<std::string> render_grid_keys(const PianoViewState& state, std::size_t gap,
-                                          const ActiveNoteMask& active) {
+                                          const ActiveNoteMask& active, const UiStyle& style) {
   std::array<std::string, kWhiteKeyCount> white_labels;
   std::array<std::string, kBlackKeyCount> black_labels;
   std::array<std::uint8_t, kWhiteKeyCount> white_midi;
@@ -219,7 +243,7 @@ std::vector<std::string> render_grid_keys(const PianoViewState& state, std::size
   TextRow white_labels_row;
   for (std::size_t i = 0; i < kWhiteKeyCount; ++i) {
     white_keys_row.put_centered(white_center[i],
-                                key_glyph(kWhiteKeys[i].key, active[white_midi[i]]));
+                                key_glyph(kWhiteKeys[i].key, active[white_midi[i]], style));
     white_labels_row.put_centered(white_center[i], white_labels[i]);
   }
 
@@ -240,20 +264,20 @@ std::vector<std::string> render_grid_keys(const PianoViewState& state, std::size
     }
 
     const std::size_t center = (white_center[right - 1] + white_center[right]) / 2;
-    black_keys_row.put_centered(center, key_glyph(kBlackKeys[b].key, active[black_midi[b]]));
+    black_keys_row.put_centered(center, key_glyph(kBlackKeys[b].key, active[black_midi[b]], style));
     black_labels_row.put_centered(center, black_labels[b]);
   }
 
   // A blank separator between the raised (black) group and the natural (white)
   // group reads as two physical key rows rather than one dense block.
-  return {black_keys_row.text, black_labels_row.text, "", white_keys_row.text,
-          white_labels_row.text};
+  return {black_keys_row.str(), black_labels_row.str(), "", white_keys_row.str(),
+          white_labels_row.str()};
 }
 
 // The narrow-but-usable fallback: keys grouped on labelled text lines. An
 // active entry is wrapped whole ("*A/C 4*") so the marker never splits a label.
 std::vector<std::string> render_minimal_keys(const PianoViewState& state, int terminal_columns,
-                                             const ActiveNoteMask& active) {
+                                             const ActiveNoteMask& active, const UiStyle& style) {
   // Entries are atomic ("W/C#4"): wrap onto a continuation row instead of
   // cutting a label mid-way when the terminal is narrow.
   const std::size_t width = static_cast<std::size_t>(terminal_columns);
@@ -263,26 +287,34 @@ std::vector<std::string> render_minimal_keys(const PianoViewState& state, int te
   auto group = [&](const char* title, KeyboardNoteLabelMode mode, auto& keys, auto count) {
     std::vector<std::string> rows{title};
     std::string row(kIndent, ' ');
+    // Track the row's visible width separately: `row` may carry SGR bytes once
+    // an active entry is styled, so size() no longer measures layout columns.
+    std::size_t row_visible = kIndent;
 
     for (std::size_t i = 0; i < count; ++i) {
       const std::uint8_t midi = midi_for(state, keys[i].semitone_from_base);
       std::string entry(1, keys[i].key);
       entry += '/';
       entry += key_label(state, midi, mode);
+      std::size_t entry_visible = entry.size();
       if (active[midi]) {
-        entry = "*" + entry + "*";
+        entry = style.apply(UiRole::kPianoActiveKey, "*" + entry + "*");
+        entry_visible += 2;  // the surrounding "*...*" markers
       }
 
-      const bool row_has_entries = row.size() > kIndent;
-      const std::size_t needed = row.size() + (row_has_entries ? kEntryGap : 0) + entry.size();
+      const bool row_has_entries = row_visible > kIndent;
+      const std::size_t needed = row_visible + (row_has_entries ? kEntryGap : 0) + entry_visible;
       if (row_has_entries && needed > width) {
         rows.push_back(row);
         row.assign(kIndent, ' ');
+        row_visible = kIndent;
       }
-      if (row.size() > kIndent) {
+      if (row_visible > kIndent) {
         row += std::string(kEntryGap, ' ');
+        row_visible += kEntryGap;
       }
       row += entry;
+      row_visible += entry_visible;
     }
 
     rows.push_back(row);
@@ -305,10 +337,11 @@ std::vector<std::string> render_minimal_keys(const PianoViewState& state, int te
 void truncate_lines(std::vector<std::string>& lines, int terminal_columns) {
   const std::size_t width = static_cast<std::size_t>(terminal_columns);
 
+  // Truncate by VISIBLE columns so styled lines keep their SGR runs intact and
+  // never get cut mid-escape. For plain lines this is byte-for-byte identical to
+  // a size()-based resize.
   for (std::string& line : lines) {
-    if (line.size() > width) {
-      line.resize(width);
-    }
+    line = ansi::visible_truncate(line, width);
   }
 }
 
@@ -343,8 +376,17 @@ std::string simple_header(const char* view_name, const PianoViewState& state) {
 
 // One line of the keyboard-view events strip. `source_key` 0 means external, so
 // we print the port/channel origin instead of a computer key.
+// A note event on the GM percussion channel reads as a drum; otherwise its
+// note-on/note-off state picks the role. `is_drum` short-circuits both.
+UiRole note_event_role(bool is_drum, bool active) {
+  if (is_drum) {
+    return UiRole::kMidiDrum;
+  }
+  return active ? UiRole::kMidiNoteOn : UiRole::kMidiNoteOff;
+}
+
 std::string format_event_line(const PianoViewState& state, const PianoVisualEvent& event,
-                              const MidiViewOptions& options) {
+                              const MidiViewOptions& options, const UiStyle& style) {
   std::string source;
   if (event.source_key != 0) {
     source = std::string(1, event.source_key);
@@ -392,12 +434,13 @@ std::string format_event_line(const PianoViewState& state, const PianoVisualEven
     line += tail;
   }
 
-  return line;
+  const bool is_drum = options.show_drum_names && event.channel == kGmDrumChannelZeroBased;
+  return style.apply(note_event_role(is_drum, event.active), line);
 }
 
 std::vector<std::string> render_keyboard(const PianoViewState& state, int terminal_columns,
-                                         const MidiMonitor& monitor,
-                                         const MidiViewOptions& options) {
+                                         const MidiMonitor& monitor, const MidiViewOptions& options,
+                                         const UiStyle& style) {
   std::vector<std::string> lines{header_line(state)};
 
   // Recent-events strip: the newest monitor_limits::kVisualEventRows, newest
@@ -405,18 +448,18 @@ std::vector<std::string> render_keyboard(const PianoViewState& state, int termin
   const std::vector<PianoVisualEvent> recent = monitor.visual_events().recent_events();
   const std::size_t shown = std::min(recent.size(), monitor_limits::kVisualEventRows);
   for (std::size_t i = recent.size() - shown; i < recent.size(); ++i) {
-    lines.push_back(format_event_line(state, recent[i], options));
+    lines.push_back(format_event_line(state, recent[i], options, style));
   }
 
   const ActiveNoteMask active = active_note_mask(monitor);
 
   std::vector<std::string> keys;
   if (terminal_columns >= piano_layout::kWideMinColumns) {
-    keys = render_grid_keys(state, piano_layout::kWideGap, active);
+    keys = render_grid_keys(state, piano_layout::kWideGap, active, style);
   } else if (terminal_columns >= piano_layout::kCompactMinColumns) {
-    keys = render_grid_keys(state, piano_layout::kCompactGap, active);
+    keys = render_grid_keys(state, piano_layout::kCompactGap, active, style);
   } else {
-    keys = render_minimal_keys(state, terminal_columns, active);
+    keys = render_minimal_keys(state, terminal_columns, active, style);
   }
 
   lines.insert(lines.end(), keys.begin(), keys.end());
@@ -425,7 +468,7 @@ std::vector<std::string> render_keyboard(const PianoViewState& state, int termin
 }
 
 std::vector<std::string> render_active_notes(const PianoViewState& state,
-                                             const MidiMonitor& monitor) {
+                                             const MidiMonitor& monitor, const UiStyle& style) {
   std::vector<std::string> lines{simple_header("active-notes", state)};
 
   const ActiveNoteTracker& tracker = monitor.active_notes();
@@ -454,7 +497,10 @@ std::vector<std::string> render_active_notes(const PianoViewState& state,
       line += ' ';
       line += compact_note_name(note, state.note_naming);
     }
-    lines.push_back(line);
+    // Held notes are, by definition, sounding: colour them note-on (or drum on
+    // the GM percussion channel).
+    const bool is_drum = channel == kGmDrumChannelZeroBased;
+    lines.push_back(style.apply(note_event_role(is_drum, /*active=*/true), line));
   }
 
   return lines;
@@ -472,8 +518,24 @@ const char* log_kind(const MidiMessage& msg) {
   return "other   ";
 }
 
+// The styling role for a logged message: drums on ch10, then note-on/note-off;
+// anything that is not a note stays neutral (kNormal is attribute-free).
+UiRole log_role(const MidiMessage& msg, const MidiViewOptions& options) {
+  const bool is_note_on = msg.type() == midi::kNoteOn && msg.d2 > 0;
+  const bool is_note_off =
+      msg.type() == midi::kNoteOff || (msg.type() == midi::kNoteOn && msg.d2 == 0);
+  if (!is_note_on && !is_note_off) {
+    return UiRole::kNormal;
+  }
+  if (options.show_drum_names && midi::is_channel_voice(msg.status) &&
+      msg.channel() == kGmDrumChannelZeroBased) {
+    return UiRole::kMidiDrum;
+  }
+  return is_note_on ? UiRole::kMidiNoteOn : UiRole::kMidiNoteOff;
+}
+
 std::string format_log_line(const PianoViewState& state, const MidiLogEvent& event, bool show_index,
-                            const MidiViewOptions& options) {
+                            const MidiViewOptions& options, const UiStyle& style) {
   std::string line = "@" + std::to_string(event.tick);
   if (show_index) {
     line += "#" + std::to_string(event.same_tick_index);
@@ -500,12 +562,12 @@ std::string format_log_line(const PianoViewState& state, const MidiLogEvent& eve
     line += "  vel " + std::to_string(static_cast<unsigned>(event.msg.d2));
   }
 
-  return line;
+  return style.apply(log_role(event.msg, options), line);
 }
 
 std::vector<std::string> render_event_log(const PianoViewState& state, const MidiMonitor& monitor,
                                           const MidiEventFilter& filter,
-                                          const MidiViewOptions& options) {
+                                          const MidiViewOptions& options, const UiStyle& style) {
   std::vector<std::string> lines{simple_header("event-log", state)};
 
   const std::vector<MidiLogEvent> events = monitor.log_events(filter);
@@ -523,7 +585,7 @@ std::vector<std::string> render_event_log(const PianoViewState& state, const Mid
       }
     }
 
-    lines.push_back(format_log_line(state, event, share, options));
+    lines.push_back(format_log_line(state, event, share, options, style));
   }
 
   return lines;
@@ -555,7 +617,7 @@ std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
                                             const MidiMonitor& monitor,
                                             const MidiEventFilter& filter,
-                                            const MidiViewOptions& options) {
+                                            const MidiViewOptions& options, const UiStyle& style) {
   if (terminal_columns < piano_layout::kMinimalMinColumns) {
     return {kTooNarrowMessage};
   }
@@ -563,13 +625,13 @@ std::vector<std::string> render_piano_panel(const PianoViewState& state, int ter
   std::vector<std::string> lines;
   switch (state.view) {
     case PianoView::kKeyboard:
-      lines = render_keyboard(state, terminal_columns, monitor, options);
+      lines = render_keyboard(state, terminal_columns, monitor, options, style);
       break;
     case PianoView::kActiveNotes:
-      lines = render_active_notes(state, monitor);
+      lines = render_active_notes(state, monitor, style);
       break;
     case PianoView::kEventLog:
-      lines = render_event_log(state, monitor, filter, options);
+      lines = render_event_log(state, monitor, filter, options, style);
       break;
   }
 
@@ -581,12 +643,14 @@ std::vector<std::string> render_piano_panel(const PianoViewState& state, int ter
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns) {
   // Host is single-threaded (D-host): a function-local static const empty
   // monitor is a cheap, allocation-free stand-in for callers that do not
-  // observe the output stream.
+  // observe the output stream. A default UiStyle keeps colours OFF, so this
+  // overload's output is byte-identical to the pre-styling renderer.
   static const MidiMonitor kEmpty;
   static const MidiEventFilter kNoFilter;
   static const MidiViewOptions kDefaultOptions;
+  static const UiStyle kNoColors;
 
-  return render_piano_panel(state, terminal_columns, kEmpty, kNoFilter, kDefaultOptions);
+  return render_piano_panel(state, terminal_columns, kEmpty, kNoFilter, kDefaultOptions, kNoColors);
 }
 
 }  // namespace arrangrr::host

@@ -7,6 +7,7 @@
 
 #include "midi_monitor.hpp"
 #include "note_names.hpp"
+#include "ui_style.hpp"
 
 // Pure ASCII piano renderer, host side only: NO ANSI, NO terminal access, NO
 // I/O. render_piano_panel() turns a view state and a column budget into a set
@@ -57,12 +58,14 @@ std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming
 // events) — kept for callers that do not observe the output stream.
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns);
 
-// Monitor-aware rendering (H2): the keyboard marks active keys and shows a
+// Monitor-aware rendering (H2/H3): the keyboard marks active keys and shows a
 // recent-events strip, and the active-notes / event-log views draw from the
-// monitor's models and the caller's filter/display options.
+// monitor's models and the caller's filter/display options. `style` applies the
+// semantic UiRoles (active keys, note-on/off, drums); with colours disabled the
+// output is byte-identical to plain rendering.
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
                                             const MidiMonitor& monitor,
                                             const MidiEventFilter& filter,
-                                            const MidiViewOptions& options);
+                                            const MidiViewOptions& options, const UiStyle& style);
 
 }  // namespace arrangrr::host

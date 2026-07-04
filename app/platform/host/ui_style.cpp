@@ -97,20 +97,20 @@ constexpr std::int8_t kCyan = 36;
 constexpr UiTheme kDefaultTheme = {
     .name = "default",
     .roles = {{
-        {},                                     // kNormal
-        {.dim = true},                          // kMuted
-        {.bold = true},                         // kPanelTitle
-        {.reverse = true},                      // kPanelTitleFocused
-        {.reverse = true},                      // kStatusBar
-        {.foreground = kCyan},                  // kInputPrompt
-        {.bold = true, .foreground = kCyan},    // kHelpTopic
-        {.bold = true, .reverse = true},        // kPianoActiveKey
-        {.foreground = kGreen},                 // kMidiNoteOn
-        {.dim = true},                          // kMidiNoteOff
-        {.foreground = kYellow},                // kMidiDrum
-        {.bold = true, .foreground = kYellow},  // kWarning
-        {.bold = true, .foreground = kRed},     // kError
-        {.bold = true, .foreground = kGreen},   // kSuccess
+        {},                                                    // kNormal
+        {.dim = true},                                         // kMuted
+        {.bold = true, .foreground = kCyan},                   // kPanelTitle
+        {.bold = true, .reverse = true, .foreground = kCyan},  // kPanelTitleFocused
+        {.reverse = true},                                     // kStatusBar
+        {.foreground = kCyan},                                 // kInputPrompt
+        {.bold = true, .foreground = kCyan},                   // kHelpTopic
+        {.bold = true, .reverse = true},                       // kPianoActiveKey
+        {.foreground = kGreen},                                // kMidiNoteOn
+        {.dim = true},                                         // kMidiNoteOff
+        {.foreground = kYellow},                               // kMidiDrum
+        {.bold = true, .foreground = kYellow},                 // kWarning
+        {.bold = true, .foreground = kRed},                    // kError
+        {.bold = true, .foreground = kGreen},                  // kSuccess
     }},
 };
 
