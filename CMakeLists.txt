@@ -31,4 +31,6 @@ else()
   add_subdirectory(app/core/tests)
   add_subdirectory(app/tests/golden)
   add_subdirectory(app/tests/integration)
+  # Host-only importer/compiler tooling (never in the ARM/firmware build).
+  add_subdirectory(app/tools/arrstyle-converter)
 endif()
