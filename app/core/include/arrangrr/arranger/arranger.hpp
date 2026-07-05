@@ -2,9 +2,12 @@
 
 #include <cstdint>
 
+#include "arrangrr/arranger/gesture.hpp"  // gesture::expand (per-event note fan-out)
 #include "arrangrr/arranger/groove.hpp"
 #include "arrangrr/arranger/style.hpp"
-#include "arrangrr/chord/theory.hpp"  // ChordState, ChordShape, theory::shape_of
+#include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
+#include "arrangrr/chord/theory.hpp"      // ChordState, ChordShape, theory::shape_of
+#include "arrangrr/common/assert.hpp"     // ARR_ASSERT (voice-group cap net)
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/config.hpp"
@@ -52,6 +55,7 @@ class Arranger {
     m_return_to = SectionType::kVarA;
     m_pending_valid = false;
     m_section_start = 0;
+    m_voicing.reset();  // a new style must not voice-lead from the old one
     return true;
   }
 
@@ -184,6 +188,7 @@ class Arranger {
 
   void on_transport_start() noexcept {
     m_section_start = 0;
+    m_voicing.reset();  // start each run with a clean voice-leading history
     if (section_is_variation(m_current)) {
       m_return_to = m_current;
     }
@@ -295,23 +300,61 @@ class Arranger {
       if (!route.enabled || part_silenced(pattern.role, solo_active)) {
         continue;
       }
+      // Per-role, per-step resolution pipeline (D40):
+      //   gather this step's events -> gesture::expand (1 event -> N specs)
+      //   -> resolve() each (unchanged NTT kernel) into a bounded voice group
+      //   -> m_voicing.voice() (voice-leading) -> groove + schedule per note.
+      // With the default kNone gestures and kAsWritten voicing this emits, in
+      // the same order and with the same timing, exactly what the former
+      // one-note-per-event loop did — byte-for-byte up to kMaxVoiceNotes notes
+      // per role per step; a step denser than that truncates (bounded, D32; no
+      // real style reaches it — the ARR_ASSERT below turns the drop into a
+      // debug signal rather than silence).
+      NoteReq group[kMaxVoiceNotes];
+      int count = 0;
       for (const StyleEvent& ev : pattern.events) {
         if (ev.step != step) {
           continue;
         }
-        const int note = resolve(pattern, ev, key, chord);
-        if (note < 0) {
-          continue;
+        StyleEvent specs[gesture::kMaxGestureFan];
+        TickOffset delays[gesture::kMaxGestureFan];
+        const int produced = gesture::expand(pattern, ev, chord, specs, delays);
+        for (int i = 0; i < produced; ++i) {
+          const int note = resolve(pattern, specs[i], key, chord);
+          if (note < 0) {
+            continue;
+          }
+          if (count >= kMaxVoiceNotes) {
+            ARR_ASSERT(count < kMaxVoiceNotes);  // a step exceeded the cap
+            break;
+          }
+          const bool is_chord_tone =
+              pattern.policy == RolePolicy::kChordTone && specs[i].src == NoteSource::kChordTone;
+          group[count++] = NoteReq{.note = note,
+                                   .vel = specs[i].vel,
+                                   .gate = specs[i].gate,
+                                   .gesture_delay = delays[i],
+                                   .chord_tone = is_chord_tone};
         }
-        // Groove: swing/accent/humanize reshape the event's timing and velocity
+      }
+      if (count == 0) {
+        continue;
+      }
+      // Voice-leading over the role's chord-tone notes (identity for kAsWritten).
+      m_voicing.voice(pattern.role, pattern.voicing, group, count);
+      for (int i = 0; i < count; ++i) {
+        const NoteReq& nr = group[i];
+        // Groove: swing/accent/humanize reshape timing and velocity
         // (deterministic; drums swing too, downbeats stay put). The note-off
-        // shifts with the note-on so the gate length is preserved.
+        // shifts with the note-on so the gate length is preserved; a gesture
+        // adds its own extra delay on top of the groove offset.
         const GrooveOut g = groove::apply(m_groove, static_cast<std::uint8_t>(pattern.role), step,
-                                          transport_tick, ev.vel);
-        schedule(route.port, g.timing_offset,
-                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(note), g.velocity));
-        schedule(route.port, static_cast<TickOffset>(ev.gate) + g.timing_offset,
-                 MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(note)));
+                                          transport_tick, nr.vel);
+        const TickOffset on = g.timing_offset + nr.gesture_delay;
+        schedule(route.port, on,
+                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(nr.note), g.velocity));
+        schedule(route.port, static_cast<TickOffset>(nr.gate) + on,
+                 MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(nr.note)));
       }
     }
     return result;
@@ -319,6 +362,11 @@ class Arranger {
 
  private:
   static constexpr std::uint8_t kRoleCount = 10;
+  // Upper bound on the notes one role emits on a single step: authored
+  // chord-tone events plus any gesture fan-out. Generous vs real styles (a
+  // dense chord part is ~4 tones), so the group buffer never overflows; extra
+  // notes past this are dropped (bounded, no heap — D32).
+  static constexpr int kMaxVoiceNotes = 16;
 
   struct Route {
     std::uint8_t port = 0;
@@ -416,6 +464,7 @@ class Arranger {
   std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
   std::uint16_t m_solo = 0;   // per-role solo bitmask
   GrooveParams m_groove;      // global groove feel applied to every part
+  VoicingState m_voicing;     // per-role voice-leading memory (D40)
 };
 
 }  // namespace arrangrr

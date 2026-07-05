@@ -14,6 +14,8 @@ arrangrr_test(test_chord_detect)
 arrangrr_test(test_arp)
 arrangrr_test(test_arranger)
 arrangrr_test(test_scheduler)
+arrangrr_test(test_gesture)
+arrangrr_test(test_voicing)
 
 arrangrr_test(test_host)
 target_link_libraries(test_host PRIVATE arrangrr_host)
