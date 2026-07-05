@@ -151,6 +151,9 @@ std::string live_chord_label(const ChordState& chord, const NoteNameOptions& opt
   return chord.valid ? pitch_class_name(chord.root_pc, opts) + chord_quality_suffix(chord.quality)
                      : std::string("—");
 }
+// D47: the `chord:` line reads the same in the styles and chords panels — one
+// literal so the two never drift apart.
+constexpr const char* kBandFollowsHint = "   (whole band follows)";
 }  // namespace
 
 void Shell::refresh_styles_content() {
@@ -164,8 +167,12 @@ void Shell::refresh_styles_content() {
   const ChordState& chord = m_engine.chords().state();
   const NoteNameOptions opts{
       .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
-  std::string key_line = "key: " + pitch_class_name(key.root_pc, opts) + " " + mode_label(key.mode);
-  std::string chord_line = "chord: " + live_chord_label(chord, opts);
+  // D47 label clarification: `scale:` is the diatonic frame for scale-degree
+  // parts only (it does NOT transpose the band); `chord:` is the live chord the
+  // whole band harmonizes against. Naming them apart kills the #1 confusion.
+  std::string key_line = "scale: " + pitch_class_name(key.root_pc, opts) + " " +
+                         mode_label(key.mode) + "   (scale-degree parts)";
+  std::string chord_line = "chord: " + live_chord_label(chord, opts) + kBandFollowsHint;
   const auto insert_at = lines.empty() ? lines.end() : lines.end() - 1;  // before the hint line
   lines.insert(insert_at, {key_line, chord_line});
   m_panels.set_content(PanelId::kStyles, std::move(lines));
@@ -209,6 +216,10 @@ void Shell::refresh_chords_content() {
   // detect: say plainly whether played keys steer the band, and how to toggle it.
   lines.push_back(detect ? std::string("detect: on   (chord detect off)")
                          : std::string("detect: off — keys don't steer (chord detect on)"));
+  // follow (D47): which producer is allowed to steer the band's harmony.
+  const ChordFollow follow = m_engine.chord_follow();
+  lines.push_back(std::string("follow: ") + chord_follow_label(follow) + "   (" +
+                  chord_follow_hint(follow) + ")");
   // mode: single-finger needs one key; the fingered modes need a full triad.
   const char* mode_name = mode == ChordMode::kSingle ? "single-finger"
                           : mode == ChordMode::kShell ? "shell"
@@ -218,7 +229,7 @@ void Shell::refresh_chords_content() {
   // (so a lone note that does nothing yet reads as "waiting", not "broken").
   if (chord.valid) {
     lines.push_back("chord: " + pitch_class_name(chord.root_pc, opts) +
-                    chord_quality_suffix(chord.quality));
+                    chord_quality_suffix(chord.quality) + kBandFollowsHint);
   } else if (detect && held > 0) {
     lines.push_back("chord: (hold " + std::to_string(need) + " — " + std::to_string(held) +
                     " held)");
@@ -500,7 +511,9 @@ std::optional<bool> Shell::dispatch_midi(const std::vector<std::string>& t, cons
 
 std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, const std::string& cmd,
                                           std::string& error) {
-  if (cmd == "key" && t.size() >= 3) {
+  // `scale` is an alias of `key` (D47 label clarification): the panel line reads
+  // `scale:` — it is the diatonic frame for scale-degree parts, NOT a transpose.
+  if ((cmd == "key" || cmd == "scale") && t.size() >= 3) {
     return cmd_key(t, error);
   }
   if ((cmd == "play" && t.size() >= 2) || (cmd == "chord" && t.size() >= 3 && t[1] == "play")) {

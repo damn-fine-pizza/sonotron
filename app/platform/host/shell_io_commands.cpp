@@ -15,12 +15,14 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
   if (topic == "chord") {
     return {
         "help: chord",
-        "  key <root> <mode>            C..B(+#/b); major minor dorian phrygian lydian",
-        "                               mixolydian locrian",
+        "  scale <root> <mode>          (alias: key) diatonic frame for scale-degree",
+        "                               parts; C..B(+#/b); major minor dorian phrygian",
+        "                               lydian mixolydian locrian",
         "  chord mode diatonic|single|shell",
         "  play <note.. up to 4> [quality] [vel]   e.g. play D | play C E Bb | play G 7",
         "  chord play ... | chord stop | chord hold on|off | chord out <port>[:ch]",
         "  chord detect on|off         live: held piano keys re-harmonize the band",
+        "  chord follow auto|detect|sequencer|manual   who steers the band's chord",
         "  qualities: maj min dim aug maj7 min7 m7 7 dom7 m7b5 halfdim dim7 sus2 sus4",
     };
   }

@@ -203,6 +203,24 @@ bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
     (void)push_panels();  // reflect the new detect state in the chords panel now
     return true;
   }
+  if (t[1] == "follow") {
+    // D47: pick which producer steers the band's harmony. auto = legacy
+    // last-writer-wins; the others narrow it to a single named source.
+    ChordFollow follow{};
+    if (t.size() < 3 || !parse_chord_follow(t[2], follow)) {
+      error = "chord follow auto|detect|sequencer|manual";
+      return false;
+    }
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kChordFollow;
+    c.a = static_cast<std::int32_t>(follow);
+    m_engine.push_command(c, m_sink);
+    console_output(std::string("chord follow: ") + chord_follow_label(m_engine.chord_follow()) +
+                   " (" + chord_follow_hint(m_engine.chord_follow()) + ")");
+    (void)push_panels();  // reflect the new follow source in the chords panel now
+    return true;
+  }
   if (t[1] == "out" && t.size() >= 3) {
     std::string port_name;
     int channel = -1;

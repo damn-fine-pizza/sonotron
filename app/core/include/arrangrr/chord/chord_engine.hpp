@@ -59,7 +59,7 @@ class ChordEngine {
   // (D19). Returns degree -1 without sounding anything when the note is
   // chromatic to the key (D20: strictly diatonic, no surprises).
   ChordResult play(std::uint8_t note, std::int8_t override_quality, std::uint8_t velocity,
-                   ScheduleFn schedule) {
+                   ScheduleFn schedule, bool steer = true) {
     ChordResult r;
     r.root_note = note;
     const int degree = theory::degree_of(m_key, static_cast<std::uint8_t>(note % 12));
@@ -71,27 +71,28 @@ class ChordEngine {
     r.quality = override_quality >= 0 ? static_cast<ChordQuality>(override_quality)
                                       : theory::smart_quality(m_key.mode, degree);
     r.shape = theory::shape_of(r.quality);
-    sound(note, r.quality, velocity, schedule);
+    sound(note, r.quality, velocity, schedule, steer);
     return r;
   }
 
   // Mode A: absolute — the note is a major root, chromatic freely allowed.
   ChordResult play_single(std::uint8_t note, std::int8_t override_quality, std::uint8_t velocity,
-                          ScheduleFn schedule) {
+                          ScheduleFn schedule, bool steer = true) {
     ChordResult r;
     r.root_note = note;
     r.degree = static_cast<std::int8_t>(kNoDegree);
     r.quality =
         override_quality >= 0 ? static_cast<ChordQuality>(override_quality) : ChordQuality::kMaj;
     r.shape = theory::shape_of(r.quality);
-    sound(note, r.quality, velocity, schedule);
+    sound(note, r.quality, velocity, schedule, steer);
     return r;
   }
 
   // Mode C: `notes` (sorted not required) — lowest is the root, the pitch
   // classes above it complete the chord. An override still wins.
   ChordResult play_shell(const std::uint8_t* notes, std::uint8_t count,
-                         std::int8_t override_quality, std::uint8_t velocity, ScheduleFn schedule) {
+                         std::int8_t override_quality, std::uint8_t velocity, ScheduleFn schedule,
+                         bool steer = true) {
     ChordResult r;
     std::uint8_t root = 127;
     for (std::uint8_t i = 0; i < count; ++i) {
@@ -110,15 +111,21 @@ class ChordEngine {
     r.quality = override_quality >= 0 ? static_cast<ChordQuality>(override_quality)
                                       : theory::complete_shell_full(iv, n);
     r.shape = theory::shape_of(r.quality);
-    sound(root, r.quality, velocity, schedule);
+    sound(root, r.quality, velocity, schedule, steer);
     return r;
   }
 
   // Sounds an already-resolved chord (the ChordSequencer path): releases the
-  // previous voicing and stacks the shape from `root_note` upward.
+  // previous voicing and stacks the shape from `root_note` upward. `steer`
+  // (D47 chord-follow) decides whether this producer also PUBLISHES the followed
+  // context: false = sound the notes but leave the followed chord untouched, so
+  // a non-selected producer never has to snap a written context back.
   void sound(std::uint8_t root_note, ChordQuality quality, std::uint8_t velocity,
-             ScheduleFn schedule) {
-    m_state = ChordState{.root_pc=static_cast<std::uint8_t>(root_note % 12), .quality=quality, .valid=true};
+             ScheduleFn schedule, bool steer = true) {
+    if (steer) {
+      m_state = ChordState{
+          .root_pc = static_cast<std::uint8_t>(root_note % 12), .quality = quality, .valid = true};
+    }
     const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
     for (std::uint8_t i = 0; i < shape.count; ++i) {
