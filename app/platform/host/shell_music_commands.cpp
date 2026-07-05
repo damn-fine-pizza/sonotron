@@ -130,6 +130,8 @@ bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
     c.param = Param::kChordMode;
     c.a = mode;
     m_engine.push_command(c, m_sink);
+    console_output(mode == 1 ? "chord mode: single (single-finger — one held key steers the band)"
+                             : (mode == 2 ? "chord mode: shell" : "chord mode: diatonic"));
     return true;
   }
   if (t[1] == "stop") {
