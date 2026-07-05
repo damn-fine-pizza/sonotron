@@ -32,21 +32,85 @@ struct NoteReq {
 };
 
 // Per-role voice-leading memory. kAsWritten is a pure identity (the historical
-// behavior — notes sound at their authored register); kLead smooths motion
-// between successive chords. Scaffold: both paths are identity until Phase 1
-// implements kLead.
+// behavior — notes sound at their authored register); kLead re-octaves a role's
+// chord tones so each voice follows the nearest octave of its previous pitch,
+// retaining common tones and minimizing motion between successive chords.
+//
+// The model: a role's chord is authored as several chord-tone events in a fixed
+// order (root, third, fifth, ...). Across a chord change the SAME pattern plays,
+// only the live chord differs, so event slot j is always "the j-th chord tone".
+// kLead moves each slot's resolved pitch by whole octaves to sit closest to
+// where that slot sounded last — a common tone (same pitch class) does not move
+// at all. Only chord tones are touched; melodic (scale-degree/interval) and
+// fixed (drum) notes pass through untouched, so the NTT guarantee holds.
+//
+// Intended for chordal comping parts (chord1/chord2/pad); a style author leaves
+// a bass/lead part as kAsWritten. Deterministic, no heap: the only state is a
+// small per-role array of the last voiced pitches, cleared on reset().
 class VoicingState {
  public:
   // Clears remembered voicings so a fresh style/transport start never leads
   // from stale notes. Called from Arranger::load_style and on_transport_start.
   void reset() noexcept {
-    // Phase 1: clear the per-role last-voicing memory. Nothing to clear yet.
+    for (int r = 0; r < kRoleCount; ++r) {
+      m_count[r] = 0;
+    }
   }
 
   // Reshapes the chord-tone members of reqs[0..n) for `role` under `policy`,
-  // updating the remembered voicing. Scaffold stub: identity (kAsWritten
-  // reproduces today's output exactly; kLead is implemented in Phase 1).
-  void voice(TrackRole /*role*/, VoicingPolicy /*policy*/, NoteReq* /*reqs*/, int /*n*/) noexcept {}
+  // updating the remembered voicing. kAsWritten is identity (reproduces today's
+  // output exactly); kLead re-octaves each chord tone toward the previous
+  // voicing. The first chord after a reset keeps its authored register (nothing
+  // to lead from yet).
+  void voice(TrackRole role, VoicingPolicy policy, NoteReq* reqs, int n) noexcept {
+    if (policy != VoicingPolicy::kLead) {
+      return;  // kAsWritten: authored register, no re-voicing
+    }
+    const int r = static_cast<int>(role);
+    if (r < 0 || r >= kRoleCount) {
+      return;
+    }
+    int voiced[kMaxVoiceTones];
+    int m = 0;
+    const int prev_count = m_count[r];
+    for (int i = 0; i < n && m < kMaxVoiceTones; ++i) {
+      if (!reqs[i].chord_tone) {
+        continue;  // melodic / drum notes are never re-voiced
+      }
+      int note = reqs[i].note;
+      if (prev_count > 0) {
+        const int slot = m < prev_count ? m : prev_count - 1;
+        note = nearest_octave(note, m_last[r][slot]);
+      }
+      reqs[i].note = note;
+      voiced[m] = note;
+      ++m;
+    }
+    for (int i = 0; i < m; ++i) {
+      m_last[r][i] = voiced[i];
+    }
+    m_count[r] = m;
+  }
+
+ private:
+  static constexpr int kRoleCount = 10;     // TrackRole count (kDrums..kCc)
+  static constexpr int kMaxVoiceTones = 8;  // chord tones tracked per role
+
+  // Moves `note` by whole octaves to sit as close as possible to `target`,
+  // staying inside the MIDI range. A note already within a tritone of the
+  // target does not move, so a common tone is retained exactly.
+  static int nearest_octave(int note, int target) noexcept {
+    while (note - target > 6 && note - 12 >= 0) {
+      note -= 12;
+    }
+    while (target - note > 6 && note + 12 <= 127) {
+      note += 12;
+    }
+    return note;
+  }
+
+  int m_last[kRoleCount][kMaxVoiceTones] = {};
+  int m_count[kRoleCount] = {};
 };
 
 }  // namespace arrangrr
