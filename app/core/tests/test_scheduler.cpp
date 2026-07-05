@@ -77,6 +77,27 @@ void test_cancel_note_off_tombstones_earliest() {
   CHECK(s.empty());
 }
 
+// Tick-aware cancel: with an `on_tick` floor, a NoteOff that lands strictly
+// before the incoming on is a DELIBERATE gap and must be left alone (the
+// `e.tick < on_tick` skip branch); the earliest off at or after on_tick wins.
+void test_cancel_note_off_tick_floor() {
+  OutScheduler<8> s;
+  CHECK(s.schedule(0, 30, MidiMessage::note_off(0, 60)));   // early: below the floor
+  CHECK(s.schedule(0, 90, MidiMessage::note_off(0, 60)));   // at/after: cancellable
+  CHECK(s.schedule(0, 150, MidiMessage::note_off(0, 60)));  // later: also cancellable
+
+  // on_tick = 60: the tick-30 off is a gap and stays; the tick-90 off cancels.
+  CHECK(s.cancel_note_off(0, 0, 60, /*on_tick=*/60));
+
+  StaticVector<Tick, 4> ticks;
+  s.pop_due(1000, [&](const ScheduledEvent& ev) { CHECK(ticks.push_back(ev.tick)); });
+  CHECK(ticks.size() == 2 && ticks[0] == 30 && ticks[1] == 150);
+
+  // A floor above every pending off finds nothing (all skipped).
+  CHECK(s.schedule(0, 200, MidiMessage::note_off(0, 60)));
+  CHECK(!s.cancel_note_off(0, 0, 60, /*on_tick=*/1000));
+}
+
 // When the earliest matching NoteOff is NOT at the heap root (a lower-tick
 // non-matching event sits at the root), cancel must still find it by scanning:
 // exercises the "e.tick < best.tick" replacement branch of the linear search.
@@ -346,6 +367,7 @@ int main() {
   test_schedule_full_rejects();
   test_pop_due_boundary();
   test_cancel_note_off_tombstones_earliest();
+  test_cancel_note_off_tick_floor();
   test_cancel_note_off_replacement_branch();
   test_cancel_note_off_no_match_and_guards();
   test_clear_resets();

@@ -50,6 +50,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "help: track",
         "  track new <name> <port>[:ch] [role]",
         "  track step <name> <1-based #> <note|clear> [vel] [gate]",
+        "       [prob=0..100] [ratchet=1..8] [micro=0..127 fwd] [tie=on|off]",
         "  track length <name> <steps>      per-track length = polymeter",
         "  track mute|solo <name> on|off",
     };

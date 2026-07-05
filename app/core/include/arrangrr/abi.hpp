@@ -35,7 +35,13 @@ enum class Param : std::uint16_t {
   kTrackNew = 9,           // do: a = role, b = port | (channel_0based << 8)
   kTrackStep = 10,         // do: idx = track; a = step index (0-based)
                            //     b = note | (vel << 8)  (vel 0 clears the slot)
-                           //     c = gate in scheduler ticks
+                           //     c = gate in scheduler ticks.
+                           //     Param-locks (opt-in, bit 31 of c set): also
+                           //     b |= probability << 16 | ratchet << 24 |
+                           //          tie << 28; c |= (micro & 0xFF) << 16.
+                           //     micro is a FORWARD-only lay-back (0..127 ticks);
+                           //     anticipation is deferred (needs step look-ahead).
+                           //     Bit 31 clear => the neutral short form above.
   kTrackLength = 11,       // set: idx = track; a = steps (1..kMaxStepsPerTrack)
   kTrackMute = 12,         // set: idx = track; a = 0/1
   kTrackSolo = 13,         // set: idx = track; a = 0/1

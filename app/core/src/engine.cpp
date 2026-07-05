@@ -383,10 +383,26 @@ void Engine::cmd_track(const Command& cmd, EventSink sink) {
       break;
     }
     case Param::kTrackStep: {
-      const auto note = static_cast<std::uint8_t>(cmd.b & 0xFF);
-      const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
-      if (!m_timeline.set_step(cmd.idx, static_cast<std::size_t>(cmd.a), note, vel,
-                               static_cast<std::uint16_t>(cmd.c))) {
+      const auto b = static_cast<std::uint32_t>(cmd.b);
+      const auto c = static_cast<std::uint32_t>(cmd.c);
+      const auto note = static_cast<std::uint8_t>(b & 0xFF);
+      const auto vel = static_cast<std::uint8_t>((b >> 8) & 0xFF);
+      const auto gate = static_cast<std::uint16_t>(c & 0xFFFF);
+      // Param-locks ride the free high bits, opt-in via bit 31 of c. When the
+      // flag is clear (the original short form) the neutral defaults apply, so
+      // existing kTrackStep commands are byte-identical.
+      std::uint8_t probability = 100;
+      std::uint8_t ratchet = 1;
+      std::uint8_t micro = 0;  // forward-only lay-back (0..127)
+      bool tie = false;
+      if ((c & 0x80000000u) != 0) {
+        probability = static_cast<std::uint8_t>((b >> 16) & 0xFF);
+        ratchet = static_cast<std::uint8_t>((b >> 24) & 0x0F);
+        tie = ((b >> 28) & 0x1) != 0;
+        micro = static_cast<std::uint8_t>((c >> 16) & 0xFF);
+      }
+      if (!m_timeline.set_step(cmd.idx, static_cast<std::size_t>(cmd.a), note, vel, gate,
+                               probability, ratchet, micro, tie)) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       }
       break;
