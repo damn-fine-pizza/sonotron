@@ -39,6 +39,8 @@ enum class Param : std::uint16_t {
                            //     Param-locks (opt-in, bit 31 of c set): also
                            //     b |= probability << 16 | ratchet << 24 |
                            //          tie << 28; c |= (micro & 0xFF) << 16.
+                           //     micro is a FORWARD-only lay-back (0..127 ticks);
+                           //     anticipation is deferred (needs step look-ahead).
                            //     Bit 31 clear => the neutral short form above.
   kTrackLength = 11,       // set: idx = track; a = steps (1..kMaxStepsPerTrack)
   kTrackMute = 12,         // set: idx = track; a = 0/1

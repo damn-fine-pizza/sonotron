@@ -135,8 +135,9 @@ void test_ratchet_evenly_spaced() {
   CHECK(count_type(capped, midi::kNoteOn) == kMaxRatchet);
 }
 
-// Micro shifts note-on AND note-off together (gate preserved); negative offsets
-// clamp so the absolute delay never goes negative.
+// Micro is a FORWARD-only lay-back: it pushes note-on AND note-off together by
+// the same amount, so the gate length is preserved. Anticipation (a negative
+// push) is deferred — it needs step look-ahead — so micro is 0..127 only.
 void test_micro_shifts_gate_preserved() {
   Timeline tl;
   CHECK(tl.add_track(TrackRole::kLead, 0, 0) == 0);
@@ -146,13 +147,12 @@ void test_micro_shifts_gate_preserved() {
   CHECK(pos[0].type == midi::kNoteOn && pos[0].delay == 10);
   CHECK(pos[1].type == midi::kNoteOff && pos[1].delay == 130);  // 10 + 120, gate kept
 
-  // Negative micro at the step boundary clamps to 0 (never a negative tick),
-  // gate still preserved from the clamped on.
-  CHECK(tl.set_step(0, 0, 60, 100, 120, 100, 1, -50));
-  const Hits neg = fire(tl, 0);
-  CHECK(neg.size() == 2);
-  CHECK(neg[0].type == midi::kNoteOn && neg[0].delay == 0);
-  CHECK(neg[1].type == midi::kNoteOff && neg[1].delay == 120);
+  // A larger forward push still preserves the gate (on and off move together).
+  CHECK(tl.set_step(0, 0, 60, 100, 120, 100, 1, /*micro=*/60));
+  const Hits far = fire(tl, 0);
+  CHECK(far.size() == 2);
+  CHECK(far[0].type == midi::kNoteOn && far[0].delay == 60);
+  CHECK(far[1].type == midi::kNoteOff && far[1].delay == 180);  // 60 + 120
 }
 
 // Tie bridges the note-off one full step past the gate, holding into the next
@@ -168,6 +168,42 @@ void test_tie_bridges_into_next_step() {
   CHECK(h[1].type == midi::kNoteOff);
   CHECK(h[1].delay == static_cast<TickOffset>(120 + kTicksPerStep));
   CHECK(static_cast<std::uint32_t>(h[1].delay) > kTicksPerStep);
+}
+
+// Real tie: when the tied step is followed by the SAME note, the next step's
+// emission is suppressed so the bridged note holds (no retrigger). When it is a
+// different note (or empty), the next step fires normally.
+void test_tie_suppresses_same_note_next_step() {
+  // Same note next step: step 0 ties into step 1 on note 60 -> step 1 is held.
+  Timeline same;
+  CHECK(same.add_track(TrackRole::kLead, 0, 0) == 0);
+  CHECK(same.set_length(0, 2));
+  CHECK(same.set_step(0, 0, 60, 100, 120, /*prob=*/100, /*ratchet=*/1, /*micro=*/0, /*tie=*/true));
+  CHECK(same.set_step(0, 1, 60, 100, 120));
+  const Hits s0 = fire(same, 0);                 // tied step fires the bridge
+  const Hits s1 = fire(same, kTicksPerStep);     // held step must be silent
+  CHECK(count_type(s0, midi::kNoteOn) == 1);
+  CHECK(s0[0].type == midi::kNoteOn && s0[0].note == 60);
+  CHECK(s1.size() == 0);  // suppressed: no second note-on, no retrigger
+
+  // Different note next step: no collision, the next step fires as usual.
+  Timeline diff;
+  CHECK(diff.add_track(TrackRole::kLead, 0, 0) == 0);
+  CHECK(diff.set_length(0, 2));
+  CHECK(diff.set_step(0, 0, 60, 100, 120, /*prob=*/100, /*ratchet=*/1, /*micro=*/0, /*tie=*/true));
+  CHECK(diff.set_step(0, 1, 64, 100, 120));
+  const Hits d0 = fire(diff, 0);
+  const Hits d1 = fire(diff, kTicksPerStep);
+  CHECK(count_type(d0, midi::kNoteOn) == 1 && d0[0].note == 60);
+  CHECK(count_type(d1, midi::kNoteOn) == 1 && d1[0].note == 64);
+
+  // Empty next step: bridge holds and nothing else fires (baseline behaviour).
+  Timeline empty;
+  CHECK(empty.add_track(TrackRole::kLead, 0, 0) == 0);
+  CHECK(empty.set_length(0, 2));
+  CHECK(empty.set_step(0, 0, 60, 100, 120, /*prob=*/100, /*ratchet=*/1, /*micro=*/0, /*tie=*/true));
+  const Hits e1 = fire(empty, kTicksPerStep);
+  CHECK(e1.size() == 0);
 }
 
 // ---- ABI path: the extended kTrackStep encoding decodes to the same locks ----
@@ -205,7 +241,7 @@ Command track_new(std::uint8_t port, std::uint8_t channel) {
 // Encodes a kTrackStep exactly as the host shell does.
 Command track_step(std::uint16_t track, std::int32_t step, std::uint8_t note, std::uint8_t vel,
                    std::uint16_t gate, bool locks, std::uint8_t prob, std::uint8_t ratchet,
-                   std::int8_t micro, bool tie) {
+                   std::uint8_t micro, bool tie) {
   Command c;
   c.param = Param::kTrackStep;
   c.idx = track;
@@ -247,6 +283,50 @@ void test_abi_extended_encoding() {
   CHECK(ratchet.count(midi::kNoteOn, 62) == 3);
 }
 
+// End-to-end note-stack invariant through Engine::advance_ticks (NOT raw
+// Timeline::on_tick): a mono ratchet must never have two note-ons of the same
+// (channel, note) outstanding on the wire, and every note-on must be preceded
+// by the note-off of the previous hit. This is the test that catches the
+// duplicate-NoteOn / bare-reattack bug in schedule_pattern: before the fix the
+// simulated "currently-on" count climbs to 2+ and a note-on arrives with a
+// still-open note (on-count already 1).
+void test_ratchet_note_stack_engine() {
+  Player p;
+  p.cmd(track_new(0, 0));  // port 0, channel 0
+  // Mono ratchet: note 60, gate 60, ratchet 4 -> slice 60, sub_gate 60. Every
+  // hit's off lands exactly on the next hit's on: a clean off-then-on chain.
+  p.cmd(track_step(0, 0, 60, 100, 60, /*locks=*/true, 100, 4, 0, false));
+  Command start;
+  start.param = Param::kTransportStart;
+  p.cmd(start);
+  p.advance(2 * kTicksPerStep);  // cover the whole step and flush the final off
+
+  int on = 0;      // currently-sounding count for (channel 0, note 60)
+  int max_on = 0;  // peak concurrency
+  int ons = 0;
+  int offs = 0;
+  for (const OutEvent& o : p.ev) {
+    if (o.kind != OutEvent::Kind::kMidi || o.msg.d1 != 60) {
+      continue;
+    }
+    if (o.msg.type() == midi::kNoteOn) {
+      CHECK(on == 0);  // every on must be preceded by the previous off
+      ++on;
+      ++ons;
+      if (on > max_on) {
+        max_on = on;
+      }
+    } else if (o.msg.type() == midi::kNoteOff) {
+      --on;
+      ++offs;
+      CHECK(on >= 0);  // never an unmatched off
+    }
+  }
+  CHECK(max_on == 1);  // mono: never two note-ons outstanding
+  CHECK(on == 0);      // balanced: every on released
+  CHECK(ons == 4 && offs == 4);
+}
+
 }  // namespace
 
 int main() {
@@ -255,7 +335,9 @@ int main() {
   test_ratchet_evenly_spaced();
   test_micro_shifts_gate_preserved();
   test_tie_bridges_into_next_step();
+  test_tie_suppresses_same_note_next_step();
   test_abi_extended_encoding();
+  test_ratchet_note_stack_engine();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_step_locks: all OK\n");
   }

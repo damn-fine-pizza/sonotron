@@ -43,13 +43,20 @@ enum class TrackRole : std::uint8_t {
 // a Step{} with probability=100, ratchet=1, micro=0, tie=false reproduces the
 // original one-note-per-step behaviour byte-for-byte. Live RAM cost is the
 // whole pool: kMaxTracks x kMaxStepsPerTrack slots.
+//
+// `micro` is FORWARD-ONLY (0..127): a step is evaluated only at its own
+// boundary tick and delays are relative to `now`, so a negative offset could
+// never anticipate the beat — it would just clamp to 0. Bidirectional micro
+// (anticipation / ahead-of-the-beat) needs one-step look-ahead in on_tick and
+// is deliberately deferred; today `micro` is an honest lay-back (behind-the-
+// beat push) only.
 struct Step {
   std::uint8_t note = 0;
   std::uint8_t vel = 0;
   std::uint16_t gate = 0;          // sounding length in scheduler ticks
   std::uint8_t probability = 100;  // 0..100 % chance the step fires (100 = always)
   std::uint8_t ratchet = 1;        // evenly-spaced retriggers within the step (1..8)
-  std::int8_t micro = 0;           // micro-timing offset in ticks (signed, on+off together)
+  std::uint8_t micro = 0;          // forward micro-timing push in ticks (0..127, on+off together)
   bool tie = false;                // hold into the next step instead of retriggering
 };
 static_assert(sizeof(Step) == 8,
@@ -94,7 +101,7 @@ class Timeline {
   // existing 5-argument caller keeps the original behaviour unchanged.
   bool set_step(std::size_t idx, std::size_t step, std::uint8_t note, std::uint8_t vel,
                 std::uint16_t gate, std::uint8_t probability = 100, std::uint8_t ratchet = 1,
-                std::int8_t micro = 0, bool tie = false) noexcept {
+                std::uint8_t micro = 0, bool tie = false) noexcept {
     Track* t = track(idx);
     if (t == nullptr || step >= kMaxStepsPerTrack || note > 127 || vel > 127) {
       return false;
@@ -153,9 +160,27 @@ class Timeline {
       if (s.vel == 0) {
         continue;
       }
+      // Tie suppression (real tie, not a blind gate extension). WHY this is
+      // needed: a tie alone only lengthens the note-off (gate + one step). But
+      // if the NEXT step repeats the SAME note, its NoteOn hits the engine's
+      // anti-stuck-note protection: schedule_pattern sees a still-pending off
+      // for that (port, channel, note) in the shared scheduler, tombstones the
+      // long bridged off (cancel_note_off) and re-attacks the note — so the tie
+      // silently degrades into a plain retrigger. We defeat that collision at
+      // the source: if the PREVIOUS step tied into this one on the SAME note,
+      // this step is being held, so we SKIP its emission entirely and let the
+      // bridged off release the note later. A different note or an empty next
+      // step never collides, so the plain bridge is left as-is.
+      if (suppressed_by_tie(t, static_cast<std::uint32_t>(ti), global_step)) {
+        continue;
+      }
       // Probability gate (D16): a seeded position hash keyed on track index and
       // global step position. 100 % never consults the hash, so a neutral step
       // is byte-identical to the original path; same position => same verdict.
+      // NOTE: the seed is the track INDEX, so verdicts are stable only while the
+      // track table is add-only. Removing a track would renumber the survivors
+      // and shift every step's probability verdict — acceptable because tracks
+      // are add-only in this milestone; revisit if track deletion lands.
       if (s.probability < 100 &&
           hash(static_cast<std::uint32_t>(ti), global_step) % 100u >= s.probability) {
         continue;
@@ -174,11 +199,33 @@ class Timeline {
     return h;
   }
 
-  // Micro-timing shift, clamped so the absolute tick can never go negative and
-  // the D29 off-before-on order is preserved (off = on + gate, gate >= 1).
-  static constexpr TickOffset shift_delay(TickOffset base, std::int8_t micro) noexcept {
-    const TickOffset d = base + static_cast<TickOffset>(micro);
-    return d < 0 ? 0 : d;
+  // Forward micro-timing push (0..127): a lay-back added to the step-relative
+  // delay. Non-negative by construction, so the absolute tick can never go
+  // negative and the D29 off-before-on order is preserved (off = on + gate).
+  static constexpr TickOffset shift_delay(TickOffset base, std::uint8_t micro) noexcept {
+    return base + static_cast<TickOffset>(micro);
+  }
+
+  // Real-tie support: returns true when the step at `global_step` is being held
+  // by a tie from the immediately preceding step on the same note, so it must
+  // be suppressed instead of retriggered. Uses global positions so it wraps and
+  // takes track length into account; the previous step must actually have fired
+  // (its probability verdict is recomputed from the same seeded hash). The
+  // pattern-loop seam (global_step == 0) starts clean: a tie does not carry
+  // across the loop boundary in this milestone.
+  static constexpr bool suppressed_by_tie(const Track& t, std::uint32_t ti,
+                                          std::uint32_t global_step) noexcept {
+    if (global_step == 0) {
+      return false;
+    }
+    const std::uint32_t prev_global = global_step - 1;
+    const Step& prev = t.steps[prev_global % t.length];
+    const Step& cur = t.steps[global_step % t.length];
+    if (!prev.tie || prev.vel == 0 || prev.note != cur.note) {
+      return false;
+    }
+    // The tie only holds if the previous step actually fired its probability.
+    return !(prev.probability < 100 && hash(ti, prev_global) % 100u >= prev.probability);
   }
 
   // Emits one firing step: a tie bridges the gate into the next step, otherwise
@@ -199,7 +246,9 @@ class Timeline {
       return;
     }
 
-    std::uint8_t ratchet = s.ratchet < 1 ? 1 : (s.ratchet > kMaxRatchet ? kMaxRatchet : s.ratchet);
+    // `ratchet` is already bounded to [1, kMaxRatchet] by set_step and the ABI
+    // decode mask, so no re-clamp is needed here.
+    const std::uint8_t ratchet = s.ratchet;
     if (ratchet <= 1) {
       const TickOffset on_delay = shift_delay(0, s.micro);
       schedule(t.port, on_delay, on);
@@ -208,7 +257,11 @@ class Timeline {
     }
 
     // Subdivide the step into `ratchet` slices; bound each sub-hit inside its
-    // slice so consecutive retriggers never overlap (D29 stays clean).
+    // slice so consecutive retriggers never overlap (D29 stays clean). Integer
+    // division front-aligns the hits: a ratchet that does not divide 240 (e.g.
+    // 7 -> slice 34, last hit at 204) leaves a small tail gap before the next
+    // step boundary. This is acceptable — the hits stay evenly spaced and the
+    // step remains musically front-aligned.
     const std::uint32_t slice = kTicksPerStep / ratchet;
     std::uint16_t sub_gate = static_cast<std::uint16_t>(slice > s.gate ? s.gate : slice);
     if (sub_gate == 0) {

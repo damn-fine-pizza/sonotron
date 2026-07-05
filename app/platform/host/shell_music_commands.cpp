@@ -15,6 +15,46 @@ using namespace shell_detail;
 
 namespace {
 
+// Parses one `key=value` step param-lock token into its destination slot.
+// Returns false and fills `error` on an unknown key or an out-of-range value;
+// the caller owns the '=' split and the positional vel/gate tokens. Keeping the
+// per-key validation here drops the cognitive complexity of track_step below the
+// clang-tidy threshold. micro is FORWARD-only (0..127): a lay-back behind the
+// beat — anticipation is deferred (it needs step look-ahead), so a negative
+// value is not accepted.
+bool parse_step_lock(const std::string& key, const std::string& val, std::uint64_t& probability,
+                     std::uint64_t& ratchet, std::uint64_t& micro, bool& tie, std::string& error) {
+  if (key == "prob") {
+    if (!parse_u64(val, probability) || probability > 100) {
+      error = "bad prob (0..100): " + val;
+      return false;
+    }
+  } else if (key == "ratchet") {
+    if (!parse_u64(val, ratchet) || ratchet < 1 || ratchet > kMaxRatchet) {
+      error = "bad ratchet (1..8): " + val;
+      return false;
+    }
+  } else if (key == "micro") {
+    if (!parse_u64(val, micro) || micro > 127) {
+      error = "bad micro (0..127, forward-only): " + val;
+      return false;
+    }
+  } else if (key == "tie") {
+    if (val == "on") {
+      tie = true;
+    } else if (val == "off") {
+      tie = false;
+    } else {
+      error = "bad tie (on|off): " + val;
+      return false;
+    }
+  } else {
+    error = "track step: unknown param-lock: " + key;
+    return false;
+  }
+  return true;
+}
+
 // Structural label of a section type (the inverse of parse_section). The
 // spellings match parse_section, so a listing round-trips through
 // `style section <name>`.
@@ -646,7 +686,7 @@ bool Shell::track_new(const std::vector<std::string>& t, std::string& error) {
 
 bool Shell::track_step(const std::vector<std::string>& t, int track, std::string& error) {
   // track step <name> <step#> <note|clear> [vel] [gate]
-  //           [prob=0..100] [ratchet=1..8] [micro=-127..127] [tie=on|off]
+  //           [prob=0..100] [ratchet=1..8] [micro=0..127] [tie=on|off]
   // The four key=value param-locks are optional and order-free; omitting them
   // all keeps the original short form (and byte-identical playback).
   std::uint64_t step = 0;
@@ -674,11 +714,12 @@ bool Shell::track_step(const std::vector<std::string>& t, int track, std::string
   std::uint64_t gate = kTicksPerStep / 2;
   std::uint64_t probability = 100;
   std::uint64_t ratchet = 1;
-  long micro = 0;
+  std::uint64_t micro = 0;
   bool tie = false;
   bool has_locks = false;
 
-  // Positional vel/gate remain; any token carrying '=' is a param-lock.
+  // Only the '=' split and positional vel/gate dispatch live here; each
+  // param-lock's own validation is delegated to parse_step_lock.
   int positional = 0;  // 0 -> vel, 1 -> gate
   for (std::size_t i = 5; i < t.size(); ++i) {
     const std::string& tok = t[i];
@@ -702,37 +743,9 @@ bool Shell::track_step(const std::vector<std::string>& t, int track, std::string
       }
       continue;
     }
-    const std::string key = tok.substr(0, eq);
-    const std::string val = tok.substr(eq + 1);
     has_locks = true;
-    if (key == "prob") {
-      if (!parse_u64(val, probability) || probability > 100) {
-        error = "bad prob (0..100): " + val;
-        return false;
-      }
-    } else if (key == "ratchet") {
-      if (!parse_u64(val, ratchet) || ratchet < 1 || ratchet > kMaxRatchet) {
-        error = "bad ratchet (1..8): " + val;
-        return false;
-      }
-    } else if (key == "micro") {
-      char* end = nullptr;
-      micro = std::strtol(val.c_str(), &end, 10);
-      if (end == val.c_str() || *end != '\0' || micro < -127 || micro > 127) {
-        error = "bad micro (-127..127): " + val;
-        return false;
-      }
-    } else if (key == "tie") {
-      if (val == "on") {
-        tie = true;
-      } else if (val == "off") {
-        tie = false;
-      } else {
-        error = "bad tie (on|off): " + val;
-        return false;
-      }
-    } else {
-      error = "track step: unknown param-lock: " + key;
+    if (!parse_step_lock(tok.substr(0, eq), tok.substr(eq + 1), probability, ratchet, micro, tie,
+                         error)) {
       return false;
     }
   }

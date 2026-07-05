@@ -393,13 +393,13 @@ void Engine::cmd_track(const Command& cmd, EventSink sink) {
       // existing kTrackStep commands are byte-identical.
       std::uint8_t probability = 100;
       std::uint8_t ratchet = 1;
-      std::int8_t micro = 0;
+      std::uint8_t micro = 0;  // forward-only lay-back (0..127)
       bool tie = false;
       if ((c & 0x80000000u) != 0) {
         probability = static_cast<std::uint8_t>((b >> 16) & 0xFF);
         ratchet = static_cast<std::uint8_t>((b >> 24) & 0x0F);
         tie = ((b >> 28) & 0x1) != 0;
-        micro = static_cast<std::int8_t>((c >> 16) & 0xFF);
+        micro = static_cast<std::uint8_t>((c >> 16) & 0xFF);
       }
       if (!m_timeline.set_step(cmd.idx, static_cast<std::size_t>(cmd.a), note, vel, gate,
                                probability, ratchet, micro, tie)) {

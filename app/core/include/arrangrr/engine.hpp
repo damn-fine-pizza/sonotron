@@ -189,15 +189,23 @@ class Engine {
 
   // Pattern-driven scheduling with retrigger care (§9.B): re-firing a note
   // whose previous NoteOff is still pending would either duplicate the on or
-  // get truncated by the stale off. Close it now (D29 sorts the off first)
-  // and tombstone the stale release.
+  // get truncated by the stale off. The compensating off is anchored to the
+  // INCOMING on's scheduled tick (m_now + delay), NOT to m_now — otherwise a
+  // ratchet, which schedules several hits of the same note in one on_tick with
+  // increasing delay, would re-emit every sub-hit's off at m_now and leave a
+  // string of bare re-attacks on an already-sounding note. cancel_note_off is
+  // tick-aware: it only cancels an off that lands at or after the new on, so a
+  // sub-hit whose gate ends before the next hit keeps its silent gap. For the
+  // normal cross-step case delay == 0, so on_tick == m_now and the wire is
+  // byte-identical to the pre-fix path (D29 still sorts the off before the on).
   void schedule_pattern(std::uint8_t port, TickOffset delay, const MidiMessage& msg,
                         EventSink sink) {
+    const Tick on_tick = m_now + static_cast<Tick>(delay);
     if (msg.type() == midi::kNoteOn &&
-        m_scheduler.cancel_note_off(port, msg.channel(), msg.d1)) {
-      schedule_or_warn(port, m_now, MidiMessage::note_off(msg.channel(), msg.d1), sink);
+        m_scheduler.cancel_note_off(port, msg.channel(), msg.d1, on_tick)) {
+      schedule_or_warn(port, on_tick, MidiMessage::note_off(msg.channel(), msg.d1), sink);
     }
-    schedule_or_warn(port, m_now + static_cast<Tick>(delay), msg, sink);
+    schedule_or_warn(port, on_tick, msg, sink);
   }
 
   void fire_timeline(Tick transport_tick, EventSink sink) {

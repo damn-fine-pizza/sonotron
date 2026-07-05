@@ -87,16 +87,28 @@ class OutScheduler {
   }
 
   // Retrigger support (§9.B: no duplicate note without an intervening off):
-  // tombstones the EARLIEST pending NoteOff for (port, channel, note) so a
-  // re-fired note is not truncated by the previous one's scheduled release.
-  // Returns true when one was found — the caller emits the off "now" instead.
-  constexpr bool cancel_note_off(std::uint8_t port, std::uint8_t channel,
-                                 std::uint8_t note) noexcept {
+  // tombstones the EARLIEST pending NoteOff for (port, channel, note) whose
+  // scheduled tick is at or after `on_tick`, so a re-fired note is not
+  // truncated by the previous one's release, while a DELIBERATE gap (an off
+  // that already lands strictly before the incoming on — e.g. a ratchet sub-hit
+  // with sub_gate < slice) is left alone. Returns true when one was found — the
+  // caller re-emits that off anchored to the incoming on's tick. `on_tick`
+  // defaults to 0 (cancel the earliest off at any tick, the tick-agnostic
+  // behaviour).
+  //
+  // Note: this same anti-stuck-note protection is exactly what a naive "tie"
+  // (a step whose note-off is merely lengthened) collides with — the next
+  // same-note step's on would tombstone the long off here and re-attack. The
+  // sequencer avoids that upstream by suppressing the tied-into step's emission
+  // (see Timeline::suppressed_by_tie), so no same-note on ever reaches here
+  // while the tie is held.
+  constexpr bool cancel_note_off(std::uint8_t port, std::uint8_t channel, std::uint8_t note,
+                                 Tick on_tick = 0) noexcept {
     int best = -1;
     for (std::size_t i = 0; i < m_size; ++i) {
       const ScheduledEvent& e = m_heap[i];
       if (e.port != port || e.msg.status == 0 || e.msg.type() != midi::kNoteOff ||
-          e.msg.channel() != channel || e.msg.d1 != note) {
+          e.msg.channel() != channel || e.msg.d1 != note || e.tick < on_tick) {
         continue;
       }
       if (best < 0 || e.tick < m_heap[static_cast<std::size_t>(best)].tick) {
