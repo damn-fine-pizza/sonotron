@@ -330,6 +330,9 @@ void Shell::groove_adjust(int delta) {
     case GrooveField::kSwingGrid:
       next = (p.swing_grid == 16) ? 8 : 16;  // left/right both toggle
       break;
+    case GrooveField::kQuantize:
+      next = std::clamp(static_cast<int>(p.quantize) + delta * 10, 0, 100);
+      break;
     case GrooveField::kSeed:
       return;
   }

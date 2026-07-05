@@ -448,6 +448,9 @@ void test_shell_groove_command_and_panel() {
   CHECK(f.run("groove humanize-t 30"));
   CHECK(f.run("groove accent 100"));
   CHECK(f.run("groove grid 16"));
+  CHECK(f.run("groove quantize 75"));  // new field reachable end-to-end
+  CHECK(block_contains(panel, "quantize"));
+  CHECK(block_contains(panel, "75%"));
   CHECK(!f.run("groove nope 10"));  // unknown field
   CHECK(!f.run("groove swing"));    // missing value
 }

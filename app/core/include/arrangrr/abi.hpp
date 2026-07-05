@@ -84,7 +84,7 @@ enum class Param : std::uint16_t {
   kPartSolo = 37,          // set: a = TrackRole, b = 0/1. Solo: when any part
                            //     is soloed, only soloed parts play.
   kGroove = 38,            // set: a = GrooveField (swing/humanize/accent/grid/
-                           //     seed), b = value. The global groove feel.
+                           //     quantize/seed), b = value. The global groove feel.
   kArp = 39,               // set: a = ArpField (enabled/rate/direction/octaves/
                            //     gate/latch/seed), b = value. Live arpeggiator.
   kArpOut = 40,            // set: a = port | (channel_0based << 8). Where the

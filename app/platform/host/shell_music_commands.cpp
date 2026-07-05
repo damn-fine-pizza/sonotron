@@ -256,7 +256,7 @@ bool Shell::cmd_part(const std::vector<std::string>& t, std::string& error) {
 bool Shell::cmd_groove(const std::vector<std::string>& t, std::string& error) {
   // groove <field> <value>   — the arranger feel from the CLI.
   if (t.size() < 3) {
-    error = "groove <swing|humanize-t|humanize-v|accent|grid|seed> <value>";
+    error = "groove <swing|humanize-t|humanize-v|accent|grid|quantize|seed> <value>";
     return false;
   }
   GrooveField field = GrooveField::kSwing;
@@ -271,6 +271,8 @@ bool Shell::cmd_groove(const std::vector<std::string>& t, std::string& error) {
     field = GrooveField::kAccent;
   } else if (f == "grid") {
     field = GrooveField::kSwingGrid;
+  } else if (f == "quantize" || f == "q") {
+    field = GrooveField::kQuantize;
   } else if (f == "seed") {
     field = GrooveField::kSeed;
   } else {

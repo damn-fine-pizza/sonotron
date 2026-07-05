@@ -19,6 +19,7 @@ constexpr std::array<GrooveRow, kGrooveRowCount> kRows = {{
     {.field = GrooveField::kHumanizeVelocity, .label = "humanize v", .hint = "velocity wobble"},
     {.field = GrooveField::kAccent, .label = "accent", .hint = "downbeat emphasis"},
     {.field = GrooveField::kSwingGrid, .label = "swing grid", .hint = "8th / 16th offbeats"},
+    {.field = GrooveField::kQuantize, .label = "quantize", .hint = "pull timing to grid"},
 }};
 
 std::uint8_t field_value(const GrooveParams& p, GrooveField field) {
@@ -33,6 +34,8 @@ std::uint8_t field_value(const GrooveParams& p, GrooveField field) {
       return p.accent;
     case GrooveField::kSwingGrid:
       return p.swing_grid;
+    case GrooveField::kQuantize:
+      return p.quantize;
     case GrooveField::kSeed:
       return 0;
   }

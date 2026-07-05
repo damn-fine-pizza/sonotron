@@ -66,8 +66,8 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
     return {
         "help: groove  (the arranger feel as parameters; focus it, then:)",
         "  up/down  select | left/right adjust | r  reseed humanize",
-        "  swing (off-beat push) · humanize-t/v (wobble) · accent · grid (8/16)",
-        "  CLI: groove <swing|humanize-t|humanize-v|accent|grid|seed> <value>",
+        "  swing (off-beat push) · humanize-t/v (wobble) · accent · grid (8/16) · quantize (to grid)",
+        "  CLI: groove <swing|humanize-t|humanize-v|accent|grid|quantize|seed> <value>",
     };
   }
   if (topic == "parts") {

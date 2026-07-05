@@ -194,6 +194,24 @@ void test_groove_apply() {
   // Velocity always clamped into 1..127.
   CHECK(groove::apply(p, 0, 3, 111, 1).velocity >= 1);
   CHECK(groove::apply(p, 0, 0, 222, 127).velocity <= 127);
+
+  // Quantize scales the swing+humanize timing offset back toward the grid,
+  // touching only the timing (velocity is left alone).
+  p = GrooveParams{};
+  p.swing = 100;
+  const TickOffset base_off = groove::apply(p, 0, 2, 0, 100).timing_offset;
+  CHECK(base_off > 0);
+  // 0% (default) leaves the offset intact.
+  p.quantize = 0;
+  CHECK(groove::apply(p, 0, 2, 0, 100).timing_offset == base_off);
+  // 100% snaps the event exactly onto the grid (offset zeroed).
+  p.quantize = 100;
+  const GrooveOut q100 = groove::apply(p, 0, 2, 0, 100);
+  CHECK(q100.timing_offset == 0);
+  CHECK(q100.velocity == 100);  // velocity untouched by quantize
+  // An intermediate value scales the offset proportionally toward zero.
+  p.quantize = 50;
+  CHECK(groove::apply(p, 0, 2, 0, 100).timing_offset == base_off * 50 / 100);
 }
 
 void test_groove_command() {
@@ -228,6 +246,12 @@ void test_groove_set_field_all() {
   CHECK(p.seed == 777u);
   groove::set_field(p, GrooveField::kSeed, -3);  // negative -> 0
   CHECK(p.seed == 0u);
+  groove::set_field(p, GrooveField::kQuantize, 75);
+  CHECK(p.quantize == 75);
+  groove::set_field(p, GrooveField::kQuantize, 200);  // clamp high
+  CHECK(p.quantize == 100);
+  groove::set_field(p, GrooveField::kQuantize, -5);  // clamp low
+  CHECK(p.quantize == 0);
 }
 
 void test_part_mute_solo() {

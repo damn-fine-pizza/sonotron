@@ -24,6 +24,7 @@ struct GrooveParams {
   std::uint8_t humanize_velocity = 0;  // 0..100 %: deterministic velocity wobble
   std::uint8_t accent = 0;             // 0..100 %: downbeat velocity emphasis
   std::uint8_t swing_grid = 8;         // 8 or 16: swing the off-8th or off-16th
+  std::uint8_t quantize = 0;           // 0..100 %: pull the timing offset back to the grid
   std::uint32_t seed = 1;              // humanize seed (determinism)
 };
 
@@ -35,8 +36,9 @@ enum class GrooveField : std::uint8_t {
   kAccent = 3,
   kSwingGrid = 4,
   kSeed = 5,
+  kQuantize = 6,
 };
-inline constexpr std::uint8_t kGrooveFieldCount = 6;
+inline constexpr std::uint8_t kGrooveFieldCount = 7;
 
 struct GrooveOut {
   TickOffset timing_offset = 0;  // added to the note-on AND note-off delay (gate preserved)
@@ -98,6 +100,15 @@ constexpr GrooveOut apply(const GrooveParams& params, std::uint8_t role, std::ui
     out.timing_offset += static_cast<TickOffset>((push * params.humanize_timing) / 100);
   }
 
+  // Quantize: scale the accumulated swing+humanize offset toward the grid as a
+  // final step. 0% leaves the groove untouched; 100% snaps the event exactly
+  // onto the grid (offset zeroed). The same scaled offset still rides both the
+  // note-on and note-off, so the gate stays preserved.
+  if (params.quantize > 0) {
+    out.timing_offset = static_cast<TickOffset>(
+        (out.timing_offset * (100 - static_cast<TickOffset>(params.quantize))) / 100);
+  }
+
   out.velocity = static_cast<std::uint8_t>(vel < 1 ? 1 : (vel > 127 ? 127 : vel));
   return out;
 }
@@ -123,6 +134,9 @@ constexpr void set_field(GrooveParams& params, GrooveField field, std::int32_t v
       break;
     case GrooveField::kSeed:
       params.seed = static_cast<std::uint32_t>(value < 0 ? 0 : value);
+      break;
+    case GrooveField::kQuantize:
+      params.quantize = pct;
       break;
   }
 }
