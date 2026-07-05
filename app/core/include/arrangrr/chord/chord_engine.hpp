@@ -28,12 +28,9 @@ enum class ChordMode : std::uint8_t {
 inline constexpr std::uint8_t kChordModeCount = 3;
 inline constexpr std::uint8_t kNoDegree = 0x7F;  // event degree for keyless modes
 
-// The live harmonic context consumed by the arranger's NTT resolution (D24).
-struct ChordState {
-  std::uint8_t root_pc = 0;
-  ChordQuality quality = ChordQuality::kMaj;
-  bool valid = false;  // false until the first chord sounds
-};
+// ChordState (the live harmonic context consumed by the arranger's NTT
+// resolution, D24) now lives in theory.hpp so the freestanding ChordDetector
+// can name it too; it is still in scope here via that include.
 
 struct ChordResult {
   std::uint8_t root_note = 0;  // MIDI note of the chord root (= input)
@@ -121,7 +118,7 @@ class ChordEngine {
   // previous voicing and stacks the shape from `root_note` upward.
   void sound(std::uint8_t root_note, ChordQuality quality, std::uint8_t velocity,
              ScheduleFn schedule) {
-    m_state = ChordState{static_cast<std::uint8_t>(root_note % 12), quality, true};
+    m_state = ChordState{.root_pc=static_cast<std::uint8_t>(root_note % 12), .quality=quality, .valid=true};
     const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
     for (std::uint8_t i = 0; i < shape.count; ++i) {
@@ -141,6 +138,18 @@ class ChordEngine {
       schedule(m_out_port, MidiMessage::note_off(m_out_channel, m_sounding[i]));
     }
     m_sounding_count = 0;
+  }
+
+  // Sets the live harmonic context WITHOUT sounding a voicing. This is the
+  // piano->chord path: notes played on the keyboard already sound through
+  // normal routing, so the live-detected chord must only STEER the arranger's
+  // NTT resolution (D24), never stack a second voicing on top. The recorded
+  // ChordSequencer and `chord play` keep going through sound(); this is the
+  // one setter that updates the context alone.
+  constexpr void set_context(std::uint8_t root_pc, ChordQuality quality) noexcept {
+    m_state = ChordState{.root_pc = static_cast<std::uint8_t>(root_pc % 12),
+                         .quality = quality,
+                         .valid = true};
   }
 
   constexpr bool sounding() const noexcept { return m_sounding_count > 0; }

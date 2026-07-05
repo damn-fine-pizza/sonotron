@@ -68,7 +68,7 @@ class ChordSequencer {
     if (ChordStep* prev = seq->last(); prev != nullptr && prev->duration == 0) {
       prev->duration = rel - prev->start;
     }
-    (void)seq->record(ChordStep{rel, 0, degree, quality_ovr, velocity});
+    (void)seq->record(ChordStep{.start=rel, .duration=0, .degree=degree, .quality_ovr=quality_ovr, .velocity=velocity});
   }
 
   // Stops recording; the open step is closed at `now`, then quantize-after.

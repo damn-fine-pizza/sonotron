@@ -88,7 +88,7 @@ class Timeline {
     if (vel > 0 && gate == 0) {
       return false;
     }
-    t->steps[step] = Step{note, vel, gate};
+    t->steps[step] = Step{.note=note, .vel=vel, .gate=gate};
     return true;
   }
 

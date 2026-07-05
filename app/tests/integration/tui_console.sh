@@ -16,15 +16,22 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# Focus now starts on the piano panel (play mode), so SHIFT+TAB (CSI Z) steps
+# back to the REPL before we type commands. We clear the crowded default grid
+# and keep only the console (for the command echo) + help (so 'help' has the
+# full height for its content, which the default 6-panel grid clips on 80x24).
 # \r submits (raw mode); arrows exercise the editor's escape parsing.
-# Sequence: play D · recall it with Up and resubmit · help · quit.
-printf 'play D\r\x1b[A\r\x1b[Bhelp\rquit\r' \
+# Sequence: SHIFT+TAB · clear · open console · play D · recall with Up · help · quit.
+printf '\x1b[Zpanel close all\rpanel open console\rplay D\r\x1b[A\r\x1b[Bhelp\rquit\r' \
   | timeout 15 script -qec "$CLI --events human" "$tmp/typescript" > "$tmp/out" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { echo "CLI exited rc=$rc"; tail -5 "$tmp/out"; exit 1; }
 
 grep -q $'\x1b\[7m' "$tmp/out" || { echo "status bar missing"; exit 1; }
-count=$(grep -c '> play D' "$tmp/out" || true)
+# The uniform panel grid repaints with cursor positioning (few newlines), so the
+# console echo of the typed + recalled command shows as repeated OCCURRENCES on
+# the same physical line rather than distinct grep lines: count occurrences.
+count=$(grep -o '> play D' "$tmp/out" | wc -l)
 [ "$count" -ge 2 ] || { echo "history recall missing (got $count)"; exit 1; }
 grep -q 'chord progressions' "$tmp/out" || { echo "help output missing"; exit 1; }
 grep -q 'stopped' "$tmp/out" || { echo "status text missing"; exit 1; }

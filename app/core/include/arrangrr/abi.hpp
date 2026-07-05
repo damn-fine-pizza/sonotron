@@ -67,6 +67,28 @@ enum class Param : std::uint16_t {
   kStyleSection = 31,      // do: a = SectionType (quantized to the next bar
                            //     while playing, immediate otherwise)
   kStyleRoute = 32,        // set: a = TrackRole, b = port | (channel << 8)
+  kStyleSwitch = 33,       // do: a = builtin style index, b = SectionType,
+                           //     c = immediate (0 = next bar while playing,
+                           //     else a hard mid-bar cut; stopped is always
+                           //     immediate). Combined style + section switch.
+  kChordDetect = 34,       // set: a = 0/1 (live piano->chord detection: held
+                           //     notes on the input port re-harmonize the
+                           //     arranger, chord-memory hold-last), b = input
+                           //     port. Distinct from the reserved kChordHold.
+  kProgram = 35,           // set: a = GM program (0..127), b = port |
+                           //     (channel_0based << 8). Sends a Program Change
+                           //     so the arrangrr picks the voice, not just the
+                           //     external synth.
+  kPartMute = 36,          // set: a = TrackRole, b = 0/1. Live mute of one
+                           //     arranger style part (the `parts` mixer).
+  kPartSolo = 37,          // set: a = TrackRole, b = 0/1. Solo: when any part
+                           //     is soloed, only soloed parts play.
+  kGroove = 38,            // set: a = GrooveField (swing/humanize/accent/grid/
+                           //     seed), b = value. The global groove feel.
+  kArp = 39,               // set: a = ArpField (enabled/rate/direction/octaves/
+                           //     gate/latch/seed), b = value. Live arpeggiator.
+  kArpOut = 40,            // set: a = port | (channel_0based << 8). Where the
+                           //     arpeggiator plays.
 };
 
 struct Command {
@@ -131,7 +153,7 @@ struct OutEvent {
     OutEvent e;
     e.kind = Kind::kChord;
     e.port = port;
-    e.msg = MidiMessage{root_note, count, vel};
+    e.msg = MidiMessage{.status=root_note, .d1=count, .d2=vel};
     e.tick = t;
     e.code = static_cast<std::uint16_t>(degree | (quality << 8));
     return e;

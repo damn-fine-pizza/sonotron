@@ -1,0 +1,140 @@
+#pragma once
+
+#include <cstdint>
+
+#include "arrangrr/chord/theory.hpp"
+#include "arrangrr/common/span.hpp"
+#include "arrangrr/timeline/timeline.hpp"
+
+// Style model (D24 groundwork): sections hold DEGREE-RELATIVE patterns per
+// role, resolved against the live chord at playback — the NTT idea in its
+// honest core form. Content is constexpr data (D32): read-only styles cost
+// zero RAM on the device (D33: flash, memory-mapped).
+
+namespace arrangrr {
+
+// Full section vocabulary from day one (ABI stability); the built-in demo
+// style implements a subset.
+enum class SectionType : std::uint8_t {
+  kIntro1 = 0,
+  kIntro2 = 1,
+  kVarA = 2,
+  kVarB = 3,
+  kVarC = 4,
+  kVarD = 5,
+  kFillA = 6,
+  kFillB = 7,
+  kFillC = 8,
+  kFillD = 9,
+  kBreak = 10,
+  kEnding1 = 11,
+  kEnding2 = 12,
+};
+inline constexpr std::uint8_t kSectionTypeCount = 13;
+
+constexpr bool section_is_variation(SectionType t) noexcept {
+  return t >= SectionType::kVarA && t <= SectionType::kVarD;
+}
+constexpr bool section_is_fill(SectionType t) noexcept {
+  return t >= SectionType::kFillA && t <= SectionType::kFillD;
+}
+constexpr bool section_is_intro(SectionType t) noexcept { return t <= SectionType::kIntro2; }
+constexpr bool section_is_ending(SectionType t) noexcept { return t >= SectionType::kEnding1; }
+
+enum class RolePolicy : std::uint8_t {
+  kFixed = 0,      // literal MIDI notes (drums/percussion — never transposed)
+  kChordTone = 1,  // tone = chord-tone index; resolved via NTT at playback
+};
+
+struct StyleEvent {
+  std::uint16_t step;  // 16th-grid position within the section
+  std::int8_t tone;    // kFixed: MIDI note; kChordTone: chord-tone index
+  std::int8_t octave;  // octave offset
+  std::uint8_t vel;
+  std::uint16_t gate;  // ticks
+};
+
+struct StylePattern {
+  TrackRole role;
+  RolePolicy policy;
+  Span<const StyleEvent> events;
+  // Default GM voice for this role, emitted as a Program Change when the style
+  // loads (on the role's route). -1 = leave the synth's current voice. Kept
+  // last with a default so existing designated initializers stay valid.
+  std::int16_t gm_program = -1;
+};
+
+struct StyleSection {
+  SectionType type;
+  std::uint8_t bars;
+  Span<const StylePattern> patterns;
+};
+
+struct Style {
+  const char* name;  // host display only; the core matches by index
+  Span<const StyleSection> sections;
+
+  constexpr const StyleSection* find(SectionType t) const noexcept {
+    for (const StyleSection& s : sections) {
+      if (s.type == t) {
+        return &s;
+      }
+    }
+    return nullptr;
+  }
+};
+
+namespace styles {
+
+// Named constants so the pattern tables read as music, not magic numbers.
+// GM drum notes (RolePolicy::kFixed — literal, never transposed).
+inline constexpr std::int8_t kKick = 36;
+inline constexpr std::int8_t kRimshot = 37;
+inline constexpr std::int8_t kSnare = 38;
+inline constexpr std::int8_t kClap = 39;
+inline constexpr std::int8_t kClosedHat = 42;
+inline constexpr std::int8_t kOpenHat = 46;
+inline constexpr std::int8_t kCrash = 49;
+inline constexpr std::int8_t kRide = 51;
+// Toms (GM) for fills and tom grooves.
+inline constexpr std::int8_t kTomFloor = 43;
+inline constexpr std::int8_t kTomLow = 45;
+inline constexpr std::int8_t kTomMid = 47;
+inline constexpr std::int8_t kTomHi = 50;
+// Latin / world percussion (GM) — makes the world grooves audibly distinct.
+inline constexpr std::int8_t kSideStick = 37;  // alias of rimshot (side-stick cross)
+inline constexpr std::int8_t kTambourine = 54;
+inline constexpr std::int8_t kCowbell = 56;
+inline constexpr std::int8_t kHiBongo = 60;
+inline constexpr std::int8_t kLoBongo = 61;
+inline constexpr std::int8_t kMuteHiConga = 62;
+inline constexpr std::int8_t kOpenHiConga = 63;
+inline constexpr std::int8_t kLoConga = 64;
+inline constexpr std::int8_t kHiTimbale = 65;
+inline constexpr std::int8_t kLoTimbale = 66;
+inline constexpr std::int8_t kHiAgogo = 67;
+inline constexpr std::int8_t kLoAgogo = 68;
+inline constexpr std::int8_t kCabasa = 69;
+inline constexpr std::int8_t kMaracas = 70;
+inline constexpr std::int8_t kShortGuiro = 73;
+inline constexpr std::int8_t kClaves = 75;
+inline constexpr std::int8_t kHiWoodblock = 76;
+inline constexpr std::int8_t kLoWoodblock = 77;
+
+// Chord-tone indices (RolePolicy::kChordTone — resolved against the live chord).
+inline constexpr std::int8_t kRoot = 0;
+inline constexpr std::int8_t kThird = 1;
+inline constexpr std::int8_t kFifth = 2;
+inline constexpr std::int8_t kSeventh = 3;
+
+// Gate lengths in ticks (PPQN=960: a 16th=240, a quarter=960, a 4/4 bar=3840).
+inline constexpr std::uint16_t kGateStaccato = 50;
+inline constexpr std::uint16_t kGateHat = 120;
+inline constexpr std::uint16_t kGateStab = 200;
+inline constexpr std::uint16_t kGate8th = 240;
+inline constexpr std::uint16_t kGateBeat = 360;
+inline constexpr std::uint16_t kGateHalfBar = 1800;
+inline constexpr std::uint16_t kGateHeld = 3600;  // just under a full bar
+
+}  // namespace styles
+}  // namespace arrangrr

@@ -50,7 +50,7 @@ class ChordSequence {
     if (duration == 0) {
       return false;
     }
-    return m_steps.push_back(ChordStep{length(), duration, degree, quality_ovr, velocity});
+    return m_steps.push_back(ChordStep{.start=length(), .duration=duration, .degree=degree, .quality_ovr=quality_ovr, .velocity=velocity});
   }
 
   // Removes step i and closes the gap (later steps shift earlier).

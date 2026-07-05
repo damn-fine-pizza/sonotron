@@ -32,6 +32,41 @@ const NameTable& select_table(const NoteNameOptions& options) {
   return options.prefer_flats ? kCdeFlat : kCdeSharp;
 }
 
+// General MIDI percussion map, channel 10 only. Table spans the conventional
+// GM drum range; gaps within it (no conventional name) are nullptr.
+constexpr std::uint8_t kGmDrumFirstNote = 35;
+constexpr std::uint8_t kGmDrumLastNote = 59;
+
+using GmDrumTable = std::array<const char*, kGmDrumLastNote - kGmDrumFirstNote + 1>;
+
+constexpr GmDrumTable kGmDrumNames = {
+    "Kick 2",      // 35
+    "Kick",        // 36
+    "Side Stick",  // 37
+    "Snare",       // 38
+    "Clap",        // 39
+    "Snare 2",     // 40
+    "Low Tom 2",   // 41
+    "Closed HH",   // 42
+    "Low Tom",     // 43
+    "Pedal HH",    // 44
+    "Mid Tom",     // 45
+    "Open HH",     // 46
+    "Mid Tom 2",   // 47
+    "High Tom",    // 48
+    "Crash",       // 49
+    "High Tom 2",  // 50
+    "Ride",        // 51
+    "China",       // 52
+    "Ride Bell",   // 53
+    "Tambourine",  // 54
+    "Splash",      // 55
+    "Cowbell",     // 56
+    "Crash 2",     // 57
+    nullptr,       // 58 (no conventional GM name)
+    "Ride 2",      // 59
+};
+
 }  // namespace
 
 std::string pitch_class_name(std::uint8_t midi_note, const NoteNameOptions& options) {
@@ -51,6 +86,14 @@ std::string note_name(std::uint8_t midi_note, const NoteNameOptions& options) {
   }
 
   return name;
+}
+
+const char* gm_drum_name(std::uint8_t midi_note) {
+  if (midi_note < kGmDrumFirstNote || midi_note > kGmDrumLastNote) {
+    return nullptr;
+  }
+
+  return kGmDrumNames[midi_note - kGmDrumFirstNote];
 }
 
 }  // namespace arrangrr::host

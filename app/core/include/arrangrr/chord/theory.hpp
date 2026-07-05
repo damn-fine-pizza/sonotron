@@ -49,6 +49,18 @@ struct ChordShape {
   std::uint8_t offsets[4] = {0, 0, 0, 0};
 };
 
+// The live harmonic context the arranger's NTT resolution (D24) resolves
+// against: a pitch class + quality, `valid` until the first chord sounds. Set
+// by the ChordEngine (chord play / recorded ChordSequencer) and by live
+// piano->chord detection. Lives here as a pure-theory type so both the chord
+// engine and the freestanding ChordDetector can name it without pulling in
+// MIDI/host headers.
+struct ChordState {
+  std::uint8_t root_pc = 0;
+  ChordQuality quality = ChordQuality::kMaj;
+  bool valid = false;  // false until the first chord sounds
+};
+
 namespace theory {
 
 // Scale intervals per mode (rotations of the major scale).
@@ -92,27 +104,27 @@ constexpr int degree_of(const Key& key, std::uint8_t pc) noexcept {
 constexpr ChordShape shape_of(ChordQuality q) noexcept {
   switch (q) {
     case ChordQuality::kMaj:
-      return {3, {0, 4, 7, 0}};
+      return {.count=3, .offsets={0, 4, 7, 0}};
     case ChordQuality::kMin:
-      return {3, {0, 3, 7, 0}};
+      return {.count=3, .offsets={0, 3, 7, 0}};
     case ChordQuality::kDim:
-      return {3, {0, 3, 6, 0}};
+      return {.count=3, .offsets={0, 3, 6, 0}};
     case ChordQuality::kAug:
-      return {3, {0, 4, 8, 0}};
+      return {.count=3, .offsets={0, 4, 8, 0}};
     case ChordQuality::kMaj7:
-      return {4, {0, 4, 7, 11}};
+      return {.count=4, .offsets={0, 4, 7, 11}};
     case ChordQuality::kMin7:
-      return {4, {0, 3, 7, 10}};
+      return {.count=4, .offsets={0, 3, 7, 10}};
     case ChordQuality::kDom7:
-      return {4, {0, 4, 7, 10}};
+      return {.count=4, .offsets={0, 4, 7, 10}};
     case ChordQuality::kHalfDim7:
-      return {4, {0, 3, 6, 10}};
+      return {.count=4, .offsets={0, 3, 6, 10}};
     case ChordQuality::kDim7:
-      return {4, {0, 3, 6, 9}};
+      return {.count=4, .offsets={0, 3, 6, 9}};
     case ChordQuality::kSus2:
-      return {3, {0, 2, 7, 0}};
+      return {.count=3, .offsets={0, 2, 7, 0}};
     case ChordQuality::kSus4:
-      return {3, {0, 5, 7, 0}};
+      return {.count=3, .offsets={0, 5, 7, 0}};
   }
   return {};
 }
@@ -239,8 +251,8 @@ constexpr ChordQuality complete_shell_full(const std::uint8_t (&iv)[3], std::uin
 
 // --- compile-time self-tests (D32) ----------------------------------------
 namespace selftest {
-constexpr Key kCMajor{0, Mode::kMajor};
-constexpr Key kAMinor{9, Mode::kMinor};
+constexpr Key kCMajor{.root_pc=0, .mode=Mode::kMajor};
+constexpr Key kAMinor{.root_pc=9, .mode=Mode::kMinor};
 // C major degrees: D is the ii, B the vii.
 static_assert(degree_of(kCMajor, 2) == 1);
 static_assert(degree_of(kCMajor, 11) == 6);

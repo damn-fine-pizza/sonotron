@@ -42,28 +42,36 @@ class LineEditor {
   std::string m_csi;
 };
 
-// Terminal renderer. Layout (H rows): rows 1..H-2 scroll region (output
-// pane), row H-1 status bar (inverse video), row H input line.
+// Terminal renderer. Layout, top to bottom over H rows:
+//   [ panel grid: rows 1..H-2 ] [ status bar: H-1 ] [ input line: H ]
+// The whole area above the status bar is one uniform panel grid, composed by
+// PanelManager and painted verbatim here (no scroll region, no bands): the
+// events/console SCROLLING now lives in PanelManager's per-panel backlogs. The
+// status bar (inverse video) and the persistent input line anchor the bottom.
 class Console {
  public:
+  static constexpr int kStatusInputRows = 2;  // status bar + input line
+
   Console();
   ~Console();
 
   Console(const Console&) = delete;
   Console& operator=(const Console&) = delete;
 
-  bool init();      // enters raw mode + scroll region; false if not a tty
+  bool init();      // enters raw mode; false if not a tty
   void shutdown();  // restores everything (idempotent)
 
-  void emit(const std::string& line);        // print into the output pane
   void set_status(const std::string& text);  // repaint the status bar (and
                                              // re-layout after a resize)
   void render_input(const LineEditor& ed);   // repaint prompt + buffer + cursor
 
-  // Persistent panel between the log pane and the status bar (help lives
-  // here). Empty vector hides it. The log pane always keeps >= ~60% of the
-  // screen: overlong panels are truncated.
+  // Paints the composed panel grid over rows 1..H-2. `lines` is expected to be
+  // exactly panel_rows() long (PanelManager fits it to width + height); shorter
+  // input clears the remaining rows, longer input is clamped.
   void set_panel(const std::vector<std::string>& lines);
+
+  // Rows available to the panel grid (everything above the status/input pair).
+  int panel_rows() const { return m_rows > kStatusInputRows ? m_rows - kStatusInputRows : 0; }
 
   // Current terminal width; panel renderers regenerate content from state
   // through the resize hook, which fires after every geometry change.
@@ -72,17 +80,15 @@ class Console {
 
  private:
   void refresh_geometry();
-  void apply_layout();  // scroll region + panel + status repaint
-  int log_bottom() const;
   int status_row() const { return m_rows - 1; }
   int input_row() const { return m_rows; }
   void write_raw(const std::string& s);
+  void paint_status();
 
   bool m_active = false;
   int m_rows = 24;
   int m_cols = 80;
   std::string m_status;
-  std::vector<std::string> m_panel;
   std::function<void()> m_resize_hook;
 };
 

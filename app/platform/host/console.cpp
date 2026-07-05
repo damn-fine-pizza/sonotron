@@ -6,6 +6,8 @@
 
 #include <cstdio>
 
+#include "ui_style.hpp"
+
 namespace arrangrr::host {
 
 namespace {
@@ -172,52 +174,29 @@ bool Console::init() {
   m_active = true;
   write_raw("\x1b[2J");  // clear screen once
   m_status = "arrangrr";
-  apply_layout();
+  paint_status();
   return true;
 }
 
-int Console::log_bottom() const {
-  // Reserve: panel lines, status bar, input line. The log pane keeps at
-  // least ~60% of the screen; the panel is truncated beyond that.
-  int panel = static_cast<int>(m_panel.size());
-  const int max_panel = (m_rows * 2) / 5;  // <= 40%
-  if (panel > max_panel) {
-    panel = max_panel;
-  }
-  return m_rows - 2 - panel;
-}
-
-void Console::apply_layout() {
+void Console::set_panel(const std::vector<std::string>& lines) {
   if (!m_active) {
     return;
   }
-  char buf[32];
-  // Scroll region = log pane only.
-  std::snprintf(buf, sizeof(buf), "\x1b[1;%dr", log_bottom());
-  write_raw(buf);
-  // Panel rows (each cleared, truncated to the pane width).
-  const int bottom = log_bottom();
-  const int panel = m_rows - 2 - bottom;
+  const int pr = panel_rows();
   std::string out;
-  for (int i = 0; i < panel; ++i) {
-    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", bottom + 1 + i);
+  char buf[32];
+  // Paint the grid over rows 1..H-2. Each row is cleared first; PanelManager
+  // already fitted the lines to the column width (styles included), so we write
+  // them verbatim and only guard the width as a safety net.
+  for (int r = 0; r < pr; ++r) {
+    std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", r + 1);
     out += buf;
-    std::string line =
-        i < static_cast<int>(m_panel.size()) ? m_panel[static_cast<std::size_t>(i)] : "";
-    if (static_cast<int>(line.size()) > m_cols) {
-      line.resize(static_cast<std::size_t>(m_cols));
+    if (r < static_cast<int>(lines.size())) {
+      out += ansi::visible_truncate(lines[static_cast<std::size_t>(r)],
+                                    static_cast<std::size_t>(m_cols));
     }
-    out += "\x1b[2m";  // dim: visually separate from the live log
-    out += line;
-    out += "\x1b[0m";
   }
   write_raw(out);
-  set_status(m_status);
-}
-
-void Console::set_panel(const std::vector<std::string>& lines) {
-  m_panel = lines;
-  apply_layout();
 }
 
 void Console::shutdown() {
@@ -225,7 +204,6 @@ void Console::shutdown() {
     return;
   }
   m_active = false;
-  write_raw("\x1b[r");  // reset scroll region
   char buf[16];
   std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\n", m_rows);
   write_raw(buf);
@@ -244,38 +222,8 @@ void Console::refresh_geometry() {
 
 void Console::write_raw(const std::string& s) { (void)!write(STDOUT_FILENO, s.data(), s.size()); }
 
-void Console::emit(const std::string& line) {
+void Console::paint_status() {
   if (!m_active) {
-    std::puts(line.c_str());
-    return;
-  }
-  // Print at the bottom of the scroll region (scrolls the pane), then leave
-  // the cursor there; the input line is repainted by render_input.
-  std::string out;
-  char buf[32];
-  std::snprintf(buf, sizeof(buf), "\x1b[%d;1H", log_bottom());
-  out += buf;
-  out += "\n";
-  out += line;
-  write_raw(out);
-}
-
-void Console::set_status(const std::string& text) {
-  m_status = text;
-  if (!m_active) {
-    return;
-  }
-  const int prev_rows = m_rows;
-  const int prev_cols = m_cols;
-  refresh_geometry();
-  if (m_rows != prev_rows || m_cols != prev_cols) {
-    apply_layout();  // terminal resized: rebuild regions and repaint
-
-    // Panel content is regenerated from state at the new geometry (H1
-    // resize contract): the hook re-renders and re-pushes the panels.
-    if (m_resize_hook) {
-      m_resize_hook();
-    }
     return;
   }
   std::string out;
@@ -288,6 +236,27 @@ void Console::set_status(const std::string& text) {
   out += padded;
   out += "\x1b[0m";
   write_raw(out);
+}
+
+void Console::set_status(const std::string& text) {
+  m_status = text;
+  if (!m_active) {
+    return;
+  }
+  const int prev_rows = m_rows;
+  const int prev_cols = m_cols;
+  refresh_geometry();
+  if (m_rows != prev_rows || m_cols != prev_cols) {
+    // Terminal resized: clear and let the hook re-render + re-push the grid from
+    // state at the new geometry (resize contract), then repaint the status bar.
+    write_raw("\x1b[2J");
+    if (m_resize_hook) {
+      m_resize_hook();
+    }
+    paint_status();
+    return;
+  }
+  paint_status();
 }
 
 void Console::render_input(const LineEditor& ed) {

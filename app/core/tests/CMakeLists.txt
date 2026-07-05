@@ -10,6 +10,8 @@ arrangrr_test(test_engine)
 arrangrr_test(test_timeline)
 arrangrr_test(test_chord)
 arrangrr_test(test_chord_seq)
+arrangrr_test(test_chord_detect)
+arrangrr_test(test_arp)
 arrangrr_test(test_arranger)
 
 arrangrr_test(test_host)
@@ -17,3 +19,9 @@ target_link_libraries(test_host PRIVATE arrangrr_host)
 
 arrangrr_test(test_panels)
 target_link_libraries(test_panels PRIVATE arrangrr_host)
+
+arrangrr_test(test_style_chooser)
+target_link_libraries(test_style_chooser PRIVATE arrangrr_host)
+
+arrangrr_test(test_rc_config)
+target_link_libraries(test_rc_config PRIVATE arrangrr_host)

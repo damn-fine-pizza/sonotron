@@ -25,7 +25,12 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kChordHold:
     case Param::kChordOut:
     case Param::kChordMode:
+    case Param::kChordDetect:
       cmd_chord(cmd, sink);
+      break;
+    case Param::kArp:
+    case Param::kArpOut:
+      cmd_arp(cmd, sink);
       break;
     case Param::kSeqNew:
     case Param::kSeqUse:
@@ -49,7 +54,14 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kStyleLoad:
     case Param::kStyleSection:
     case Param::kStyleRoute:
+    case Param::kStyleSwitch:
+    case Param::kPartMute:
+    case Param::kPartSolo:
+    case Param::kGroove:
       cmd_style(cmd, sink);
+      break;
+    case Param::kProgram:
+      cmd_voice(cmd, sink);
       break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
@@ -106,6 +118,8 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
       m_tracker.panic([&](std::uint8_t port, const MidiMessage& msg) {
         schedule_or_warn(port, m_now, msg, sink);
       });
+      m_detector.clear();  // every key is up now; the latched chord stays (memory)
+      m_arp.panic();       // drop any held/latched arp notes
       flush(sink);
       break;
     case Param::kRouteAdd: {
@@ -172,6 +186,17 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
         m_chords.set_mode(static_cast<ChordMode>(cmd.a));
       }
       break;
+    case Param::kChordDetect: {
+      // Live piano->chord: a = 0/1 enable, b = input port (default 0). The
+      // held notes on that port re-harmonize the arranger in real time.
+      const std::int32_t port = cmd.b;
+      if (port < 0 || static_cast<std::size_t>(port) >= kMaxPorts) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        break;
+      }
+      set_chord_detect(cmd.a != 0, static_cast<std::uint8_t>(port));
+      break;
+    }
     case Param::kChordPlay: {
       const auto vel = static_cast<std::uint8_t>(cmd.c);
       // Up to 4 packed notes, zero-terminated (one per byte).
@@ -386,6 +411,8 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
     case Param::kStyleLoad:
       if (cmd.a < 0 || !m_arranger.load(static_cast<std::uint8_t>(cmd.a))) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        apply_arranger_voices(sink);  // pick the style's default voices
       }
       break;
     case Param::kStyleSection:
@@ -396,6 +423,45 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
       }
       break;
+    case Param::kStyleSwitch: {
+      // A combined style + section switch (D24). Immediate on explicit request
+      // (CTRL+\ "now") or whenever the transport is stopped — a queued switch
+      // could never land without ticks; otherwise it rides the next bar
+      // boundary (ENTER "next-bar"), matching kStyleSection's quantization.
+      const bool immediate = cmd.c != 0 || !m_transport.playing();
+      const bool ok = cmd.a >= 0 && cmd.a < static_cast<std::int32_t>(styles::kBuiltinCount) &&
+                      cmd.b >= 0 && cmd.b < kSectionTypeCount &&
+                      m_arranger.request_style(styles::kBuiltins[static_cast<std::uint8_t>(cmd.a)],
+                                               static_cast<SectionType>(cmd.b), immediate);
+      if (!ok) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else if (immediate) {
+        sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+        apply_arranger_voices(sink);  // the new style's voices land with the cut
+      }
+      break;
+    }
+    case Param::kPartMute:
+    case Param::kPartSolo: {
+      if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc)) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        break;
+      }
+      const auto role = static_cast<TrackRole>(cmd.a);
+      if (cmd.param == Param::kPartMute) {
+        m_arranger.set_mute(role, cmd.b != 0);
+      } else {
+        m_arranger.set_solo(role, cmd.b != 0);
+      }
+      break;
+    }
+    case Param::kGroove:
+      if (cmd.a < 0 || cmd.a >= kGrooveFieldCount) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        m_arranger.set_groove_field(static_cast<GrooveField>(cmd.a), cmd.b);
+      }
+      break;
     case Param::kStyleRoute:
     default: {
       const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
@@ -403,9 +469,51 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) ||
           !m_arranger.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        apply_arranger_voices(sink);  // a role just gained a route: voice it now
       }
       break;
     }
+  }
+}
+
+// Voice selection: a Program Change on a port+channel so the arranger (or the
+// user) picks the GM instrument, instead of leaving the timbre to the synth.
+void Engine::cmd_voice(const Command& cmd, EventSink sink) {
+  if (cmd.param != Param::kProgram) {
+    sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
+    return;
+  }
+  const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
+  const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
+  if (cmd.a < 0 || cmd.a > 127 || port >= kMaxPorts || channel > 15) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  schedule_or_warn(port, m_now, MidiMessage::program(channel, static_cast<std::uint8_t>(cmd.a)),
+                   sink);
+  flush(sink);
+}
+
+// Live arpeggiator: kArp sets one field (kEnabled toggles capture on the input
+// port; the rest are engine params); kArpOut sets the output route.
+void Engine::cmd_arp(const Command& cmd, EventSink sink) {
+  if (cmd.param == Param::kArpOut) {
+    const auto port = static_cast<std::uint8_t>(cmd.a & 0xFF);
+    const auto channel = static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF);
+    if (port >= kMaxPorts || channel > 15) {
+      sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    } else {
+      set_arp_out(port, channel);
+    }
+    return;
+  }
+  if (cmd.a < 0 || cmd.a >= kArpFieldCount) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  } else if (static_cast<ArpField>(cmd.a) == ArpField::kEnabled) {
+    set_arp_enabled(cmd.b != 0, m_arp_in_port);
+  } else {
+    m_arp.set_field(static_cast<ArpField>(cmd.a), cmd.b);
   }
 }
 

@@ -4,9 +4,15 @@
 key C major
 chord out out0:4
 style load basic
+# All 8 style parts routed to distinct channels so the enriched styles
+# (pad/perc/chord2/arp) sound. Percussion shares the GM drum channel (10).
 style route drums out0:10
+style route perc out0:10
 style route bass out0:2
 style route chord1 out0:3
+style route chord2 out0:7
+style route pad out0:5
+style route arp out0:6
 seq new verse
 seq add C 1bar
 seq add A 1bar

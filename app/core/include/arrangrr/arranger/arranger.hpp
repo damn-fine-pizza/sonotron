@@ -2,8 +2,9 @@
 
 #include <cstdint>
 
+#include "arrangrr/arranger/groove.hpp"
 #include "arrangrr/arranger/style.hpp"
-#include "arrangrr/chord/chord_engine.hpp"
+#include "arrangrr/chord/theory.hpp"  // ChordState, ChordShape, theory::shape_of
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/config.hpp"
@@ -24,6 +25,7 @@ class Arranger {
 
   struct TickResult {
     bool section_changed = false;
+    bool style_changed = false;
     SectionType section = SectionType::kVarA;
     bool stop_transport = false;
   };
@@ -36,6 +38,7 @@ class Arranger {
   }
   constexpr bool loaded() const noexcept { return m_style != nullptr; }
   constexpr SectionType current() const noexcept { return m_current; }
+  constexpr const Style* current_style() const noexcept { return m_style; }
 
   // Loads a style by pointer (compiled user styles, tests). The pointee must
   // outlive the arranger — builtin styles are constexpr, compiled ones live
@@ -57,8 +60,76 @@ class Arranger {
     if (idx >= kRoleCount || port >= kMaxPorts || channel > 15) {
       return false;
     }
-    m_routes[idx] = Route{port, channel, true};
+    m_routes[idx] = Route{.port = port, .channel = channel, .enabled = true};
     return true;
+  }
+
+  // Per-part (per-role) live mute/solo, mirroring the step-track mixer: a muted
+  // role is silent; when ANY role is soloed, only soloed roles play. This is the
+  // arranger-band mixer behind the host `parts` panel.
+  void set_mute(TrackRole role, bool on) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx < kRoleCount) {
+      set_bit(m_muted, idx, on);
+    }
+  }
+  void set_solo(TrackRole role, bool on) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx < kRoleCount) {
+      set_bit(m_solo, idx, on);
+    }
+  }
+  constexpr bool muted(TrackRole role) const noexcept {
+    return bit(m_muted, static_cast<std::uint8_t>(role));
+  }
+  constexpr bool soloed(TrackRole role) const noexcept {
+    return bit(m_solo, static_cast<std::uint8_t>(role));
+  }
+  constexpr bool any_solo() const noexcept { return m_solo != 0; }
+
+  // Global groove feel (the `groove` panel). set_groove_field clamps per field.
+  void set_groove_field(GrooveField field, std::int32_t value) noexcept {
+    groove::set_field(m_groove, field, value);
+  }
+  constexpr const GrooveParams& groove_params() const noexcept { return m_groove; }
+
+  // A snapshot of one part for the host mixer: its route, its voice in the
+  // current section, and its mute/solo state. `present` is false when the
+  // current section has no pattern for this role (e.g. arp only in varC/varD).
+  struct PartInfo {
+    bool routed = false;
+    std::uint8_t port = 0;
+    std::uint8_t channel = 0;  // 0-based
+    std::int16_t gm_program = -1;
+    bool muted = false;
+    bool soloed = false;
+    bool present = false;
+  };
+  PartInfo part_info(TrackRole role) const noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    PartInfo info;
+    if (idx >= kRoleCount) {
+      return info;
+    }
+    const Route& r = m_routes[idx];
+    info.routed = r.enabled;
+    info.port = r.port;
+    info.channel = r.channel;
+    info.muted = bit(m_muted, idx);
+    info.soloed = bit(m_solo, idx);
+    if (m_style != nullptr) {
+      const StyleSection* section = m_style->find(m_current);
+      if (section != nullptr) {
+        for (const StylePattern& pattern : section->patterns) {
+          if (pattern.role == role) {
+            info.present = true;
+            info.gm_program = pattern.gm_program;
+            break;
+          }
+        }
+      }
+    }
+    return info;
   }
 
   // Requests a section switch, applied at the next bar boundary (or at once
@@ -80,6 +151,37 @@ class Arranger {
     return true;
   }
 
+  // Requests a combined style + section switch. `immediate` applies it at once
+  // (a hard mid-bar cut); otherwise both land TOGETHER at the next bar boundary
+  // so live style changes stay seamless. The target section must exist in the
+  // new style, else it falls back to varA (every style is expected to define
+  // one). Returns false if the style is null or lacks even the fallback.
+  bool request_style(const Style* style, SectionType section, bool immediate) noexcept {
+    if (style == nullptr) {
+      return false;
+    }
+    const SectionType target = style->find(section) != nullptr ? section : SectionType::kVarA;
+    if (style->find(target) == nullptr) {
+      return false;
+    }
+
+    if (immediate) {
+      m_style = style;
+      m_current = target;
+      if (section_is_variation(target)) {
+        m_return_to = target;
+      }
+      m_pending_valid = false;
+      m_pending_style = nullptr;
+      return true;
+    }
+
+    m_pending_style = style;
+    m_pending = target;
+    m_pending_valid = true;
+    return true;
+  }
+
   void on_transport_start() noexcept {
     m_section_start = 0;
     if (section_is_variation(m_current)) {
@@ -87,9 +189,37 @@ class Arranger {
     }
   }
 
+  // Emits a Program Change for each routed role of the current section that
+  // declares a default GM voice (StylePattern.gm_program >= 0), so loading a
+  // style also picks its instruments. Unrouted roles are skipped (no known
+  // destination). Call once after a style loads.
+  void emit_voices(ScheduleFn schedule) const {
+    if (m_style == nullptr) {
+      return;
+    }
+    const StyleSection* section = m_style->find(m_current);
+    if (section == nullptr) {
+      return;
+    }
+    for (const StylePattern& pattern : section->patterns) {
+      const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
+      if (route.enabled && pattern.gm_program >= 0 && pattern.gm_program <= 127) {
+        schedule(route.port, 0,
+                 MidiMessage::program(route.channel,
+                                      static_cast<std::uint8_t>(pattern.gm_program)));
+      }
+    }
+  }
+
   // One transport tick. Resolution order matters upstream: feed the chord
   // AFTER the chord sequencer has fired this tick, so bar downbeats resolve
   // against the fresh chord.
+  //
+  // Deliberately over the cognitive-complexity threshold: this is the realtime
+  // core heartbeat (bar-boundary detection, pending style/section switches,
+  // one-shot transitions, grid firing). Splitting it would scatter the tight
+  // timing logic across functions for no readability gain and real risk.
+  // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   TickResult on_tick(Tick transport_tick, const ChordState& chord, ScheduleFn schedule) {
     TickResult result;
     if (m_style == nullptr) {
@@ -108,7 +238,15 @@ class Arranger {
       const bool section_end = pos == len;
       if (bar_boundary || section_end) {
         SectionType next = m_current;
+        bool style_switched = false;
         if (m_pending_valid) {
+          // A pending style change lands together with its section, so a live
+          // style switch is seamless (both on the same downbeat).
+          if (m_pending_style != nullptr && m_pending_style != m_style) {
+            m_style = m_pending_style;
+            style_switched = true;
+          }
+          m_pending_style = nullptr;
           next = m_pending;
           m_pending_valid = false;
         } else if (section_end) {
@@ -119,19 +257,23 @@ class Arranger {
             return result;
           }
         }
-        // The section clock restarts ONLY when the section wraps or actually
-        // changes: a mid-section bar boundary must not reset `pos`, or bars
-        // 2..N of a multi-bar section would never play.
-        if (section_end || next != m_current) {
+        // The section clock restarts when the section wraps, the section
+        // changes, OR the style changes (even to the same section type) — a
+        // mid-section bar boundary must not reset `pos`, or bars 2..N of a
+        // multi-bar section would never play.
+        if (section_end || next != m_current || style_switched) {
           m_section_start = transport_tick;
         }
-        if (next != m_current) {
+        if (next != m_current || style_switched) {
           m_current = next;
           if (section_is_variation(next)) {
             m_return_to = next;
           }
           result.section_changed = true;
+          result.style_changed = style_switched;
           result.section = next;
+          // Re-resolve against the (possibly new) style — required even when
+          // the section TYPE is unchanged but the style switched.
           section = m_style->find(m_current);
           if (section == nullptr) {
             return result;
@@ -146,9 +288,10 @@ class Arranger {
       return result;
     }
     const std::uint16_t step = static_cast<std::uint16_t>(rel / kTicksPerStep);
+    const bool solo_active = any_solo();
     for (const StylePattern& pattern : section->patterns) {
       const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
-      if (!route.enabled) {
+      if (!route.enabled || part_silenced(pattern.role, solo_active)) {
         continue;
       }
       for (const StyleEvent& ev : pattern.events) {
@@ -159,9 +302,14 @@ class Arranger {
         if (note < 0) {
           continue;
         }
-        schedule(route.port, 0,
-                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(note), ev.vel));
-        schedule(route.port, static_cast<TickOffset>(ev.gate),
+        // Groove: swing/accent/humanize reshape the event's timing and velocity
+        // (deterministic; drums swing too, downbeats stay put). The note-off
+        // shifts with the note-on so the gate length is preserved.
+        const GrooveOut g = groove::apply(m_groove, static_cast<std::uint8_t>(pattern.role), step,
+                                          transport_tick, ev.vel);
+        schedule(route.port, g.timing_offset,
+                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(note), g.velocity));
+        schedule(route.port, static_cast<TickOffset>(ev.gate) + g.timing_offset,
                  MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(note)));
       }
     }
@@ -176,6 +324,22 @@ class Arranger {
     std::uint8_t channel = 0;
     bool enabled = false;
   };
+
+  // A part plays unless it is muted, or a solo is active and it is not soloed.
+  bool part_silenced(TrackRole role, bool solo_active) const noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    return bit(m_muted, idx) || (solo_active && !bit(m_solo, idx));
+  }
+  static constexpr bool bit(std::uint16_t mask, std::uint8_t i) noexcept {
+    return (mask & static_cast<std::uint16_t>(1u << i)) != 0;
+  }
+  static void set_bit(std::uint16_t& mask, std::uint8_t i, bool on) noexcept {
+    if (on) {
+      mask = static_cast<std::uint16_t>(mask | (1u << i));
+    } else {
+      mask = static_cast<std::uint16_t>(mask & ~(1u << i));
+    }
+  }
 
   // NTT core (D24): chord-tone index -> concrete note. Bass anchors low
   // (octave 2), everything else around octave 4; indices past the shape wrap
@@ -194,18 +358,40 @@ class Arranger {
     }
     const std::uint8_t wrap = static_cast<std::uint8_t>(ev.tone / shape.count);
     const std::uint8_t offset = shape.offsets[ev.tone % shape.count];
-    const int anchor = (pattern.role == TrackRole::kBass ? 36 : 60) + chord.root_pc;
+    const int anchor = kRoleAnchor[static_cast<std::uint8_t>(pattern.role)] + chord.root_pc;
     const int note = anchor + offset + 12 * (ev.octave + wrap);
     return (note < 0 || note > 127) ? -1 : note;
   }
 
+  // Default register anchor per role (MIDI note of chord-tone 0 at octave 0),
+  // so stacked tonal roles don't all pile into one octave = timbral mush. Bass
+  // sits low; pad fills the gap under the mid comp; arp/lead/phrase sit above.
+  // StyleEvent.octave still fine-tunes per pattern; kFixed roles ignore this.
+  // kBass(36) and kChord1(60) keep their historical registers.
+  static constexpr int kRoleAnchor[kRoleCount] = {
+      60,  // kDrums  (fixed; unused)
+      60,  // kPerc   (fixed; unused)
+      36,  // kBass
+      60,  // kChord1
+      60,  // kChord2
+      48,  // kPad
+      72,  // kArp
+      72,  // kPhrase
+      72,  // kLead
+      60,  // kCc     (unused)
+  };
+
   const Style* m_style = nullptr;
+  const Style* m_pending_style = nullptr;  // queued with m_pending for a seamless switch
   SectionType m_current = SectionType::kVarA;
   SectionType m_return_to = SectionType::kVarA;
   SectionType m_pending = SectionType::kVarA;
   bool m_pending_valid = false;
   Tick m_section_start = 0;
   Route m_routes[kRoleCount]{};
+  std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
+  std::uint16_t m_solo = 0;   // per-role solo bitmask
+  GrooveParams m_groove;      // global groove feel applied to every part
 };
 
 }  // namespace arrangrr

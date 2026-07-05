@@ -48,7 +48,7 @@ class MidiParser {
       m_needed = midi::data_length(byte);
       m_running = midi::is_channel_voice(byte) ? byte : 0;  // system common: no running status
       if (m_needed == 0) {
-        sink(MidiMessage{byte, 0, 0});
+        sink(MidiMessage{.status=byte, .d1=0, .d2=0});
         m_status = 0;
       }
       return;
@@ -68,7 +68,7 @@ class MidiParser {
     }
     m_data[m_have++] = byte;
     if (m_have == m_needed) {
-      MidiMessage msg{m_status, m_data[0], m_needed > 1 ? m_data[1] : std::uint8_t{0}};
+      MidiMessage msg{.status=m_status, .d1=m_data[0], .d2=m_needed > 1 ? m_data[1] : std::uint8_t{0}};
       if (msg.type() == midi::kNoteOn && msg.d2 == 0) {
         msg = MidiMessage::note_off(msg.channel(), msg.d1, 0);
       }

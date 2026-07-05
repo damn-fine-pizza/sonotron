@@ -7,6 +7,7 @@
 
 #include "midi_monitor.hpp"
 #include "note_names.hpp"
+#include "ui_style.hpp"
 
 // Pure ASCII piano renderer, host side only: NO ANSI, NO terminal access, NO
 // I/O. render_piano_panel() turns a view state and a column budget into a set
@@ -25,6 +26,7 @@ struct PianoViewState {
   int base_octave = 4;       // piano_keys::kDefaultOctave
   std::uint8_t channel = 0;  // 0-based internal; displayed 1-based
   std::uint8_t velocity = 96;
+  int transpose = 0;  // semitones added to played notes; always shown in the header
   OctaveDisplayMode octave_display = OctaveDisplayMode::kAll;
 };
 
@@ -34,10 +36,11 @@ struct PianoKeyBinding {
 };
 
 // Centralized computer-keyboard -> semitone map (single source of truth so the
-// renderer and any future input handler never diverge). 'P'/'p' is reserved and
-// intentionally never musical.
+// renderer and any future input handler never diverge). 'P' is the D#5 black
+// key (it sits above L/D5-;/E5); octave shift lives on '.'/'/' so no musical
+// key doubles as a shortcut.
 inline constexpr std::size_t kWhiteKeyCount = 11;
-inline constexpr std::size_t kBlackKeyCount = 6;
+inline constexpr std::size_t kBlackKeyCount = 7;
 
 const std::array<PianoKeyBinding, kWhiteKeyCount>& default_keymap_white();
 const std::array<PianoKeyBinding, kBlackKeyCount>& default_keymap_black();
@@ -56,12 +59,14 @@ std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming
 // events) — kept for callers that do not observe the output stream.
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns);
 
-// Monitor-aware rendering (H2): the keyboard marks active keys and shows a
+// Monitor-aware rendering (H2/H3): the keyboard marks active keys and shows a
 // recent-events strip, and the active-notes / event-log views draw from the
-// monitor's models and the caller's filter/display options.
+// monitor's models and the caller's filter/display options. `style` applies the
+// semantic UiRoles (active keys, note-on/off, drums); with colours disabled the
+// output is byte-identical to plain rendering.
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
                                             const MidiMonitor& monitor,
                                             const MidiEventFilter& filter,
-                                            const MidiViewOptions& options);
+                                            const MidiViewOptions& options, const UiStyle& style);
 
 }  // namespace arrangrr::host

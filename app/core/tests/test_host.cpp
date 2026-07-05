@@ -7,9 +7,11 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/arranger/arranger.hpp"
+#include "gm_program.hpp"
 #include "arrangrr/transport/transport.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
+#include "kitty_keys.hpp"
 #include "shell.hpp"
 #include "test.hpp"
 
@@ -72,6 +74,12 @@ void test_human_encoder() {
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 0)), "note-on"));
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_off(0, 60, 64), 0)), "note-off"));
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::cc(0, 7, 1), 0)), "cc"));
+
+  // H3 enrichment: note lines carry the note name; ch10 (0-based 9) shows the
+  // GM drum name, with a scientific-pitch fallback for notes without one.
+  CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 0)), "C4"));
+  CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(9, 36, 100), 0)), "Kick"));
+  CHECK(has(to_human(OutEvent::midi(0, MidiMessage::note_on(9, 60, 100), 0)), "C4"));
   CHECK(has(to_human(OutEvent::midi(0, {0xC0, 1, 0}, 0)), "status"));
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::realtime(midi::kClock), 0)), "clock"));
   CHECK(has(to_human(OutEvent::transport(1, 0)), "transport playing"));
@@ -94,6 +102,15 @@ struct ShellFixture {
     return n;
   }
 };
+
+bool block_contains(const std::vector<std::string>& lines, const std::string& needle) {
+  for (const std::string& line : lines) {
+    if (line.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
 
 void test_shell_happy_path() {
   ShellFixture f;
@@ -119,6 +136,37 @@ void test_shell_tempo_and_bars() {
   CHECK(f.shell.engine().transport().bpm() == 12000);
   CHECK(f.run("advance 2bars"));
   CHECK(f.shell.engine().now() == 2 * kTicksPerBar);
+}
+
+void test_shell_bpm_command() {
+  ShellFixture f;
+  std::vector<std::string> out;
+  f.shell.set_print_hook([&](const std::string& line) { out.push_back(line); });
+  auto printed = [&](const char* needle) {
+    for (const std::string& line : out) {
+      if (line.find(needle) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // `bpm <N>` sets the tempo and confirms it.
+  CHECK(f.run("bpm 120"));
+  CHECK(f.shell.engine().transport().bpm() == 12000);
+  CHECK(printed("tempo set to 120.00 bpm"));
+
+  // `bpm` with no argument reports the current tempo and changes nothing.
+  out.clear();
+  CHECK(f.run("bpm"));
+  CHECK(f.shell.engine().transport().bpm() == 12000);
+  CHECK(printed("bpm 120.00"));
+
+  // A bad number errors and leaves the tempo untouched.
+  out.clear();
+  CHECK(!f.run("bpm abc"));
+  CHECK(!f.err.empty());
+  CHECK(f.shell.engine().transport().bpm() == 12000);
 }
 
 void test_shell_transport_and_clock() {
@@ -295,6 +343,146 @@ void test_shell_chord_commands() {
   CHECK(!f.run("chord out nowhere"));
   CHECK(!f.run("chord hold maybe"));
   CHECK(!f.run("chord flip"));
+  CHECK(!f.run("chord detect maybe"));  // detect wants on|off
+}
+
+void test_shell_chord_detect_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open chords"));
+  CHECK(block_contains(panel, "detect: off"));
+  CHECK(block_contains(panel, "(no chord)"));
+
+  CHECK(f.run("chord detect on"));
+  CHECK(block_contains(panel, "detect: on"));
+
+  // Hold a C major triad on the piano input port (port 0): the arranger's live
+  // chord context becomes C major, and the chords panel names it.
+  const std::uint8_t on[9] = {0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(on, sizeof(on)));
+  CHECK(f.run("chord detect on"));  // idempotent toggle repaints the panel
+  CHECK(block_contains(panel, "chord: C"));
+
+  // Chord memory: releasing the keys leaves the last chord named.
+  const std::uint8_t off[9] = {0x80, 60, 0, 0x80, 64, 0, 0x80, 67, 0};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(off, sizeof(off)));
+  CHECK(f.run("chord detect on"));
+  CHECK(block_contains(panel, "chord: C"));
+
+  CHECK(f.run("chord detect off"));
+  CHECK(block_contains(panel, "detect: off"));
+}
+
+void test_shell_parts_command_and_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open parts"));
+  CHECK(block_contains(panel, "Drums"));
+  CHECK(block_contains(panel, "Bass"));
+  CHECK(block_contains(panel, "Pad"));
+  CHECK(block_contains(panel, "Arp"));
+  // Mute/solo via the CLI (the panel keys share this path).
+  CHECK(f.run("part bass mute on"));
+  CHECK(f.run("part drums solo on"));
+  CHECK(f.run("part pad mute off"));
+  // Errors.
+  CHECK(!f.run("part nope mute on"));  // unknown role
+  CHECK(!f.run("part bass flip on"));  // bad subcommand
+  CHECK(!f.run("part bass"));          // too few args
+}
+
+void test_shell_arp_command_and_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open arp"));
+  CHECK(block_contains(panel, "rate"));
+  CHECK(block_contains(panel, "direction"));
+  CHECK(f.run("arp on"));
+  CHECK(f.run("arp rate 1/8"));
+  CHECK(block_contains(panel, "1/8"));
+  CHECK(f.run("arp dir updown"));
+  CHECK(block_contains(panel, "up-down"));
+  CHECK(f.run("arp octaves 3"));
+  CHECK(f.run("arp gate 50"));
+  CHECK(f.run("arp latch on"));
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("arp out synth:2"));
+  CHECK(f.run("arp off"));
+  // Errors.
+  CHECK(!f.run("arp rate 1/3"));      // bad rate
+  CHECK(!f.run("arp dir sideways"));  // bad direction
+  CHECK(!f.run("arp nope 1"));        // unknown field
+}
+
+void test_shell_groove_command_and_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open groove"));
+  CHECK(block_contains(panel, "swing"));
+  CHECK(block_contains(panel, "accent"));
+  CHECK(f.run("groove swing 60"));
+  CHECK(block_contains(panel, "60%"));
+  CHECK(f.run("groove humanize-t 30"));
+  CHECK(f.run("groove accent 100"));
+  CHECK(f.run("groove grid 16"));
+  CHECK(!f.run("groove nope 10"));  // unknown field
+  CHECK(!f.run("groove swing"));    // missing value
+}
+
+void test_gm_program_parsing() {
+  CHECK(parse_gm_program("0") == 0);
+  CHECK(parse_gm_program("127") == 127);
+  CHECK(parse_gm_program("128") == -1);        // out of range
+  CHECK(parse_gm_program("-1") == -1);
+  CHECK(parse_gm_program("trumpet") == 56);    // exact name
+  CHECK(parse_gm_program("Trumpet") == 56);    // case-insensitive
+  CHECK(parse_gm_program("acoustic-grand-piano") == 0);  // hyphen-normalized
+  CHECK(parse_gm_program("Electric Piano 1") == 4);      // spaces normalized
+  CHECK(parse_gm_program("finger") == 33);     // unique substring: Electric Bass (finger)
+  CHECK(parse_gm_program("violin") == 40);     // exact single name
+  CHECK(parse_gm_program("pad") == -1);        // ambiguous (Pad 1..8) -> reject
+  CHECK(parse_gm_program("piano") == -1);      // ambiguous family -> reject, use a number
+  CHECK(parse_gm_program("zzznope") == -1);    // unknown
+  CHECK(std::string(gm_program_name(56)) == "Trumpet");
+}
+
+void test_shell_program_command() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("program synth 0"));                 // by number, default channel 1
+  CHECK(f.run("program synth:2 trumpet"));         // name + explicit channel
+  CHECK(f.run("program synth electric piano 1"));  // multi-word GM name
+  CHECK(!f.run("program synth 200"));              // out of range
+  CHECK(!f.run("program synth zzznope"));          // unknown voice
+  CHECK(!f.run("program nowhere 0"));              // unknown port
+  int programs = 0;
+  int trumpet_ch2 = 0;
+  for (const OutEvent& o : f.events) {
+    if (o.kind == OutEvent::Kind::kMidi && (o.msg.status & 0xF0) == 0xC0) {
+      ++programs;
+      if (o.msg.d1 == 56 && (o.msg.status & 0x0F) == 1) {  // trumpet on channel 2 (0-based 1)
+        ++trumpet_ch2;
+      }
+    }
+  }
+  CHECK(programs == 3);
+  CHECK(trumpet_ch2 == 1);
 }
 
 void test_shell_chord_modes_cli() {
@@ -482,6 +670,60 @@ void test_line_editor() {
   CHECK(ed.buffer() == "second");
 }
 
+void test_console_geometry() {
+  // panel_rows() is the pane the grid paints into: everything above the fixed
+  // status + input pair. An inactive console keeps the default 24 rows.
+  Console console;  // never init()'d: stays inactive, so no terminal writes
+  CHECK(console.panel_rows() == 24 - Console::kStatusInputRows);
+
+  // The uniform grid tiles to EXACTLY the requested rows (no bands, no scroll
+  // region) — including when nothing is open: a blank pane is still `rows` lines,
+  // so the contract holds without leaning on the caller to clear.
+  PanelManager pm;
+  const std::vector<std::string> hidden = pm.combined_lines(80, 12);
+  CHECK(static_cast<int>(hidden.size()) == 12);
+  for (const std::string& line : hidden) {
+    CHECK(line.empty());
+  }
+  pm.open(PanelId::kEvents);
+  for (const int rows : {5, 8, 12, 24, 40}) {
+    CHECK(static_cast<int>(pm.combined_lines(80, rows).size()) == rows);
+  }
+
+  // Scrolling panels keep a bounded backlog and render only their cell tail, so
+  // a long log reads like a scroll without a real scroll region.
+  for (int i = 0; i < 40; ++i) {
+    pm.append_line(PanelId::kEvents, "line" + std::to_string(i));
+  }
+  const std::vector<std::string> grid = pm.combined_lines(80, 6);  // title + 5 content rows
+  CHECK(static_cast<int>(grid.size()) == 6);
+  CHECK(block_contains(grid, "line39"));  // newest tail line is shown
+  CHECK(!block_contains(grid, "line0"));  // oldest is scrolled off
+
+  // Narrow 2-per-row falls back to one-per-row: a wide terminal pairs the two
+  // panels (a " | " gutter) but one too narrow for two min-width cells stacks
+  // them, and no composed line overruns the width (colours off -> size == cols).
+  pm.open(PanelId::kConsole);
+  pm.set_per_row(2);
+  CHECK(block_contains(pm.combined_lines(80, 8), " | "));
+  const std::vector<std::string> narrow = pm.combined_lines(18, 8);
+  CHECK(!block_contains(narrow, " | "));
+  for (const std::string& line : narrow) {
+    CHECK(line.size() <= 18);
+  }
+
+  // Short terminal (more panels than rows): keep the bottom-priority rows, each
+  // still showing at least its title, tiling to EXACTLY rows — never the blind
+  // tail-truncation that used to eat the bottom (most important) panels.
+  pm.set_per_row(1);
+  pm.open(PanelId::kStyles);
+  const std::vector<std::string> tight = pm.combined_lines(80, 2);
+  CHECK(static_cast<int>(tight.size()) == 2);
+  for (const std::string& line : tight) {
+    CHECK(line.find("-- ") != std::string::npos);
+  }
+}
+
 void test_help_command() {
   ShellFixture f;
   CHECK(f.run("help"));
@@ -499,15 +741,6 @@ void test_help_command() {
   CHECK(f.events.empty());  // help never touches the engine
 }
 
-bool block_contains(const std::vector<std::string>& lines, const std::string& needle) {
-  for (const std::string& line : lines) {
-    if (line.find(needle) != std::string::npos) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void test_help_panel_hook() {
   ShellFixture f;
   std::vector<std::string> panel{"sentinel"};
@@ -521,11 +754,11 @@ void test_help_panel_hook() {
   // combined block: title rule first, topic content after it.
   CHECK(f.run("help chord"));
   CHECK(calls == 1 && panel.size() >= 2);
-  CHECK(panel[0] == "-- help --");
-  CHECK(panel[1] == "help: chord");
+  CHECK(panel[0].find("-- menu") != std::string::npos);  // the panel is the contextual MENU
+  CHECK(block_contains(panel, "help: chord"));
   // Lifecycle now lives under `panel ...`.
   CHECK(f.run("panel close help"));
-  CHECK(calls == 2 && panel.empty());
+  CHECK(calls == 2 && !block_contains(panel, "-- "));  // pane cleared (no titles)
   CHECK(f.run("panel open help"));
   CHECK(calls == 3 && block_contains(panel, "help: chord"));  // content survives close
   // A different topic replaces the content.
@@ -550,34 +783,51 @@ void test_panel_commands() {
     return true;
   });
 
-  // Coexistence: help and piano stack in one combined block, help first.
+  // Index of the first line whose text contains `needle` (or size() if none).
+  auto line_index = [&](const char* needle) {
+    for (std::size_t i = 0; i < panel.size(); ++i) {
+      if (panel[i].find(needle) != std::string::npos) {
+        return i;
+      }
+    }
+    return panel.size();
+  };
+
+  // Coexistence: menu and piano share the grid; menu is higher in the order so
+  // it paints above the piano (earlier in the top-to-bottom block).
   CHECK(f.run("panel open piano"));
-  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(block_contains(panel, "-- piano"));
   CHECK(f.run("help chord"));
-  CHECK(block_contains(panel, "-- help --") && block_contains(panel, "-- piano --"));
-  const auto help_pos =
-      std::find(panel.begin(), panel.end(), std::string("-- help --")) - panel.begin();
-  const auto piano_pos =
-      std::find(panel.begin(), panel.end(), std::string("-- piano --")) - panel.begin();
-  CHECK(help_pos < piano_pos);
+  CHECK(block_contains(panel, "-- menu") && block_contains(panel, "-- piano"));
+  CHECK(line_index("-- menu") < line_index("-- piano"));
+
+  // Rename + alias: `panel open menu` is canonical, `panel open help` still
+  // targets the same panel, and the title renders "-- menu ...".
+  CHECK(f.run("panel close all"));
+  CHECK(f.run("panel open menu"));
+  CHECK(block_contains(panel, "-- menu"));
+  CHECK(f.run("panel close all"));
+  CHECK(f.run("panel open help"));  // backward-compatible alias
+  CHECK(block_contains(panel, "-- menu"));
+  CHECK(f.run("panel open piano"));  // restore the state the toggle test expects
 
   // toggle / close all.
   CHECK(f.run("panel toggle piano"));
-  CHECK(!block_contains(panel, "-- piano --"));
+  CHECK(!block_contains(panel, "-- piano"));
   CHECK(f.run("panel toggle piano"));
-  CHECK(block_contains(panel, "-- piano --"));
+  CHECK(block_contains(panel, "-- piano"));
   CHECK(f.run("panel close all"));
-  CHECK(panel.empty());
+  CHECK(!block_contains(panel, "-- "));  // nothing visible -> a blank pane
 
   // Focus: focusing opens, the title carries the '*' marker, repl clears it.
   CHECK(f.run("panel focus piano"));
-  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(block_contains(panel, "-- piano* "));
   CHECK(f.run("panel focus repl"));
-  CHECK(block_contains(panel, "-- piano --") && !block_contains(panel, "-- piano* --"));
+  CHECK(block_contains(panel, "-- piano") && !block_contains(panel, "-- piano* "));
   CHECK(f.run("panel focus next"));
-  CHECK(block_contains(panel, "-- piano* --"));
+  CHECK(block_contains(panel, "-- piano* "));
   CHECK(f.run("panel focus next"));  // past the last visible -> back to repl
-  CHECK(!block_contains(panel, "-- piano* --"));
+  CHECK(!block_contains(panel, "-- piano* "));
 
   // Errors: unknown panel / unknown subcommand / missing argument.
   CHECK(!f.run("panel open nonsense"));
@@ -669,10 +919,351 @@ void test_filter_view_commands() {
   CHECK(f.run("view show-octaves boundary"));
   CHECK(f.run("view show-octaves all"));
   CHECK(f.run("view show-octaves none"));
+  CHECK(f.run("view show drum-names off"));
   CHECK(f.run("view clear"));
   CHECK(!f.run("view show nonsense on"));
   CHECK(!f.run("view show velocity maybe"));
   CHECK(!f.run("view"));
+
+  // H3 filters: drums / melodic / velocity floor.
+  CHECK(f.run("filter drums"));
+  CHECK(f.run("filter melodic"));
+  CHECK(f.run("filter velocity >= 80"));
+  CHECK(!f.run("filter velocity >= 999"));
+  CHECK(!f.run("filter velocity 80"));  // missing >=
+  CHECK(f.run("filter clear"));
+  CHECK(f.midi_count() == 0);  // filters never touch the engine
+}
+
+void test_theme_colors_layout_commands() {
+  ShellFixture f;
+
+  // theme: list / current / set, with a clear rejection of an unknown name.
+  CHECK(f.run("theme list"));
+  CHECK(f.run("theme current"));
+  CHECK(f.run("theme set mono"));
+  CHECK(f.shell.ui_style().theme_name() == "mono");
+  CHECK(f.run("theme set dark"));
+  CHECK(f.run("theme set high-contrast"));
+  CHECK(!f.run("theme set nonexistent"));
+  CHECK(f.shell.ui_style().theme_name() == "high-contrast");  // unchanged
+  CHECK(!f.run("theme bogus"));
+  CHECK(!f.run("theme"));
+
+  // colors: on / off / toggle.
+  CHECK(f.run("colors on"));
+  CHECK(f.shell.ui_style().colors_enabled());
+  CHECK(f.run("colors off"));
+  CHECK(!f.shell.ui_style().colors_enabled());
+  CHECK(f.run("colors toggle"));
+  CHECK(f.shell.ui_style().colors_enabled());
+  CHECK(!f.run("colors maybe"));
+  CHECK(!f.run("colors"));
+
+  // panel layout: 1 / 2 / toggle (panels per row).
+  CHECK(f.run("panel layout 2"));
+  CHECK(f.shell.panels().per_row() == 2);
+  CHECK(f.run("panel layout 1"));
+  CHECK(f.shell.panels().per_row() == 1);
+  CHECK(f.run("panel layout toggle"));
+  CHECK(f.shell.panels().per_row() == 2);
+  CHECK(!f.run("panel layout diagonal"));
+  CHECK(!f.run("panel layout"));
+
+  CHECK(f.midi_count() == 0);
+}
+
+void test_contextual_panel() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+
+  // Opening the help panel with no topic shows the contextual overview plus
+  // the always-present navigation footer.
+  CHECK(f.run("panel open help"));
+  CHECK(block_contains(panel, "nav: TAB focus"));
+  CHECK(block_contains(panel, "help  (help <topic>"));
+
+  // An explicit topic pins: it survives re-renders in the same mode.
+  CHECK(f.run("help chord"));
+  CHECK(block_contains(panel, "help: chord"));
+  CHECK(f.run("panel open piano"));  // a re-render, still REPL mode
+  CHECK(block_contains(panel, "help: chord"));
+
+  // Entering piano play mode unpins and the contextual content follows.
+  CHECK(f.run("panel focus piano"));
+  CHECK(block_contains(panel, "white: A S D F G H J K L"));
+  CHECK(block_contains(panel, "nav: TAB focus"));
+
+  // Back to the REPL: contextual overview returns.
+  CHECK(f.run("panel focus repl"));
+  CHECK(block_contains(panel, "help  (help <topic>"));
+}
+
+void test_ctrl_p_play_stop() {
+  ShellFixture f;
+  constexpr std::uint8_t kCtrlP = 0x10;
+  CHECK(!f.shell.engine().transport().playing());
+
+  CHECK(f.shell.handle_ui_key(kCtrlP));  // -> play
+  CHECK(f.shell.engine().transport().playing());
+  CHECK(f.shell.handle_ui_key(kCtrlP));  // -> stop
+  CHECK(!f.shell.engine().transport().playing());
+
+  // Global: works with piano focus too, and never leaks a note.
+  CHECK(f.run("panel focus piano"));
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key(kCtrlP));
+  CHECK(f.shell.engine().transport().playing());
+  CHECK(f.midi_count() == 0);
+}
+
+void test_styles_panel_chooser() {
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("style load basic"));
+  constexpr std::uint8_t kBacktick = 0x60;      // focus shortcut for the styles panel
+  constexpr std::uint8_t kCtrlApplyNow = 0x1C;  // CTRL+backslash: apply now
+  constexpr std::uint8_t kEnter = 0x0D;
+
+  // Backtick (`) is a FOCUS SHORTCUT: it gives focus to the styles panel and
+  // opens it (the chooser dissolved into the always-present styles panel).
+  CHECK(!f.shell.styles_focused());
+  CHECK(f.shell.handle_ui_key(kBacktick));
+  CHECK(f.shell.styles_focused());
+  CHECK(f.shell.panels().visible(PanelId::kStyles));
+
+  // The styles panel renders the chooser: style:/section:/hint + a `key:` line.
+  f.shell.refresh_panels();
+  CHECK(block_contains(panel, "-- styles"));
+  CHECK(block_contains(panel, "ENTER next-bar"));
+  CHECK(block_contains(panel, "key:"));
+
+  // A digit feeds the filter only while the styles panel is focused.
+  CHECK(f.shell.handle_ui_key('0'));
+  CHECK(f.shell.chooser().filter() == "0");
+  CHECK(f.shell.handle_ui_key(0x7F));  // backspace clears the filter
+  CHECK(f.shell.chooser().filter().empty());
+
+  // Move the section highlight, then CTRL+\ applies immediately (transport
+  // stopped) and KEEPS focus on the styles panel.
+  f.shell.chooser_nav_section(+1);
+  const SectionType want = f.shell.chooser().selected_section();
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key(kCtrlApplyNow));
+  CHECK(f.shell.styles_focused());  // applying keeps focus
+  CHECK(f.shell.engine().arranger().current() == want);
+  bool saw_section = false;
+  for (const OutEvent& e : f.events) {
+    saw_section = saw_section || e.kind == OutEvent::Kind::kSection;
+  }
+  CHECK(saw_section);
+
+  // ENTER also applies and stays focused.
+  f.shell.chooser_nav_section(+1);
+  const SectionType want2 = f.shell.chooser().selected_section();
+  CHECK(f.shell.handle_ui_key(kEnter));
+  CHECK(f.shell.styles_focused());
+  CHECK(f.shell.engine().arranger().current() == want2);
+
+  // ESC (chooser_cancel) drops focus back to the REPL without a switch.
+  f.events.clear();
+  f.shell.chooser_cancel();
+  CHECK(!f.shell.styles_focused());
+  CHECK(f.events.empty());
+
+  // Backtick from piano focus jumps straight to the styles panel.
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key(kBacktick));
+  CHECK(f.shell.styles_focused());
+}
+
+void test_ctrl_z_layout() {
+  // CTRL+Z (0x1A) toggles the grid between 1 and 2 panels per row (global).
+  ShellFixture f;
+  constexpr std::uint8_t kCtrlZ = 0x1A;
+  CHECK(f.shell.panels().per_row() == 1);
+  CHECK(f.shell.handle_ui_key(kCtrlZ));
+  CHECK(f.shell.panels().per_row() == 2);
+  CHECK(f.shell.handle_ui_key(kCtrlZ));
+  CHECK(f.shell.panels().per_row() == 1);
+}
+
+void test_styles_key_line() {
+  // The styles panel carries a live `key:` line read from the chord engine.
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("panel open styles"));
+  CHECK(f.run("key F major"));
+  f.shell.refresh_panels();
+  CHECK(block_contains(panel, "key: F major"));
+  CHECK(f.run("key A minor"));
+  f.shell.refresh_panels();
+  CHECK(block_contains(panel, "key: A minor"));
+}
+
+void test_tab_number_focus() {
+  // TAB followed by a digit focuses the panel at that 1-based grid position.
+  ShellFixture f;
+  CHECK(f.run("panel open piano"));   // grid position 1 (bottom)
+  CHECK(f.run("panel open styles"));  // grid position 2
+  // TAB arms the jump; the next digit selects the panel.
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.handle_ui_key('2'));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kPanel);
+  CHECK(f.shell.panels().focused_panel() == PanelId::kStyles);
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.handle_ui_key('1'));
+  CHECK(f.shell.panels().focused_panel() == PanelId::kPiano);
+}
+
+// Byte values of the four stepping keys (mirrors the shell's constexprs).
+constexpr std::uint8_t kStepSectionPrev = 0x2D;  // '-'
+constexpr std::uint8_t kStepSectionNext = 0x3D;  // '='
+constexpr std::uint8_t kStepStylePrev = 0x5F;    // '_'
+constexpr std::uint8_t kStepStyleNext = 0x2B;    // '+'
+
+void test_style_section_stepping() {
+  // Stepping the variation (section) while the styles panel is focused advances
+  // a PENDING selection with a debounced apply — no wrap at either end. Derives
+  // first/last from the loaded style so it holds for any section vocabulary.
+  ShellFixture f;
+  CHECK(f.run("style load basic"));
+  const auto& sections = styles::kBuiltins[0]->sections;
+  const SectionType first = sections[0].type;
+  const SectionType last = sections[sections.size() - 1].type;
+  const int section_count = static_cast<int>(sections.size());
+
+  // Focusing the styles panel seeds the chooser from the arranger.
+  CHECK(f.run("panel focus styles"));
+  CHECK(f.shell.styles_focused());
+  CHECK(!f.shell.style_step_pending());
+  const std::uint32_t gen0 = f.shell.style_step_gen();
+
+  // '=' next: pending advances and the gen bumps, but the arranger does NOT
+  // switch yet (the apply is debounced).
+  const SectionType before = f.shell.engine().arranger().current();
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  CHECK(f.shell.style_step_pending());
+  CHECK(f.shell.style_step_gen() == gen0 + 1);
+  CHECK(f.shell.engine().arranger().current() == before);
+
+  // Keep stepping past the end: '=' CLAMPS at the last section (no wrap).
+  for (int i = 0; i < section_count + 2; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  }
+  CHECK(f.shell.engine().arranger().current() == before);  // still unapplied
+
+  // Apply: transport stopped -> immediate; pending clears; lands on the last.
+  f.shell.apply_style_step();
+  CHECK(!f.shell.style_step_pending());
+  CHECK(f.shell.engine().arranger().current() == last);
+
+  // '-' steps back; repeated '-' CLAMPS at the first section.
+  for (int i = 0; i < section_count + 5; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepSectionPrev));
+  }
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current() == first);
+
+  // apply_style_step with nothing pending is a no-op (idempotent).
+  CHECK(!f.shell.style_step_pending());
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current() == first);
+}
+
+void test_style_stepping_and_reclamp() {
+  // '_'/'+' step the STYLE (clamped, no wrap); a style step preserves the
+  // selected variation by type into the new style (see the StyleChooser unit
+  // test for the preserve-by-type guarantee itself).
+  ShellFixture f;
+  CHECK(f.run("style load basic"));  // builtin index 0
+  CHECK(f.run("panel focus styles"));
+  CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);
+
+  // '_' at the first style CLAMPS (stays basic).
+  CHECK(f.shell.handle_ui_key(kStepStylePrev));
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);
+
+  // '+' walks to the last builtin, then clamps; unapplied until apply.
+  for (std::uint8_t i = 0; i < styles::kBuiltinCount + 2; ++i) {
+    CHECK(f.shell.handle_ui_key(kStepStyleNext));
+  }
+  CHECK(f.shell.engine().arranger().current_style() == styles::kBuiltins[0]);  // not applied
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current_style() ==
+        styles::kBuiltins[styles::kBuiltinCount - 1]);
+
+  // Step the style back one: whatever section the chooser shows is exactly what
+  // gets applied, and the style lands one before the last.
+  CHECK(f.shell.handle_ui_key(kStepStylePrev));
+  const SectionType shown = f.shell.chooser().selected_section();
+  f.shell.apply_style_step();
+  CHECK(f.shell.engine().arranger().current() == shown);
+  CHECK(f.shell.engine().arranger().current_style() ==
+        styles::kBuiltins[styles::kBuiltinCount - 2]);
+}
+
+void test_step_mirrors_chooser() {
+  // Stepping while the styles panel is focused drives the chooser highlight and
+  // feeds the debounced pending selection; applying switches to exactly what is
+  // shown.
+  ShellFixture f;
+  CHECK(f.run("style load basic"));
+  CHECK(f.run("panel focus styles"));
+  CHECK(f.shell.styles_focused());
+  const std::uint32_t gen0 = f.shell.style_step_gen();
+
+  const SectionType before = f.shell.engine().arranger().current();
+  CHECK(f.shell.handle_ui_key(kStepSectionNext));
+  CHECK(f.shell.styles_focused());
+  CHECK(f.shell.style_step_pending());
+  CHECK(f.shell.style_step_gen() == gen0 + 1);
+  CHECK(f.shell.engine().arranger().current() == before);  // debounced, not yet applied
+
+  const SectionType want = f.shell.chooser().selected_section();
+  f.shell.apply_style_step();
+  CHECK(!f.shell.style_step_pending());
+  CHECK(f.shell.engine().arranger().current() == want);
+}
+
+void test_theme_switch_restyles_titles() {
+  // With colors on, a coloured theme wraps panel titles in SGR; with colors
+  // off the same titles are plain — proving the switch is coherent.
+  ShellFixture f;
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("colors on"));
+  CHECK(f.run("theme set default"));
+  CHECK(f.run("panel open piano"));
+
+  bool any_escape = false;
+  for (const std::string& line : panel) {
+    any_escape = any_escape || line.find('\x1b') != std::string::npos;
+  }
+  CHECK(any_escape);
+
+  CHECK(f.run("colors off"));
+  bool still_escape = false;
+  for (const std::string& line : panel) {
+    still_escape = still_escape || line.find('\x1b') != std::string::npos;
+  }
+  CHECK(!still_escape);  // colors off -> no escapes anywhere
 }
 
 // A fixture with the default thru wiring, so piano input becomes visible
@@ -736,20 +1327,27 @@ void test_piano_key_dispatch() {
   CHECK(f.run("piano panic"));
   CHECK(f.shell.monitor().active_notes().size() == 0);
 
+  // 'P' is the D#5 black key = base C4 (60) + 15 = 75, through the normal path.
+  CHECK(f.run("piano channel 1"));
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key('p'));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.events.back().msg.d1 == 75);
+  CHECK(f.shell.handle_ui_key('p'));  // toggle release
+
   // Out-of-range: octave 9, ' = +17 semitones -> 137 -> rejected, no event.
   CHECK(f.run("piano octave 9"));
   const int before = f.note_ons();
   CHECK(f.shell.handle_ui_key('\''));
   CHECK(f.note_ons() == before);
 
-  // 'P' closes the piano panel and returns focus to the REPL.
-  CHECK(f.shell.handle_ui_key('p'));
-  CHECK(!f.shell.panels().visible(PanelId::kPiano));
+  // TAB is the way out: focus returns to the REPL, the panel stays open.
+  CHECK(f.shell.handle_ui_key('\t'));
   CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+  CHECK(f.shell.panels().visible(PanelId::kPiano));
 
-  // With REPL focus nothing is intercepted anymore.
+  // With REPL focus musical keys are no longer intercepted.
   CHECK(!f.shell.handle_ui_key('a'));
-  CHECK(!f.shell.handle_ui_key('\t'));
 }
 
 void test_piano_focus_shortcuts() {
@@ -765,10 +1363,10 @@ void test_piano_focus_shortcuts() {
   CHECK(f.shell.handle_ui_key('v'));
   CHECK(f.shell.piano_state().view == PianoView::kKeyboard);
 
-  // [ ] change octave.
-  CHECK(f.shell.handle_ui_key('['));
+  // . / change octave (moved off [ ] so they never shadow a musical key).
+  CHECK(f.shell.handle_ui_key('.'));
   CHECK(f.shell.piano_state().base_octave == 3);
-  CHECK(f.shell.handle_ui_key(']'));
+  CHECK(f.shell.handle_ui_key('/'));
   CHECK(f.shell.piano_state().base_octave == 4);
 
   // C clears monitor buffers.
@@ -787,34 +1385,332 @@ void test_piano_focus_shortcuts() {
   CHECK(f.shell.handle_ui_key('1'));
 }
 
+void test_kitty_key_parser() {
+  using Type = KittyKeyEvent::Type;
+
+  // Bare code = press (event type defaults to 1).
+  auto a = parse_kitty_key("97");
+  CHECK(a.has_value() && a->code == 97 && a->type == Type::kPress);
+
+  // Explicit press / repeat / release event types.
+  auto press = parse_kitty_key("97;1u");  // trailing 'u' tolerated
+  CHECK(press.has_value() && press->code == 97 && press->type == Type::kPress);
+  auto repeat = parse_kitty_key("97;1:2");
+  CHECK(repeat.has_value() && repeat->type == Type::kRepeat);
+  auto release = parse_kitty_key("97;1:3");
+  CHECK(release.has_value() && release->code == 97 && release->type == Type::kRelease);
+
+  // Extra key/text sub-fields are skipped; the base code still parses.
+  auto shifted = parse_kitty_key("59:58;2:3");  // ';' key, shift modifier, release
+  CHECK(shifted.has_value() && shifted->code == 59 && shifted->type == Type::kRelease);
+
+  // Modifiers are decoded as the wire value minus one: 5 -> ctrl, 2 -> shift,
+  // 1 (or absent) -> none. This is what lets Ctrl chords be told apart.
+  auto ctrl_p = parse_kitty_key("112;5u");  // CTRL+P
+  CHECK(ctrl_p.has_value() && ctrl_p->code == 112 && (ctrl_p->modifiers & kitty::kModCtrl) != 0);
+  CHECK((shifted->modifiers & kitty::kModShift) != 0);
+  auto plain_a = parse_kitty_key("97;1u");
+  CHECK(plain_a.has_value() && plain_a->code == 97 && plain_a->modifiers == 0);
+  auto bare = parse_kitty_key("97");  // no section -> no modifiers
+  CHECK(bare.has_value() && bare->modifiers == 0);
+
+  // Malformed / non-events -> nullopt (a plain letter is not a kitty event).
+  CHECK(!parse_kitty_key("a").has_value());
+  CHECK(!parse_kitty_key("").has_value());
+  CHECK(!parse_kitty_key(";1").has_value());      // no key code
+  CHECK(!parse_kitty_key("97;1:9").has_value());  // unknown event type
+}
+
+void test_control_byte_for() {
+  const std::uint8_t ctrl = kitty::kModCtrl;
+
+  // The three chords that were being mis-read as musical keys.
+  auto p = control_byte_for('p', ctrl);
+  CHECK(p.has_value() && *p == 0x10);  // CTRL+P -> play/stop byte
+  auto space = control_byte_for(' ', ctrl);
+  CHECK(space.has_value() && *space == 0x00);
+  auto backslash = control_byte_for('\\', ctrl);
+  CHECK(backslash.has_value() && *backslash == 0x1c);
+
+  // Case-insensitive: 'P' and 'p' map to the same control byte.
+  auto upper_p = control_byte_for('P', ctrl);
+  CHECK(upper_p.has_value() && *upper_p == 0x10);
+
+  // No ctrl bit -> not a control chord; a ctrl-digit has no control byte.
+  CHECK(!control_byte_for('a', 0).has_value());
+  CHECK(!control_byte_for('a', kitty::kModShift).has_value());
+  CHECK(!control_byte_for('1', ctrl).has_value());
+}
+
+void test_momentary_lock() {
+  PianoFixture f;  // starts in piano focus
+  CHECK(f.shell.momentary_available());
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // With momentary available, SPACE cycles momentary <-> toggle freely.
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // Locking momentary out downgrades the live mode to toggle at once...
+  f.shell.set_momentary_available(false);
+  CHECK(!f.shell.momentary_available());
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+
+  // ...and SPACE can no longer switch back to momentary.
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+
+  // Re-enabling restores the SPACE switch.
+  f.shell.set_momentary_available(true);
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+}
+
+void test_piano_momentary_mode() {
+  PianoFixture f;
+  // Default is momentary: true press/release drive note-on/off.
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // 'A' pressed = note-on for MIDI 60 through the normal feed_midi path.
+  CHECK(f.shell.piano_key_event('A', true));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.events.back().msg.type() == midi::kNoteOn);
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+
+  // Re-press without release (autorepeat) must NOT double note-on.
+  CHECK(f.shell.piano_key_event('A', true));
+  CHECK(f.note_ons() == 1);
+
+  // Release = matching note-off.
+  CHECK(f.shell.piano_key_event('A', false));
+  CHECK(f.note_offs() == 1);
+  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // A release with nothing held is a no-op, not a spurious note-off.
+  const int offs = f.note_offs();
+  CHECK(f.shell.piano_key_event('A', false));
+  CHECK(f.note_offs() == offs);
+
+  // Polyphony: two distinct keys held together.
+  CHECK(f.shell.piano_key_event('A', true));  // 60
+  CHECK(f.shell.piano_key_event('S', true));  // 62
+  CHECK(f.shell.monitor().active_notes().size() == 2);
+  CHECK(f.shell.piano_key_event('A', false));
+  CHECK(f.shell.piano_key_event('S', false));
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+}
+
+void test_piano_space_toggles_mode() {
+  PianoFixture f;
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // SPACE flips the mode and is never a musical note.
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+  CHECK(f.note_ons() == 0);
+  CHECK(f.shell.handle_ui_key(' '));
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+  CHECK(f.note_ons() == 0);
+
+  // In kToggle, piano_key_event presses toggle and releases are ignored.
+  CHECK(f.shell.handle_ui_key(' '));  // -> kToggle
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+  CHECK(f.shell.piano_key_event('A', true));  // note-on
+  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.piano_key_event('A', false));  // release ignored in toggle mode
+  CHECK(f.note_offs() == 0);
+  CHECK(f.shell.piano_key_event('A', true));  // same key again = note-off
+  CHECK(f.note_offs() == 1);
+}
+
+void test_piano_plain_bytes_always_toggle() {
+  // The plain-byte path is toggle even in momentary mode, so a terminal
+  // without the kitty protocol still plays (graceful degradation).
+  PianoFixture f;
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+  CHECK(f.shell.handle_ui_key('a'));  // press = note-on
+  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.handle_ui_key('a'));  // same key again = note-off
+  CHECK(f.note_offs() == 1);
+}
+
+void test_piano_toggle_autorepeat_debounce() {
+  // The bug: in toggle mode (the plain-TTY fallback, no key-release), holding a
+  // piano key makes the OS auto-repeat the keystroke — a stream of identical
+  // bytes. Without a debounce each byte flips the note on/off/on/off, a flood
+  // "a manetta" with no rhythm. The fix ignores toggles that land within the
+  // debounce window of the key's previous toggle, driven by an injected clock.
+  constexpr std::uint64_t kDebounceUs = 300'000;  // mirrors kToggleAutoRepeatDebounceUs
+
+  PianoFixture f;
+  CHECK(f.shell.handle_ui_key(' '));  // momentary -> toggle
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
+
+  // First press sounds MIDI 60 ('a' at octave 4).
+  std::uint64_t t = 1'000'000;  // any non-zero base
+  f.shell.set_input_time_us(t);
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_ons() == 1);
+  CHECK(f.note_offs() == 0);
+
+  // A sustained auto-repeat burst (~30 ms cadence) inside the window is fully
+  // swallowed: no machine-gun. The note simply stays held for as long as the
+  // key is down, because every repeat slides the window forward.
+  for (int i = 0; i < 30; ++i) {
+    t += 30'000;
+    f.shell.set_input_time_us(t);
+    CHECK(f.shell.handle_ui_key('a'));
+  }
+  CHECK(f.note_ons() == 1);   // still exactly one note-on
+  CHECK(f.note_offs() == 0);  // and never toggled off
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+
+  // A genuine re-tap AFTER the window is quiet long enough to be a fresh
+  // keystroke, so it toggles the note off.
+  t += kDebounceUs + 1;
+  f.shell.set_input_time_us(t);
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_offs() == 1);
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+
+  // ...and once more turns it back on: intentional re-tapping still works.
+  t += kDebounceUs + 1;
+  f.shell.set_input_time_us(t);
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.note_ons() == 2);
+  CHECK(f.shell.monitor().active_notes().size() == 1);
+
+  // The debounce is per-key: a DIFFERENT key held at the same instant sounds
+  // its own note, it is not suppressed by the first key's window.
+  CHECK(f.shell.handle_ui_key('s'));  // MIDI 62, same timestamp t
+  CHECK(f.shell.monitor().active_notes().size() == 2);
+}
+
+void test_piano_kitty_repeat_no_double_fire() {
+  // Momentary mode (kitty key protocol): a held key emits kPress then a stream
+  // of kRepeat events. Neither the shell's held-check nor the live loop's
+  // kRepeat drop may let a held key fire a second note-on.
+  PianoFixture f;
+  CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
+
+  // The live loop drops kRepeat for MUSICAL keys; the predicate it relies on.
+  CHECK(f.shell.piano_is_musical_key(static_cast<std::uint8_t>('a')));
+  CHECK(f.shell.piano_is_musical_key(static_cast<std::uint8_t>('A')));
+  CHECK(!f.shell.piano_is_musical_key(static_cast<std::uint8_t>('\t')));
+  CHECK(!f.shell.piano_is_musical_key(static_cast<std::uint8_t>(' ')));
+
+  // Press then autorepeat (both arrive as piano_key_event(pressed=true) when a
+  // repeat is not dropped): exactly one note-on, then one note-off on release.
+  CHECK(f.shell.piano_key_event('A', true));  // press -> note-on
+  CHECK(f.note_ons() == 1);
+  for (int i = 0; i < 10; ++i) {
+    CHECK(f.shell.piano_key_event('A', true));  // autorepeat re-press: idempotent
+  }
+  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.piano_key_event('A', false));  // release -> note-off
+  CHECK(f.note_offs() == 1);
+  CHECK(f.shell.monitor().active_notes().size() == 0);
+}
+
+void test_arp_live_stays_on_grid() {
+  // Sanity: with the transport PLAYING and the arp on over a held chord, the
+  // output lands on the rate grid (one step per 1/8), NOT a flood — proving the
+  // "a manetta" bug was the input path, never the rhythmic arp engine.
+  ShellFixture f;
+  CHECK(f.run("port open in in0"));
+  CHECK(f.run("port open out out0"));
+  CHECK(f.run("arp out out0:1"));
+  CHECK(f.run("arp rate 1/8"));
+  CHECK(f.run("arp on"));
+
+  auto note_ons = [&]() {
+    int n = 0;
+    for (const OutEvent& e : f.events) {
+      if (e.kind == OutEvent::Kind::kMidi && e.msg.type() == midi::kNoteOn && e.msg.d2 > 0) {
+        ++n;
+      }
+    }
+    return n;
+  };
+
+  // Hold a C major triad on the piano input port; the arp captures it while
+  // playing (push_midi_in), so raw held notes do not pass straight through.
+  CHECK(f.run("transport start"));
+  const std::uint8_t on[9] = {0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(on, sizeof(on)));
+
+  // Advance exactly one bar and count arp note-ons. A 1/8 grid is ~8 steps per
+  // bar: a small bounded number. A flood ("a manetta") would emit on the order
+  // of one note per tick (hundreds per bar), so the bound below fails loudly if
+  // the rhythm ever breaks.
+  const int before = note_ons();
+  std::string err;
+  CHECK(f.shell.advance_by(kTicksPerBar, err));
+  const int fired = note_ons() - before;
+  CHECK(fired > 0);
+  CHECK(fired < static_cast<int>(kTicksPerBar) / 10);  // decisively on the grid, not a flood
+}
+
+void test_tab_enters_piano_from_repl() {
+  ShellFixture f;
+  CHECK(f.run("panel open piano"));
+  // Merely opening a panel leaves focus on the REPL.
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
+
+  // TAB from the REPL drops into the only visible panel = piano play mode.
+  CHECK(f.shell.handle_ui_key('\t'));
+  CHECK(f.shell.panels().focus_kind() == PanelFocus::kPanel);
+  CHECK(f.shell.panels().focused_panel() == PanelId::kPiano);
+
+  // A musical key now sounds through the normal path.
+  CHECK(f.run("port open in in0"));
+  CHECK(f.run("port open out out0"));
+  CHECK(f.run("thru in0 out0"));
+  f.events.clear();
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.midi_count() >= 1);
+
+  // With nothing open, TAB falls through to the line editor.
+  ShellFixture g;
+  CHECK(!g.shell.handle_ui_key('\t'));
+}
+
 void test_panel_manager_state() {
   PanelManager pm;
   CHECK(!pm.any_visible());
   CHECK(pm.focus_kind() == PanelFocus::kRepl);
 
-  // Open + content + stacking.
+  // Open + content + grid composition.
   pm.set_content(PanelId::kHelp, {"h1", "h2"});
   pm.open(PanelId::kHelp);
   pm.open(PanelId::kPiano);
   pm.set_content(PanelId::kPiano, {"p1"});
   CHECK(pm.visible(PanelId::kHelp) && pm.visible(PanelId::kPiano));
-  std::vector<std::string> combined = pm.combined_lines();
-  CHECK(combined.size() == 2 + 2 + 1);  // two titles + help(2) + piano(1)
 
-  // An oversized panel is truncated with an honest marker; the panel below
-  // stays visible (fairness cap).
-  const std::vector<std::string> big(40, "x");
-  pm.set_content(PanelId::kHelp, big);
-  combined = pm.combined_lines();
-  CHECK(block_contains(combined, "more lines)"));
-  std::size_t help_lines = 0;
-  for (const std::string& line : combined) {
-    if (line == "x") {
-      ++help_lines;
-    }
-  }
-  CHECK(help_lines < big.size());
-  CHECK(block_contains(combined, "-- piano --"));
+  // The grid tiles to EXACTLY the requested rows and carries both titles and
+  // their content; menu is higher in the order so it paints above the piano.
+  constexpr int kWide = 100;
+  constexpr int kRows = 20;
+  const std::vector<std::string> grid = pm.combined_lines(kWide, kRows);
+  CHECK(static_cast<int>(grid.size()) == kRows);
+  CHECK(block_contains(grid, "-- menu"));
+  CHECK(block_contains(grid, "-- piano"));
+  CHECK(block_contains(grid, "h1") && block_contains(grid, "p1"));
+
+  // Panel numbers appear in the titles (1-based grid position, bottom-to-top:
+  // piano is [1], menu is [2]).
+  CHECK(block_contains(grid, "[1]") && block_contains(grid, "[2]"));
+  CHECK(pm.panel_number(PanelId::kPiano) == 1);
+  CHECK(pm.panel_number(PanelId::kHelp) == 2);
+
+  // TAB+number: focus_number targets the visible panel at that grid slot.
+  CHECK(pm.focus_number(2));
+  CHECK(pm.focus_kind() == PanelFocus::kPanel && pm.focused_panel() == PanelId::kHelp);
+  CHECK(!pm.focus_number(9));  // out of range: unchanged
 
   // Closing the focused panel returns focus to the REPL.
   pm.focus(PanelId::kPiano);
@@ -822,9 +1718,13 @@ void test_panel_manager_state() {
   pm.close(PanelId::kPiano);
   CHECK(pm.focus_kind() == PanelFocus::kRepl);
 
-  // Name round-trip.
+  // Name round-trip. "menu" is canonical; "help" stays a backward-compat alias.
   PanelId id{};
   CHECK(parse_panel_name("filter", id) && id == PanelId::kFilter);
+  CHECK(parse_panel_name("menu", id) && id == PanelId::kHelp);
+  CHECK(parse_panel_name("help", id) && id == PanelId::kHelp);
+  CHECK(parse_panel_name("styles", id) && id == PanelId::kStyles);
+  CHECK(parse_panel_name("events", id) && id == PanelId::kEvents);
   CHECK(!parse_panel_name("bogus", id));
 }
 
@@ -887,6 +1787,68 @@ void test_shell_pending_order_same_tick() {
   CHECK(f.events[1].msg.d1 == 62);
 }
 
+void test_shell_style_listing() {
+  ShellFixture f;
+  std::vector<std::string> out;
+  f.shell.set_print_hook([&](const std::string& line) { out.push_back(line); });
+  auto listed = [&](const char* needle) {
+    for (const std::string& line : out) {
+      if (line.find(needle) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // `style list` names every builtin.
+  CHECK(f.run("style list"));
+  CHECK(listed("basic"));
+
+  // `style section list` lists the current style's sections and marks the
+  // active one (varA right after load).
+  out.clear();
+  CHECK(f.run("style load basic"));
+  CHECK(f.run("style section list"));
+  CHECK(listed("varA"));
+  CHECK(listed("varB"));
+  CHECK(listed("fillA"));
+  CHECK(listed("ending1"));
+  CHECK(listed("(current)"));  // varA is active right after load
+
+  // The marker follows the active section (immediate while stopped).
+  out.clear();
+  CHECK(f.run("style section varB"));
+  CHECK(f.shell.engine().arranger().current() == SectionType::kVarB);
+  CHECK(f.run("style section list"));
+  CHECK(listed("varB"));
+  CHECK(listed("(current)"));
+
+  // `style <name> section list` lists a named builtin (case-insensitive).
+  out.clear();
+  CHECK(f.run("style BASIC section list"));
+  CHECK(listed("varA"));
+  CHECK(listed("ending1"));
+
+  // Unknown style name errors.
+  CHECK(!f.run("style nope section list"));
+
+  // Listing never emits MIDI.
+  CHECK(f.midi_count() == 0);
+}
+
+void test_shell_view_external_keys() {
+  // No view-options accessor is exposed (shell.hpp is owned elsewhere), so the
+  // test pins the command grammar: on/off flip the overlay, everything else is
+  // a clear error.
+  ShellFixture f;
+  CHECK(f.run("view external-keys off"));
+  CHECK(f.run("view external-keys on"));
+  CHECK(f.run("view external-keys off"));  // idempotent re-toggle
+  CHECK(!f.run("view external-keys maybe"));
+  CHECK(!f.run("view external-keys"));  // missing on|off
+  CHECK(f.midi_count() == 0);           // a view toggle never touches the engine
+}
+
 }  // namespace
 
 int main() {
@@ -894,6 +1856,7 @@ int main() {
   test_human_encoder();
   test_shell_happy_path();
   test_shell_tempo_and_bars();
+  test_shell_bpm_command();
   test_shell_transport_and_clock();
   test_shell_route_channel_remap();
   test_shell_error_paths();
@@ -901,11 +1864,20 @@ int main() {
   test_shell_track_commands();
   test_note_name_parsing();
   test_shell_chord_commands();
+  test_shell_chord_detect_panel();
+  test_gm_program_parsing();
+  test_shell_program_command();
+  test_shell_parts_command_and_panel();
+  test_shell_groove_command_and_panel();
+  test_shell_arp_command_and_panel();
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();
+  test_shell_style_listing();
+  test_shell_view_external_keys();
   test_jsonl_section_rendering();
   test_jsonl_chord_rendering();
+  test_console_geometry();
   test_help_command();
   test_help_panel_hook();
   test_panel_commands();
@@ -913,8 +1885,29 @@ int main() {
   test_piano_commands();
   test_notes_names_commands();
   test_filter_view_commands();
+  test_theme_colors_layout_commands();
+  test_contextual_panel();
+  test_ctrl_p_play_stop();
+  test_ctrl_z_layout();
+  test_styles_key_line();
+  test_tab_number_focus();
+  test_styles_panel_chooser();
+  test_style_section_stepping();
+  test_style_stepping_and_reclamp();
+  test_step_mirrors_chooser();
+  test_theme_switch_restyles_titles();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();
+  test_kitty_key_parser();
+  test_control_byte_for();
+  test_momentary_lock();
+  test_piano_momentary_mode();
+  test_piano_space_toggles_mode();
+  test_piano_plain_bytes_always_toggle();
+  test_piano_toggle_autorepeat_debounce();
+  test_piano_kitty_repeat_no_double_fire();
+  test_arp_live_stays_on_grid();
+  test_tab_enters_piano_from_repl();
   test_warn_names_complete();
   test_shell_name_tables_never_diverge();
   test_line_editor();

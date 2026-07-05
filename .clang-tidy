@@ -1,14 +1,36 @@
 ---
 # Project style enforcement (see docs/DESIGN.md + memory: cpp-style):
-#  - data members are m_snake_case (never a trailing underscore)
-#  - every control-flow body is braced
-Checks: '-*,readability-identifier-naming,readability-braces-around-statements'
+#  - encapsulated data members are m_snake_case, no trailing underscore
+#    (Private/Protected only). Public data-bag / ABI-POD fields stay plain:
+#    m_ on them is a REVIEW rule, not automation. readability-identifier-naming
+#    cannot tell an aggregate POD from a struct-with-methods (both are "public
+#    members"), so leaving PublicMember* unset is what lets the D26 wire PODs
+#    (Command/MidiMessage/OutEvent) keep positional plain fields and clean
+#    designated init (.status =, not .m_status =).
+#  - every control-flow body is braced.
+#  - aggregate literals use designated initializers (.field =).
+#  - cognitive complexity is a warning for now, promoted to a gate once the
+#    command dispatch (Shell::exec_now) is split into per-domain cmd_* handlers.
+Checks: >
+  -*,
+  readability-identifier-naming,
+  readability-braces-around-statements,
+  modernize-use-designated-initializers,
+  readability-function-cognitive-complexity
 HeaderFilterRegex: 'app/'
-WarningsAsErrors: '*'
+# The two opinionated new checks ramp in as warnings first: designated-init
+# fires hard on the core's dense positional data tables (StyleEvent, wire PODs)
+# where positional is idiomatic, and cognitive-complexity flags exec_now/on_tick
+# pending their split. Migrate + NOLINT incrementally, then promote to gate.
+WarningsAsErrors: '*,-readability-function-cognitive-complexity,-modernize-use-designated-initializers'
 CheckOptions:
   readability-identifier-naming.PrivateMemberCase: lower_case
   readability-identifier-naming.PrivateMemberPrefix: m_
   readability-identifier-naming.ProtectedMemberCase: lower_case
   readability-identifier-naming.ProtectedMemberPrefix: m_
   readability-braces-around-statements.ShortStatementLines: 0
+  modernize-use-designated-initializers.IgnoreSingleElementAggregates: 'true'
+  modernize-use-designated-initializers.RestrictToPODTypes: 'false'
+  readability-function-cognitive-complexity.Threshold: '25'
+  readability-function-cognitive-complexity.IgnoreMacros: 'true'
 ...
