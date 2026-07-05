@@ -30,6 +30,21 @@
 
 namespace arrangrr {
 
+// D47: which producer is allowed to UPDATE the arranger-followed chord context
+// (m_chords). Three producers can write it — live detect, the ChordSequencer,
+// and manual `chord play` — and their implicit last-writer-wins contention is
+// the problem this selector makes explicit. kAuto keeps every producer writing
+// (exactly the legacy behavior); the other values gate the followed-chord
+// UPDATE down to a single named source. Gating touches ONLY that update: the
+// other side effects (sounding a chord, advancing the sequencer, tracking the
+// held detect set for display) always run.
+enum class ChordFollow : std::uint8_t {
+  kAuto = 0,       // all three producers may steer (legacy last-writer-wins)
+  kDetect = 1,     // only live piano->chord detection steers
+  kSequencer = 2,  // only the ChordSequencer steers
+  kManual = 3,     // only manual `chord play` steers
+};
+
 class Engine {
  public:
   // Monomorphic sink at the ABI boundary (D26): one instantiation, no
@@ -110,6 +125,10 @@ class Engine {
     m_chord_detect = enabled;
   }
   constexpr bool chord_detect() const noexcept { return m_chord_detect; }
+
+  // D47 chord-follow selector: which producer may steer the followed chord.
+  constexpr void set_chord_follow(ChordFollow follow) noexcept { m_chord_follow = follow; }
+  constexpr ChordFollow chord_follow() const noexcept { return m_chord_follow; }
   // Live piano->chord detector state, for host display (how many keys are held
   // and how many are needed before a chord is named — fingered 3 vs single 1).
   constexpr std::uint8_t chord_held_count() const noexcept { return m_detector.held_count(); }
@@ -215,13 +234,31 @@ class Engine {
                        });
   }
 
+  // D47: is producer X allowed to UPDATE the followed chord context? kAuto lets
+  // all three through (legacy); any other value narrows it to a single source.
+  constexpr bool detect_may_follow() const noexcept {
+    return m_chord_follow == ChordFollow::kAuto || m_chord_follow == ChordFollow::kDetect;
+  }
+  constexpr bool seq_may_follow() const noexcept {
+    return m_chord_follow == ChordFollow::kAuto || m_chord_follow == ChordFollow::kSequencer;
+  }
+  constexpr bool manual_may_follow() const noexcept {
+    return m_chord_follow == ChordFollow::kAuto || m_chord_follow == ChordFollow::kManual;
+  }
+
   void fire_chord_seq(Tick transport_tick, EventSink sink) {
     m_seq.on_tick(
         transport_tick,
         [&](std::uint8_t root_note, ChordQuality quality, std::uint8_t degree, std::uint8_t vel) {
-          m_chords.sound(root_note, quality, vel, [&](std::uint8_t port, const MidiMessage& msg) {
-            schedule_or_warn(port, m_now, msg, sink);
-          });
+          // The sequencer always SOUNDS its chord; whether it STEERS the followed
+          // context is gated (D47) — passed straight into sound() so a non-selected
+          // producer never publishes it in the first place.
+          m_chords.sound(
+              root_note, quality, vel,
+              [&](std::uint8_t port, const MidiMessage& msg) {
+                schedule_or_warn(port, m_now, msg, sink);
+              },
+              seq_may_follow());
           sink(OutEvent::chord(m_chords.out_port(), degree, static_cast<std::uint8_t>(quality),
                                root_note, theory::shape_of(quality).count, vel, m_now));
         },
@@ -274,7 +311,9 @@ class Engine {
       return;  // non-note messages leave the held set (and the chord) untouched
     }
     ChordState detected;
-    if (m_detector.recognize(detected)) {
+    if (m_detector.recognize(detected) && detect_may_follow()) {
+      // The detector always tracks its held set (so the panel can display it);
+      // it only STEERS the band when detection is the selected source (D47).
       m_chords.set_context(detected.root_pc, detected.quality);
     }
   }
@@ -319,6 +358,7 @@ class Engine {
   ChordDetector m_detector;                 // live piano->chord held-note set
   bool m_chord_detect = false;              // kChordDetect: detection enabled
   std::uint8_t m_chord_detect_port = 0;     // input port feeding the detector
+  ChordFollow m_chord_follow = ChordFollow::kAuto;  // D47: who steers the band
   ArpeggiatorEngine m_arp;                  // live keyboard arpeggiator
   bool m_arp_enabled = false;               // kArp: capture + play the input port
   std::uint8_t m_arp_in_port = 0;           // keyboard the arp listens to

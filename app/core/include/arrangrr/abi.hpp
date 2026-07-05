@@ -95,6 +95,10 @@ enum class Param : std::uint16_t {
                            //     gate/latch/seed), b = value. Live arpeggiator.
   kArpOut = 40,            // set: a = port | (channel_0based << 8). Where the
                            //     arpeggiator plays.
+  kChordFollow = 41,       // set: a = ChordFollow (0 auto, 1 detect, 2 sequencer,
+                           //     3 manual). Selects WHICH producer may update the
+                           //     arranger-followed chord context. kAuto keeps the
+                           //     legacy last-writer-wins behavior.
 };
 
 struct Command {

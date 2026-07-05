@@ -26,6 +26,7 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kChordOut:
     case Param::kChordMode:
     case Param::kChordDetect:
+    case Param::kChordFollow:
       cmd_chord(cmd, sink);
       break;
     case Param::kArp:
@@ -203,6 +204,13 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
       set_chord_detect(cmd.a != 0, static_cast<std::uint8_t>(port));
       break;
     }
+    case Param::kChordFollow:
+      if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(ChordFollow::kManual)) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        set_chord_follow(static_cast<ChordFollow>(cmd.a));
+      }
+      break;
     case Param::kChordPlay: {
       const auto vel = static_cast<std::uint8_t>(cmd.c);
       // Up to 4 packed notes, zero-terminated (one per byte).
@@ -226,18 +234,22 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
       const auto schedule = [&](std::uint8_t port, const MidiMessage& msg) {
         schedule_or_warn(port, m_now, msg, sink);
       };
+      // Manual `chord play` always SOUNDS its notes; whether it STEERS the
+      // followed context is gated (D47) — threaded into play*/sound so a
+      // non-selected producer never publishes it.
+      const bool steer = manual_may_follow();
       ChordResult r;
       switch (m_chords.mode()) {
         case ChordMode::kSingle:
-          r = m_chords.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule);
+          r = m_chords.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule, steer);
           break;
         case ChordMode::kShell:
-          r = m_chords.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b), vel,
-                                  schedule);
+          r = m_chords.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b), vel, schedule,
+                                  steer);
           break;
         case ChordMode::kDiatonic:
         default:
-          r = m_chords.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule);
+          r = m_chords.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule, steer);
           break;
       }
       if (r.degree < 0) {

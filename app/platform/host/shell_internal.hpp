@@ -82,6 +82,54 @@ bool parse_role(const std::string& s, TrackRole& out);
 bool parse_hex_byte(const std::string& s, std::uint8_t& out);
 bool parse_int(const std::string& s, int& out);
 
+// D47 chord-follow labels, shared by the `chord follow` confirmation and the
+// chords panel so the wording matches. `label` is the short selector name;
+// `hint` is the one-line meaning of who steers the band.
+inline const char* chord_follow_label(ChordFollow follow) {
+  switch (follow) {
+    case ChordFollow::kDetect:
+      return "detect";
+    case ChordFollow::kSequencer:
+      return "sequencer";
+    case ChordFollow::kManual:
+      return "manual";
+    case ChordFollow::kAuto:
+    default:
+      return "auto";
+  }
+}
+inline const char* chord_follow_hint(ChordFollow follow) {
+  switch (follow) {
+    case ChordFollow::kDetect:
+      return "live keys steer";
+    case ChordFollow::kSequencer:
+      return "the sequence steers";
+    case ChordFollow::kManual:
+      return "chord play steers";
+    case ChordFollow::kAuto:
+    default:
+      return "any source steers";
+  }
+}
+
+// Parses a `chord follow` argument into the selector (`seq` is an alias of
+// `sequencer`). The one place that knows the argument spelling — kept next to
+// label/hint so the three stay in sync when a value is added.
+inline bool parse_chord_follow(const std::string& s, ChordFollow& out) {
+  if (s == "auto") {
+    out = ChordFollow::kAuto;
+  } else if (s == "detect") {
+    out = ChordFollow::kDetect;
+  } else if (s == "sequencer" || s == "seq") {
+    out = ChordFollow::kSequencer;
+  } else if (s == "manual") {
+    out = ChordFollow::kManual;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace shell_detail
 
 }  // namespace arrangrr::host

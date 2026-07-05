@@ -1050,11 +1050,11 @@ void test_styles_panel_chooser() {
   CHECK(f.shell.styles_focused());
   CHECK(f.shell.panels().visible(PanelId::kStyles));
 
-  // The styles panel renders the chooser: style:/section:/hint + a `key:` line.
+  // The styles panel renders the chooser: style:/section:/hint + a `scale:` line.
   f.shell.refresh_panels();
   CHECK(block_contains(panel, "-- styles"));
   CHECK(block_contains(panel, "ENTER next-bar"));
-  CHECK(block_contains(panel, "key:"));
+  CHECK(block_contains(panel, "scale:"));
 
   // A digit feeds the filter only while the styles panel is focused.
   CHECK(f.shell.handle_ui_key('0'));
@@ -1107,7 +1107,8 @@ void test_ctrl_z_layout() {
 }
 
 void test_styles_key_line() {
-  // The styles panel carries a live `key:` line read from the chord engine.
+  // The styles panel carries a live `scale:` line read from the chord engine
+  // (D47 renamed the label from `key:`); the `scale` command is a `key` alias.
   ShellFixture f;
   std::vector<std::string> panel;
   f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
@@ -1117,10 +1118,10 @@ void test_styles_key_line() {
   CHECK(f.run("panel open styles"));
   CHECK(f.run("key F major"));
   f.shell.refresh_panels();
-  CHECK(block_contains(panel, "key: F major"));
-  CHECK(f.run("key A minor"));
+  CHECK(block_contains(panel, "scale: F major"));
+  CHECK(f.run("scale A minor"));
   f.shell.refresh_panels();
-  CHECK(block_contains(panel, "key: A minor"));
+  CHECK(block_contains(panel, "scale: A minor"));
 }
 
 void test_tab_number_focus() {
