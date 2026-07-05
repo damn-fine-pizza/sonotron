@@ -88,6 +88,25 @@ constexpr Scale scale_of(Mode mode) noexcept {
   return s;
 }
 
+// Signed scale degree -> semitone offset from the key tonic. The degree is
+// diatonic and unbounded: it wraps every 7 steps with a full-octave (12
+// semitone) shift, so degree 7 is the tonic one octave up and degree -1 is the
+// scale's leading tone one octave down. Uses floor division/modulo so negative
+// degrees wrap correctly (e.g. C major degree -1 = B below tonic = -1).
+constexpr int degree_to_semitones(Mode mode, int degree) noexcept {
+  const Scale s = scale_of(mode);
+  constexpr int kScaleSteps = 7;
+  constexpr int kSemitonesPerOctave = 12;
+  // Floor division/modulo (C++ truncates toward zero, wrong for negatives).
+  int octave = degree / kScaleSteps;
+  int index = degree % kScaleSteps;
+  if (index < 0) {
+    index += kScaleSteps;
+    --octave;
+  }
+  return static_cast<int>(s.steps[index]) + kSemitonesPerOctave * octave;
+}
+
 // Degree (0..6) of a pitch class within the key's scale; -1 if chromatic.
 constexpr int degree_of(const Key& key, std::uint8_t pc) noexcept {
   const Scale s = scale_of(key.mode);
@@ -270,6 +289,19 @@ static_assert(smart_quality(Mode::kMinor, 4) == ChordQuality::kDom7);
 static_assert(smart_quality(Mode::kMinor, 6) == ChordQuality::kDom7);
 // A natural minor scale root check: E (pc 4) is the V of A minor.
 static_assert(degree_of(kAMinor, 4) == 4);
+// degree_to_semitones: C major maps degrees to major-scale semitones, wrapping
+// an octave every 7 steps with correct floor behavior for negatives.
+static_assert(degree_to_semitones(Mode::kMajor, 0) == 0);
+static_assert(degree_to_semitones(Mode::kMajor, 1) == 2);
+static_assert(degree_to_semitones(Mode::kMajor, 4) == 7);
+static_assert(degree_to_semitones(Mode::kMajor, 7) == 12);
+static_assert(degree_to_semitones(Mode::kMajor, 8) == 14);
+static_assert(degree_to_semitones(Mode::kMajor, -1) == -1);  // leading tone below
+static_assert(degree_to_semitones(Mode::kMajor, -7) == -12);
+// Aeolian (natural minor) follows its own steps {0,2,3,5,7,8,10}.
+static_assert(degree_to_semitones(Mode::kMinor, 2) == 3);   // minor third
+static_assert(degree_to_semitones(Mode::kMinor, 5) == 8);   // minor sixth
+static_assert(degree_to_semitones(Mode::kMinor, -1) == -2); // whole tone below tonic
 // Shell completion (mode C) spot checks.
 constexpr std::uint8_t kIv1[3] = {4, 0, 0};
 static_assert(complete_shell_full(kIv1, 1) == ChordQuality::kMaj);

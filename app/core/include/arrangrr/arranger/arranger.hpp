@@ -220,7 +220,8 @@ class Arranger {
   // one-shot transitions, grid firing). Splitting it would scatter the tight
   // timing logic across functions for no readability gain and real risk.
   // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-  TickResult on_tick(Tick transport_tick, const ChordState& chord, ScheduleFn schedule) {
+  TickResult on_tick(Tick transport_tick, const Key& key, const ChordState& chord,
+                     ScheduleFn schedule) {
     TickResult result;
     if (m_style == nullptr) {
       return result;
@@ -298,7 +299,7 @@ class Arranger {
         if (ev.step != step) {
           continue;
         }
-        const int note = resolve(pattern, ev, chord);
+        const int note = resolve(pattern, ev, key, chord);
         if (note < 0) {
           continue;
         }
@@ -344,23 +345,46 @@ class Arranger {
   // NTT core (D24): chord-tone index -> concrete note. Bass anchors low
   // (octave 2), everything else around octave 4; indices past the shape wrap
   // an octave up, so tone 3 over a triad is the root one octave higher.
-  static int resolve(const StylePattern& pattern, const StyleEvent& ev,
+  //
+  // The per-event NoteSource selects how `tone` is read (kChordTone keeps this
+  // exact historical computation). kFixed roles short-circuit to the literal
+  // note REGARDLESS of src — drums never transpose.
+  static int resolve(const StylePattern& pattern, const StyleEvent& ev, const Key& key,
                      const ChordState& chord) noexcept {
     if (pattern.policy == RolePolicy::kFixed) {
       return ev.tone;
     }
-    if (!chord.valid || ev.tone < 0) {
-      return -1;  // silent until a chord exists
+    const int anchor = kRoleAnchor[static_cast<std::uint8_t>(pattern.role)];
+    switch (ev.src) {
+      case NoteSource::kInterval: {
+        // Signed semitone offset from the chord root; no shape/quality lookup.
+        if (!chord.valid) {
+          return -1;  // silent until a chord exists
+        }
+        const int note = anchor + chord.root_pc + ev.tone + 12 * ev.octave;
+        return (note < 0 || note > 127) ? -1 : note;
+      }
+      case NoteSource::kScaleDegree: {
+        // Key-diatonic: independent of the chord (the key always exists).
+        const int note =
+            anchor + key.root_pc + theory::degree_to_semitones(key.mode, ev.tone) + 12 * ev.octave;
+        return (note < 0 || note > 127) ? -1 : note;
+      }
+      case NoteSource::kChordTone:
+      default: {
+        if (!chord.valid || ev.tone < 0) {
+          return -1;  // silent until a chord exists
+        }
+        const ChordShape shape = theory::shape_of(chord.quality);
+        if (shape.count == 0) {
+          return -1;
+        }
+        const std::uint8_t wrap = static_cast<std::uint8_t>(ev.tone / shape.count);
+        const std::uint8_t offset = shape.offsets[ev.tone % shape.count];
+        const int note = anchor + chord.root_pc + offset + 12 * (ev.octave + wrap);
+        return (note < 0 || note > 127) ? -1 : note;
+      }
     }
-    const ChordShape shape = theory::shape_of(chord.quality);
-    if (shape.count == 0) {
-      return -1;
-    }
-    const std::uint8_t wrap = static_cast<std::uint8_t>(ev.tone / shape.count);
-    const std::uint8_t offset = shape.offsets[ev.tone % shape.count];
-    const int anchor = kRoleAnchor[static_cast<std::uint8_t>(pattern.role)] + chord.root_pc;
-    const int note = anchor + offset + 12 * (ev.octave + wrap);
-    return (note < 0 || note > 127) ? -1 : note;
   }
 
   // Default register anchor per role (MIDI note of chord-tone 0 at octave 0),

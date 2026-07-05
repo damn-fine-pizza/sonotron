@@ -56,7 +56,7 @@ void test_role_anchor_and_gm_voices() {
   arr.on_transport_start();
   bool bass_c2 = false;
   bool pad_c3 = false;
-  arr.on_tick(0, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
+  arr.on_tick(0, Key{}, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
     if (m.type() == midi::kNoteOn) {
       if (m.channel() == 0 && m.d1 == 36) {
         bass_c2 = true;
@@ -345,7 +345,7 @@ void test_multibar_section_plays_bar_two() {
   const ChordState no_chord{};
   StaticVector<std::uint32_t, 8> hits36, hits38;
   for (Tick t = 0; t < 4 * kTicksPerBar; ++t) {
-    a.on_tick(t, no_chord, [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
+    a.on_tick(t, Key{}, no_chord, [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
       if (msg.type() != midi::kNoteOn || delay != 0) {
         return;
       }
@@ -388,7 +388,7 @@ void test_seamless_style_switch() {
   bool changed_before_bar = false;
   bool changed_at_bar = false;
   for (Tick t = 0; t <= kTicksPerBar; ++t) {
-    const Arranger::TickResult r = a.on_tick(t, no_chord, sink);
+    const Arranger::TickResult r = a.on_tick(t, Key{}, no_chord, sink);
     if (r.style_changed) {
       if (t < kTicksPerBar) {
         changed_before_bar = true;
@@ -518,6 +518,86 @@ void test_builtin_styles_play_roles() {
   }
 }
 
+// Resolve a single tonal event through the normal on_tick path and return the
+// MIDI note it produced (or -1 if it was skipped/clamped). Builds a throwaway
+// one-event style so we can probe NoteSource resolution directly, chord- and
+// key-aware, without leaning on any builtin's pattern data.
+int resolve_one(TrackRole role, RolePolicy policy, NoteSource src, std::int8_t tone,
+                std::int8_t octave, const Key& key, const ChordState& chord) {
+  const StyleEvent ev[] = {
+      {.step = 0, .tone = tone, .octave = octave, .vel = 100, .gate = 100, .src = src}};
+  const StylePattern pat[] = {
+      {.role = role, .policy = policy, .events = Span<const StyleEvent>(ev)}};
+  const StyleSection sec[] = {
+      {.type = SectionType::kVarA, .bars = 1, .patterns = Span<const StylePattern>(pat)}};
+  const Style style{.name = "probe", .sections = Span<const StyleSection>(sec)};
+  Arranger a;
+  CHECK(a.load_style(&style));
+  CHECK(a.set_route(role, 0, 0));
+  a.on_transport_start();
+  int note = -1;
+  a.on_tick(0, key, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
+    if (m.type() == midi::kNoteOn) {
+      note = m.d1;
+    }
+  });
+  return note;
+}
+
+void test_note_source_vocabulary() {
+  const Key c_major{.root_pc = 0, .mode = Mode::kMajor};
+  const Key a_minor{.root_pc = 9, .mode = Mode::kMinor};
+  const ChordState c_maj{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  const ChordState c_min{.root_pc = 0, .quality = ChordQuality::kMin, .valid = true};
+  constexpr int kLeadAnchor = 72;  // kRoleAnchor[kLead]
+  const auto lead = [&](NoteSource src, std::int8_t tone, std::int8_t octave, const Key& key,
+                        const ChordState& chord) {
+    return resolve_one(TrackRole::kLead, RolePolicy::kChordTone, src, tone, octave, key, chord);
+  };
+
+  // Backward compat: kChordTone (the default src) resolves EXACTLY as before —
+  // over C major, chord-tone 0/1/2 = root/third/fifth at the lead anchor.
+  CHECK(lead(NoteSource::kChordTone, 0, 0, c_major, c_maj) == kLeadAnchor + 0);  // 72 C
+  CHECK(lead(NoteSource::kChordTone, 1, 0, c_major, c_maj) == kLeadAnchor + 4);  // 76 E
+  CHECK(lead(NoteSource::kChordTone, 2, 0, c_major, c_maj) == kLeadAnchor + 7);  // 79 G
+
+  // kInterval: signed semitones from the chord root, no shape/quality lookup.
+  CHECK(lead(NoteSource::kInterval, 14, 0, c_major, c_maj) == kLeadAnchor + 14);  // 86
+  CHECK(lead(NoteSource::kInterval, -1, 0, c_major, c_maj) == kLeadAnchor - 1);   // 71 approach
+  CHECK(lead(NoteSource::kInterval, 3, 0, c_major, c_min) == kLeadAnchor + 3);    // quality-blind
+  CHECK(lead(NoteSource::kInterval, 0, -7, c_major, c_maj) == -1);  // 72-84 clamps low to skipped
+  CHECK(lead(NoteSource::kInterval, 0, 7, c_major, c_maj) == -1);   // 72+84 clamps high to skipped
+  CHECK(lead(NoteSource::kInterval, 0, 0, c_major, ChordState{}) == -1);  // needs a valid chord
+
+  // kScaleDegree in C major: degrees 0/1/4 = tonic/2nd/5th diatonic pitches.
+  CHECK(lead(NoteSource::kScaleDegree, 0, 0, c_major, c_maj) == kLeadAnchor + 0);  // 72 C
+  CHECK(lead(NoteSource::kScaleDegree, 1, 0, c_major, c_maj) == kLeadAnchor + 2);  // 74 D
+  CHECK(lead(NoteSource::kScaleDegree, 4, 0, c_major, c_maj) == kLeadAnchor + 7);  // 79 G
+  // Chord-quality independent: same diatonic notes over a minor chord.
+  CHECK(lead(NoteSource::kScaleDegree, 1, 0, c_major, c_min) == kLeadAnchor + 2);
+  // Chord-validity independent: the key always exists, so it still sounds.
+  CHECK(lead(NoteSource::kScaleDegree, 0, 0, c_major, ChordState{}) == kLeadAnchor + 0);
+  // Out-of-range scale-degree lines clamp to skipped on both ends.
+  CHECK(lead(NoteSource::kScaleDegree, 0, 7, c_major, c_maj) == -1);   // 72+84 clamps high
+  CHECK(lead(NoteSource::kScaleDegree, 0, -7, c_major, c_maj) == -1);  // 72-84 clamps low
+
+  // A minor key follows the aeolian scale (root_pc = 9): degrees 0/1/4.
+  CHECK(lead(NoteSource::kScaleDegree, 0, 0, a_minor, c_maj) == kLeadAnchor + 9 + 0);  // 81 A
+  CHECK(lead(NoteSource::kScaleDegree, 1, 0, a_minor, c_maj) == kLeadAnchor + 9 + 2);  // 83 B
+  CHECK(lead(NoteSource::kScaleDegree, 4, 0, a_minor, c_maj) == kLeadAnchor + 9 + 7);  // 88 E
+  // The SCALE (not the chord) decides colour: degree 2 is a major third in C
+  // major but a minor third in A minor.
+  CHECK(lead(NoteSource::kScaleDegree, 2, 0, c_major, c_maj) == kLeadAnchor + 4);      // E
+  CHECK(lead(NoteSource::kScaleDegree, 2, 0, a_minor, c_maj) == kLeadAnchor + 9 + 3);  // C natural
+
+  // kFixed short-circuits to the literal note REGARDLESS of src (drums never
+  // transpose), whatever key/chord/note-source is attached.
+  CHECK(resolve_one(TrackRole::kDrums, RolePolicy::kFixed, NoteSource::kInterval, 38, 0, a_minor,
+                    c_min) == 38);
+  CHECK(resolve_one(TrackRole::kDrums, RolePolicy::kFixed, NoteSource::kScaleDegree, 42, 0, a_minor,
+                    c_min) == 42);
+}
+
 }  // namespace
 
 int main() {
@@ -542,6 +622,7 @@ int main() {
   test_style_switch_bad_index_warns();
   test_builtin_styles_registered();
   test_builtin_styles_play_roles();
+  test_note_source_vocabulary();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_arranger: all OK\n");
   }
