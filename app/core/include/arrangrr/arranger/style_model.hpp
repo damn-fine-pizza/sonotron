@@ -66,8 +66,11 @@ enum class NoteSource : std::uint8_t {
 // arranger fire loop expands the event through `gesture::expand` before
 // resolving each produced note.
 enum class ChordGesture : std::uint8_t {
-  kNone = 0,  // no gesture: the event yields exactly one note (default)
-  // Additional variants (kStrum, kRollUp, ...) are added by the gesture stage.
+  kNone = 0,       // no gesture: the event yields exactly one note (default)
+  kStrumUp = 1,    // arpeggiate the chord low->high, fixed micro-stagger per tone
+  kStrumDown = 2,  // arpeggiate the chord high->low, fixed micro-stagger per tone
+  kRollUp = 3,     // spread the tones evenly across the gate, ascending
+  kRollDown = 4,   // spread the tones evenly across the gate, descending
 };
 
 // Per-pattern voicing policy (D40 pipeline): whether the role's chord-tone
