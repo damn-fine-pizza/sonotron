@@ -1,10 +1,14 @@
 #include "cli.hpp"
 
+#include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
+#include "canon.hpp"
 #include "chordpro_import.hpp"
 #include "diagnostics.hpp"
+#include "genre.hpp"
 #include "json.hpp"
 #include "midi_import.hpp"
 #include "serialize.hpp"
@@ -115,6 +119,9 @@ void print_usage(std::ostream& out) {
          "  import-chordpro <in> --out <f.json>    ChordPro -> .arrsong.json\n"
          "  import-sff <in.sty>                    SFF import (not implemented; inspect-only)\n"
          "  validate <file.json>                   validate an .arrstyle/.arrsong document\n"
+         "  infer-genre <file>                     classify a style's genre from content\n"
+         "  build-canon [--kb <dir>] --out <f.hpp> distil KB aggregates into a constexpr header\n"
+         "              [--max-cells N] [--max-bass N]\n"
          "  help                                   show this message\n"
          "  version                                print the tool version\n";
 }
@@ -155,6 +162,9 @@ int cmd_inspect(const std::vector<std::string>& args, std::ostream& out, std::os
         notes += t.notes.size();
       }
       out << "notes:  " << notes << '\n';
+      const GenreGuess guess = infer_genre(smf);
+      const int conf_pct = static_cast<int>(guess.confidence * 100.0F + 0.5F);
+      out << "genre_inferred: " << guess.genre << " (conf " << conf_pct << "%)\n";
       break;
     }
     case SourceFormat::kChordPro: {
@@ -286,6 +296,78 @@ int cmd_validate(const std::vector<std::string>& args, std::ostream& out, std::o
   return kExitFailure;
 }
 
+int cmd_infer_genre(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
+  if (args.size() < 2) {
+    err << "infer-genre: expected a MIDI/SFF file argument\n";
+    return kExitUsage;
+  }
+  std::vector<std::uint8_t> bytes;
+  std::string error;
+  if (!read_binary(args[1], bytes, error)) {
+    err << error << '\n';
+    return kExitFailure;
+  }
+  Diagnostics diag;
+  SmfFile smf;
+  if (!parse_smf(bytes, args[1], smf, diag)) {
+    diag.print(err);
+    return kExitFailure;
+  }
+  const GenreGuess guess = infer_genre(smf);
+  const int conf_pct = static_cast<int>(guess.confidence * 100.0F + 0.5F);
+  out << guess.genre << " (conf " << conf_pct << "%)\n";
+  return kExitOk;
+}
+
+// Finds "--<name> <value>" in args (after the subcommand). Returns false if absent.
+bool find_option(const std::vector<std::string>& args, std::size_t start, const std::string& name,
+                 std::string& out) {
+  for (std::size_t i = start; i < args.size(); ++i) {
+    if (args[i] == name && i + 1 < args.size()) {
+      out = args[i + 1];
+      return true;
+    }
+  }
+  return false;
+}
+
+int cmd_build_canon(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
+  std::string kb_path = "resources/kb/styles/aggregate";
+  std::string kb_arg;
+  if (find_option(args, 1, "--kb", kb_arg)) {
+    kb_path = kb_arg;
+  }
+  std::string out_path;
+  if (!find_out(args, 1, out_path)) {
+    err << "build-canon: missing --out <file>\n";
+    return kExitUsage;
+  }
+  CanonOptions opts;
+  std::string value;
+  if (find_option(args, 1, "--max-cells", value)) {
+    opts.max_cells = static_cast<std::size_t>(std::max(0, std::atoi(value.c_str())));
+  }
+  if (find_option(args, 1, "--max-bass", value)) {
+    opts.max_bass = static_cast<std::size_t>(std::max(0, std::atoi(value.c_str())));
+  }
+
+  Diagnostics diag;
+  CanonInput input;
+  if (!load_canon_input(kb_path, input, diag)) {
+    diag.print(err);
+    return kExitFailure;
+  }
+  const std::string header = emit_canon_header(input, opts);
+  std::string error;
+  if (!write_text(out_path, header, error)) {
+    err << error << '\n';
+    return kExitFailure;
+  }
+  out << "wrote " << out_path << " (" << input.genres.size() << " genre(s))\n";
+  diag.print(err);
+  return kExitOk;
+}
+
 }  // namespace
 
 int run(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
@@ -316,6 +398,12 @@ int run(const std::vector<std::string>& args, std::ostream& out, std::ostream& e
   }
   if (cmd == "validate") {
     return cmd_validate(args, out, err);
+  }
+  if (cmd == "infer-genre") {
+    return cmd_infer_genre(args, out, err);
+  }
+  if (cmd == "build-canon") {
+    return cmd_build_canon(args, out, err);
   }
   err << "unknown command: " << cmd << "\n\n";
   print_usage(err);
