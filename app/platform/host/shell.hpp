@@ -124,7 +124,7 @@ class Shell {
 
   // The live loop injects the current wall-clock (monotonic microseconds) before
   // it processes a batch of REPL input, so the toggle-mode auto-repeat debounce
-  // (toggle_piano_key) can measure key cadence WITHOUT the Shell ever touching a
+  // (toggle_surface_key) can measure key cadence WITHOUT the Shell ever touching a
   // real clock — that keeps the debounce unit-testable with an injected time.
   // Left at 0 (the default) the debounce is inert, so tests that never inject a
   // time keep their exact toggle-on/toggle-off behaviour.
@@ -160,9 +160,17 @@ class Shell {
   // focused the SAME piano key bindings play here, but their notes route to the
   // harmony input port (zone kHarmony) — silent, observed by the ChordDetector,
   // so playing re-harmonizes the band. Reuses the piano octave/transpose/channel
-  // state so a key means the same note on both surfaces.
+  // state so a musical key means the same note on both surfaces (the piano's
+  // view-only shortcuts N/V/C/Z are NOT shared — they stay in the piano branch).
   bool chords_focused() const;
   bool chords_key(std::uint8_t byte);
+
+  // Shared surface key handling (piano + chords route through the same code):
+  // the SPACE key-mode toggle (labelled per surface) and the musical/octave/
+  // transpose keys that both surfaces bind identically, differing only in which
+  // port + held-set they drive.
+  bool surface_key_mode_toggle(const char* surface, const char* momentary_action);
+  bool surface_musical_key(std::uint8_t port, ActiveNoteTracker& held, std::uint8_t byte);
 
   // Default two-surface topology (live launch): pins the piano port to kMelody
   // (sounds, no steer), the harmony port to kHarmony (silent) and points the

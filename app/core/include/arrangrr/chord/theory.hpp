@@ -192,8 +192,10 @@ constexpr ChordQuality smart_quality(Mode mode, int degree) noexcept {
 //     that degree (a minor third -> minor, a major third -> major);
 //   - dim degree (vii in major, ii in natural minor) -> MINOR: it already has
 //     the minor third, so we keep it and restore the perfect fifth;
-//   - aug degree (III+ in harmonic minor) -> MAJOR: it already has the major
-//     third, so we keep it and restore the perfect fifth;
+//   - aug degree -> MAJOR by the same major-third rule. (Musically stated for
+//     completeness; smart_quality only ever yields maj7/dom7/min7/half-dim/dim7
+//     over the diatonic degrees, so kAug never actually reaches here — the
+//     major-third branch is defensive, not a live path.)
 //   - chromatic root (out of key) -> MAJOR: it functions as a secondary
 //     dominant and a one-finger shortcut must NEVER stall mid-phrase.
 // Triads only, no D19 richness — this is what keeps single-finger DISTINCT from

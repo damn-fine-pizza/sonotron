@@ -102,10 +102,11 @@ class ChordDetector {
         iv[n++] = rel;
       }
     }
-    // Single-finger, one pitch class held (n == 0 = bare root, octaves/fifths
-    // add no colour): resolve the diatonic maj/min triad of that root in the
-    // current key. Any colour note (n >= 1) falls through to shell completion,
-    // and fingered mode never reaches here with n == 0 below its triad minimum.
+    // Single-finger, one pitch class held (n == 0 = only the root and its
+    // octaves — octaves alone leave n == 0): resolve the diatonic maj/min triad
+    // of that root in the current key. Any OTHER held interval is a colour note
+    // (n >= 1 — a held fifth included) and falls through to shell completion;
+    // fingered mode never reaches here with n == 0 below its triad minimum.
     const ChordQuality quality = (m_single_finger && n == 0)
                                      ? theory::single_finger_quality(m_key, root_pc)
                                      : theory::complete_shell_full(iv, n);
