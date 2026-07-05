@@ -1,8 +1,14 @@
 // Host-layer unit tests: JSONL/human encoders (every branch) and the shell
 // (command parsing, @tick queue, error paths). Links arrangrr_host.
 
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "alsa_midi.hpp"
@@ -14,6 +20,7 @@
 #include "kitty_keys.hpp"
 #include "shell.hpp"
 #include "test.hpp"
+#include "uds_server.hpp"
 
 namespace {
 
@@ -1836,6 +1843,142 @@ void test_shell_style_listing() {
   CHECK(f.midi_count() == 0);
 }
 
+void test_line_buffer_framing() {
+  LineBuffer lb;
+  std::vector<std::string> lines;
+
+  // A line split across two feed() calls reassembles correctly.
+  CHECK(lb.feed("hel", 3, lines));
+  CHECK(lines.empty());
+  CHECK(lb.feed("lo\n", 3, lines));
+  CHECK(lines.size() == 1 && lines[0] == "hello");
+  CHECK(lb.pending().empty());
+
+  // Multiple lines in one chunk, plus a trailing partial line that stays
+  // pending until the next feed() supplies its terminator.
+  lines.clear();
+  const std::string chunk = "one\ntwo\nthr";
+  CHECK(lb.feed(chunk.data(), chunk.size(), lines));
+  CHECK(lines.size() == 2 && lines[0] == "one" && lines[1] == "two");
+  CHECK(lb.pending() == "thr");
+  lines.clear();
+  CHECK(lb.feed("ee\n", 3, lines));
+  CHECK(lines.size() == 1 && lines[0] == "three");
+
+  // Empty lines (blank input) are reported as empty strings, not dropped.
+  lines.clear();
+  CHECK(lb.feed("\n\nx\n", 4, lines));
+  CHECK(lines.size() == 3);
+  CHECK(lines[0].empty() && lines[1].empty() && lines[2] == "x");
+
+  // CRLF framing: the trailing '\r' is stripped from the reassembled line.
+  lines.clear();
+  CHECK(lb.feed("crlf\r\n", 6, lines));
+  CHECK(lines.size() == 1 && lines[0] == "crlf");
+}
+
+void test_line_buffer_overflow() {
+  // A partial line that never terminates and grows past kMaxLineLength
+  // reports overflow so the caller can drop a broken/hostile client instead
+  // of buffering it without bound.
+  LineBuffer lb;
+  std::vector<std::string> lines;
+  const std::string huge(LineBuffer::kMaxLineLength + 1, 'x');
+  CHECK(!lb.feed(huge.data(), huge.size(), lines));
+  CHECK(lines.empty());  // never terminated, so nothing was extracted
+  CHECK(lb.pending().size() == huge.size());
+}
+
+void test_uds_server_start_errors() {
+  // A path longer than sockaddr_un::sun_path is rejected before any syscall
+  // that could otherwise misbehave on truncation.
+  UdsServer too_long;
+  CHECK(!too_long.start(std::string(200, 'x')));
+  CHECK(!too_long.enabled());
+  CHECK(too_long.listen_fd() < 0);
+
+  // bind() failing (a directory component that does not exist) is reported
+  // and leaves the adapter disabled rather than crashing.
+  UdsServer bad_dir;
+  CHECK(!bad_dir.start("/no/such/directory/arrangrr.sock"));
+  CHECK(!bad_dir.enabled());
+}
+
+void test_uds_server_end_to_end() {
+  // A real AF_UNIX socket exercised synchronously: no threads, no sleeps.
+  // connect() on a unix stream socket completes as soon as the kernel queues
+  // the new peer into the listen backlog (there is no real handshake), so
+  // writing from the client before the server's accept() runs is safe and
+  // deterministic — the bytes sit in the accepted socket's receive buffer.
+  const std::string path =
+      "/tmp/arrangrr_test_uds_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
+
+  UdsServer server;
+  CHECK(server.start(path));
+  CHECK(server.enabled());
+
+  std::vector<std::pair<int, std::string>> received;
+  server.set_line_handler(
+      [&](int fd, const std::string& line) { received.emplace_back(fd, line); });
+
+  const int client = ::socket(AF_UNIX, SOCK_STREAM, 0);
+  CHECK(client >= 0);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+  CHECK(::connect(client, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0);
+
+  // Two command lines in one write, split by the server's LineBuffer —
+  // exercises the whole inbound path (accept -> read -> frame -> dispatch).
+  const std::string wire = "transport start\nbpm 120\n";
+  CHECK(::write(client, wire.data(), wire.size()) == static_cast<ssize_t>(wire.size()));
+
+  server.handle_listen_readable();
+  CHECK(server.client_fds().size() == 1);
+  const int server_side_fd = server.client_fds()[0];
+  server.handle_client_readable(server_side_fd);
+
+  CHECK(received.size() == 2);
+  CHECK(received[0].first == server_side_fd);
+  CHECK(received[0].second == "transport start");
+  CHECK(received[1].second == "bpm 120");
+
+  // Outbound: broadcast() reaches the connected peer verbatim + newline.
+  server.broadcast(R"({"ev":"warn","code":"unsupported","@":0})");
+  char buf[256];
+  const ssize_t n = ::read(client, buf, sizeof(buf));
+  CHECK(n > 0);
+  CHECK(std::string(buf, static_cast<std::size_t>(n)) ==
+        "{\"ev\":\"warn\",\"code\":\"unsupported\",\"@\":0}\n");
+
+  // send_error() reaches the same client as a JSON error object.
+  server.send_error(server_side_fd, "unknown command: bogus", "bogus");
+  const ssize_t n2 = ::read(client, buf, sizeof(buf));
+  CHECK(n2 > 0);
+  const std::string got2(buf, static_cast<std::size_t>(n2));
+  CHECK(got2.find(R"("error":"unknown command: bogus")") != std::string::npos);
+  CHECK(got2.find(R"("cmd":"bogus")") != std::string::npos);
+
+  // JSON escaping of characters we did not generate ourselves (quotes,
+  // backslash, newline, a raw control byte) — send_error()'s message and cmd
+  // are arbitrary text, never host-controlled like jsonl.cpp's own strings.
+  server.send_error(server_side_fd, "bad \"quote\"\\slash\nline", "cmd\x01x");
+  const ssize_t n3 = ::read(client, buf, sizeof(buf));
+  CHECK(n3 > 0);
+  const std::string got3(buf, static_cast<std::size_t>(n3));
+  CHECK(got3.find(R"(bad \"quote\"\\slash\nline)") != std::string::npos);
+  CHECK(got3.find("cmd\\u0001x") != std::string::npos);
+
+  CHECK(server.listen_fd() >= 0);
+
+  // EOF: closing the client and letting the server observe it drops the
+  // connection cleanly (no crash, client_fds() shrinks).
+  ::close(client);
+  server.handle_client_readable(server_side_fd);
+  CHECK(server.client_fds().empty());
+  // `server` going out of scope closes the listen fd and unlinks `path`.
+}
+
 void test_shell_view_external_keys() {
   // No view-options accessor is exposed (shell.hpp is owned elsewhere), so the
   // test pins the command grammar: on/off flip the overlay, everything else is
@@ -1913,6 +2056,10 @@ int main() {
   test_line_editor();
   test_alsa_null_state_is_safe();
   test_shell_pending_order_same_tick();
+  test_line_buffer_framing();
+  test_line_buffer_overflow();
+  test_uds_server_start_errors();
+  test_uds_server_end_to_end();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_host: all OK\n");
   }
