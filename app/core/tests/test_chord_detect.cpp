@@ -98,6 +98,22 @@ void test_detector_chord_memory_and_clear() {
   CHECK(d.held_count() == 0);
 }
 
+void test_detector_out_of_range_notes_ignored() {
+  ChordDetector d;
+  ChordState s;
+  d.note_on(200);  // > 127: ignored, no count change
+  CHECK(d.held_count() == 0);
+  d.note_off(200);  // > 127: ignored
+  CHECK(d.held_count() == 0);
+  d.note_off(50);   // not held: ignored (the !is_held branch)
+  CHECK(d.held_count() == 0);
+  // A valid triad still recognizes after the out-of-range noise.
+  d.note_on(60);
+  d.note_on(64);
+  d.note_on(67);
+  CHECK(d.recognize(s) && s.root_pc == 0 && s.quality == ChordQuality::kMaj);
+}
+
 // --- engine integration: held keys re-harmonize the running band -----------
 
 using Events = StaticVector<OutEvent, 512>;
@@ -190,6 +206,7 @@ int main() {
   test_detector_seventh_qualities();
   test_detector_octave_doubling_dedup();
   test_detector_chord_memory_and_clear();
+  test_detector_out_of_range_notes_ignored();
   test_live_keys_reharmonize_the_band();
   test_chord_memory_holds_after_release();
   test_detection_off_leaves_band_chordless();

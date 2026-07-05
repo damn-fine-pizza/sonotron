@@ -43,6 +43,41 @@ void test_sequence_quantize_after() {
   CHECK(s.step(2).duration == 2 * kTicksPerBar);  // 1.5 bars rounds up to 2
 }
 
+void test_sequence_quantize_edge_cases() {
+  // grid == 0 is a no-op (guard branch), starts untouched.
+  ChordSequence s;
+  s.key = Key{0, Mode::kMajor};
+  CHECK(s.record(ChordStep{50, 0, 0, -1, 100}));
+  s.quantize(0);
+  CHECK(s.step(0).start == 50);  // unchanged
+  // Empty sequence quantize is also a no-op (no crash).
+  ChordSequence empty;
+  empty.quantize();
+  CHECK(empty.count() == 0);
+  // Two near-simultaneous starts snap to the SAME bar: the second is clamped to
+  // keep order (snapped < previous_end), and the zero gap falls back to grid.
+  ChordSequence t;
+  t.key = Key{0, Mode::kMajor};
+  CHECK(t.record(ChordStep{10, 0, 0, -1, 100}));   // -> bar 0
+  CHECK(t.record(ChordStep{60, 0, 4, -1, 100}));    // also -> bar 0, clamped after
+  t.quantize();
+  CHECK(t.step(0).start == 0);
+  CHECK(t.step(1).start == kTicksPerBar);           // pushed to keep order
+  CHECK(t.step(0).duration == kTicksPerBar);        // gap fell back to a full bar
+}
+
+void test_transpose_to_valid_mode() {
+  // transpose_to with a VALID mode index changes both root and mode (the
+  // mode>=0 && mode<kModeCount branch).
+  ChordSequence s;
+  s.key = Key{0, Mode::kMajor};
+  s.transpose_to(9, static_cast<std::int8_t>(Mode::kMinor));
+  CHECK(s.key.root_pc == 9 && s.key.mode == Mode::kMinor);
+  // An out-of-range mode leaves the mode untouched (only the root moves).
+  s.transpose_to(2, 99);
+  CHECK(s.key.root_pc == 2 && s.key.mode == Mode::kMinor);
+}
+
 void test_transpose_re_derives() {
   ChordSequence s;
   s.key = Key{0, Mode::kMajor};
@@ -284,6 +319,8 @@ void test_seq_warns() {
 int main() {
   test_sequence_free_durations_and_edit();
   test_sequence_quantize_after();
+  test_sequence_quantize_edge_cases();
+  test_transpose_to_valid_mode();
   test_transpose_re_derives();
   test_progression_playback_and_loop();
   test_no_loop_stops_and_releases();
