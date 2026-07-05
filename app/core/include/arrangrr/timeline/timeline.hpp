@@ -160,17 +160,13 @@ class Timeline {
       if (s.vel == 0) {
         continue;
       }
-      // Tie suppression (real tie, not a blind gate extension). WHY this is
-      // needed: a tie alone only lengthens the note-off (gate + one step). But
-      // if the NEXT step repeats the SAME note, its NoteOn hits the engine's
-      // anti-stuck-note protection: schedule_pattern sees a still-pending off
-      // for that (port, channel, note) in the shared scheduler, tombstones the
-      // long bridged off (cancel_note_off) and re-attacks the note — so the tie
-      // silently degrades into a plain retrigger. We defeat that collision at
-      // the source: if the PREVIOUS step tied into this one on the SAME note,
-      // this step is being held, so we SKIP its emission entirely and let the
-      // bridged off release the note later. A different note or an empty next
-      // step never collides, so the plain bridge is left as-is.
+      // Tie suppression (sustain-chain model, D42-adjacent). A maximal run of
+      // tied steps on the SAME note is ONE sustained note: the run's START step
+      // articulates once and owns a single note-off spanning the whole run;
+      // every step absorbed into that run emits nothing. This step is absorbed
+      // (and skipped) when an earlier same-note tied step reaches it — see
+      // suppressed_by_tie. A run start, a different note, or a rest are never
+      // absorbed and fall through to the normal firing path below.
       if (suppressed_by_tie(t, static_cast<std::uint32_t>(ti), global_step)) {
         continue;
       }
@@ -185,7 +181,7 @@ class Timeline {
           hash(static_cast<std::uint32_t>(ti), global_step) % 100u >= s.probability) {
         continue;
       }
-      emit_step(t, s, schedule);
+      emit_step(t, static_cast<std::uint32_t>(global_step % t.length), schedule);
     }
   }
 
@@ -206,41 +202,74 @@ class Timeline {
     return base + static_cast<TickOffset>(micro);
   }
 
-  // Real-tie support: returns true when the step at `global_step` is being held
-  // by a tie from the immediately preceding step on the same note, so it must
-  // be suppressed instead of retriggered. Uses global positions so it wraps and
-  // takes track length into account; the previous step must actually have fired
-  // (its probability verdict is recomputed from the same seeded hash). The
-  // pattern-loop seam (global_step == 0) starts clean: a tie does not carry
-  // across the loop boundary in this milestone.
+  // Sustain-chain suppression: returns true when the step at `global_step` is
+  // ABSORBED into a same-note tied run that started at an earlier step, so it
+  // must emit nothing (the run start already owns the held note and its off).
+  //
+  // It walks backwards over consecutive same-note tied predecessors WITHIN the
+  // current pattern iteration to find the run start. If no tied predecessor
+  // reaches this step (walk stays put) the step is a run start or a plain step
+  // and is not suppressed. Otherwise the step is held iff the run START actually
+  // fired its probability verdict (D16): absorbed steps never re-verdict on
+  // their own, keeping the whole run governed by a single decision.
+  //
+  // Loop seam (deferred, deliberate): the walk stops at step index 0 and never
+  // wraps past t.length, so a tie on the last pattern step does NOT carry across
+  // the loop restart — the pattern re-articulates on step 0.
   static constexpr bool suppressed_by_tie(const Track& t, std::uint32_t ti,
                                           std::uint32_t global_step) noexcept {
-    if (global_step == 0) {
-      return false;
+    const std::uint32_t cur_idx = global_step % t.length;
+    if (cur_idx == 0) {
+      return false;  // loop seam: step 0 always re-articulates
     }
-    const std::uint32_t prev_global = global_step - 1;
-    const Step& prev = t.steps[prev_global % t.length];
-    const Step& cur = t.steps[global_step % t.length];
-    if (!prev.tie || prev.vel == 0 || prev.note != cur.note) {
-      return false;
+    const Step& cur = t.steps[cur_idx];
+    std::uint32_t rs = cur_idx;
+    while (rs > 0) {
+      const Step& prev = t.steps[rs - 1];
+      if (!prev.tie || prev.vel == 0 || prev.note != cur.note) {
+        break;
+      }
+      --rs;
     }
-    // The tie only holds if the previous step actually fired its probability.
-    return !(prev.probability < 100 && hash(ti, prev_global) % 100u >= prev.probability);
+    if (rs == cur_idx) {
+      return false;  // no tied predecessor: run start or plain step
+    }
+    // Absorbed: held only if the run start passed its own probability verdict.
+    const std::uint32_t run_start_global = global_step - (cur_idx - rs);
+    const Step& start = t.steps[rs];
+    return !(start.probability < 100 && hash(ti, run_start_global) % 100u >= start.probability);
   }
 
-  // Emits one firing step: a tie bridges the gate into the next step, otherwise
-  // `ratchet` evenly-spaced micro-shifted note-on/off pairs (ratchet 1 = the
-  // original single hit).
-  static void emit_step(const Track& t, const Step& s, ScheduleFn& schedule) {
+  // Emits one firing step at pattern index `cur_idx`. A tied run start sustains
+  // one held note across the whole same-note run; otherwise `ratchet` evenly-
+  // spaced micro-shifted note-on/off pairs (ratchet 1 = the original single
+  // hit). The caller has already resolved suppression, so this is always the
+  // articulating step.
+  static void emit_step(const Track& t, std::uint32_t cur_idx, ScheduleFn& schedule) {
+    const Step& s = t.steps[cur_idx];
     const MidiMessage on = MidiMessage::note_on(t.channel, s.note, s.vel);
     const MidiMessage off = MidiMessage::note_off(t.channel, s.note);
 
     if (s.tie) {
-      // Hold across the boundary: bridge the note-off one full step later so the
-      // note sustains into the next step instead of retriggering.
+      // Forward-scan the maximal same-note tied run starting here. Absorb the
+      // next step while the current step ties AND the next step repeats the same
+      // audible note. The scan is bounded by t.length and STOPS at the loop seam
+      // (never wraps past t.length): a tie on the last step does not carry over.
+      std::uint32_t last = cur_idx;
+      while (last + 1 < t.length && t.steps[last].tie && t.steps[last + 1].vel != 0 &&
+             t.steps[last + 1].note == s.note) {
+        ++last;
+      }
+      // One note-on at the run start (micro-shifted, as before); one note-off at
+      // (start tick of the LAST step) + (that last step's gate), carried by the
+      // same run-start micro so on and off move together and off > on always
+      // (D29). A lone tie (no same-note successor: last == cur_idx) degrades to
+      // exactly the normal single-hit shape — a tie only means something with a
+      // same-note step to hold into.
       const TickOffset on_delay = shift_delay(0, s.micro);
-      const auto off_delay = static_cast<TickOffset>(on_delay + static_cast<TickOffset>(s.gate) +
-                                                     static_cast<TickOffset>(kTicksPerStep));
+      const std::uint32_t span =
+          (last - cur_idx) * kTicksPerStep + static_cast<std::uint32_t>(t.steps[last].gate);
+      const auto off_delay = static_cast<TickOffset>(on_delay + static_cast<TickOffset>(span));
       schedule(t.port, on_delay, on);
       schedule(t.port, off_delay, off);
       return;
