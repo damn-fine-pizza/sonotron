@@ -285,6 +285,12 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
     shell.exec_line("panel open events", ignored);
     shell.exec_line("panel focus piano", ignored);  // start in play mode
 
+    // Default two-surface topology (before any ~/.arrangrr.init override): piano
+    // panel = melody (sounds, no steer), chords panel = harmony (silent) + the
+    // chord-detect source with detection ON. Fresh launch: play piano = sound;
+    // focus the chords panel + play = silent re-harmonize.
+    shell.configure_default_surfaces();
+
     const char* home = std::getenv("HOME");
     if (home != nullptr && *home != '\0') {
       shell.apply_rc(load_rc(std::string(home) + "/.arrangrr.rc"));
@@ -721,11 +727,15 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
     // the instant any of those stops holding. Gated behind `tui` (isatty), so
     // scripts/pipes never see a byte of it.
     if (tui) {
-      const bool piano_focused = shell.panels().focus_kind() == PanelFocus::kPanel &&
-                                 shell.panels().focused_panel() == PanelId::kPiano;
+      // Both playable surfaces want true key-release for momentary: the piano
+      // panel (melody) and the chords panel (harmony). Kitty is pushed only while
+      // one of them is focused in momentary mode.
+      const PanelId focused = shell.panels().focused_panel();
+      const bool play_surface = shell.panels().focus_kind() == PanelFocus::kPanel &&
+                                (focused == PanelId::kPiano || focused == PanelId::kChords);
       // The chooser needs plain-CSI arrows, so kitty is popped while it is up
       // (else arrows would arrive as CSI-u escapes the chooser never sees).
-      const bool want_kitty = kitty_supported && piano_focused && !shell.styles_focused() &&
+      const bool want_kitty = kitty_supported && play_surface && !shell.styles_focused() &&
                               shell.piano_key_mode() == PianoKeyMode::kMomentary;
       if (want_kitty != kitty_on) {
         kitty_on = want_kitty;

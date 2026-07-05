@@ -124,7 +124,7 @@ class Shell {
 
   // The live loop injects the current wall-clock (monotonic microseconds) before
   // it processes a batch of REPL input, so the toggle-mode auto-repeat debounce
-  // (toggle_piano_key) can measure key cadence WITHOUT the Shell ever touching a
+  // (toggle_surface_key) can measure key cadence WITHOUT the Shell ever touching a
   // real clock — that keeps the debounce unit-testable with an injected time.
   // Left at 0 (the default) the debounce is inert, so tests that never inject a
   // time keep their exact toggle-on/toggle-off behaviour.
@@ -155,6 +155,28 @@ class Shell {
   void groove_select(int delta);
   void groove_adjust(int delta);
   bool groove_key(std::uint8_t byte);
+
+  // The `chords` panel is the HARMONY surface: focus gate + key handling. When
+  // focused the SAME piano key bindings play here, but their notes route to the
+  // harmony input port (zone kHarmony) — silent, observed by the ChordDetector,
+  // so playing re-harmonizes the band. Reuses the piano octave/transpose/channel
+  // state so a musical key means the same note on both surfaces (the piano's
+  // view-only shortcuts N/V/C/Z are NOT shared — they stay in the piano branch).
+  bool chords_focused() const;
+  bool chords_key(std::uint8_t byte);
+
+  // Shared surface key handling (piano + chords route through the same code):
+  // the SPACE key-mode toggle (labelled per surface) and the musical/octave/
+  // transpose keys that both surfaces bind identically, differing only in which
+  // port + held-set they drive.
+  bool surface_key_mode_toggle(const char* surface, const char* momentary_action);
+  bool surface_musical_key(std::uint8_t port, ActiveNoteTracker& held, std::uint8_t byte);
+
+  // Default two-surface topology (live launch): pins the piano port to kMelody
+  // (sounds, no steer), the harmony port to kHarmony (silent) and points the
+  // chord detector at the harmony port with detection ON. Called once at startup
+  // so a fresh launch already re-harmonizes from the chords panel.
+  void configure_default_surfaces();
 
   // True when focus is on the command line (repl) rather than a panel — the host
   // highlights the input box in that state so "you can type here" is visible.
@@ -315,16 +337,25 @@ class Shell {
   void print_line(const std::string& line);
   int panel_columns() const;
   int panel_rows_available() const;
-  void toggle_piano_key(char key, int semitone_from_base);
-  void piano_momentary_on(char key, int semitone_from_base);
-  void piano_momentary_off(char key, int semitone_from_base);
-  void piano_all_notes_off();
+  // Note plumbing shared by the two playable surfaces (piano = melody, chords =
+  // harmony). `port`/`held` select the surface; piano_midi_note (the shared
+  // m_piano octave/transpose/channel state) makes a key mean the same note on
+  // both. The toggle path is the plain-byte fallback on every terminal; the
+  // momentary path fires from kitty key press/release.
+  void toggle_surface_key(std::uint8_t port, ActiveNoteTracker& held, char key,
+                          int semitone_from_base);
+  void surface_momentary_on(std::uint8_t port, ActiveNoteTracker& held, char key,
+                            int semitone_from_base);
+  void surface_momentary_off(std::uint8_t port, ActiveNoteTracker& held, char key,
+                             int semitone_from_base);
+  void surface_all_notes_off(std::uint8_t port, ActiveNoteTracker& held);
 
-  // Shared piano note plumbing (used by both the toggle and momentary paths).
+  // Shared piano note plumbing (used by both surfaces' toggle and momentary paths).
   const PianoKeyBinding* piano_binding_for(std::uint8_t byte) const;
   bool piano_midi_note(int semitone_from_base, std::uint8_t& out) const;
-  bool piano_note_held(std::uint8_t midi_note) const;
-  void piano_send_note(char key, std::uint8_t midi_note, bool note_on);
+  bool surface_note_held(const ActiveNoteTracker& held, std::uint8_t midi_note) const;
+  void surface_send_note(std::uint8_t port, ActiveNoteTracker& held, char key,
+                         std::uint8_t midi_note, bool note_on);
 
   Engine m_engine;
   EventSink m_sink;
@@ -352,7 +383,8 @@ class Shell {
   MidiMonitor m_monitor;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;
-  ActiveNoteTracker m_piano_held;  // notes the piano is currently sounding
+  ActiveNoteTracker m_piano_held;    // notes the melody (piano) surface holds
+  ActiveNoteTracker m_harmony_held;  // notes the harmony (chords) surface holds
   PianoKeyMode m_piano_key_mode = PianoKeyMode::kMomentary;  // default: momentary
   bool m_momentary_available = true;  // cleared when the terminal has no key-release
   char m_pending_source_key = 0;      // annotates monitor events while feeding

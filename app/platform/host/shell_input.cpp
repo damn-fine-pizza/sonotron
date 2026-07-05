@@ -28,9 +28,9 @@ bool Shell::piano_midi_note(int semitone_from_base, std::uint8_t& out) const {
   return true;
 }
 
-bool Shell::piano_note_held(std::uint8_t midi_note) const {
-  for (std::size_t i = 0; i < m_piano_held.size(); ++i) {
-    const ActiveNote& n = m_piano_held.notes()[i];
+bool Shell::surface_note_held(const ActiveNoteTracker& held, std::uint8_t midi_note) const {
+  for (std::size_t i = 0; i < held.size(); ++i) {
+    const ActiveNote& n = held.notes()[i];
     if (n.note == midi_note && n.channel == m_piano.channel) {
       return true;
     }
@@ -38,10 +38,13 @@ bool Shell::piano_note_held(std::uint8_t midi_note) const {
   return false;
 }
 
-void Shell::piano_send_note(char key, std::uint8_t midi_note, bool note_on) {
-  // Every piano note goes through the same feed_midi -> push_midi_in path real
+void Shell::surface_send_note(std::uint8_t port, ActiveNoteTracker& /*held*/, char key,
+                              std::uint8_t midi_note, bool note_on) {
+  // Every surface note goes through the same feed_midi -> push_midi_in path real
   // hardware uses (docs/TUI_SPEC.md §1.3): the piano is an input device, never
-  // a shortcut into the engine.
+  // a shortcut into the engine. `port` selects the surface — kPianoInputPort
+  // (kMelody, sounds) or kHarmonyInputPort (kHarmony, suppressed but observed by
+  // the ChordDetector, so the harmony surface steers silently).
   std::uint8_t bytes[3];
   bytes[0] =
       static_cast<std::uint8_t>((note_on ? midi::kNoteOn : midi::kNoteOff) | m_piano.channel);
@@ -49,13 +52,14 @@ void Shell::piano_send_note(char key, std::uint8_t midi_note, bool note_on) {
   bytes[2] = note_on ? m_piano.velocity : kPianoReleaseVelocity;
 
   m_pending_source_key = key;
-  feed_midi(kPianoInputPort, Span<const std::uint8_t>(bytes, sizeof(bytes)));
+  feed_midi(port, Span<const std::uint8_t>(bytes, sizeof(bytes)));
   m_pending_source_key = 0;
 
   (void)push_panels();
 }
 
-void Shell::toggle_piano_key(char key, int semitone_from_base) {
+void Shell::toggle_surface_key(std::uint8_t port, ActiveNoteTracker& held, char key,
+                               int semitone_from_base) {
   // Toggle note-off policy (H2): a plain TTY delivers no key-release events,
   // so pressing the same key again releases the note. This is also the
   // fallback the plain-byte path always uses, even in momentary mode.
@@ -81,25 +85,26 @@ void Shell::toggle_piano_key(char key, int semitone_from_base) {
     return;
   }
 
-  if (piano_note_held(midi_note)) {
-    m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
-    piano_send_note(key, midi_note, false);
+  if (surface_note_held(held, midi_note)) {
+    held.note_off(port, m_piano.channel, midi_note);
+    surface_send_note(port, held, key, midi_note, false);
     return;
   }
 
-  if (!m_piano_held.note_on({.port = kPianoInputPort,
-                             .channel = m_piano.channel,
-                             .note = midi_note,
-                             .velocity = m_piano.velocity,
-                             .source_key = key,
-                             .start_tick = 0})) {
+  if (!held.note_on({.port = port,
+                     .channel = m_piano.channel,
+                     .note = midi_note,
+                     .velocity = m_piano.velocity,
+                     .source_key = key,
+                     .start_tick = 0})) {
     print_line("piano: too many held notes");
     return;
   }
-  piano_send_note(key, midi_note, true);
+  surface_send_note(port, held, key, midi_note, true);
 }
 
-void Shell::piano_momentary_on(char key, int semitone_from_base) {
+void Shell::surface_momentary_on(std::uint8_t port, ActiveNoteTracker& held, char key,
+                                 int semitone_from_base) {
   // Momentary note-on (kitty key-down): sound the note unless it is already
   // sounding. Autorepeat re-presses land here too, so the held check keeps a
   // physically-held key from double-firing note-on.
@@ -110,23 +115,24 @@ void Shell::piano_momentary_on(char key, int semitone_from_base) {
     return;
   }
 
-  if (piano_note_held(midi_note)) {
+  if (surface_note_held(held, midi_note)) {
     return;
   }
 
-  if (!m_piano_held.note_on({.port = kPianoInputPort,
-                             .channel = m_piano.channel,
-                             .note = midi_note,
-                             .velocity = m_piano.velocity,
-                             .source_key = key,
-                             .start_tick = 0})) {
+  if (!held.note_on({.port = port,
+                     .channel = m_piano.channel,
+                     .note = midi_note,
+                     .velocity = m_piano.velocity,
+                     .source_key = key,
+                     .start_tick = 0})) {
     print_line("piano: too many held notes");
     return;
   }
-  piano_send_note(key, midi_note, true);
+  surface_send_note(port, held, key, midi_note, true);
 }
 
-void Shell::piano_momentary_off(char key, int semitone_from_base) {
+void Shell::surface_momentary_off(std::uint8_t port, ActiveNoteTracker& held, char key,
+                                  int semitone_from_base) {
   // Momentary note-off (kitty key-up): release the note only if we were
   // sounding it.
   std::uint8_t midi_note = 0;
@@ -134,22 +140,22 @@ void Shell::piano_momentary_off(char key, int semitone_from_base) {
     return;
   }
 
-  if (!piano_note_held(midi_note)) {
+  if (!surface_note_held(held, midi_note)) {
     return;
   }
-  m_piano_held.note_off(kPianoInputPort, m_piano.channel, midi_note);
-  piano_send_note(key, midi_note, false);
+  held.note_off(port, m_piano.channel, midi_note);
+  surface_send_note(port, held, key, midi_note, false);
 }
 
-void Shell::piano_all_notes_off() {
-  // Release everything the piano is holding through the normal input path.
-  while (m_piano_held.size() > 0) {
-    const ActiveNote n = m_piano_held.notes()[0];
+void Shell::surface_all_notes_off(std::uint8_t port, ActiveNoteTracker& held) {
+  // Release everything the surface is holding through the normal input path.
+  while (held.size() > 0) {
+    const ActiveNote n = held.notes()[0];
 
     std::uint8_t bytes[3] = {static_cast<std::uint8_t>(midi::kNoteOff | n.channel), n.note,
                              kPianoReleaseVelocity};
-    m_piano_held.note_off(n.port, n.channel, n.note);
-    feed_midi(kPianoInputPort, Span<const std::uint8_t>(bytes, sizeof(bytes)));
+    held.note_off(n.port, n.channel, n.note);
+    feed_midi(port, Span<const std::uint8_t>(bytes, sizeof(bytes)));
   }
 
   (void)push_panels();
@@ -257,7 +263,10 @@ bool Shell::cmd_piano(const std::vector<std::string>& t, std::string& error) {
   }
 
   if (sub == "panic") {
-    piano_all_notes_off();
+    // Flush BOTH playable surfaces so a note stuck in toggle mode on either the
+    // melody (piano) or the harmony (chords) held set is released.
+    surface_all_notes_off(kPianoInputPort, m_piano_held);
+    surface_all_notes_off(kHarmonyInputPort, m_harmony_held);
     return true;
   }
 
@@ -495,6 +504,13 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return arp_panel_key(byte);
   }
 
+  // The chords panel is the harmony surface: while focused it owns the piano key
+  // bindings (routed silently to the detect port) plus the shared octave/mode
+  // controls, so nothing leaks to the piano or the line editor.
+  if (chords_focused()) {
+    return chords_key(byte);
+  }
+
   // Every other shortcut/musical key needs a focused panel; with repl focus the
   // byte falls through to the line editor and typing stays exactly as before.
   if (m_panels.focus_kind() != PanelFocus::kPanel) {
@@ -505,21 +521,10 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return false;  // help/filter focus: keys fall through to the editor
   }
 
-  // SPACE flips the key mode (momentary <-> toggle). It is a mode switch only
-  // in piano focus and is never a musical note. Momentary needs true key-release
-  // events, so on a terminal that cannot deliver them the switch stays honest:
-  // toggle -> momentary is refused with a one-line explanation.
+  // SPACE flips the key mode (momentary <-> toggle) — shared with the harmony
+  // surface, never a musical note.
   if (byte == ' ') {
-    if (m_piano_key_mode == PianoKeyMode::kMomentary) {
-      m_piano_key_mode = PianoKeyMode::kToggle;
-      print_line("piano: toggle key mode (press = on, same key again = off)");
-    } else if (!m_momentary_available) {
-      print_line("this terminal can't do momentary (no key-release) — toggle only");
-    } else {
-      m_piano_key_mode = PianoKeyMode::kMomentary;
-      print_line("piano: momentary key mode (hold to sound; needs a kitty-protocol terminal)");
-    }
-    return true;
+    return surface_key_mode_toggle("piano", "sound");
   }
 
   // Variation/style stepping (-/= sections, _/+ styles). Works in piano focus;
@@ -528,11 +533,11 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return true;
   }
 
+  // Piano-ONLY view shortcuts take priority over musical keys (none collide, and
+  // they are deliberately not shared with the chords surface). TAB is the way out
+  // of play mode; 'P' is deliberately NOT a shortcut — it sits right next to 'O'
+  // (C#5) and a stray press must never close the panel.
   const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
-
-  // Piano-focus shortcuts take priority over musical keys (none collide).
-  // TAB is the way out of play mode; 'P' is deliberately NOT a shortcut — it
-  // sits right next to 'O' (C#5) and a stray press must never close the panel.
   switch (upper) {
     case 'N': {
       std::string ignored;
@@ -555,6 +560,47 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
       m_panels.toggle_layout();
       (void)push_panels();
       return true;
+    default:
+      break;
+  }
+
+  // Octave/transpose + musical keys, shared with the harmony surface.
+  if (surface_musical_key(kPianoInputPort, m_piano_held, byte)) {
+    return true;
+  }
+
+  // Piano focus swallows everything else so stray keys never leak into a
+  // half-typed REPL command.
+  return true;
+}
+
+// SPACE key-mode toggle, shared by the piano and harmony surfaces (they share
+// the one m_piano_key_mode). `surface` labels the confirmation line, and
+// `momentary_action` is what holding a key does on that surface (sound / steer).
+// Momentary needs true key-release, so a terminal without it is told plainly and
+// the switch is refused rather than faked.
+bool Shell::surface_key_mode_toggle(const char* surface, const char* momentary_action) {
+  if (m_piano_key_mode == PianoKeyMode::kMomentary) {
+    m_piano_key_mode = PianoKeyMode::kToggle;
+    print_line(std::string(surface) + ": toggle key mode (press = on, same key again = off)");
+  } else if (!m_momentary_available) {
+    print_line("this terminal can't do momentary (no key-release) — toggle only");
+  } else {
+    m_piano_key_mode = PianoKeyMode::kMomentary;
+    print_line(std::string(surface) + ": momentary key mode (hold to " + momentary_action +
+               "; needs a kitty-protocol terminal)");
+  }
+  return true;
+}
+
+// Octave (./ ), transpose ([]) and the musical note keys — both surfaces bind
+// them identically, differing only in the (port, held-set) they drive. Returns
+// false when `byte` is none of them so the caller can keep looking / swallow.
+// The plain-byte musical path is ALWAYS toggle (a plain TTY cannot see key
+// release); true momentary press/release arrives via piano_key_event instead.
+bool Shell::surface_musical_key(std::uint8_t port, ActiveNoteTracker& held, std::uint8_t byte) {
+  const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
+  switch (upper) {
     case '.': {
       std::string ignored;
       (void)cmd_piano({"piano", "octave", "down"}, ignored);
@@ -576,18 +622,47 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     default:
       break;
   }
-
-  // Musical keys: the plain-byte path is ALWAYS toggle (a plain TTY cannot see
-  // key-release), so the piano is playable on every terminal even in momentary
-  // mode. True momentary press/release arrives via piano_key_event instead.
   if (const PianoKeyBinding* binding = piano_binding_for(byte); binding != nullptr) {
-    toggle_piano_key(binding->key, binding->semitone_from_base);
+    toggle_surface_key(port, held, binding->key, binding->semitone_from_base);
     return true;
   }
+  return false;
+}
 
-  // Piano focus swallows everything else so stray keys never leak into a
+bool Shell::chords_focused() const {
+  return m_panels.focus_kind() == PanelFocus::kPanel &&
+         m_panels.focused_panel() == PanelId::kChords;
+}
+
+bool Shell::chords_key(std::uint8_t byte) {
+  // The chords panel is the HARMONY surface: the SAME piano key bindings play
+  // here, but their notes route to kHarmonyInputPort (zone kHarmony) — silent,
+  // observed by the ChordDetector, so playing re-harmonizes the band without a
+  // sound. It shares the piano's SPACE key-mode and the octave/transpose/musical
+  // keys (surface_* helpers), differing only in the (port, held-set) it drives —
+  // single-finger here = one key -> the scale-aware triad (Phase 1). The piano's
+  // view-only shortcuts N/V/C/Z are NOT bound here, so those letters play their
+  // note on the chords surface where on the piano they are shortcuts.
+  if (byte == ' ') {
+    return surface_key_mode_toggle("harmony", "steer");
+  }
+  if (surface_musical_key(kHarmonyInputPort, m_harmony_held, byte)) {
+    return true;
+  }
+  // The chords panel swallows everything else so stray keys never leak into a
   // half-typed REPL command.
   return true;
+}
+
+void Shell::configure_default_surfaces() {
+  // Default two-surface topology (D34(b) split as DATA): the piano port SOUNDS
+  // and steers nobody (kMelody), the harmony port is SILENT and IS the chord
+  // source (kHarmony + detect on). So a fresh launch immediately does: play
+  // piano = sound; focus the chords panel + play = silent re-harmonize.
+  m_engine.set_input_zone(kPianoInputPort, InputZone::kMelody);
+  m_engine.set_input_zone(kHarmonyInputPort, InputZone::kHarmony);
+  m_engine.set_chord_detect(true, kHarmonyInputPort);
+  (void)push_panels();
 }
 
 const PianoKeyBinding* Shell::piano_binding_for(std::uint8_t byte) const {
@@ -616,9 +691,14 @@ void Shell::set_momentary_available(bool available) {
 }
 
 bool Shell::piano_key_event(char key, bool pressed) {
-  // Only piano focus turns keys into notes (matches handle_ui_key). Non-piano
-  // focus lets the caller fall back to the normal byte path.
-  if (m_panels.focus_kind() != PanelFocus::kPanel || m_panels.focused_panel() != PanelId::kPiano) {
+  // Only a playable surface turns keys into notes (matches handle_ui_key): the
+  // piano panel (melody) or the chords panel (harmony). Any other focus lets the
+  // caller fall back to the normal byte path.
+  const bool piano = m_panels.focus_kind() == PanelFocus::kPanel &&
+                     m_panels.focused_panel() == PanelId::kPiano;
+  const bool chords = m_panels.focus_kind() == PanelFocus::kPanel &&
+                      m_panels.focused_panel() == PanelId::kChords;
+  if (!piano && !chords) {
     return false;
   }
 
@@ -627,18 +707,24 @@ bool Shell::piano_key_event(char key, bool pressed) {
     return false;  // TAB / SPACE / shortcuts: caller drives the byte path
   }
 
+  // Route to the focused surface: the piano port (kMelody, sounds) or the harmony
+  // port (kHarmony, silent + steers). The held sets are separate so a note-off on
+  // one surface never clears the other.
+  const std::uint8_t port = chords ? kHarmonyInputPort : kPianoInputPort;
+  ActiveNoteTracker& held = chords ? m_harmony_held : m_piano_held;
+
   if (m_piano_key_mode == PianoKeyMode::kToggle) {
     // In toggle mode a key-down toggles; the key-up carries no meaning.
     if (pressed) {
-      toggle_piano_key(binding->key, binding->semitone_from_base);
+      toggle_surface_key(port, held, binding->key, binding->semitone_from_base);
     }
     return true;
   }
 
   if (pressed) {
-    piano_momentary_on(binding->key, binding->semitone_from_base);
+    surface_momentary_on(port, held, binding->key, binding->semitone_from_base);
   } else {
-    piano_momentary_off(binding->key, binding->semitone_from_base);
+    surface_momentary_off(port, held, binding->key, binding->semitone_from_base);
   }
   return true;
 }

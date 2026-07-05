@@ -75,14 +75,20 @@ class ChordEngine {
     return r;
   }
 
-  // Mode A: absolute — the note is a major root, chromatic freely allowed.
+  // Mode A: arrangrr scale-aware single-finger (Dxx, refines D45). One key ->
+  // the diatonic MAJOR-or-MINOR triad of that root in the current key (never
+  // dim/aug); a chromatic root defaults to major so the shortcut never stalls.
+  // An explicit override still wins. This is the Casio-Chord lineage, NOT
+  // Yamaha Single Finger (which is key-independent). Chromatic roots are freely
+  // allowed here (no D20 rejection).
   ChordResult play_single(std::uint8_t note, std::int8_t override_quality, std::uint8_t velocity,
                           ScheduleFn schedule, bool steer = true) {
     ChordResult r;
     r.root_note = note;
     r.degree = static_cast<std::int8_t>(kNoDegree);
-    r.quality =
-        override_quality >= 0 ? static_cast<ChordQuality>(override_quality) : ChordQuality::kMaj;
+    r.quality = override_quality >= 0
+                    ? static_cast<ChordQuality>(override_quality)
+                    : theory::single_finger_quality(m_key, static_cast<std::uint8_t>(note % 12));
     r.shape = theory::shape_of(r.quality);
     sound(note, r.quality, velocity, schedule, steer);
     return r;

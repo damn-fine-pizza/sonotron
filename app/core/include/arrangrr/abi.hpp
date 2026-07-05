@@ -99,6 +99,12 @@ enum class Param : std::uint16_t {
                            //     3 manual). Selects WHICH producer may update the
                            //     arranger-followed chord context. kAuto keeps the
                            //     legacy last-writer-wins behavior.
+  kInputZone = 42,         // set: a = input port, b = InputZone (0 melody, 1
+                           //     harmony). kHarmony suppresses the port's note
+                           //     output (silent chord recognition, the Split
+                           //     zone); kMelody routes/sounds (default). Rides
+                           //     the same parsed input path; the detect port
+                           //     (kChordDetect) still decides who OBSERVES.
 };
 
 struct Command {
