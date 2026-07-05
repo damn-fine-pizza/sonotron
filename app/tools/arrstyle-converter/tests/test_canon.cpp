@@ -113,6 +113,29 @@ void test_missing_kb_errors() {
   CHECK(diag.has_errors());
 }
 
+// A hostile aggregate (name with quote/newline/brace, out-of-range numbers)
+// must NOT inject source into the emitted header nor make it fail to compile:
+// the name is escaped inside the literal, control bytes are dropped, and the
+// numeric fields are clamped to their destination widths.
+void test_emit_escapes_hostile_input() {
+  CanonInput input;
+  GenreAggregate g;
+  g.name = "ev\"il\n},{";  // quote + newline + brace-injection attempt
+  g.tempo_bpm = 70000;     // > uint16
+  g.time_sig_num = 300;    // > uint8
+  g.time_sig_den = 4;
+  g.swing_percent = 999;   // > uint8
+  input.genres.push_back(g);
+
+  const std::string src = emit_canon_header(input, CanonOptions{});
+  CHECK(contains(src, "\\\""));         // the quote is emitted ESCAPED
+  CHECK(!contains(src, "\"ev\"il"));    // the raw literal breakout never appears
+  CHECK(contains(src, "65535"));        // tempo clamped to uint16 max
+  CHECK(contains(src, "255"));          // time_sig_num / swing clamped to uint8 max
+  CHECK(!contains(src, "70000"));       // the out-of-range value is gone
+  CHECK(!contains(src, "300"));
+}
+
 }  // namespace
 
 int main() {
@@ -123,5 +146,6 @@ int main() {
   test_emit_is_deterministic();
   test_max_cells_truncates();
   test_missing_kb_errors();
+  test_emit_escapes_hostile_input();
   return arrstyle::test::failures();
 }

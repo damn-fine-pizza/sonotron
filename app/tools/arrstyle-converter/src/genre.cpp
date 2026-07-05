@@ -54,7 +54,9 @@ int bar_step(std::uint32_t tick, std::uint16_t division) {
   if (division == 0) {
     return 0;
   }
-  const std::uint32_t step = (tick * 4U) / division;  // 4 sixteenths per quarter
+  // 64-bit product so a pathological tick can't overflow before the divide.
+  const std::uint32_t step =
+      static_cast<std::uint32_t>((static_cast<std::uint64_t>(tick) * 4U) / division);
   return static_cast<int>(step % static_cast<std::uint32_t>(kStepsPerBar));
 }
 
@@ -118,13 +120,15 @@ GenreGuess infer_genre(const SmfFile& smf) {
   const DrumFeatures f = extract_features(smf);
   const std::uint32_t bpm = smf.tempo_milli_bpm / 1000U;
 
+  // No drums to read: nothing to classify (guard BEFORE any metre signal, so a
+  // note-less 3/4 file is not confidently called a waltz).
+  if (f.total_note_count == 0) {
+    return {.genre = "unknown", .confidence = 0.0F};
+  }
+
   // Triple metre is a strong, unambiguous signal.
   if (smf.time_sig_num == 3) {
     return {.genre = "waltz", .confidence = 0.80F};
-  }
-
-  if (f.total_note_count == 0) {
-    return {.genre = "unknown", .confidence = 0.0F};
   }
 
   // Groove predicates on the 4/4 16th grid.

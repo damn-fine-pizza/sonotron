@@ -182,6 +182,42 @@ std::string to_identifier(const std::string& name) {
   return id;
 }
 
+// The genre name comes from an untrusted aggregate JSON and is emitted into
+// generated C++. Escape it so a hostile name (quotes, backslashes, newlines,
+// control bytes) can never close a string literal or a // comment and inject
+// source into the header the core later compiles.
+std::string escape_cpp_literal(const std::string& s) {
+  std::string out;
+  for (unsigned char c : s) {
+    if (c == '\\' || c == '"') {
+      out.push_back('\\');
+      out.push_back(static_cast<char>(c));
+    } else if (c >= 0x20 && c < 0x7F) {
+      out.push_back(static_cast<char>(c));
+    }
+    // control and non-ASCII bytes are dropped
+  }
+  return out;
+}
+
+std::string comment_safe(const std::string& s) {
+  std::string out;
+  for (unsigned char c : s) {
+    out.push_back((c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : ' ');
+  }
+  return out;
+}
+
+// Clamp emitted values to their destination field widths so an out-of-range
+// aggregate can never produce a header that fails to compile (narrowing in
+// aggregate-init is ill-formed).
+unsigned clamp_u16(long long v) {
+  return static_cast<unsigned>(v < 0 ? 0 : (v > 0xFFFF ? 0xFFFF : v));
+}
+unsigned clamp_u8(long long v) {
+  return static_cast<unsigned>(v < 0 ? 0 : (v > 0xFF ? 0xFF : v));
+}
+
 std::string hex16(std::uint16_t v) {
   std::array<char, 8> buf{};
   std::snprintf(buf.data(), buf.size(), "0x%04X", v);
@@ -368,7 +404,7 @@ std::string emit_canon_header(const CanonInput& in, const CanonOptions& opts) {
     cell_counts.push_back(g.rhythm_cells.size());
     bass_counts.push_back(g.bass_templates.size());
 
-    os << "// --- " << g.name << " ---\n";
+    os << "// --- " << comment_safe(g.name) << " ---\n";
     os << "inline constexpr RhythmCell k" << id << "RhythmCells[] = {";
     for (std::size_t i = 0; i < g.rhythm_cells.size(); ++i) {
       os << (i == 0 ? "" : ", ") << hex16(cell_to_mask(g.rhythm_cells[i].steps));
@@ -391,9 +427,11 @@ std::string emit_canon_header(const CanonInput& in, const CanonOptions& opts) {
   os << "inline constexpr GenreCanon kGenreCanon[] = {\n";
   for (std::size_t gi = 0; gi < work.genres.size(); ++gi) {
     const GenreAggregate& g = work.genres[gi];
-    os << "    {\"" << g.name << "\", " << g.tempo_bpm << ", " << g.time_sig_num << ", "
-       << g.time_sig_den << ", " << g.swing_percent << ", k" << ids[gi] << "RhythmCells, "
-       << cell_counts[gi] << ", k" << ids[gi] << "BassTemplates, " << bass_counts[gi] << "},\n";
+    os << "    {\"" << escape_cpp_literal(g.name) << "\", " << clamp_u16(g.tempo_bpm) << ", "
+       << clamp_u8(g.time_sig_num) << ", " << clamp_u8(g.time_sig_den) << ", "
+       << clamp_u8(g.swing_percent) << ", k" << ids[gi] << "RhythmCells, "
+       << clamp_u8(static_cast<long long>(cell_counts[gi])) << ", k" << ids[gi] << "BassTemplates, "
+       << clamp_u8(static_cast<long long>(bass_counts[gi])) << "},\n";
   }
   os << "};\n"
      << "inline constexpr std::uint8_t kGenreCanonCount = " << work.genres.size() << ";\n"

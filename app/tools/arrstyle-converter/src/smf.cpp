@@ -177,7 +177,10 @@ bool handle_meta(Cursor& cursor, SmfFile& file, SmfTrack& track, Diagnostics& di
     cursor.read_u8(dd);
     cursor.skip(len - 2);
     file.time_sig_num = nn;
-    file.time_sig_den = static_cast<std::uint8_t>(1u << dd);
+    // `dd` is an attacker-controlled byte (denominator = 2^dd); a large value
+    // would make `1u << dd` undefined and overflow the u8. Real denominators are
+    // tiny (<=128 = 2^7); anything out of range falls back to 4.
+    file.time_sig_den = dd < 8 ? static_cast<std::uint8_t>(1u << dd) : 4;
     file.has_time_sig = true;
   } else {
     cursor.skip(len);
