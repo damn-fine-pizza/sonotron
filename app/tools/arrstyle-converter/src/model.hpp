@@ -107,6 +107,15 @@ struct PhraseLane {
   std::uint8_t source_channel = 0;  // MIDI channel of origin, 0-based (provenance)
   TranspositionPolicy transposition = TranspositionPolicy::kChordTone;
   RetriggerPolicy retrigger = RetriggerPolicy::kSustain;
+  // SFF/CASM provenance. The recorded notes of a chord-tone lane were written
+  // over a fixed SOURCE chord (Yamaha: almost always C Maj7); together with the
+  // transposition policy this is what makes the lane transposable to any live
+  // chord (D24 NTT). `source_root_pc < 0` means "not applicable" (e.g. an SMF
+  // import), and those lanes serialize exactly as before (no extra JSON keys).
+  std::int8_t source_root_pc = -1;                       // 0..11; -1 = not set
+  ChordQuality source_quality = ChordQuality::kUnknown;  // quality of the source chord
+  std::uint8_t note_low = 0;                             // CASM register clamp, low
+  std::uint8_t note_high = 127;                          // CASM register clamp, high
   std::vector<PhraseEvent> events;
 };
 
