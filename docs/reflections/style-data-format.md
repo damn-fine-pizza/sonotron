@@ -3,6 +3,15 @@
 Status: proposal / direction. Read-only branch context: `styles-modern-vocab`.
 Author: Prospero (dual-axis critique). Scope: DIRECTION, not code.
 
+**Owner decision (roadmapped, not now — see DESIGN D44):** keep BOTH
+representations. Add a pure-data format for interchange/authoring/runtime-loading
+AND a generator that emits the C++-style form from the data, so the STM32 target
+can keep using compiled styles. Foreseen SW pieces: a style *inspector*,
+*generators*, *serialize/deserialize*, a *style compiler* (data → `.cpp`), and a
+*non-binary* interchange format (an on-device text parser stays refused). This
+confirms Prospero's layered verdict and its "smallest first step" (teach
+`arrstyle-converter` to emit the constexpr header from its `StyleModel`).
+
 ## Sul tavolo (the reflection, restated)
 
 Today arranger STYLES are C++ source: `inline constexpr StyleEvent[]` tables
