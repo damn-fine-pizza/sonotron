@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "arrangrr/style-kb/pattern.schema.json",
+  "title": "Abstract generative pattern",
+  "description": "A generation-oriented abstraction of a style track's behaviour over one bar/section. Never raw notes: chord/scale degrees, rhythmic grid, contour, density.",
+  "type": "object",
+  "required": ["pattern_id", "pattern_type", "role", "section_type", "abstract_representation"],
+  "properties": {
+    "pattern_id": {"type": "string"},
+    "pattern_type": {"type": "string", "enum": ["bass_movement", "chord_rhythm", "drum_grid", "pad_sustain", "phrase_contour", "generic"]},
+    "role": {"type": "string", "enum": ["DRUMS", "PERCUSSION", "BASS", "CHORD_COMP", "PAD", "ARP", "RIFF", "MELODY", "COUNTERMELODY", "FX", "UNKNOWN"]},
+    "section_type": {"type": "string", "enum": ["intro", "main", "fill", "break", "ending", "unknown"]},
+    "abstract_representation": {
+      "type": "object",
+      "description": "Only fields relevant to the role are present.",
+      "properties": {
+        "rhythm_cell_16": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 15}, "description": "Active onset slots on a 1/16 grid, one bar (4/4)."},
+        "onsets_per_bar": {"type": "number"},
+        "syncopation": {"type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of onsets off the quarter-note beats."},
+        "density": {"type": "number", "minimum": 0, "maximum": 1},
+        "degrees": {"type": "array", "items": {"type": "string"}, "description": "Chord/scale degrees relative to the source root C (1, b3, 5, b7, ...)."},
+        "contour": {"type": "string", "enum": ["flat", "ascending", "descending", "arch", "wave"]},
+        "avg_voices": {"type": "number", "description": "CHORD_COMP: mean simultaneous notes = voicing width."},
+        "drum_map": {"type": "object", "description": "DRUMS: instrument -> onset count (kick/snare/hat/...)."}
+      }
+    },
+    "mutation_axes": {"type": "array", "items": {"type": "string"}, "description": "Parameters a generator may safely vary (octave, syncopation, ghost_density, voicing_width, ...)."},
+    "generation_notes": {"type": "array", "items": {"type": "string"}}
+  }
+}

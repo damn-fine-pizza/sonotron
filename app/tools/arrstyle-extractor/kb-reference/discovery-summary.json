@@ -1,0 +1,113 @@
+{
+ "files_total": 1184,
+ "parse_status": {
+  "partial": 21,
+  "ok": 1109,
+  "failed": 54
+ },
+ "formats": {
+  "smf": 21,
+  "sff": 1109,
+  "unknown": 54
+ },
+ "avg_confidence": 0.932,
+ "patterns_extracted": 63564,
+ "genres_top": [
+  [
+   "unknown",
+   546
+  ],
+  [
+   "pop",
+   84
+  ],
+  [
+   "rock",
+   51
+  ],
+  [
+   "beat",
+   50
+  ],
+  [
+   "ballad",
+   44
+  ],
+  [
+   "swing",
+   35
+  ],
+  [
+   "country",
+   34
+  ],
+  [
+   "bossa",
+   28
+  ],
+  [
+   "jazz",
+   26
+  ],
+  [
+   "waltz",
+   23
+  ],
+  [
+   "disco",
+   16
+  ],
+  [
+   "blues",
+   16
+  ],
+  [
+   "funk",
+   15
+  ],
+  [
+   "bigband",
+   14
+  ],
+  [
+   "samba",
+   14
+  ],
+  [
+   "latin",
+   10
+  ],
+  [
+   "jive",
+   10
+  ],
+  [
+   "dance",
+   8
+  ],
+  [
+   "boogie",
+   8
+  ],
+  [
+   "march",
+   7
+  ]
+ ],
+ "roles": {
+  "BASS": 1059,
+  "CHORD_COMP": 1066,
+  "DRUMS": 966,
+  "PAD": 957,
+  "PERCUSSION": 1035,
+  "RIFF": 931,
+  "MELODY": 895,
+  "UNKNOWN": 872
+ },
+ "sections": {
+  "main": 4013,
+  "fill": 5092,
+  "intro": 2765,
+  "ending": 2750
+ }
+}
