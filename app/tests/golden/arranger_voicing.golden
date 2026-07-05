@@ -41,12 +41,12 @@
 {"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":43,"vel":50,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":47,"vel":48,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":5,"note":50,"vel":50,"@":3840}
-{"ev":"midi-out","port":0,"msg":"noteon","ch":6,"note":71,"vel":52,"@":3840}
-{"ev":"midi-out","port":0,"msg":"noteon","ch":6,"note":74,"vel":52,"@":3840}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":6,"note":59,"vel":52,"@":3840}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":6,"note":62,"vel":52,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":3,"note":71,"vel":64,"@":4680}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":71,"vel":68,"@":4800}
-{"ev":"midi-out","port":0,"msg":"noteoff","ch":6,"note":71,"vel":64,"@":5640}
-{"ev":"midi-out","port":0,"msg":"noteoff","ch":6,"note":74,"vel":64,"@":5640}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":6,"note":59,"vel":64,"@":5640}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":6,"note":62,"vel":64,"@":5640}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":74,"vel":72,"@":5760}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":3,"note":71,"vel":64,"@":6600}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":77,"vel":66,"@":6720}
