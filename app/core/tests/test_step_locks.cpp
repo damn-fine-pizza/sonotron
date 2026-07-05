@@ -483,6 +483,27 @@ void test_tie_last_step_no_loop_carry_engine() {
   CHECK(s.ordered);      // each on preceded by the previous off
 }
 
+// A tied run whose START fails its probability roll must be ENTIRELY silent, not
+// fragmented into separate notes. The run's single verdict lives at the start;
+// absorbed steps keep the default prob=100, so if they re-verdicted on their own
+// they would articulate when the start was silenced. Start prob=0 never fires,
+// so the whole same-note run (steps 0,1,2) must emit nothing at any position.
+// (Regression guard for the earlier suppressed_by_tie re-verdict bug.)
+void test_tie_run_start_fails_probability_whole_run_silent() {
+  Timeline tl;
+  CHECK(tl.add_track(TrackRole::kLead, 1, 3) == 0);
+  CHECK(tl.set_length(0, 3));
+  CHECK(tl.set_step(0, 0, 60, 100, 120, /*prob=*/0, /*ratchet=*/1, /*micro=*/0, /*tie=*/true));
+  CHECK(tl.set_step(0, 1, 60, 100, 120, /*prob=*/100, /*ratchet=*/1, /*micro=*/0, /*tie=*/true));
+  CHECK(tl.set_step(0, 2, 60, 100, 120));  // same note, closes the run
+  const Hits s0 = fire(tl, 0);                    // run start: prob 0 -> silent
+  const Hits s1 = fire(tl, 1 * kTicksPerStep);    // absorbed -> silent
+  const Hits s2 = fire(tl, 2 * kTicksPerStep);    // absorbed -> silent
+  CHECK(count_type(s0, midi::kNoteOn) == 0);
+  CHECK(count_type(s1, midi::kNoteOn) == 0);  // the bug fired a note here
+  CHECK(count_type(s2, midi::kNoteOn) == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -499,6 +520,7 @@ int main() {
   test_tie_into_different_note_releases_engine();
   test_tie_into_rest_releases_engine();
   test_tie_last_step_no_loop_carry_engine();
+  test_tie_run_start_fails_probability_whole_run_silent();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_step_locks: all OK\n");
   }

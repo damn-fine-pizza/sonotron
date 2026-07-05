@@ -167,7 +167,7 @@ class Timeline {
       // (and skipped) when an earlier same-note tied step reaches it — see
       // suppressed_by_tie. A run start, a different note, or a rest are never
       // absorbed and fall through to the normal firing path below.
-      if (suppressed_by_tie(t, static_cast<std::uint32_t>(ti), global_step)) {
+      if (suppressed_by_tie(t, global_step)) {
         continue;
       }
       // Probability gate (D16): a seeded position hash keyed on track index and
@@ -209,15 +209,17 @@ class Timeline {
   // It walks backwards over consecutive same-note tied predecessors WITHIN the
   // current pattern iteration to find the run start. If no tied predecessor
   // reaches this step (walk stays put) the step is a run start or a plain step
-  // and is not suppressed. Otherwise the step is held iff the run START actually
-  // fired its probability verdict (D16): absorbed steps never re-verdict on
-  // their own, keeping the whole run governed by a single decision.
+  // and is not suppressed. Otherwise the step is ABSORBED into the run and is
+  // always suppressed: the run's single probability verdict (D16) lives at the
+  // start step's own gate in on_tick, so if the start fails it emits nothing and
+  // every absorbed step stays silent too — the whole run is held-or-silent as
+  // one. (Re-verdicting the absorbed step here, as an earlier version did, let
+  // it re-fire when the start failed its roll, fragmenting the run.)
   //
   // Loop seam (deferred, deliberate): the walk stops at step index 0 and never
   // wraps past t.length, so a tie on the last pattern step does NOT carry across
   // the loop restart — the pattern re-articulates on step 0.
-  static constexpr bool suppressed_by_tie(const Track& t, std::uint32_t ti,
-                                          std::uint32_t global_step) noexcept {
+  static constexpr bool suppressed_by_tie(const Track& t, std::uint32_t global_step) noexcept {
     const std::uint32_t cur_idx = global_step % t.length;
     if (cur_idx == 0) {
       return false;  // loop seam: step 0 always re-articulates
@@ -234,10 +236,7 @@ class Timeline {
     if (rs == cur_idx) {
       return false;  // no tied predecessor: run start or plain step
     }
-    // Absorbed: held only if the run start passed its own probability verdict.
-    const std::uint32_t run_start_global = global_step - (cur_idx - rs);
-    const Step& start = t.steps[rs];
-    return !(start.probability < 100 && hash(ti, run_start_global) % 100u >= start.probability);
+    return true;  // absorbed into a same-note tied run: held or silent as one
   }
 
   // Emits one firing step at pattern index `cur_idx`. A tied run start sustains
