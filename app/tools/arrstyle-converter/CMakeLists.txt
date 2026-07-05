@@ -9,6 +9,8 @@ add_library(arrstyle_lib STATIC
   src/json.cpp
   src/serialize.cpp
   src/smf.cpp
+  src/genre.cpp
+  src/canon.cpp
   src/midi_import.cpp
   src/chordpro_import.cpp
   src/casm.cpp
