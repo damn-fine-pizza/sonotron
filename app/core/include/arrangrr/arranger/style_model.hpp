@@ -46,12 +46,28 @@ enum class RolePolicy : std::uint8_t {
   kChordTone = 1,  // tone = chord-tone index; resolved via NTT at playback
 };
 
+// Per-event note-source vocabulary (additive on top of RolePolicy): how the
+// event's `tone` is interpreted when the role is NOT kFixed. kChordTone keeps
+// the historical NTT behavior, so it is the default and every existing style
+// table stays byte-for-byte identical. kScaleDegree and kInterval unlock
+// key-diatonic lines and chromatic/interval figures without leaving the core's
+// wrong-note-proof envelope.
+enum class NoteSource : std::uint8_t {
+  kChordTone = 0,    // tone = chord-tone index (CURRENT behavior; default)
+  kScaleDegree = 1,  // tone = scale degree of the current KEY (diatonic)
+  kInterval = 2,     // tone = signed semitone offset from the chord root
+};
+
 struct StyleEvent {
   std::uint16_t step;  // 16th-grid position within the section
-  std::int8_t tone;    // kFixed: MIDI note; kChordTone: chord-tone index
+  std::int8_t tone;    // kFixed: MIDI note; kChordTone: chord-tone index;
+                       // kScaleDegree: key scale degree; kInterval: semitones
   std::int8_t octave;  // octave offset
   std::uint8_t vel;
   std::uint16_t gate;  // ticks
+  // How `tone` is read at resolve time. Kept LAST with a default so existing
+  // designated- AND positional-initializer tables stay valid and unchanged.
+  NoteSource src = NoteSource::kChordTone;
 };
 
 struct StylePattern {

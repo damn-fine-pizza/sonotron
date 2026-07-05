@@ -222,7 +222,7 @@ class Engine {
 
   void fire_arranger(Tick transport_tick, EventSink sink) {
     const Arranger::TickResult r =
-        m_arranger.on_tick(transport_tick, m_chords.state(),
+        m_arranger.on_tick(transport_tick, m_chords.key(), m_chords.state(),
                            [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
                              schedule_pattern(port, delay, msg, sink);
                            });
