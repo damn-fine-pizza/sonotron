@@ -183,7 +183,13 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
       if (cmd.a < 0 || cmd.a >= kChordModeCount) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else {
-        m_chords.set_mode(static_cast<ChordMode>(cmd.a));
+        const auto mode = static_cast<ChordMode>(cmd.a);
+        m_chords.set_mode(mode);
+        // "single" is single-finger everywhere: the typed chord path already
+        // reads only the root (play_single), and the live piano detector drops
+        // its minimum to one held note so a lone key steers the band; the other
+        // modes keep the fingered triad minimum.
+        m_detector.set_min_notes(mode == ChordMode::kSingle ? 1 : kMinChordNotes);
       }
       break;
     case Param::kChordDetect: {

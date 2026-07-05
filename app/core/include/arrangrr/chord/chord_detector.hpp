@@ -24,8 +24,14 @@
 
 namespace arrangrr {
 
-// A triad is the smallest gesture that names a chord; two notes are an
-// interval, not a harmony. Below this the detector reports no chord.
+// A triad is the smallest gesture that unambiguously names a chord; two notes
+// are an interval, not a harmony. This is the FINGERED default: below it the
+// detector reports no chord (hold-last memory keeps the band on the old chord).
+// Single-finger mode (Yamaha-style) lowers the threshold to 1 via
+// set_min_notes(1): then a lone key is a major chord on that root, a second key
+// colours it (minor/7th/etc. via the same shell interpretation), a third and up
+// resolve the full chord — the interpretation is unchanged, only the minimum
+// number of held notes differs.
 inline constexpr std::uint8_t kMinChordNotes = 3;
 
 class ChordDetector {
@@ -56,13 +62,19 @@ class ChordDetector {
 
   constexpr std::uint8_t held_count() const noexcept { return m_count; }
 
+  // Minimum simultaneously-held notes before recognize() names a chord.
+  // kMinChordNotes (3) = fingered; 1 = single-finger. A zero is clamped to 1 so
+  // recognition can never trigger on an empty keyboard.
+  constexpr void set_min_notes(std::uint8_t n) noexcept { m_min_notes = n == 0 ? 1 : n; }
+  constexpr std::uint8_t min_notes() const noexcept { return m_min_notes; }
+
   // Recognizes the chord from the currently-held notes. Returns true and fills
   // `out` (valid = true) when at least kMinChordNotes are down; returns false
   // otherwise so the caller keeps the previous chord (chord memory). The root
   // is the lowest held note's pitch class; up to three distinct pitch classes
   // above it feed theory::complete_shell_full, mirroring shell-mode entry.
   constexpr bool recognize(ChordState& out) const noexcept {
-    if (m_count < kMinChordNotes) {
+    if (m_count < m_min_notes) {
       return false;
     }
     const int root = lowest_held();
@@ -114,6 +126,7 @@ class ChordDetector {
 
   std::uint32_t m_held[4] = {0, 0, 0, 0};  // 128-bit held-note set
   std::uint8_t m_count = 0;
+  std::uint8_t m_min_notes = kMinChordNotes;  // fingered (3) by default; 1 = single-finger
 };
 
 }  // namespace arrangrr

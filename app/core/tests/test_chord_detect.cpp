@@ -114,6 +114,46 @@ void test_detector_out_of_range_notes_ignored() {
   CHECK(d.recognize(s) && s.root_pc == 0 && s.quality == ChordQuality::kMaj);
 }
 
+// --- single-finger: one key names a chord (min_notes lowered to 1) ---------
+
+void test_detector_single_finger_one_key_is_major() {
+  ChordDetector d;
+  ChordState s;
+  d.set_min_notes(1);      // single-finger
+  d.note_on(60);           // one key: C
+  CHECK(d.recognize(s));   // now a chord (in fingered mode this was "no chord")
+  CHECK(s.valid);
+  CHECK(s.root_pc == 0);
+  CHECK(s.quality == ChordQuality::kMaj);  // a lone key is a major chord on its root
+  // A zero threshold is clamped to 1, so recognition can never fire on nothing.
+  d.set_min_notes(0);
+  CHECK(d.min_notes() == 1);
+  d.clear();
+  CHECK(!d.recognize(s));
+}
+
+void test_detector_single_finger_modifiers() {
+  {  // C + Eb (two keys) -> C minor
+    ChordDetector d;
+    ChordState s;
+    d.set_min_notes(1);
+    d.note_on(60);
+    d.note_on(63);
+    CHECK(d.recognize(s));
+    CHECK(s.root_pc == 0);
+    CHECK(s.quality == ChordQuality::kMin);
+  }
+  {  // C + Bb -> C dominant 7 (the same shell interpretation, one fewer note)
+    ChordDetector d;
+    ChordState s;
+    d.set_min_notes(1);
+    d.note_on(60);
+    d.note_on(70);
+    CHECK(d.recognize(s));
+    CHECK(s.quality == ChordQuality::kDom7);
+  }
+}
+
 // --- engine integration: held keys re-harmonize the running band -----------
 
 using Events = StaticVector<OutEvent, 512>;
@@ -198,6 +238,29 @@ void test_detection_off_leaves_band_chordless() {
   CHECK(b.bass_ons(36) == 0);
 }
 
+void test_single_finger_mode_one_key_steers_the_band() {
+  Band b;
+  b.setup_basic();
+  b.cmd(Param::kChordMode, 1, 0, 0, Op::kSet);    // single-finger (ChordMode::kSingle)
+  b.cmd(Param::kChordDetect, 1, 0, 0, Op::kSet);  // detection on, port 0
+  b.key(65, 100);                                 // ONE key: F
+  b.cmd(Param::kTransportStart);
+  b.advance(kTicksPerBar - 1);
+  // F major -> bass anchors at 36 + root_pc 5 = 41 (F2).
+  CHECK(b.bass_ons(41) > 0);
+}
+
+void test_fingered_mode_ignores_one_key() {
+  Band b;
+  b.setup_basic();
+  // Default mode is diatonic (fingered): one key is not a chord.
+  b.cmd(Param::kChordDetect, 1, 0, 0, Op::kSet);
+  b.key(65, 100);  // one key: F
+  b.cmd(Param::kTransportStart);
+  b.advance(kTicksPerBar - 1);
+  CHECK(b.bass_ons(41) == 0);  // no chord formed from a single key in fingered mode
+}
+
 }  // namespace
 
 int main() {
@@ -207,8 +270,12 @@ int main() {
   test_detector_octave_doubling_dedup();
   test_detector_chord_memory_and_clear();
   test_detector_out_of_range_notes_ignored();
+  test_detector_single_finger_one_key_is_major();
+  test_detector_single_finger_modifiers();
   test_live_keys_reharmonize_the_band();
   test_chord_memory_holds_after_release();
   test_detection_off_leaves_band_chordless();
+  test_single_finger_mode_one_key_steers_the_band();
+  test_fingered_mode_ignores_one_key();
   return 0;
 }
