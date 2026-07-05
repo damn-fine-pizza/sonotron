@@ -58,6 +58,28 @@ enum class NoteSource : std::uint8_t {
   kInterval = 2,     // tone = signed semitone offset from the chord root
 };
 
+// Per-event generative gesture (D40 pipeline): how a single StyleEvent expands
+// into one OR MORE timed notes at playback. kNone is the historical 1-event ->
+// 1-note behavior and the default, so every existing style table stays
+// byte-for-byte identical. Concrete gesture variants (strum, roll, arpeggiate)
+// are defined by the gesture-expansion stage (`arranger/gesture.hpp`); the
+// arranger fire loop expands the event through `gesture::expand` before
+// resolving each produced note.
+enum class ChordGesture : std::uint8_t {
+  kNone = 0,  // no gesture: the event yields exactly one note (default)
+  // Additional variants (kStrum, kRollUp, ...) are added by the gesture stage.
+};
+
+// Per-pattern voicing policy (D40 pipeline): whether the role's chord-tone
+// notes are re-voiced for smooth voice-leading. kAsWritten reproduces today's
+// behavior exactly (notes sound at their authored register) and is the default,
+// so existing style tables are unchanged; kLead lets the VoicingEngine retain
+// common tones and minimize motion between successive chords.
+enum class VoicingPolicy : std::uint8_t {
+  kAsWritten = 0,  // authored register, no re-voicing (default; historical)
+  kLead = 1,       // smooth voice-leading (common-tone retention, minimal motion)
+};
+
 struct StyleEvent {
   std::uint16_t step;  // 16th-grid position within the section
   std::int8_t tone;    // kFixed: MIDI note; kChordTone: chord-tone index;
@@ -68,7 +90,14 @@ struct StyleEvent {
   // How `tone` is read at resolve time. Kept LAST with a default so existing
   // designated- AND positional-initializer tables stay valid and unchanged.
   NoteSource src = NoteSource::kChordTone;
+  // Generative gesture. Fits the struct's existing tail padding (no size
+  // growth), and kept last with a default so every style table is unchanged.
+  ChordGesture gesture = ChordGesture::kNone;
 };
+// The event is the per-note flash unit (D33): its size is multiplied across
+// every constexpr style table. Pin it so an accidental field/padding change is
+// caught at compile time rather than silently growing flash.
+static_assert(sizeof(StyleEvent) == 10, "StyleEvent must stay 10 bytes (flash budget, D33)");
 
 struct StylePattern {
   TrackRole role;
@@ -78,6 +107,10 @@ struct StylePattern {
   // loads (on the role's route). -1 = leave the synth's current voice. Kept
   // last with a default so existing designated initializers stay valid.
   std::int16_t gm_program = -1;
+  // Voice-leading policy for this part's chord-tone notes (D40). Kept last with
+  // a default so existing designated initializers stay valid; fits existing
+  // padding (no size growth).
+  VoicingPolicy voicing = VoicingPolicy::kAsWritten;
 };
 
 struct StyleSection {
