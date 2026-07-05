@@ -7,6 +7,7 @@
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
 #include "arrangrr/chord/theory.hpp"      // ChordState, ChordShape, theory::shape_of
+#include "arrangrr/common/assert.hpp"     // ARR_ASSERT (voice-group cap net)
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/config.hpp"
@@ -305,7 +306,10 @@ class Arranger {
       //   -> m_voicing.voice() (voice-leading) -> groove + schedule per note.
       // With the default kNone gestures and kAsWritten voicing this emits, in
       // the same order and with the same timing, exactly what the former
-      // one-note-per-event loop did — the goldens prove it byte-for-byte.
+      // one-note-per-event loop did — byte-for-byte up to kMaxVoiceNotes notes
+      // per role per step; a step denser than that truncates (bounded, D32; no
+      // real style reaches it — the ARR_ASSERT below turns the drop into a
+      // debug signal rather than silence).
       NoteReq group[kMaxVoiceNotes];
       int count = 0;
       for (const StyleEvent& ev : pattern.events) {
@@ -315,10 +319,14 @@ class Arranger {
         StyleEvent specs[gesture::kMaxGestureFan];
         TickOffset delays[gesture::kMaxGestureFan];
         const int produced = gesture::expand(pattern, ev, chord, specs, delays);
-        for (int i = 0; i < produced && count < kMaxVoiceNotes; ++i) {
+        for (int i = 0; i < produced; ++i) {
           const int note = resolve(pattern, specs[i], key, chord);
           if (note < 0) {
             continue;
+          }
+          if (count >= kMaxVoiceNotes) {
+            ARR_ASSERT(count < kMaxVoiceNotes);  // a step exceeded the cap
+            break;
           }
           const bool is_chord_tone =
               pattern.policy == RolePolicy::kChordTone && specs[i].src == NoteSource::kChordTone;

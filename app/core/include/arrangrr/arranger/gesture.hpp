@@ -44,11 +44,19 @@ inline int passthrough(const StyleEvent& ev, StyleEvent (&out_specs)[kMaxGesture
 // stagger or a sub-grid roll). kNone yields the event unchanged with zero delay;
 // the strum/roll gestures fan the live chord's tones out in time. Returns the
 // produced count (>= 1).
-inline int expand(const StylePattern& /*pattern*/, const StyleEvent& ev,
-                  const ChordState& chord, StyleEvent (&out_specs)[kMaxGestureFan],
+inline int expand(const StylePattern& pattern, const StyleEvent& ev, const ChordState& chord,
+                  StyleEvent (&out_specs)[kMaxGestureFan],
                   TickOffset (&out_delays)[kMaxGestureFan]) noexcept {
   // Golden-locked path: no gesture -> the event passes through untouched.
   if (ev.gesture == ChordGesture::kNone) {
+    return passthrough(ev, out_specs, out_delays);
+  }
+  // A gesture fans out the live CHORD, so it only applies to a chord-tone event
+  // of a chord-tone part. On a fixed drum event it would emit literal notes
+  // 0..count-1 (resolve() ignores src for kFixed) — subsonic garbage on the
+  // drum channel; on a scale-degree/interval event it would silently rewrite a
+  // melodic line into a chord. Both pass straight through instead.
+  if (pattern.policy != RolePolicy::kChordTone || ev.src != NoteSource::kChordTone) {
     return passthrough(ev, out_specs, out_delays);
   }
 

@@ -86,10 +86,15 @@ class VoicingState {
       voiced[m] = note;
       ++m;
     }
-    for (int i = 0; i < m; ++i) {
-      m_last[r][i] = voiced[i];
+    // A step with no chord tones (e.g. a lone melodic/passing note in a kLead
+    // part) must NOT erase the voicing history — leave it for the next chord to
+    // lead from, exactly as a pure rest (count == 0, handled by the caller) does.
+    if (m > 0) {
+      for (int i = 0; i < m; ++i) {
+        m_last[r][i] = voiced[i];
+      }
+      m_count[r] = m;
     }
-    m_count[r] = m;
   }
 
  private:

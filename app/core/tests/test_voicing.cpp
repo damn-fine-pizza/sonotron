@@ -102,6 +102,27 @@ static void test_voicing_reset_clears_memory() {
   CHECK(again[2].note == 79);
 }
 
+// A step with NO chord tones (a lone melodic note under kLead) must not erase
+// the voicing memory: the next chord still leads from the previous voicing, as
+// if the melodic step never happened.
+static void test_voicing_melodic_step_preserves_memory() {
+  VoicingState v;
+  v.reset();
+  NoteReq first[3] = {chord_tone(48), chord_tone(52), chord_tone(55)};  // C major, recorded
+  v.voice(TrackRole::kChord1, VoicingPolicy::kLead, first, 3);
+
+  NoteReq melodic[1] = {
+      NoteReq{.note = 84, .vel = 100, .gate = 240, .gesture_delay = 0, .chord_tone = false}};
+  v.voice(TrackRole::kChord1, VoicingPolicy::kLead, melodic, 1);
+  CHECK(melodic[0].note == 84);  // melodic note untouched
+
+  NoteReq third[3] = {chord_tone(69), chord_tone(72), chord_tone(76)};
+  v.voice(TrackRole::kChord1, VoicingPolicy::kLead, third, 3);
+  CHECK(third[0].note == 45);  // still leads from {48,52,55}, not a wiped memory
+  CHECK(third[1].note == 48);
+  CHECK(third[2].note == 52);
+}
+
 int main() {
   test_voicing_as_written_identity();
   test_voicing_lead_first_chord_identity();
@@ -109,6 +130,7 @@ int main() {
   test_voicing_lead_common_tone_held();
   test_voicing_lead_skips_non_chord_tones();
   test_voicing_reset_clears_memory();
+  test_voicing_melodic_step_preserves_memory();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_voicing: all OK\n");
   }

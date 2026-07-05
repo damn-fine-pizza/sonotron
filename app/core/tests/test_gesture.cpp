@@ -209,6 +209,46 @@ static void test_invalid_chord_fallback() {
   CHECK(delays[0] == 0);
 }
 
+// A gesture on a kFixed (drum) part must degenerate to the passthrough: a
+// gesture-tagged kick stays ONE literal drum note, never chord tones 0..count-1
+// (resolve() ignores src for kFixed, so a strum there would emit subsonic junk).
+static void test_gesture_fixed_role_passthrough() {
+  const StyleEvent ev{.step = 0,
+                      .tone = styles::kKick,
+                      .octave = 0,
+                      .vel = 100,
+                      .gate = 60,
+                      .src = NoteSource::kChordTone,
+                      .gesture = ChordGesture::kStrumUp};
+  const StylePattern pat{.role = TrackRole::kDrums, .policy = RolePolicy::kFixed, .events = {}};
+  StyleEvent specs[gesture::kMaxGestureFan];
+  TickOffset delays[gesture::kMaxGestureFan];
+  const int n = gesture::expand(pat, ev, c_major_triad(), specs, delays);
+  CHECK(n == 1);
+  CHECK(specs[0].tone == styles::kKick);
+  CHECK(delays[0] == 0);
+}
+
+// A gesture on a melodic (scale-degree/interval) event must also pass through:
+// the gesture fans the chord, it must not silently rewrite a melodic line.
+static void test_gesture_melodic_passthrough() {
+  const StyleEvent ev{.step = 0,
+                      .tone = 4,
+                      .octave = 0,
+                      .vel = 100,
+                      .gate = 240,
+                      .src = NoteSource::kScaleDegree,
+                      .gesture = ChordGesture::kStrumUp};
+  const StylePattern pat{.role = TrackRole::kLead, .policy = RolePolicy::kChordTone, .events = {}};
+  StyleEvent specs[gesture::kMaxGestureFan];
+  TickOffset delays[gesture::kMaxGestureFan];
+  const int n = gesture::expand(pat, ev, c_major_triad(), specs, delays);
+  CHECK(n == 1);
+  CHECK(specs[0].tone == 4);
+  CHECK(specs[0].src == NoteSource::kScaleDegree);
+  CHECK(delays[0] == 0);
+}
+
 int main() {
   test_gesture_none_passthrough();
   test_strum_up();
@@ -217,6 +257,8 @@ int main() {
   test_roll_down();
   test_seventh_chord_fan();
   test_invalid_chord_fallback();
+  test_gesture_fixed_role_passthrough();
+  test_gesture_melodic_passthrough();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_gesture: all OK\n");
   }
