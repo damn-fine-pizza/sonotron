@@ -64,6 +64,68 @@ void test_parser_orphan_data_dropped() {
   CHECK(m[0].type() == midi::kNoteOn);
 }
 
+void test_parser_all_branches() {
+  // Drives a single parser through every decision branch of feed() in one
+  // stateful stream: realtime pass-through, SysEx open/skip/close, status
+  // terminating a dangling SysEx, running-status re-arm, orphan drop,
+  // NoteOn-v0 normalization, zero/one/two data-byte messages, and reset.
+  MidiParser p;
+  Msgs out;
+  auto sink = [&](const MidiMessage& m) { CHECK(out.push_back(m)); };
+  const auto feed = [&](std::initializer_list<std::uint8_t> bytes) {
+    for (std::uint8_t b : bytes) {
+      p.feed(b, sink);
+    }
+  };
+
+  feed({0xF8});  // realtime standalone -> passes through
+  CHECK(out.size() == 1 && out[0].status == midi::kClock);
+
+  out.clear();
+  feed({0x90, 60, 100});  // channel voice, 2 data bytes
+  feed({62, 90});         // running status re-arms last channel status
+  feed({0x90, 64, 0});    // NoteOn velocity 0 -> NoteOff
+  CHECK(out.size() == 3);
+  CHECK(out[0].type() == midi::kNoteOn && out[0].d2 == 100);
+  CHECK(out[1].type() == midi::kNoteOn && out[1].d1 == 62);
+  CHECK(out[2].type() == midi::kNoteOff && out[2].d1 == 64);
+
+  out.clear();
+  feed({0xC3, 42});  // Program Change: single data byte (needed == 1)
+  feed({43});        // running status on a 1-byte message
+  CHECK(out.size() == 2);
+  CHECK(out[0].type() == midi::kProgramChange && out[0].d1 == 42);
+  CHECK(out[1].type() == midi::kProgramChange && out[1].d1 == 43);
+
+  out.clear();
+  feed({0xF2, 0x10, 0x02});  // system common: clears running status
+  feed({77});                // orphan data byte, no running status -> dropped
+  feed({0xF6});              // Tune Request: zero data bytes, emitted at once
+  CHECK(out.size() == 2);
+  CHECK(out[0].status == midi::kSongPosition);
+  CHECK(out[1].status == midi::kTuneRequest);
+
+  out.clear();
+  feed({0xF0, 1, 2, 3});  // SysEx open; payload bytes skipped
+  feed({0xF8});           // realtime inside SysEx: passes, state untouched
+  feed({0xF7});           // EOX closes SysEx
+  feed({0x80, 60, 64});   // NoteOff after SysEx (type != NoteOn)
+  CHECK(out.size() == 2);
+  CHECK(out[0].status == midi::kClock);
+  CHECK(out[1].type() == midi::kNoteOff && out[1].d1 == 60);
+
+  out.clear();
+  feed({0xF0, 9});       // SysEx open + one payload byte
+  feed({0x90, 61, 99});  // a status byte terminates the dangling SysEx
+  CHECK(out.size() == 1 && out[0].type() == midi::kNoteOn && out[0].d1 == 61);
+
+  out.clear();
+  feed({0x90, 60});  // half a message pending
+  p.reset();
+  feed({100});  // orphan after reset -> dropped
+  CHECK(out.empty());
+}
+
 void test_scheduler_total_order() {
   OutScheduler<16> s;
   // Insert same-tick events in adversarial order; expect
@@ -165,14 +227,49 @@ void test_parser_reset() {
   MidiParser p;
   Msgs out;
   auto sink = [&](const MidiMessage& m) { CHECK(out.push_back(m)); };
+
+  // Half a channel message, then reset: the trailing data byte is an orphan.
   p.feed(0x90, sink);
   p.feed(60, sink);  // half a message
   p.reset();
   p.feed(100, sink);  // orphan after reset: dropped
   CHECK(out.empty());
   const std::uint8_t rest[] = {0x80, 60, 0};
-  p.feed(rest, 3, sink);
+  p.feed(rest, 3, sink);  // NoteOff parses cleanly (type != NoteOn path)
   CHECK(out.size() == 1 && out[0].type() == midi::kNoteOff);
+
+  // One stream that walks the same parser through realtime pass-through,
+  // running status, NoteOn-v0 normalization, an EOX-terminated SysEx and a
+  // system-common message that clears running status.
+  out.clear();
+  const std::uint8_t stream[] = {
+      0x90, 62,   100,   // NoteOn, arms running status 0x90
+      64,   90,          // running status -> second NoteOn
+      66,   0,           // running status -> NoteOn v0 normalized to NoteOff
+      0xF8,              // realtime passes through, parsing state untouched
+      0xF0, 0x01, 0xF7,  // SysEx: payload skipped, EOX closes it
+      0xF2, 0x10, 0x02,  // system common clears running status
+      0xF6,              // Tune Request: zero data bytes, emitted immediately
+  };
+  p.feed(stream, sizeof(stream), sink);
+  CHECK(out.size() == 6);
+  CHECK(out[0].type() == midi::kNoteOn && out[0].d1 == 62);
+  CHECK(out[1].type() == midi::kNoteOn && out[1].d1 == 64);   // running status
+  CHECK(out[2].type() == midi::kNoteOff && out[2].d1 == 66);  // v0 -> NoteOff
+  CHECK(out[3].status == midi::kClock);
+  CHECK(out[4].status == midi::kSongPosition);
+  CHECK(out[5].status == midi::kTuneRequest);
+
+  // reset() also clears an open SysEx: the payload byte after reset is an
+  // orphan (not swallowed), and a later NoteOn parses normally.
+  out.clear();
+  p.feed(0xF0, sink);  // SysEx opens
+  p.feed(0x7F, sink);  // payload byte
+  p.reset();
+  p.feed(0x7E, sink);  // orphan after reset
+  const std::uint8_t after[] = {0x90, 65, 90};
+  p.feed(after, 3, sink);
+  CHECK(out.size() == 1 && out[0].type() == midi::kNoteOn && out[0].d1 == 65);
 }
 
 void test_scheduler_clear_and_refill() {
@@ -397,6 +494,7 @@ int main() {
   test_parser_reset();
   test_parser_more_edges();
   test_parser_eox_terminates_and_kills_running_status();
+  test_parser_all_branches();
   test_message_wire_lengths();
   test_scheduler_total_order();
   test_scheduler_due_only();
