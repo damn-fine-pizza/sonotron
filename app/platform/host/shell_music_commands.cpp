@@ -646,6 +646,9 @@ bool Shell::track_new(const std::vector<std::string>& t, std::string& error) {
 
 bool Shell::track_step(const std::vector<std::string>& t, int track, std::string& error) {
   // track step <name> <step#> <note|clear> [vel] [gate]
+  //           [prob=0..100] [ratchet=1..8] [micro=-127..127] [tie=on|off]
+  // The four key=value param-locks are optional and order-free; omitting them
+  // all keeps the original short form (and byte-identical playback).
   std::uint64_t step = 0;
   if (!parse_u64(t[3], step) || step < 1 || step > kMaxStepsPerTrack) {
     error = "bad step number: " + t[3];
@@ -658,23 +661,90 @@ bool Shell::track_step(const std::vector<std::string>& t, int track, std::string
   if (t[4] == "clear") {
     c.b = 0;
     c.c = 0;
-  } else {
-    std::uint8_t note = 0;
-    std::uint64_t vel = 100, gate = kTicksPerStep / 2;
-    if (!parse_note(t[4], note)) {
-      error = "bad note: " + t[4];
+    m_engine.push_command(c, m_sink);
+    return true;
+  }
+
+  std::uint8_t note = 0;
+  if (!parse_note(t[4], note)) {
+    error = "bad note: " + t[4];
+    return false;
+  }
+  std::uint64_t vel = 100;
+  std::uint64_t gate = kTicksPerStep / 2;
+  std::uint64_t probability = 100;
+  std::uint64_t ratchet = 1;
+  long micro = 0;
+  bool tie = false;
+  bool has_locks = false;
+
+  // Positional vel/gate remain; any token carrying '=' is a param-lock.
+  int positional = 0;  // 0 -> vel, 1 -> gate
+  for (std::size_t i = 5; i < t.size(); ++i) {
+    const std::string& tok = t[i];
+    const std::size_t eq = tok.find('=');
+    if (eq == std::string::npos) {
+      if (positional == 0) {
+        if (!parse_u64(tok, vel) || vel < 1 || vel > 127) {
+          error = "bad velocity: " + tok;
+          return false;
+        }
+        positional = 1;
+      } else if (positional == 1) {
+        if (!parse_u64(tok, gate) || gate == 0 || gate > 0xFFFF) {
+          error = "bad gate: " + tok;
+          return false;
+        }
+        positional = 2;
+      } else {
+        error = "track step: unexpected token: " + tok;
+        return false;
+      }
+      continue;
+    }
+    const std::string key = tok.substr(0, eq);
+    const std::string val = tok.substr(eq + 1);
+    has_locks = true;
+    if (key == "prob") {
+      if (!parse_u64(val, probability) || probability > 100) {
+        error = "bad prob (0..100): " + val;
+        return false;
+      }
+    } else if (key == "ratchet") {
+      if (!parse_u64(val, ratchet) || ratchet < 1 || ratchet > kMaxRatchet) {
+        error = "bad ratchet (1..8): " + val;
+        return false;
+      }
+    } else if (key == "micro") {
+      char* end = nullptr;
+      micro = std::strtol(val.c_str(), &end, 10);
+      if (end == val.c_str() || *end != '\0' || micro < -127 || micro > 127) {
+        error = "bad micro (-127..127): " + val;
+        return false;
+      }
+    } else if (key == "tie") {
+      if (val == "on") {
+        tie = true;
+      } else if (val == "off") {
+        tie = false;
+      } else {
+        error = "bad tie (on|off): " + val;
+        return false;
+      }
+    } else {
+      error = "track step: unknown param-lock: " + key;
       return false;
     }
-    if (t.size() >= 6 && (!parse_u64(t[5], vel) || vel < 1 || vel > 127)) {
-      error = "bad velocity: " + t[5];
-      return false;
-    }
-    if (t.size() >= 7 && (!parse_u64(t[6], gate) || gate == 0 || gate > 0xFFFF)) {
-      error = "bad gate: " + t[6];
-      return false;
-    }
-    c.b = note | (static_cast<std::int32_t>(vel) << 8);
-    c.c = static_cast<std::int32_t>(gate);
+  }
+
+  c.b = note | (static_cast<std::int32_t>(vel) << 8);
+  c.c = static_cast<std::int32_t>(gate);
+  if (has_locks) {
+    // Opt-in extended encoding (ABI kTrackStep): bit 31 of c flags the locks.
+    c.b |= static_cast<std::int32_t>(probability << 16) | static_cast<std::int32_t>(ratchet << 24) |
+           static_cast<std::int32_t>(tie ? (1u << 28) : 0u);
+    c.c |= static_cast<std::int32_t>((static_cast<std::uint32_t>(micro) & 0xFFu) << 16) |
+           static_cast<std::int32_t>(0x80000000u);
   }
   m_engine.push_command(c, m_sink);
   return true;
