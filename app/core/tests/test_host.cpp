@@ -395,6 +395,33 @@ void test_shell_chord_detect_panel() {
   CHECK(block_contains(panel, "detect: off"));
 }
 
+// The REAL live path (not feed_midi): with the default two-surface topology,
+// focusing the CHORDS panel and pressing a musical LETTER key must route through
+// chords_key -> the harmony port -> the detector and STEER the band; the same
+// key on the PIANO panel must NOT steer. This is the exact chain a user drives.
+void test_chords_panel_keys_steer_band_piano_does_not() {
+  ShellFixture f;
+  f.shell.configure_default_surfaces();          // piano=melody, harmony=detect+kHarmony
+  CHECK(f.run("chord mode single"));             // one letter key = a chord
+  CHECK(f.run("panel focus chords"));            // focus the harmony surface
+
+  // 'F' letter = F4: on the chords panel it must steer the band to F.
+  CHECK(f.shell.handle_ui_key('F'));
+  CHECK(f.shell.engine().chords().state().valid);
+  CHECK(f.shell.engine().chords().state().root_pc == 5);  // F
+
+  // 'G' letter = G4: the band must MOVE to G (proves it re-steers, not latches).
+  CHECK(f.shell.handle_ui_key('F'));  // release F (toggle)
+  CHECK(f.shell.handle_ui_key('G'));
+  CHECK(f.shell.engine().chords().state().root_pc == 7);  // G
+
+  // The PIANO/melody surface must NOT steer: focus it, press 'A' (=C4), the
+  // followed chord stays G.
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key('A'));
+  CHECK(f.shell.engine().chords().state().root_pc == 7);  // still G
+}
+
 void test_shell_parts_command_and_panel() {
   ShellFixture f;
   std::vector<std::string> panel;
@@ -2024,6 +2051,7 @@ int main() {
   test_note_name_parsing();
   test_shell_chord_commands();
   test_shell_chord_detect_panel();
+  test_chords_panel_keys_steer_band_piano_does_not();
   test_gm_program_parsing();
   test_shell_program_command();
   test_shell_parts_command_and_panel();

@@ -40,6 +40,7 @@ arrangrr_test(test_chord_follow functional)
 # the detector's scale-aware single-finger steering, driven through the ABI ->
 # the subject is the integration, so `functional`.
 arrangrr_test(test_input_zone functional)
+arrangrr_test(test_harmony_steer functional)
 # test_arp / test_arranger: subject is ONE producer (Arp / Arranger); the Engine
 # is only the harness that lets it emit over ticks -> unit (see header note).
 arrangrr_test(test_arp unit)
