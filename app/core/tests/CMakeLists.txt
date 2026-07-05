@@ -36,6 +36,10 @@ arrangrr_test(test_chord unit)
 arrangrr_test(test_chord_seq unit)
 arrangrr_test(test_chord_detect unit)
 arrangrr_test(test_chord_follow functional)
+# test_input_zone: the Engine's per-port InputZone route-vs-suppress split and
+# the detector's scale-aware single-finger steering, driven through the ABI ->
+# the subject is the integration, so `functional`.
+arrangrr_test(test_input_zone functional)
 # test_arp / test_arranger: subject is ONE producer (Arp / Arranger); the Engine
 # is only the harness that lets it emit over ticks -> unit (see header note).
 arrangrr_test(test_arp unit)

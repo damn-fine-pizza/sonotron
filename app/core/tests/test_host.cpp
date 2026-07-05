@@ -367,18 +367,29 @@ void test_shell_chord_detect_panel() {
   CHECK(f.run("chord detect on"));
   CHECK(block_contains(panel, "detect: on"));
 
-  // Hold a C major triad on the piano input port (port 0): the arranger's live
-  // chord context becomes C major, and the chords panel names it.
+  // Two-zone topology (Dxx): detection observes the HARMONY surface port
+  // (kHarmonyInputPort = 1), which `chord detect on` wires as the detect source
+  // — NOT the piano/melody port (0). Holding a C major triad on the harmony port
+  // (silent, but observed) re-harmonizes the band, and the chords panel names it.
   const std::uint8_t on[9] = {0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100};
-  f.shell.feed_midi(0, Span<const std::uint8_t>(on, sizeof(on)));
+  f.shell.feed_midi(1, Span<const std::uint8_t>(on, sizeof(on)));  // harmony port
   CHECK(f.run("chord detect on"));  // idempotent toggle repaints the panel
   CHECK(block_contains(panel, "chord: C"));
 
   // Chord memory: releasing the keys leaves the last chord named.
   const std::uint8_t off[9] = {0x80, 60, 0, 0x80, 64, 0, 0x80, 67, 0};
-  f.shell.feed_midi(0, Span<const std::uint8_t>(off, sizeof(off)));
+  f.shell.feed_midi(1, Span<const std::uint8_t>(off, sizeof(off)));  // harmony port
   CHECK(f.run("chord detect on"));
   CHECK(block_contains(panel, "chord: C"));
+
+  // The PIANO/melody port (0) must NOT steer: a full D minor triad played there
+  // sounds but leaves the followed chord untouched — the panel still names C,
+  // never D. This pins the two-zone split: only the harmony surface steers.
+  const std::uint8_t dmin[9] = {0x90, 62, 100, 0x90, 65, 100, 0x90, 69, 100};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(dmin, sizeof(dmin)));  // piano port
+  CHECK(f.run("chord detect on"));
+  CHECK(block_contains(panel, "chord: C"));
+  CHECK(!block_contains(panel, "chord: D"));
 
   CHECK(f.run("chord detect off"));
   CHECK(block_contains(panel, "detect: off"));
