@@ -45,6 +45,22 @@ enum class ChordFollow : std::uint8_t {
   kManual = 3,     // only manual `chord play` steers
 };
 
+// Dxx (un-defers D34(b) / §11 split): per-input-port harmony zone. This is the
+// "observe-without-route" split as DATA — the zone of a whole port decides
+// route-vs-suppress, riding the SAME parsed input path (no parallel
+// push_harmony_in). A future pitch split_point can later subdivide one physical
+// port into two logical zones without reshaping this.
+//   - kMelody: note messages ROUTE/sound normally through m_router (and steer
+//     only if the port is also the detect port -> the D34 FullKeyboard branch).
+//   - kHarmony: note messages are SUPPRESSED from output (never reach m_router)
+//     while still OBSERVED by the detector when it is the detect port -> silent
+//     re-harmonization (the canonical Split arranger zone).
+// Default kMelody keeps every port byte-identical to the legacy path.
+enum class InputZone : std::uint8_t {
+  kMelody = 0,   // routes/sounds; observed only as the D34 FullKeyboard branch
+  kHarmony = 1,  // observed + suppressed from output (silent chord zone)
+};
+
 class Engine {
  public:
   // Monomorphic sink at the ABI boundary (D26): one instantiation, no
@@ -76,9 +92,15 @@ class Engine {
         // sound. Stopped => notes pass through and play normally.
         const bool arp_captures =
             m_arp_enabled && m_transport.playing() && port == m_arp_in_port && is_note_message(msg);
+        // A note on a kHarmony port is a silent chord-recognition gesture: it is
+        // OBSERVED (below) but SUPPRESSED from output — it never reaches the
+        // router. Non-note traffic (CC, sustain, program) still passes; only the
+        // sounding notes are silenced. kMelody ports route exactly as before.
+        const bool harmony_suppress =
+            is_note_message(msg) && m_input_zone[port] == InputZone::kHarmony;
         if (arp_captures) {
           observe_arp_input(msg);
-        } else {
+        } else if (!harmony_suppress) {
           m_router.route(port, msg, [&](std::uint8_t out_port, const MidiMessage& routed) {
             schedule_or_warn(out_port, m_now, routed, sink);
           });
@@ -125,6 +147,21 @@ class Engine {
     m_chord_detect = enabled;
   }
   constexpr bool chord_detect() const noexcept { return m_chord_detect; }
+
+  // Dxx: the harmony zone of a whole input port. kHarmony suppresses the port's
+  // note output (silent chord recognition); kMelody routes/sounds. Independent
+  // of set_chord_detect (which decides which port OBSERVES): the Split default
+  // is the host's chords-panel port set to kHarmony AND to the detect port; a
+  // detect port left kMelody is the D34 FullKeyboard branch (sounds + steers).
+  // Host wiring (which port is the piano vs the chords panel) is next-phase.
+  constexpr void set_input_zone(std::uint8_t port, InputZone zone) noexcept {
+    if (port < kMaxPorts) {
+      m_input_zone[port] = zone;
+    }
+  }
+  constexpr InputZone input_zone(std::uint8_t port) const noexcept {
+    return port < kMaxPorts ? m_input_zone[port] : InputZone::kMelody;
+  }
 
   // D47 chord-follow selector: which producer may steer the followed chord.
   constexpr void set_chord_follow(ChordFollow follow) noexcept { m_chord_follow = follow; }
@@ -358,6 +395,7 @@ class Engine {
   ChordDetector m_detector;                 // live piano->chord held-note set
   bool m_chord_detect = false;              // kChordDetect: detection enabled
   std::uint8_t m_chord_detect_port = 0;     // input port feeding the detector
+  InputZone m_input_zone[kMaxPorts] = {};   // Dxx: per-port harmony zone (kMelody default)
   ChordFollow m_chord_follow = ChordFollow::kAuto;  // D47: who steers the band
   ArpeggiatorEngine m_arp;                  // live keyboard arpeggiator
   bool m_arp_enabled = false;               // kArp: capture + play the input port

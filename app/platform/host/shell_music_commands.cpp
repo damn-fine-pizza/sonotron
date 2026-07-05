@@ -189,16 +189,18 @@ bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
     return true;
   }
   if (t[1] == "detect" && t.size() >= 3 && (t[2] == "on" || t[2] == "off")) {
-    // Live piano->chord: held keys on the piano input port re-harmonize the
-    // arranger (whole-keyboard mode, chord-memory hold-last).
+    // Live keys -> chord: held keys on the HARMONY surface (the chords panel, its
+    // dedicated kHarmonyInputPort) re-harmonize the arranger. Under the two-zone
+    // topology the harmony port is silent (kHarmony) and IS the detect source;
+    // the piano port stays kMelody (sounds, never steers). Chord-memory hold-last.
     const bool on = t[2] == "on";
     Command c;
     c.op = Op::kSet;
     c.param = Param::kChordDetect;
     c.a = on ? 1 : 0;
-    c.b = kPianoInputPort;
+    c.b = kHarmonyInputPort;
     m_engine.push_command(c, m_sink);
-    console_output(on ? "chord detect: on (play a chord to steer the band)"
+    console_output(on ? "chord detect: on (focus the chords panel and play to steer the band)"
                       : "chord detect: off");
     (void)push_panels();  // reflect the new detect state in the chords panel now
     return true;

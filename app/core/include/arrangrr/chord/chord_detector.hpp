@@ -68,6 +68,15 @@ class ChordDetector {
   constexpr void set_min_notes(std::uint8_t n) noexcept { m_min_notes = n == 0 ? 1 : n; }
   constexpr std::uint8_t min_notes() const noexcept { return m_min_notes; }
 
+  // Scale-aware single-finger (Dxx, refines D45): the current key and the
+  // single-finger flag together let the ONE-key case resolve to the diatonic
+  // maj/min triad of the pressed root (theory::single_finger_quality) instead
+  // of the key-agnostic "always major" shell result. They only affect the
+  // n==0 (bare-root) resolution; two or more pitch classes still shell-complete
+  // exactly as before, so nothing else about recognition changes.
+  constexpr void set_key(const Key& key) noexcept { m_key = key; }
+  constexpr void set_single_finger(bool on) noexcept { m_single_finger = on; }
+
   // Recognizes the chord from the currently-held notes. Returns true and fills
   // `out` (valid = true) when at least kMinChordNotes are down; returns false
   // otherwise so the caller keeps the previous chord (chord memory). The root
@@ -93,9 +102,14 @@ class ChordDetector {
         iv[n++] = rel;
       }
     }
-    out = ChordState{.root_pc = root_pc,
-                     .quality = theory::complete_shell_full(iv, n),
-                     .valid = true};
+    // Single-finger, one pitch class held (n == 0 = bare root, octaves/fifths
+    // add no colour): resolve the diatonic maj/min triad of that root in the
+    // current key. Any colour note (n >= 1) falls through to shell completion,
+    // and fingered mode never reaches here with n == 0 below its triad minimum.
+    const ChordQuality quality = (m_single_finger && n == 0)
+                                     ? theory::single_finger_quality(m_key, root_pc)
+                                     : theory::complete_shell_full(iv, n);
+    out = ChordState{.root_pc = root_pc, .quality = quality, .valid = true};
     return true;
   }
 
@@ -127,6 +141,8 @@ class ChordDetector {
   std::uint32_t m_held[4] = {0, 0, 0, 0};  // 128-bit held-note set
   std::uint8_t m_count = 0;
   std::uint8_t m_min_notes = kMinChordNotes;  // fingered (3) by default; 1 = single-finger
+  Key m_key{};                    // current key, for scale-aware single-finger
+  bool m_single_finger = false;   // scale-aware one-key maj/min resolution (Dxx)
 };
 
 }  // namespace arrangrr

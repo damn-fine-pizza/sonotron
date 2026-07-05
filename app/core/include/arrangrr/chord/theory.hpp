@@ -184,6 +184,32 @@ constexpr ChordQuality smart_quality(Mode mode, int degree) noexcept {
   return third == 3 ? ChordQuality::kMin7 : ChordQuality::kMaj7;
 }
 
+// arrangrr scale-aware single-finger (Dxx, refines D45) — NOT Yamaha Single
+// Finger, which is key-independent (one key = major). This is the Casio-Chord /
+// "smart" lineage: one key -> the diatonic MAJOR-or-MINOR TRIAD rooted on the
+// pressed pitch class, so a non-keyboardist stays in key with one finger.
+//   - diatonic root: the triad quality is the third of D19 `smart_quality` at
+//     that degree (a minor third -> minor, a major third -> major);
+//   - dim degree (vii in major, ii in natural minor) -> MINOR: it already has
+//     the minor third, so we keep it and restore the perfect fifth;
+//   - aug degree (III+ in harmonic minor) -> MAJOR: it already has the major
+//     third, so we keep it and restore the perfect fifth;
+//   - chromatic root (out of key) -> MAJOR: it functions as a secondary
+//     dominant and a one-finger shortcut must NEVER stall mid-phrase.
+// Triads only, no D19 richness — this is what keeps single-finger DISTINCT from
+// diatonic mode (which is D20-strict and shows the true dim/aug quality).
+constexpr ChordQuality single_finger_quality(const Key& key, std::uint8_t pc) noexcept {
+  const int degree = degree_of(key, pc);
+  if (degree < 0) {
+    return ChordQuality::kMaj;  // chromatic root -> major (secondary dominant)
+  }
+  // The third of the diatonic seventh-chord (offsets[1]) is the quality bit: a
+  // minor third (3) collapses dim/min7/half-dim to a MINOR triad, a major third
+  // (4) collapses aug/maj7/dom7 to a MAJOR triad. Fifth is always restored.
+  const ChordShape sh = shape_of(smart_quality(key.mode, degree));
+  return sh.offsets[1] == 3 ? ChordQuality::kMin : ChordQuality::kMaj;
+}
+
 // Mode C (D12): complete a shell/partial voicing. `intervals` are the pitch
 // classes above the root (mod 12, root excluded, zero-terminated array of up
 // to 3). Decision tree over third/fifth/seventh/sus flags; unmatched combos
@@ -311,6 +337,16 @@ constexpr std::uint8_t kIv3[3] = {10, 0, 0};
 static_assert(complete_shell_full(kIv3, 1) == ChordQuality::kDom7);
 constexpr std::uint8_t kIv4[3] = {3, 6, 9};
 static_assert(complete_shell_full(kIv4, 3) == ChordQuality::kDim7);
+// Scale-aware single-finger (Dxx): triads only, dim->minor, aug->major,
+// chromatic->major. C major: I major, ii minor, vii(dim)->minor, C# chromatic
+// ->major. A minor: i minor, III major, ii(dim)->minor.
+static_assert(single_finger_quality(kCMajor, 0) == ChordQuality::kMaj);   // I
+static_assert(single_finger_quality(kCMajor, 2) == ChordQuality::kMin);   // ii
+static_assert(single_finger_quality(kCMajor, 11) == ChordQuality::kMin);  // vii dim->min
+static_assert(single_finger_quality(kCMajor, 1) == ChordQuality::kMaj);   // C# chromatic->maj
+static_assert(single_finger_quality(kAMinor, 9) == ChordQuality::kMin);   // i
+static_assert(single_finger_quality(kAMinor, 0) == ChordQuality::kMaj);   // III (C)
+static_assert(single_finger_quality(kAMinor, 11) == ChordQuality::kMin);  // ii dim->min (B)
 }  // namespace selftest
 
 }  // namespace theory

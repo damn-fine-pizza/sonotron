@@ -236,6 +236,11 @@ void Shell::refresh_chords_content() {
   } else {
     lines.push_back(std::string("chord: (no chord)"));
   }
+  // The chords panel IS the harmony surface: playing its keys steers the band
+  // silently. Only worth saying when focused (that is when the keys route here).
+  if (chords_focused()) {
+    lines.push_back(std::string("play here: keys steer the band, no sound (octave ./ transpose [])"));
+  }
   m_panels.set_content(PanelId::kChords, std::move(lines));
 }
 

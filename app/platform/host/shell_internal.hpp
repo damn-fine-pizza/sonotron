@@ -42,8 +42,16 @@ inline constexpr std::uint8_t kBackspaceBs = 0x08;
 inline constexpr std::uint8_t kAsciiDigitLow = '0';
 inline constexpr std::uint8_t kAsciiDigitHigh = '9';
 
-// The simulated piano feeds the same input port real hardware uses (in0).
+// Two playable surfaces selected by panel focus (whole keyboard, no pitch
+// split). The PIANO panel plays the MELODY surface: its keys feed kPianoInputPort
+// (in0), zone kMelody — they SOUND and steer nobody. The CHORDS panel plays the
+// HARMONY surface: the SAME key bindings feed kHarmonyInputPort, zone kHarmony —
+// their notes are output-suppressed (silent) but OBSERVED by the ChordDetector,
+// so playing there re-harmonizes the band. kHarmonyInputPort is a logical engine
+// port (< kMaxPorts); it is the chord-detect port under the default topology and
+// is fed only by the chords-panel keys (no ALSA hardware port is created for it).
 inline constexpr std::uint8_t kPianoInputPort = 0;
+inline constexpr std::uint8_t kHarmonyInputPort = 1;
 inline constexpr std::uint8_t kPianoReleaseVelocity = 64;
 
 // Toggle-mode auto-repeat debounce window (microseconds). OS key auto-repeat is

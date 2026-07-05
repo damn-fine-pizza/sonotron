@@ -27,6 +27,7 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kChordMode:
     case Param::kChordDetect:
     case Param::kChordFollow:
+    case Param::kInputZone:
       cmd_chord(cmd, sink);
       break;
     case Param::kArp:
@@ -154,7 +155,9 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
       if (cmd.a < 0 || cmd.a > 11 || cmd.b < 0 || cmd.b >= kModeCount) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else {
-        m_chords.set_key(Key{static_cast<std::uint8_t>(cmd.a), static_cast<Mode>(cmd.b)});
+        const Key key{static_cast<std::uint8_t>(cmd.a), static_cast<Mode>(cmd.b)};
+        m_chords.set_key(key);
+        m_detector.set_key(key);  // scale-aware single-finger reads the same key
       }
       break;
     case Param::kChordOut: {
@@ -189,8 +192,12 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
         // "single" is single-finger everywhere: the typed chord path already
         // reads only the root (play_single), and the live piano detector drops
         // its minimum to one held note so a lone key steers the band; the other
-        // modes keep the fingered triad minimum.
-        m_detector.set_min_notes(mode == ChordMode::kSingle ? 1 : kMinChordNotes);
+        // modes keep the fingered triad minimum. The detector also flips into
+        // scale-aware single-finger so a lone key resolves the diatonic maj/min
+        // triad of its root (Dxx), matching the typed play_single path.
+        const bool single = mode == ChordMode::kSingle;
+        m_detector.set_min_notes(single ? 1 : kMinChordNotes);
+        m_detector.set_single_finger(single);
       }
       break;
     case Param::kChordDetect: {
@@ -209,6 +216,17 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else {
         set_chord_follow(static_cast<ChordFollow>(cmd.a));
+      }
+      break;
+    case Param::kInputZone:
+      // Dxx: a = input port, b = InputZone. kHarmony silences that port's notes
+      // (silent chord recognition); kMelody routes/sounds. Whole-port decision,
+      // no pitch split yet.
+      if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPorts || cmd.b < 0 ||
+          cmd.b > static_cast<std::int32_t>(InputZone::kHarmony)) {
+        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+      } else {
+        set_input_zone(static_cast<std::uint8_t>(cmd.a), static_cast<InputZone>(cmd.b));
       }
       break;
     case Param::kChordPlay: {
