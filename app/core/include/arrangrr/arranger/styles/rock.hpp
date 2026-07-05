@@ -54,6 +54,17 @@ inline constexpr StyleEvent kPercCowbell[] = {
 inline constexpr StyleEvent kPercTamb[] = {
     {.step=4, .tone=kTambourine, .octave=0, .vel=84, .gate=kGateHat}, {.step=12, .tone=kTambourine, .octave=0, .vel=86, .gate=kGateHat},
 };
+// A rock lead lick for the back half of the peak bar. kScaleDegree keeps it
+// diatonic to the live KEY over any chord; the step-10 grace is a kInterval blue
+// b3 (3 semitones) off the current chord ROOT — it bends bluesy against the
+// harmony, not the key. kLead role -> anchor 72, screaming over the wall.
+inline constexpr std::int16_t kLeadVoice = 29;  // Overdriven Guitar
+inline constexpr StyleEvent kLeadLick[] = {
+    {.step=8,  .tone=4, .octave=0, .vel=104, .gate=kGate8th,      .src=NoteSource::kScaleDegree},   // 5th
+    {.step=10, .tone=3, .octave=0, .vel=98,  .gate=kGateStaccato, .src=NoteSource::kInterval},      // blue b3 off the chord root
+    {.step=12, .tone=4, .octave=0, .vel=106, .gate=kGate8th,      .src=NoteSource::kScaleDegree},   // 5th
+    {.step=14, .tone=7, .octave=0, .vel=110, .gate=kGateBeat,     .src=NoteSource::kScaleDegree},   // up to the octave
+};
 
 inline constexpr StyleEvent kVarADrums[] = {
     {.step=0, .tone=kKick, .octave=0, .vel=118, .gate=kGateHat},  {.step=3, .tone=kKick, .octave=0, .vel=100, .gate=kGateHat},
@@ -72,15 +83,17 @@ inline constexpr StyleEvent kVarABass[] = {
     {.step=12, .tone=kRoot, .octave=0, .vel=110, .gate=kGate8th}, {.step=14, .tone=kRoot, .octave=1, .vel=96, .gate=kGateHat},
 };
 inline constexpr StyleEvent kVarAChord[] = {
-    // Power stabs: root + fifth only, held across the beat.
-    {.step=0, .tone=kRoot, .octave=0, .vel=110, .gate=kGateBeat}, {.step=0, .tone=kFifth, .octave=0, .vel=110, .gate=kGateBeat},
-    {.step=8, .tone=kRoot, .octave=0, .vel=108, .gate=kGateBeat}, {.step=8, .tone=kFifth, .octave=0, .vel=108, .gate=kGateBeat},
+    // Downbeat electric-guitar strums — one gesture per hit sweeps the whole live
+    // chord high->low (the authored tone is ignored). Collapsed from the former
+    // root+fifth block so the sweep fans the full chord, not one strum per tone.
+    {.step=0, .tone=kRoot, .octave=0, .vel=110, .gate=kGateBeat, .gesture=ChordGesture::kStrumDown},
+    {.step=8, .tone=kRoot, .octave=0, .vel=108, .gate=kGateBeat, .gesture=ChordGesture::kStrumDown},
 };
 inline constexpr StylePattern kVarAPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarADrums)},
     {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarABass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarAChord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2Off), .gm_program=kChord2Voice},
 };
 
@@ -100,15 +113,16 @@ inline constexpr StyleEvent kVarBBass[] = {
     {.step=12, .tone=kFifth, .octave=0, .vel=112, .gate=kGate8th},
 };
 inline constexpr StyleEvent kVarBChord[] = {
-    {.step=0, .tone=kRoot, .octave=0, .vel=112, .gate=kGateBeat},  {.step=0, .tone=kFifth, .octave=0, .vel=112, .gate=kGateBeat},  {.step=0, .tone=kRoot, .octave=1, .vel=112, .gate=kGateBeat},
-    {.step=8, .tone=kRoot, .octave=0, .vel=110, .gate=kGateBeat},  {.step=8, .tone=kFifth, .octave=0, .vel=110, .gate=kGateBeat},  {.step=8, .tone=kRoot, .octave=1, .vel=110, .gate=kGateBeat},
-    {.step=12, .tone=kRoot, .octave=0, .vel=106, .gate=kGateStab}, {.step=12, .tone=kFifth, .octave=0, .vel=106, .gate=kGateStab},
+    // Full downbeat strums plus an upbeat accent on 4 — each a single gesture.
+    {.step=0, .tone=kRoot, .octave=0, .vel=112, .gate=kGateBeat, .gesture=ChordGesture::kStrumDown},
+    {.step=8, .tone=kRoot, .octave=0, .vel=110, .gate=kGateBeat, .gesture=ChordGesture::kStrumDown},
+    {.step=12, .tone=kRoot, .octave=0, .vel=106, .gate=kGateStab, .gesture=ChordGesture::kStrumDown},
 };
 inline constexpr StylePattern kVarBPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarBDrums)},
     {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarBBass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarBChord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2Off), .gm_program=kChord2Voice},
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercTamb)},
 };
@@ -155,7 +169,7 @@ inline constexpr StylePattern kEndPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kEndDrums)},
     {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kEndBass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kEndChord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
 };
 
 inline constexpr StyleEvent kIntro2Drums[] = {
@@ -170,7 +184,7 @@ inline constexpr StylePattern kIntro2Patterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIntro2Drums)},
     {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntroBass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntro2Chord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
 };
 
 inline constexpr StyleEvent kFillBDrums[] = {
@@ -212,7 +226,7 @@ inline constexpr StylePattern kEnd2Patterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kEnd2Drums)},
     {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kEnd2Bass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kEnd2Chord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
 };
 
 // varC: half-time stomp — huge kick, backbeat on beat 3, open-hat quarters, held power chord.
@@ -220,18 +234,36 @@ inline constexpr StyleEvent kVarCDrums[] = {{.step=0, .tone=kCrash, .octave=0, .
 inline constexpr StyleEvent kVarCBass[] = {{.step=0, .tone=kRoot, .octave=0, .vel=116, .gate=kGate8th}, {.step=4, .tone=kRoot, .octave=1, .vel=96, .gate=kGateHat}, {.step=8, .tone=kFifth, .octave=0, .vel=112, .gate=kGate8th}, {.step=12, .tone=kRoot, .octave=1, .vel=96, .gate=kGateHat}};
 inline constexpr StyleEvent kVarCChord[] = {{.step=0, .tone=kRoot, .octave=0, .vel=110, .gate=kGateHalfBar}, {.step=0, .tone=kFifth, .octave=0, .vel=110, .gate=kGateHalfBar}, {.step=8, .tone=kRoot, .octave=0, .vel=108, .gate=kGateHalfBar}, {.step=8, .tone=kFifth, .octave=0, .vel=108, .gate=kGateHalfBar}};
 inline constexpr StylePattern kVarCPatterns[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarCDrums)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarCBass)}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarCChord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRehit), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRehit), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2HalfBar), .gm_program=kChord2Voice},
     {.role=TrackRole::kArp, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kArp8), .gm_program=kArpVoice}};
 // varD: peak — four-on-the-floor eighth kick, crash, open-hat accents, power+7th stabs.
 inline constexpr StyleEvent kVarDDrums[] = {{.step=0, .tone=kCrash, .octave=0, .vel=118, .gate=kGateBeat}, {.step=0, .tone=kKick, .octave=0, .vel=120, .gate=kGateHat}, {.step=2, .tone=kKick, .octave=0, .vel=100, .gate=kGateHat}, {.step=4, .tone=kKick, .octave=0, .vel=110, .gate=kGateHat}, {.step=6, .tone=kKick, .octave=0, .vel=100, .gate=kGateHat}, {.step=8, .tone=kKick, .octave=0, .vel=116, .gate=kGateHat}, {.step=10, .tone=kKick, .octave=0, .vel=100, .gate=kGateHat}, {.step=12, .tone=kKick, .octave=0, .vel=110, .gate=kGateHat}, {.step=14, .tone=kKick, .octave=0, .vel=100, .gate=kGateHat}, {.step=4, .tone=kSnare, .octave=0, .vel=118, .gate=kGateHat}, {.step=12, .tone=kSnare, .octave=0, .vel=118, .gate=kGateHat}, {.step=2, .tone=kOpenHat, .octave=0, .vel=92, .gate=kGate8th}, {.step=6, .tone=kOpenHat, .octave=0, .vel=92, .gate=kGate8th}, {.step=10, .tone=kOpenHat, .octave=0, .vel=92, .gate=kGate8th}, {.step=14, .tone=kOpenHat, .octave=0, .vel=92, .gate=kGate8th}};
 inline constexpr StyleEvent kVarDBass[] = {{.step=0, .tone=kRoot, .octave=0, .vel=120, .gate=kGate8th}, {.step=2, .tone=kRoot, .octave=1, .vel=100, .gate=kGateHat}, {.step=4, .tone=kFifth, .octave=0, .vel=112, .gate=kGate8th}, {.step=6, .tone=kRoot, .octave=1, .vel=100, .gate=kGateHat}, {.step=8, .tone=kRoot, .octave=0, .vel=116, .gate=kGate8th}, {.step=10, .tone=kSeventh, .octave=0, .vel=100, .gate=kGateHat}, {.step=12, .tone=kFifth, .octave=0, .vel=112, .gate=kGate8th}, {.step=14, .tone=kRoot, .octave=1, .vel=100, .gate=kGateHat}};
-inline constexpr StyleEvent kVarDChord[] = {{.step=0, .tone=kRoot, .octave=0, .vel=114, .gate=kGateBeat}, {.step=0, .tone=kFifth, .octave=0, .vel=114, .gate=kGateBeat}, {.step=0, .tone=kSeventh, .octave=0, .vel=114, .gate=kGateBeat}, {.step=0, .tone=kRoot, .octave=1, .vel=114, .gate=kGateBeat}, {.step=8, .tone=kRoot, .octave=0, .vel=112, .gate=kGateBeat}, {.step=8, .tone=kFifth, .octave=0, .vel=112, .gate=kGateBeat}, {.step=8, .tone=kSeventh, .octave=0, .vel=112, .gate=kGateBeat}, {.step=8, .tone=kRoot, .octave=1, .vel=112, .gate=kGateBeat}, {.step=12, .tone=kRoot, .octave=0, .vel=108, .gate=kGateStab}, {.step=12, .tone=kFifth, .octave=0, .vel=108, .gate=kGateStab}, {.step=12, .tone=kSeventh, .octave=0, .vel=108, .gate=kGateStab}};
+inline constexpr StyleEvent kVarDChord[] = {{.step=0, .tone=kRoot, .octave=0, .vel=114, .gate=kGateBeat, .gesture=ChordGesture::kStrumDown}, {.step=8, .tone=kRoot, .octave=0, .vel=112, .gate=kGateBeat, .gesture=ChordGesture::kStrumDown}, {.step=12, .tone=kRoot, .octave=0, .vel=108, .gate=kGateStab, .gesture=ChordGesture::kStrumDown}};
 inline constexpr StylePattern kVarDPatterns[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarDDrums)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarDBass)}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarDChord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRehit), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRehit), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2Off), .gm_program=kChord2Voice},
     {.role=TrackRole::kArp, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kArp8), .gm_program=kArpVoice},
+    {.role=TrackRole::kLead, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kLeadLick), .gm_program=kLeadVoice},
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercCowbell)}};
+
+// varBreak: the rock stop — one accented downbeat (kick+crash, a bass pop, a
+// power-chord stab held as a literal synchronized block), then wide silence,
+// then a snare/tom pickup on beat 4 that throws the groove back in.
+inline constexpr StyleEvent kBrkD[] = {
+    {.step=0, .tone=kKick, .octave=0, .vel=120, .gate=kGateHat}, {.step=0, .tone=kCrash, .octave=0, .vel=116, .gate=kGateStab},
+    {.step=12, .tone=kSnare, .octave=0, .vel=104, .gate=100}, {.step=13, .tone=kSnare, .octave=0, .vel=110, .gate=100}, {.step=14, .tone=kTomMid, .octave=0, .vel=114, .gate=100}, {.step=15, .tone=kTomLow, .octave=0, .vel=118, .gate=100},
+};
+inline constexpr StyleEvent kBrkB[] = {{.step=0, .tone=kRoot, .octave=0, .vel=118, .gate=kGateStab}};
+inline constexpr StyleEvent kBrkC[] = {
+    {.step=0, .tone=kRoot, .octave=0, .vel=112, .gate=kGateStab}, {.step=0, .tone=kFifth, .octave=0, .vel=112, .gate=kGateStab}, {.step=0, .tone=kRoot, .octave=1, .vel=112, .gate=kGateStab},
+};
+inline constexpr StylePattern kBrkP[] = {
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kBrkD)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kBrkB)},
+    {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kBrkC)},
+};
 
 inline constexpr StyleSection kSections[] = {
     {.type=SectionType::kIntro1, .bars=1, .patterns=Span<const StylePattern>(kIntroPatterns)},
@@ -244,6 +276,7 @@ inline constexpr StyleSection kSections[] = {
     {.type=SectionType::kFillB, .bars=1, .patterns=Span<const StylePattern>(kFillBPatterns)},
     {.type=SectionType::kFillC, .bars=1, .patterns=Span<const StylePattern>(kFillCPatterns)},
     {.type=SectionType::kFillD, .bars=1, .patterns=Span<const StylePattern>(kFillDPatterns)},
+    {.type=SectionType::kBreak, .bars=1, .patterns=Span<const StylePattern>(kBrkP)},
     {.type=SectionType::kEnding1, .bars=1, .patterns=Span<const StylePattern>(kEndPatterns)},
     {.type=SectionType::kEnding2, .bars=1, .patterns=Span<const StylePattern>(kEnd2Patterns)},
 };
