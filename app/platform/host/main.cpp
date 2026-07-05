@@ -26,6 +26,7 @@
 #include "kitty_keys.hpp"
 #include "rc_config.hpp"
 #include "shell.hpp"
+#include "uds_server.hpp"
 
 namespace {
 
@@ -164,7 +165,7 @@ std::string status_line(const Shell& shell) {
   return buf;
 }
 
-int run_live(bool human, const char* init_path, const char* motd_path) {
+int run_live(bool human, const char* init_path, const char* motd_path, const char* control_path) {
   AlsaMidi alsa;
   std::string error;
   if (!alsa.open("arrangrr", error)) {
@@ -176,6 +177,18 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
   Console console;
   const bool tui = console.init();
   LineEditor editor;
+
+  // D38 GUI transport: opt-in only (--control PATH). run_script() never
+  // constructs this, so the adapter is impossible to reach in script/golden
+  // mode regardless of what flags are passed.
+  UdsServer control;
+  if (control_path != nullptr) {
+    if (control.start(control_path)) {
+      std::printf("control socket: %s\n", control_path);
+    } else {
+      std::fprintf(stderr, "control socket disabled (see error above)\n");
+    }
+  }
 
   Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
@@ -189,8 +202,24 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     } else {
       std::puts(line.c_str());
     }
+    // GUI clients always get the canonical JSONL wire format (the same one
+    // the golden harness diffs), independent of --events human/jsonl, since
+    // a control-plane client parses JSON, never the human one-liner.
+    if (control.enabled()) {
+      control.broadcast(to_jsonl(ev, flats));
+    }
   });
   shell_ref = &shell;
+  // Inbound: a control-plane line is the SAME L1 grammar the REPL accepts.
+  // A parse error is reported back to the originating client only — it never
+  // touches stdout/the panels, mirroring how a REPL syntax error stays local
+  // to that terminal.
+  control.set_line_handler([&](int client_fd, const std::string& line) {
+    std::string cmd_error;
+    if (!shell.exec_line(line, cmd_error)) {
+      control.send_error(client_fd, cmd_error, line);
+    }
+  });
   shell.set_panel_hook([&](const std::vector<std::string>& lines) {
     if (!tui) {
       return false;  // plain mode prints help inline as before
@@ -542,8 +571,14 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     feed_tui_byte(static_cast<std::uint8_t>(kitty_leftover[i]));
   }
 
+  // Fixed slots (stdin, the tick timer) + ALSA's descriptors + the control
+  // adapter's listen socket and however many GUI clients are connected. A
+  // handful of control clients is the entire expected load, so this is
+  // generous headroom rather than a real limit.
+  constexpr int kMaxPollFds = 64;
+
   while (running && !shell.quit_requested()) {
-    struct pollfd fds[16];
+    struct pollfd fds[kMaxPollFds];
     int n = 0;
     fds[n].fd = STDIN_FILENO;
     fds[n].events = POLLIN;
@@ -551,7 +586,29 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     fds[n].fd = tfd;
     fds[n].events = POLLIN;
     ++n;
-    n += alsa.fill_poll_fds(&fds[n], 16 - n);
+    n += alsa.fill_poll_fds(&fds[n], kMaxPollFds - n);
+
+    // Control adapter (D38): the listen socket first, then every currently
+    // connected client. control_start stays -1 when the adapter is off, so
+    // the handling block below is a no-op — script mode never reaches any of
+    // this because it never constructs a UdsServer at all.
+    int control_start = -1;
+    int control_client_count = 0;
+    if (control.enabled()) {
+      control_start = n;
+      fds[n].fd = control.listen_fd();
+      fds[n].events = POLLIN;
+      ++n;
+      for (const int cfd : control.client_fds()) {
+        if (n >= kMaxPollFds) {
+          break;  // defensive: more clients than the array can hold
+        }
+        fds[n].fd = cfd;
+        fds[n].events = POLLIN;
+        ++n;
+        ++control_client_count;
+      }
+    }
 
     if (poll(fds, static_cast<nfds_t>(n), 100) < 0) {
       break;
@@ -575,6 +632,22 @@ int run_live(bool human, const char* init_path, const char* motd_path) {
     alsa.drain_input([&](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
       shell.feed_midi(port, Span<const std::uint8_t>(bytes, len));
     });
+
+    // Control adapter (D38): new connections, then bytes from each existing
+    // client. Each complete line lands in the line handler wired above,
+    // which drives it through the exact same shell.exec_line() the REPL
+    // uses.
+    if (control_start >= 0) {
+      if (fds[control_start].revents & POLLIN) {
+        control.handle_listen_readable();
+      }
+      for (int i = 0; i < control_client_count; ++i) {
+        const int idx = control_start + 1 + i;
+        if (fds[idx].revents & (POLLIN | POLLHUP | POLLERR)) {
+          control.handle_client_readable(fds[idx].fd);
+        }
+      }
+    }
 
     // REPL input. Raw read(2), never iostream: cin's stdio-synced buffer
     // hides pending lines from both poll() and in_avail(), stranding every
@@ -676,6 +749,7 @@ int main(int argc, char** argv) {
   const char* script = nullptr;
   const char* init = nullptr;
   const char* motd = nullptr;
+  const char* control = nullptr;
   bool human = false;
   bool events_set = false;
   for (int i = 1; i < argc; ++i) {
@@ -685,13 +759,15 @@ int main(int argc, char** argv) {
       init = argv[++i];
     } else if (std::strcmp(argv[i], "--motd") == 0 && i + 1 < argc) {
       motd = argv[++i];
+    } else if (std::strcmp(argv[i], "--control") == 0 && i + 1 < argc) {
+      control = argv[++i];
     } else if (std::strcmp(argv[i], "--events") == 0 && i + 1 < argc) {
       human = std::strcmp(argv[++i], "human") == 0;
       events_set = true;
     } else if (std::strcmp(argv[i], "--help") == 0) {
       std::printf(
           "usage: arrangrr [--script FILE|-] [--init FILE] [--motd FILE] "
-          "[--events jsonl|human]\n");
+          "[--events jsonl|human] [--control PATH]\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -700,7 +776,9 @@ int main(int argc, char** argv) {
   }
   // Script mode defaults to canonical JSONL (golden format); live to human.
   if (script) {
+    // --control is a live-only feature (D38): the golden-test driver never
+    // sees it, by construction — run_script() has no such parameter at all.
     return run_script(script, human);
   }
-  return run_live(events_set ? human : true, init, motd);
+  return run_live(events_set ? human : true, init, motd, control);
 }
