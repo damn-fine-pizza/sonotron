@@ -1,3 +1,5 @@
+#include <initializer_list>
+
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/theory.hpp"
 
@@ -45,6 +47,95 @@ void test_theory_minor_harmonic_v() {
   using theory::smart_quality;
   CHECK(smart_quality(Mode::kMinor, 4) == ChordQuality::kDom7);   // harmonic exception
   CHECK(smart_quality(Mode::kDorian, 4) == ChordQuality::kMin7);  // other modes: pure stack
+}
+
+// shape_of returns the chord tones for every explicit quality (runtime call so
+// each switch arm is covered, not just the compile-time self-tests).
+void test_theory_shape_of_all_qualities() {
+  using theory::shape_of;
+  const ChordShape maj = shape_of(ChordQuality::kMaj);
+  CHECK(maj.count == 3 && maj.offsets[0] == 0 && maj.offsets[1] == 4 && maj.offsets[2] == 7);
+  const ChordShape min = shape_of(ChordQuality::kMin);
+  CHECK(min.count == 3 && min.offsets[1] == 3 && min.offsets[2] == 7);
+  const ChordShape dim = shape_of(ChordQuality::kDim);
+  CHECK(dim.count == 3 && dim.offsets[1] == 3 && dim.offsets[2] == 6);
+  const ChordShape aug = shape_of(ChordQuality::kAug);
+  CHECK(aug.count == 3 && aug.offsets[1] == 4 && aug.offsets[2] == 8);
+  const ChordShape maj7 = shape_of(ChordQuality::kMaj7);
+  CHECK(maj7.count == 4 && maj7.offsets[3] == 11);
+  const ChordShape min7 = shape_of(ChordQuality::kMin7);
+  CHECK(min7.count == 4 && min7.offsets[1] == 3 && min7.offsets[3] == 10);
+  const ChordShape dom7 = shape_of(ChordQuality::kDom7);
+  CHECK(dom7.count == 4 && dom7.offsets[1] == 4 && dom7.offsets[3] == 10);
+  const ChordShape hd7 = shape_of(ChordQuality::kHalfDim7);
+  CHECK(hd7.count == 4 && hd7.offsets[2] == 6 && hd7.offsets[3] == 10);
+  const ChordShape dim7 = shape_of(ChordQuality::kDim7);
+  CHECK(dim7.count == 4 && dim7.offsets[2] == 6 && dim7.offsets[3] == 9);
+  const ChordShape sus2 = shape_of(ChordQuality::kSus2);
+  CHECK(sus2.count == 3 && sus2.offsets[1] == 2 && sus2.offsets[2] == 7);
+  const ChordShape sus4 = shape_of(ChordQuality::kSus4);
+  CHECK(sus4.count == 3 && sus4.offsets[1] == 5 && sus4.offsets[2] == 7);
+}
+
+// degree_to_semitones with floor division: positive degrees wrap up an octave
+// every 7 steps, negative degrees wrap down (the index<0 correction branch).
+void test_theory_degree_to_semitones_runtime() {
+  using theory::degree_to_semitones;
+  CHECK(degree_to_semitones(Mode::kMajor, 0) == 0);
+  CHECK(degree_to_semitones(Mode::kMajor, 4) == 7);
+  CHECK(degree_to_semitones(Mode::kMajor, 7) == 12);   // tonic, octave up
+  CHECK(degree_to_semitones(Mode::kMajor, 8) == 14);
+  CHECK(degree_to_semitones(Mode::kMajor, -1) == -1);  // leading tone below tonic
+  CHECK(degree_to_semitones(Mode::kMajor, -7) == -12);
+  CHECK(degree_to_semitones(Mode::kMajor, -8) == -13);
+  CHECK(degree_to_semitones(Mode::kMinor, 2) == 3);
+  CHECK(degree_to_semitones(Mode::kMinor, -1) == -2);
+}
+
+// complete_shell decision tree: drive every branch with an interval set that
+// selects exactly that arm (runtime call for coverage).
+void test_theory_complete_shell_all_branches() {
+  using theory::complete_shell;
+  auto q = [](std::initializer_list<std::uint8_t> ivs) {
+    std::uint8_t iv[3] = {0, 0, 0};
+    std::uint8_t n = 0;
+    for (std::uint8_t v : ivs) {
+      iv[n++] = v;
+    }
+    return complete_shell(iv, n);
+  };
+  CHECK(q({3, 6, 10}) == ChordQuality::kHalfDim7);  // min3 && dim5 && min7
+  CHECK(q({3, 6}) == ChordQuality::kDim);           // min3 && dim5, no 7
+  CHECK(q({4, 8}) == ChordQuality::kAug);           // maj3 && aug5
+  CHECK(q({3, 10}) == ChordQuality::kMin7);         // min7 with min3
+  CHECK(q({4, 10}) == ChordQuality::kDom7);         // min7 with maj3 -> dominant
+  CHECK(q({10}) == ChordQuality::kDom7);            // bare min7 -> dominant
+  CHECK(q({4, 11}) == ChordQuality::kMaj7);         // maj7 present
+  CHECK(q({11}) == ChordQuality::kMaj7);            // bare maj7
+  CHECK(q({3}) == ChordQuality::kMin);              // just a minor third
+  CHECK(q({4}) == ChordQuality::kMaj);              // just a major third
+  CHECK(q({5}) == ChordQuality::kSus4);             // suspended fourth
+  CHECK(q({2}) == ChordQuality::kSus2);             // suspended second
+  CHECK(q({7}) == ChordQuality::kMaj);              // bare fifth -> major (default arm)
+  CHECK(q({}) == ChordQuality::kMaj);               // bare root -> major
+}
+
+// complete_shell_full folds in the diminished-seventh (bb7) case, otherwise
+// delegates to complete_shell.
+void test_theory_complete_shell_full() {
+  using theory::complete_shell_full;
+  auto q = [](std::initializer_list<std::uint8_t> ivs) {
+    std::uint8_t iv[3] = {0, 0, 0};
+    std::uint8_t n = 0;
+    for (std::uint8_t v : ivs) {
+      iv[n++] = v;
+    }
+    return complete_shell_full(iv, n);
+  };
+  CHECK(q({3, 6, 9}) == ChordQuality::kDim7);       // min3 && dim5 && bb7 -> dim7
+  CHECK(q({3, 6, 10}) == ChordQuality::kHalfDim7);  // no bb7 -> delegate
+  CHECK(q({4}) == ChordQuality::kMaj);              // delegate, plain major
+  CHECK(q({9}) == ChordQuality::kMaj);              // bb7 alone (no min3/dim5) -> delegate
 }
 
 using Events = StaticVector<OutEvent, 64>;
@@ -266,6 +357,10 @@ int main() {
   test_theory_scales_and_degrees();
   test_theory_smart_qualities_all_degrees_major();
   test_theory_minor_harmonic_v();
+  test_theory_shape_of_all_qualities();
+  test_theory_degree_to_semitones_runtime();
+  test_theory_complete_shell_all_branches();
+  test_theory_complete_shell_full();
   test_play_d_in_c_major_is_dm7();
   test_chord_change_releases_previous_first();
   test_chord_stop_and_out_of_key();

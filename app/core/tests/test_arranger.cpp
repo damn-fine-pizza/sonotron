@@ -169,11 +169,15 @@ void test_groove_apply() {
   p.swing_grid = 16;
   CHECK(groove::apply(p, 0, 1, 0, 100).timing_offset > 0);
 
-  // Accent lifts beat 1, softens beat 2.
+  // Accent lifts beat 1 most, beat 3 (step 8) a little, and softens beats 2/4.
   p = GrooveParams{};
   p.accent = 100;
-  CHECK(groove::apply(p, 0, 0, 0, 80).velocity > 80);
-  CHECK(groove::apply(p, 0, 4, 0, 80).velocity < 80);
+  const std::uint8_t beat1 = groove::apply(p, 0, 0, 0, 80).velocity;
+  const std::uint8_t beat3 = groove::apply(p, 0, 8, 0, 80).velocity;
+  CHECK(beat1 > 80);
+  CHECK(beat3 > 80 && beat3 < beat1);  // beat 3 lifted, but less than beat 1
+  CHECK(groove::apply(p, 0, 4, 0, 80).velocity < 80);   // beat 2 softened
+  CHECK(groove::apply(p, 0, 12, 0, 80).velocity < 80);  // beat 4 softened
 
   // Humanize is deterministic: same seed+position => identical result.
   p = GrooveParams{};
@@ -200,6 +204,30 @@ void test_groove_command() {
   b.cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kAccent), 200, 0, Op::kSet);
   CHECK(b.e.arranger().groove_params().accent == 100);  // clamped
   b.cmd(Param::kGroove, 99, 10, 0, Op::kSet);           // bad field -> warn, no change
+}
+
+// groove::set_field drives every GrooveField arm and clamps each value.
+void test_groove_set_field_all() {
+  GrooveParams p;
+  groove::set_field(p, GrooveField::kSwing, 40);
+  CHECK(p.swing == 40);
+  groove::set_field(p, GrooveField::kSwing, -5);  // clamp low
+  CHECK(p.swing == 0);
+  groove::set_field(p, GrooveField::kHumanizeTiming, 200);  // clamp high
+  CHECK(p.humanize_timing == 100);
+  groove::set_field(p, GrooveField::kHumanizeVelocity, 55);
+  CHECK(p.humanize_velocity == 55);
+  groove::set_field(p, GrooveField::kAccent, 30);
+  CHECK(p.accent == 30);
+  // Swing grid only accepts 16, anything else snaps to 8.
+  groove::set_field(p, GrooveField::kSwingGrid, 16);
+  CHECK(p.swing_grid == 16);
+  groove::set_field(p, GrooveField::kSwingGrid, 4);  // not 16 -> 8
+  CHECK(p.swing_grid == 8);
+  groove::set_field(p, GrooveField::kSeed, 777);
+  CHECK(p.seed == 777u);
+  groove::set_field(p, GrooveField::kSeed, -3);  // negative -> 0
+  CHECK(p.seed == 0u);
 }
 
 void test_part_mute_solo() {
@@ -606,6 +634,7 @@ int main() {
   test_role_anchor_and_gm_voices();
   test_groove_apply();
   test_groove_command();
+  test_groove_set_field_all();
   test_part_mute_solo();
   test_quantized_variation_switch();
   test_fill_one_shot_returns_to_variation();

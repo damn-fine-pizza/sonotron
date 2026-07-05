@@ -243,10 +243,84 @@ void test_warn_on_unknown_command() {
   CHECK(ev[0].code == static_cast<std::uint16_t>(WarnCode::kUnknownCommand));
 }
 
+// Out-of-range ports on the arp setters are rejected (guard false branches):
+// the arp keeps its valid output route and input port, and a captured note-off
+// on the arp input port exercises observe_arp_input's release path.
+void test_engine_arp_setter_guards() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+
+  e.set_arp_out(1, 5);          // valid route: port 1, channel 5
+  e.set_arp_enabled(true, 0);   // listen on input port 0
+  CHECK(e.arp_enabled());
+  e.set_arp_out(99, 99);        // out of range: must NOT clobber port 1 / ch 5
+  e.set_arp_enabled(true, 99);  // in_port out of range: input port stays 0
+
+  e.arp().set_field(ArpField::kRate, static_cast<std::int32_t>(ArpRate::kEighth));
+
+  Command start;
+  start.param = Param::kTransportStart;
+  e.push_command(start, sink);
+
+  const std::uint8_t on1[3] = {0x90, 60, 100};
+  const std::uint8_t on2[3] = {0x90, 64, 100};
+  const std::uint8_t off1[3] = {0x80, 64, 0};  // release: observe_arp_input note_off path
+  e.push_midi_in(0, Span<const std::uint8_t>(on1, 3), sink);
+  e.push_midi_in(0, Span<const std::uint8_t>(on2, 3), sink);
+  e.push_midi_in(0, Span<const std::uint8_t>(off1, 3), sink);
+  ev.clear();
+  e.advance_ticks(480 * 2, sink);
+
+  int arp_ons = 0;
+  for (const OutEvent& o : ev) {
+    if (o.kind == OutEvent::Kind::kMidi && o.msg.type() == midi::kNoteOn && o.msg.d2 > 0) {
+      ++arp_ons;
+      CHECK(o.port == 1 && o.msg.channel() == 5);  // route survived the bad set_arp_out
+    }
+  }
+  CHECK(arp_ons > 0);
+}
+
+// set_chord_detect with an out-of-range port keeps the default detect port, and
+// a non-note message on the detect port leaves the recognized chord untouched
+// (observe_chord_input's else-return branch).
+void test_engine_chord_detect_guard_and_nonnote() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+
+  e.set_chord_detect(true, 99);  // out of range: detect port stays 0
+  CHECK(e.chord_detect());
+
+  auto feed = [&](std::uint8_t s, std::uint8_t d1, std::uint8_t d2) {
+    const std::uint8_t b[3] = {s, d1, d2};
+    e.push_midi_in(0, Span<const std::uint8_t>(b, 3), sink);
+  };
+  feed(0x90, 60, 100);  // C E G on port 0 -> C major recognized
+  feed(0x90, 64, 100);
+  feed(0x90, 67, 100);
+  CHECK(e.chords().state().valid);
+  CHECK(e.chords().state().root_pc == 0);
+  CHECK(e.chords().state().quality == ChordQuality::kMaj);
+
+  // A CC on the detect port is a non-note message: the chord must not change.
+  feed(0xB0, 7, 100);
+  CHECK(e.chords().state().root_pc == 0 && e.chords().state().quality == ChordQuality::kMaj);
+
+  // Toggling detection off then on again clears the held set (enable branch).
+  e.set_chord_detect(false, 0);
+  CHECK(!e.chord_detect());
+  e.set_chord_detect(true, 0);
+  CHECK(e.chord_detect());
+}
+
 }  // namespace
 
 int main() {
   test_thru_note_in_note_out();
+  test_engine_arp_setter_guards();
+  test_engine_chord_detect_guard_and_nonnote();
   test_scheduled_events_fire_on_advance();
   test_events_fire_with_stopped_transport();
   test_transport_clock_emission();
