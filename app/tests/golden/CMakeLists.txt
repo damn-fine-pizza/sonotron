@@ -9,6 +9,9 @@ function(arrangrr_golden name)
       -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/${name}.golden
       -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.out
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_golden.cmake)
+  # Golden scripts drive the CLI binary end-to-end (clock -> engine -> JSONL):
+  # cross-module behaviour, hence `functional` in the three-metric split.
+  set_tests_properties(golden_${name} PROPERTIES LABELS functional)
 endfunction()
 
 arrangrr_golden(routing_panic)
