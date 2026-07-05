@@ -16,6 +16,8 @@ bool Shell::styles_focused() const {
          m_panels.focused_panel() == PanelId::kStyles;
 }
 
+bool Shell::repl_focused() const { return m_panels.focus_kind() == PanelFocus::kRepl; }
+
 void Shell::focus_styles() {
   // Backtick shortcut: focus the styles panel (opens it) and seed the chooser
   // from the arranger. push_panels seeds on the repl->panel focus edge.

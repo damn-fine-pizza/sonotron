@@ -186,12 +186,13 @@ void PanelManager::focus_repl() {
 }
 
 void PanelManager::focus_next() {
-  const std::vector<PanelId> vis = visible_order();
+  const std::vector<PanelId> vis = nav_order();
   if (vis.empty()) {
     focus_repl();
     return;
   }
-  // Cycle repl -> first visible -> ... -> last visible -> repl.
+  // Cycle repl -> top panel -> ... -> bottom panel -> repl (infinite, matching
+  // the on-screen order so Tab moves DOWN the screen through the numbers 1..N).
   if (m_focus != PanelFocus::kPanel) {
     m_focus = PanelFocus::kPanel;
     m_focused = vis.front();
@@ -211,12 +212,13 @@ void PanelManager::focus_next() {
 }
 
 void PanelManager::focus_prev() {
-  const std::vector<PanelId> vis = visible_order();
+  const std::vector<PanelId> vis = nav_order();
   if (vis.empty()) {
     focus_repl();
     return;
   }
-  // Reverse cycle: repl -> last visible -> ... -> first visible -> repl.
+  // Exact reverse of focus_next: repl -> bottom panel -> ... -> top panel ->
+  // repl (also infinite, so Shift+Tab is symmetric with Tab).
   if (m_focus != PanelFocus::kPanel) {
     m_focus = PanelFocus::kPanel;
     m_focused = vis.back();
@@ -236,7 +238,7 @@ void PanelManager::focus_prev() {
 }
 
 bool PanelManager::focus_number(int n) {
-  const std::vector<PanelId> vis = visible_order();
+  const std::vector<PanelId> vis = nav_order();  // numbers count top-to-bottom
   if (n < 1 || n > static_cast<int>(vis.size())) {
     return false;
   }
@@ -308,8 +310,17 @@ std::vector<PanelId> PanelManager::visible_order() const {
   return vis;
 }
 
+// The on-screen top-to-bottom order: m_order is the bottom-to-top grid order and
+// the render draws it bottom-up (grid.rbegin()), so the visual order — the one a
+// user reads and the one panel numbers / Tab focus must follow — is its reverse.
+std::vector<PanelId> PanelManager::nav_order() const {
+  std::vector<PanelId> v = visible_order();
+  std::reverse(v.begin(), v.end());
+  return v;
+}
+
 int PanelManager::panel_number(PanelId id) const {
-  const std::vector<PanelId> vis = visible_order();
+  const std::vector<PanelId> vis = nav_order();  // #1 = top panel, #N = bottom
   for (std::size_t i = 0; i < vis.size(); ++i) {
     if (vis[i] == id) {
       return static_cast<int>(i) + 1;

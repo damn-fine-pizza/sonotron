@@ -156,6 +156,10 @@ class Shell {
   void groove_adjust(int delta);
   bool groove_key(std::uint8_t byte);
 
+  // True when focus is on the command line (repl) rather than a panel — the host
+  // highlights the input box in that state so "you can type here" is visible.
+  bool repl_focused() const;
+
   // The `arp` panel: focus gate + key handling (arrow up/down select, left/right
   // adjust a parameter via kArp commands).
   bool arp_panel_focused() const;

@@ -127,23 +127,6 @@ void Shell::refresh_piano_content() {
                                                            m_view_options, m_style));
 }
 
-void Shell::refresh_styles_content() {
-  // The styles panel IS the chooser: current style/section (bold+colour on the
-  // selection) plus a live `key:` line read from the chord engine. The key line
-  // sits just above the (least-important) hint line so it survives a short cell.
-  std::vector<std::string> lines = m_chooser.render(m_piano.note_naming, m_style);
-  const Key& key = m_engine.chords().key();
-  const NoteNameOptions opts{
-      .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
-  std::string key_line = "key: " + pitch_class_name(key.root_pc, opts) + " " + mode_label(key.mode);
-  if (lines.empty()) {
-    lines.push_back(std::move(key_line));
-  } else {
-    lines.insert(lines.end() - 1, std::move(key_line));  // before the hint line
-  }
-  m_panels.set_content(PanelId::kStyles, std::move(lines));
-}
-
 namespace {
 // Jazz/lead-sheet suffix for a chord quality ("" = plain major, so root only).
 const char* chord_quality_suffix(ChordQuality q) {
@@ -162,7 +145,31 @@ const char* chord_quality_suffix(ChordQuality q) {
   }
   return "";
 }
+// The live chord the band is following ("—" when none is latched yet). This is
+// the thing that RESPONDS to played keys, distinct from the static key/tonality.
+std::string live_chord_label(const ChordState& chord, const NoteNameOptions& opts) {
+  return chord.valid ? pitch_class_name(chord.root_pc, opts) + chord_quality_suffix(chord.quality)
+                     : std::string("—");
+}
 }  // namespace
+
+void Shell::refresh_styles_content() {
+  // The styles panel IS the chooser: current style/section (bold+colour on the
+  // selection) plus two lines read from the chord engine — the static `key:`
+  // (tonality/frame) AND the live `chord:` the band is harmonizing against, so
+  // the thing that reacts to played keys is visible right where you drive the
+  // band (it is a different thing from the key, the #1 source of confusion).
+  std::vector<std::string> lines = m_chooser.render(m_piano.note_naming, m_style);
+  const Key& key = m_engine.chords().key();
+  const ChordState& chord = m_engine.chords().state();
+  const NoteNameOptions opts{
+      .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
+  std::string key_line = "key: " + pitch_class_name(key.root_pc, opts) + " " + mode_label(key.mode);
+  std::string chord_line = "chord: " + live_chord_label(chord, opts);
+  const auto insert_at = lines.empty() ? lines.end() : lines.end() - 1;  // before the hint line
+  lines.insert(insert_at, {key_line, chord_line});
+  m_panels.set_content(PanelId::kStyles, std::move(lines));
+}
 
 void Shell::refresh_parts_content() {
   const int cols = m_panels.cell_width(PanelId::kParts, panel_columns());
@@ -193,13 +200,31 @@ void Shell::refresh_chords_content() {
   // name lingers after the keys are released, until a new chord is played.
   const ChordState& chord = m_engine.chords().state();
   const bool detect = m_engine.chord_detect();
+  const ChordMode mode = m_engine.chords().mode();
+  const int need = m_engine.chord_min_notes();
+  const int held = m_engine.chord_held_count();
   const NoteNameOptions opts{
       .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
   std::vector<std::string> lines;
-  lines.push_back(std::string("detect: ") + (detect ? "on " : "off") + "  (chord detect on|off)");
-  lines.push_back(chord.valid ? "chord: " + pitch_class_name(chord.root_pc, opts) +
-                                    chord_quality_suffix(chord.quality)
-                              : "chord: (no chord)");
+  // detect: say plainly whether played keys steer the band, and how to toggle it.
+  lines.push_back(detect ? std::string("detect: on   (chord detect off)")
+                         : std::string("detect: off — keys don't steer (chord detect on)"));
+  // mode: single-finger needs one key; the fingered modes need a full triad.
+  const char* mode_name = mode == ChordMode::kSingle ? "single-finger"
+                          : mode == ChordMode::kShell ? "shell"
+                                                      : "diatonic";
+  lines.push_back(std::string("mode: ") + mode_name + "   (chord mode)");
+  // chord: the live chord, or — while detecting — how many more keys are needed
+  // (so a lone note that does nothing yet reads as "waiting", not "broken").
+  if (chord.valid) {
+    lines.push_back("chord: " + pitch_class_name(chord.root_pc, opts) +
+                    chord_quality_suffix(chord.quality));
+  } else if (detect && held > 0) {
+    lines.push_back("chord: (hold " + std::to_string(need) + " — " + std::to_string(held) +
+                    " held)");
+  } else {
+    lines.push_back(std::string("chord: (no chord)"));
+  }
   m_panels.set_content(PanelId::kChords, std::move(lines));
 }
 

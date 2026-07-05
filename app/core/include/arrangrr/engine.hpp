@@ -110,6 +110,10 @@ class Engine {
     m_chord_detect = enabled;
   }
   constexpr bool chord_detect() const noexcept { return m_chord_detect; }
+  // Live piano->chord detector state, for host display (how many keys are held
+  // and how many are needed before a chord is named — fingered 3 vs single 1).
+  constexpr std::uint8_t chord_held_count() const noexcept { return m_detector.held_count(); }
+  constexpr std::uint8_t chord_min_notes() const noexcept { return m_detector.min_notes(); }
 
   // Applies one binary command (D26). Sink receives any resulting events.
   // Implemented in engine.cpp as per-domain handlers: the dispatch stays a

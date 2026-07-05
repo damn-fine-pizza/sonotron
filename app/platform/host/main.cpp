@@ -225,7 +225,7 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
       return false;  // plain mode prints help inline as before
     }
     console.set_panel(lines);
-    console.render_input(editor);
+    console.render_input(editor, shell.repl_focused());
     return true;
   });
   if (tui) {
@@ -343,7 +343,7 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
     // Seed the status bar up front so it reflects the (stopped) transport even
     // if a fast-piped session quits before the loop's first throttled refresh.
     console.set_status(status_line(shell));
-    console.render_input(editor);
+    console.render_input(editor, shell.repl_focused());
   }
 
   std::string stdin_acc;  // partial-line accumulator (flat mode)
@@ -457,8 +457,11 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
   auto finish_csi = [&](std::uint8_t final_byte) {
     if (final_byte == 'u') {
       dispatch_kitty(std::string_view(esc).substr(2, esc.size() - 3));
-    } else if (final_byte == 'Z' && esc.size() == kBareCsiSize) {
-      shell.focus_prev();  // SHIFT+TAB (CSI Z): reverse focus cycle
+    } else if (final_byte == 'Z') {
+      // SHIFT+TAB: reverse focus cycle. A CSI ending in 'Z' is always backtab,
+      // whether bare (ESC [ Z) or modified (ESC [ 1 ; 2 Z) — accept both, or
+      // terminals that send the modified form drop out of the reverse cycle.
+      shell.focus_prev();
     } else if (shell.styles_focused() && is_bare_arrow(final_byte)) {
       // up/down move the style highlight; left/right the section highlight.
       switch (final_byte) {
@@ -668,7 +671,7 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
         for (ssize_t i = 0; i < got && running; ++i) {
           feed_tui_byte(static_cast<std::uint8_t>(buf[i]));
         }
-        console.render_input(editor);
+        console.render_input(editor, shell.repl_focused());
       } else {
         stdin_acc.append(buf, static_cast<std::size_t>(got));
         std::size_t nl;
@@ -731,7 +734,7 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
         last_status_us = now_us;
         shell.refresh_panels();
         console.set_status(status_line(shell));
-        console.render_input(editor);
+        console.render_input(editor, shell.repl_focused());
       }
     }
   }

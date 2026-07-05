@@ -259,7 +259,7 @@ void Console::set_status(const std::string& text) {
   paint_status();
 }
 
-void Console::render_input(const LineEditor& ed) {
+void Console::render_input(const LineEditor& ed, bool focused) {
   if (!m_active) {
     return;
   }
@@ -267,7 +267,11 @@ void Console::render_input(const LineEditor& ed) {
   char buf[32];
   std::snprintf(buf, sizeof(buf), "\x1b[%d;1H\x1b[2K", input_row());
   out += buf;
+  // The prompt lights up (bold) when the command line has focus, and dims when a
+  // panel does — so you can tell at a glance whether typing lands here.
+  out += focused ? "\x1b[1m" : "\x1b[2m";
   out += kPrompt;
+  out += "\x1b[0m";
   out += ed.buffer();
   const std::size_t col = std::string(kPrompt).size() + ed.cursor() + 1;
   std::snprintf(buf, sizeof(buf), "\x1b[%d;%zuH", input_row(), col);

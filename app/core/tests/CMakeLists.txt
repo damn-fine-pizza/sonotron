@@ -23,6 +23,9 @@ target_link_libraries(test_host PRIVATE arrangrr_host)
 arrangrr_test(test_panels)
 target_link_libraries(test_panels PRIVATE arrangrr_host)
 
+arrangrr_test(test_panel_nav)
+target_link_libraries(test_panel_nav PRIVATE arrangrr_host)
+
 arrangrr_test(test_style_chooser)
 target_link_libraries(test_style_chooser PRIVATE arrangrr_host)
 
