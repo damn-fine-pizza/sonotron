@@ -28,19 +28,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# DEPENDENCY DISCIPLINE: reuse the existing gcovr mechanism only (gcovr, else
-# uvx gcovr). Do NOT add a pinned gcovr / new test framework here. Per-category
-# numbers would be more reproducible against a PINNED gcovr (8.x line/branch
-# accounting has shifted across releases); that is an OWNER decision under the
-# host-dep policy — flagged, not taken here.
-GCOVR=(gcovr)
-if ! command -v gcovr >/dev/null 2>&1; then
-  if command -v uvx >/dev/null 2>&1; then
-    GCOVR=(uvx gcovr)
-  else
-    echo "gcovr not found: install it (dnf install gcovr) or install uv" >&2
-    exit 2
-  fi
+# gcovr is PINNED to 8.6 (owner decision under the host-dep policy). Rationale:
+# gcovr's 8.x line/branch accounting has shifted across point-releases and the
+# branch gate runs only ~18 branches above the 80% floor, so an unpinned gcovr
+# could move the gate silently on an upstream release. `uvx gcovr==8.6` fixes
+# the version deterministically with no local install. Coverage/instrumentation
+# is HOST-ONLY and never touches the arm cross-build.
+GCOVR=(uvx gcovr==8.6)
+if ! command -v uvx >/dev/null 2>&1; then
+  echo "uvx not found: install uv (coverage pins gcovr==8.6 via uvx)" >&2
+  exit 2
 fi
 
 # Full clean: stale .gcno/.gcda from previous source layouts confuse gcovr's
