@@ -11,6 +11,7 @@ add_library(arrstyle_lib STATIC
   src/smf.cpp
   src/midi_import.cpp
   src/chordpro_import.cpp
+  src/casm.cpp
   src/sff_import.cpp
   src/validate.cpp
   src/cli.cpp

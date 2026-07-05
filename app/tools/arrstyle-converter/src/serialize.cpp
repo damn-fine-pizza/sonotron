@@ -19,6 +19,14 @@ Json lane_to_json(const PhraseLane& lane) {
   j.set("source_channel", Json::integer(lane.source_channel));
   j.set("transposition", Json::string(to_string(lane.transposition)));
   j.set("retrigger", Json::string(to_string(lane.retrigger)));
+  // SFF/CASM provenance is emitted only when a source chord was decoded, so
+  // non-SFF imports keep their exact previous byte layout.
+  if (lane.source_root_pc >= 0) {
+    j.set("source_root_pc", Json::integer(lane.source_root_pc));
+    j.set("source_quality", Json::string(to_string(lane.source_quality)));
+    j.set("note_low", Json::integer(lane.note_low));
+    j.set("note_high", Json::integer(lane.note_high));
+  }
   Json events = Json::array();
   for (const PhraseEvent& e : lane.events) {
     events.push_back(event_to_json(e));

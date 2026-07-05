@@ -113,7 +113,7 @@ void print_usage(std::ostream& out) {
          "  inspect <file>                         detect format and print a summary\n"
          "  import-midi <in.mid> --out <f.json>    Standard MIDI File -> .arrstyle.json\n"
          "  import-chordpro <in> --out <f.json>    ChordPro -> .arrsong.json\n"
-         "  import-sff <in.sty>                    SFF import (not implemented; inspect-only)\n"
+         "  import-sff <in.sty> --out <f.json>     Yamaha SFF (.sty) -> .arrstyle.json\n"
          "  validate <file.json>                   validate an .arrstyle/.arrsong document\n"
          "  help                                   show this message\n"
          "  version                                print the tool version\n";
@@ -258,11 +258,33 @@ int cmd_import_sff(const std::vector<std::string>& args, std::ostream& out, std:
     err << error << '\n';
     return kExitFailure;
   }
-  out << "SFF: unsupported subset — inspect-only (use `inspect` to view the embedded SMF)\n";
+  // Only genuine Yamaha styles (SFF markers or section markers) are imported;
+  // a plain SMF or other input is refused with a pointer to `inspect`.
+  if (!sff_is_importable(bytes)) {
+    out << "SFF: not a Yamaha style — inspect-only (use `inspect`, or `import-midi` "
+           "for a plain .mid)\n";
+    err << "error: " << args[1] << ": not a Yamaha SFF style (no CASM/SFF markers)\n";
+    return kExitFailure;
+  }
+  std::string out_path;
+  if (!find_out(args, 2, out_path)) {
+    err << "import-sff: missing --out <file>\n";
+    return kExitUsage;
+  }
   Diagnostics diag;
-  import_sff(bytes, args[1], diag);  // always records an error
+  StyleModel style;
+  if (!import_sff(bytes, args[1], style, diag)) {
+    diag.print(err);
+    return kExitFailure;
+  }
+  const std::string json = to_json(style).dump() + "\n";
+  if (!write_text(out_path, json, error)) {
+    err << error << '\n';
+    return kExitFailure;
+  }
+  out << "wrote " << out_path << " (" << style.sections.size() << " section(s))\n";
   diag.print(err);
-  return kExitFailure;
+  return diag.has_errors() ? kExitFailure : kExitOk;
 }
 
 int cmd_validate(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
