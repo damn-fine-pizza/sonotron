@@ -404,11 +404,9 @@ bool Shell::cmd_style(const std::vector<std::string>& t, std::string& error) {
 
   Command c;
   if (verb == "load" && t.size() >= 3) {
-    // Built-in styles resolve by name host-side (D26).
-    std::int32_t index = -1;
-    if (t[2] == "basic") {
-      index = 0;
-    }
+    // Built-in styles resolve by name host-side (D26): any of the 16 builtins,
+    // case-insensitively, not just "basic".
+    const int index = find_builtin_style(t[2]);
     if (index < 0) {
       error = "unknown style: " + t[2];
       return false;
