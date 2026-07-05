@@ -1,0 +1,30 @@
+# Example ~/.arrangrr.init — copy to $HOME/.arrangrr.init to use it.
+#
+# The live TUI auto-runs ~/.arrangrr.init on every launch (no flag), after the
+# panels open and ~/.arrangrr.rc is applied. It is a plain list of shell
+# commands (the same grammar the REPL accepts). It is LENIENT: a bad line only
+# warns to the console and startup continues — a stale default never bricks the
+# TUI. An explicit `--init FILE` overrides the auto-load and is STRICT (a bad
+# line aborts). Blank lines and '#' comments are ignored.
+#
+# This example configures the "single-finger live steering" session: you play
+# one key and that key alone imposes the chord the whole band follows.
+
+# Live piano -> chord detection ON: your played keys drive the harmony.
+chord detect on
+
+# Single-finger chords: one held key = a chord (a second key colours it).
+chord mode single
+
+# Only your live keys steer the band. The chord sequencer and `chord play`
+# never override your finger (see DESIGN.md D47, chord-follow selector).
+chord follow detect
+
+# Load a style so there is a band to hear. Swap for any builtin:
+#   basic pop rock ballad funk disco house swing bossa samba
+#   reggae country blues shuffle latin motown
+style load basic
+
+# The band is NOT started automatically — press CTRL+P to play/stop.
+# To auto-start it on launch instead, uncomment the next line:
+# transport start

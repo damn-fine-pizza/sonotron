@@ -394,7 +394,7 @@ int Shell::find_port(const std::string& name, bool input) const {
 bool Shell::exec_line(const std::string& line, std::string& error) {
   std::vector<std::string> tokens = tokenize(line);
   if (tokens.empty()) {
-    return true;
+    return true;  // blank line, or a full-line '#' comment (tokenize strips it)
   }
 
   // @tick prefix: queue for execution when time reaches the tick (D29).

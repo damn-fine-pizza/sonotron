@@ -306,7 +306,8 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
     }
   }
 
-  // --init FILE: run a setup script, then stay interactive.
+  // --init FILE: run a setup script, then stay interactive. Explicit and STRICT
+  // — a failing line aborts, so a scripted run fails loud.
   if (init_path != nullptr) {
     std::ifstream init(init_path);
     if (!init) {
@@ -323,6 +324,28 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
       }
     }
     std::printf("init: %s loaded\n", init_path);
+  } else if (tui) {
+    // No explicit --init: auto-run ~/.arrangrr.init if present, so a saved
+    // session (chord mode/follow, style, ...) comes up on EVERY launch with no
+    // flag — symmetric with ~/.arrangrr.rc. LENIENT: a bad line warns to the
+    // console and startup continues (a stale default must never brick the TUI).
+    const char* home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0') {
+      const std::string path = std::string(home) + "/.arrangrr.init";
+      std::ifstream init(path);
+      if (init) {
+        std::string line;
+        int line_no = 0;
+        while (std::getline(init, line)) {
+          ++line_no;
+          std::string line_error;
+          if (!shell.exec_line(line, line_error)) {
+            shell.console_output("~/.arrangrr.init:" + std::to_string(line_no) + ": " + line_error);
+          }
+        }
+        shell.console_output("init: ~/.arrangrr.init loaded");
+      }
+    }
   }
 
   // Tick wakeup timer; actual tick count derives from elapsed time through
@@ -770,7 +793,9 @@ int main(int argc, char** argv) {
     } else if (std::strcmp(argv[i], "--help") == 0) {
       std::printf(
           "usage: arrangrr [--script FILE|-] [--init FILE] [--motd FILE] "
-          "[--events jsonl|human] [--control PATH]\n");
+          "[--events jsonl|human] [--control PATH]\n"
+          "  the live TUI also auto-runs ~/.arrangrr.init (a command script) if "
+          "present; --init FILE overrides it. See docs/arrangrr.init.example.\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
