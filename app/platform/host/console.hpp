@@ -63,7 +63,10 @@ class Console {
 
   void set_status(const std::string& text);  // repaint the status bar (and
                                              // re-layout after a resize)
-  void render_input(const LineEditor& ed);   // repaint prompt + buffer + cursor
+  // Repaint prompt + buffer + cursor. `focused` = the command line (repl) holds
+  // focus: the prompt is drawn bold/bright so the input box visibly "lights up",
+  // and dim when a panel has focus instead (so it's clear where typing goes).
+  void render_input(const LineEditor& ed, bool focused = true);
 
   // Paints the composed panel grid over rows 1..H-2. `lines` is expected to be
   // exactly panel_rows() long (PanelManager fits it to width + height); shorter

@@ -155,6 +155,10 @@ class PanelManager {
   const Panel& at(PanelId id) const;
   Panel& at(PanelId id);
   std::vector<PanelId> visible_order() const;
+  // On-screen TOP-to-BOTTOM order (the single source of truth for panel numbers
+  // and Tab/Shift+Tab focus). The render draws the grid bottom-up, so this is
+  // the reverse of visible_order.
+  std::vector<PanelId> nav_order() const;
   // Groups visible panels into rows (which panels share a row): width-aware,
   // heights NOT set. Two-per-row only when the terminal is wide enough for two
   // min-width cells + the gutter, else one-per-row.

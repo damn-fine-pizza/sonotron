@@ -1126,15 +1126,15 @@ void test_styles_key_line() {
 void test_tab_number_focus() {
   // TAB followed by a digit focuses the panel at that 1-based grid position.
   ShellFixture f;
-  CHECK(f.run("panel open piano"));   // grid position 1 (bottom)
-  CHECK(f.run("panel open styles"));  // grid position 2
-  // TAB arms the jump; the next digit selects the panel.
+  CHECK(f.run("panel open piano"));   // paints at the bottom -> grid number 2
+  CHECK(f.run("panel open styles"));  // paints above the piano -> grid number 1
+  // TAB arms the jump; the next digit selects the panel (numbered top-to-bottom).
   CHECK(f.shell.handle_ui_key('\t'));
-  CHECK(f.shell.handle_ui_key('2'));
+  CHECK(f.shell.handle_ui_key('1'));
   CHECK(f.shell.panels().focus_kind() == PanelFocus::kPanel);
   CHECK(f.shell.panels().focused_panel() == PanelId::kStyles);
   CHECK(f.shell.handle_ui_key('\t'));
-  CHECK(f.shell.handle_ui_key('1'));
+  CHECK(f.shell.handle_ui_key('2'));
   CHECK(f.shell.panels().focused_panel() == PanelId::kPiano);
 }
 
@@ -1711,14 +1711,15 @@ void test_panel_manager_state() {
   CHECK(block_contains(grid, "-- piano"));
   CHECK(block_contains(grid, "h1") && block_contains(grid, "p1"));
 
-  // Panel numbers appear in the titles (1-based grid position, bottom-to-top:
-  // piano is [1], menu is [2]).
+  // Panel numbers appear in the titles (1-based grid position, TOP-to-bottom so
+  // they match reading order: menu paints above the piano, so menu is [1], the
+  // piano [2]).
   CHECK(block_contains(grid, "[1]") && block_contains(grid, "[2]"));
-  CHECK(pm.panel_number(PanelId::kPiano) == 1);
-  CHECK(pm.panel_number(PanelId::kHelp) == 2);
+  CHECK(pm.panel_number(PanelId::kHelp) == 1);
+  CHECK(pm.panel_number(PanelId::kPiano) == 2);
 
   // TAB+number: focus_number targets the visible panel at that grid slot.
-  CHECK(pm.focus_number(2));
+  CHECK(pm.focus_number(1));
   CHECK(pm.focus_kind() == PanelFocus::kPanel && pm.focused_panel() == PanelId::kHelp);
   CHECK(!pm.focus_number(9));  // out of range: unchanged
 
