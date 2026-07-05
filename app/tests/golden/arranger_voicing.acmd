@@ -1,0 +1,24 @@
+# Golden: voice-leading (D41) over a |C|G| change, ballad varA. The strings pad
+# and the E.Piano second comp carry VoicingPolicy::kLead: across the change each
+# voice re-octaves to the NEAREST register of the previous chord instead of
+# jumping to the authored one. On C->G that is audible — the authored G triad
+# would sit a fourth/fifth up (55/59/62), but kLead pulls it down to 43/47/50,
+# the minimal move from the C voicing 48/52/55. Bass and the rising arpeggio
+# (kChord1) stay kAsWritten.
+key C major
+port open out virt as synth
+chord out synth:4
+style load ballad
+style route bass synth:2
+style route chord1 synth:3
+style route chord2 synth:6
+style route pad synth:5
+style section varA
+seq new verse
+seq add C 1bar
+seq add G 1bar
+seq loop on
+seq play
+transport start
+advance 7680
+quit

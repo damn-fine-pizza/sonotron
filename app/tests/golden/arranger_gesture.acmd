@@ -1,0 +1,22 @@
+# Golden: the modern note vocabulary (D39/D42) over a |C|F| change, country varD.
+# chord1 is a guitar STRUM (ChordGesture::kStrumUp/Down fans the live chord with a
+# fixed micro-stagger); the kLead part is a telecaster lick where kScaleDegree
+# notes stay diatonic to the KEY across the F chord while a kInterval blue-3 grace
+# tracks the CHORD root (so it moves C->F, the scale degrees do not).
+key C major
+port open out virt as synth
+chord out synth:4
+style load country
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+style route lead synth:7
+style section varD
+seq new verse
+seq add C 1bar
+seq add F 1bar
+seq loop on
+seq play
+transport start
+advance 7680
+quit
