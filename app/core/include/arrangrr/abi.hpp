@@ -50,6 +50,8 @@ enum class Param : std::uint16_t {
                            //         zero-terminated (single note == low byte)
                            //     b = quality override (-1 = smart/D19)
                            //     c = velocity (1..127)
+                           //     idx = 0 immediate (default), != 0 SHIFT-quantized
+                           //           (staged to the next bar like a shift note)
   kChordStop = 16,         // do
   kChordHold = 17,         // set: a = 0/1
   kChordOut = 18,          // set: a = port | (channel_0based << 8)

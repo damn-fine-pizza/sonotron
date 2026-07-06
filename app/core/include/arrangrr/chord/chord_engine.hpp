@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "arrangrr/chord/followed_context.hpp"
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/midi/message.hpp"
@@ -59,7 +60,7 @@ class ChordEngine {
   // (D19). Returns degree -1 without sounding anything when the note is
   // chromatic to the key (D20: strictly diatonic, no surprises).
   ChordResult play(std::uint8_t note, std::int8_t override_quality, std::uint8_t velocity,
-                   ScheduleFn schedule, bool steer = true) {
+                   ScheduleFn schedule, bool steer = true, bool quantize = false) {
     ChordResult r;
     r.root_note = note;
     const int degree = theory::degree_of(m_key, static_cast<std::uint8_t>(note % 12));
@@ -71,7 +72,7 @@ class ChordEngine {
     r.quality = override_quality >= 0 ? static_cast<ChordQuality>(override_quality)
                                       : theory::smart_quality(m_key.mode, degree);
     r.shape = theory::shape_of(r.quality);
-    sound(note, r.quality, velocity, schedule, steer);
+    sound(note, r.quality, velocity, schedule, Producer::kManual, steer, quantize);
     return r;
   }
 
@@ -82,7 +83,7 @@ class ChordEngine {
   // Yamaha Single Finger (which is key-independent). Chromatic roots are freely
   // allowed here (no D20 rejection).
   ChordResult play_single(std::uint8_t note, std::int8_t override_quality, std::uint8_t velocity,
-                          ScheduleFn schedule, bool steer = true) {
+                          ScheduleFn schedule, bool steer = true, bool quantize = false) {
     ChordResult r;
     r.root_note = note;
     r.degree = static_cast<std::int8_t>(kNoDegree);
@@ -90,7 +91,7 @@ class ChordEngine {
                     ? static_cast<ChordQuality>(override_quality)
                     : theory::single_finger_quality(m_key, static_cast<std::uint8_t>(note % 12));
     r.shape = theory::shape_of(r.quality);
-    sound(note, r.quality, velocity, schedule, steer);
+    sound(note, r.quality, velocity, schedule, Producer::kManual, steer, quantize);
     return r;
   }
 
@@ -98,7 +99,7 @@ class ChordEngine {
   // classes above it complete the chord. An override still wins.
   ChordResult play_shell(const std::uint8_t* notes, std::uint8_t count,
                          std::int8_t override_quality, std::uint8_t velocity, ScheduleFn schedule,
-                         bool steer = true) {
+                         bool steer = true, bool quantize = false) {
     ChordResult r;
     std::uint8_t root = 127;
     for (std::uint8_t i = 0; i < count; ++i) {
@@ -117,20 +118,28 @@ class ChordEngine {
     r.quality = override_quality >= 0 ? static_cast<ChordQuality>(override_quality)
                                       : theory::complete_shell_full(iv, n);
     r.shape = theory::shape_of(r.quality);
-    sound(root, r.quality, velocity, schedule, steer);
+    sound(root, r.quality, velocity, schedule, Producer::kManual, steer, quantize);
     return r;
   }
 
-  // Sounds an already-resolved chord (the ChordSequencer path): releases the
-  // previous voicing and stacks the shape from `root_note` upward. `steer`
-  // (D47 chord-follow) decides whether this producer also PUBLISHES the followed
-  // context: false = sound the notes but leave the followed chord untouched, so
-  // a non-selected producer never has to snap a written context back.
+  // Sounds an already-resolved chord (the ChordSequencer and manual paths):
+  // releases the previous voicing and stacks the shape from `root_note` upward.
+  // When `steer` is set it ALSO publishes the followed context through the single
+  // owner as producer `who` — the owner applies the D47 gate (a non-selected
+  // producer's publish is a no-op) and the explicit latch. `quantize` chooses
+  // stage (next-bar) vs commit_now (immediate); `steer == false` sounds the notes
+  // but leaves the followed context untouched (a resolution-only call).
   void sound(std::uint8_t root_note, ChordQuality quality, std::uint8_t velocity,
-             ScheduleFn schedule, bool steer = true) {
+             ScheduleFn schedule, Producer who = Producer::kManual, bool steer = true,
+             bool quantize = false) {
     if (steer) {
-      m_state = ChordState{
+      const ChordState chord{
           .root_pc = static_cast<std::uint8_t>(root_note % 12), .quality = quality, .valid = true};
+      if (quantize) {
+        m_followed.stage(who, chord);
+      } else {
+        m_followed.commit_now(who, chord);
+      }
     }
     const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
@@ -153,20 +162,42 @@ class ChordEngine {
     m_sounding_count = 0;
   }
 
-  // Sets the live harmonic context WITHOUT sounding a voicing. This is the
-  // piano->chord path: notes played on the keyboard already sound through
-  // normal routing, so the live-detected chord must only STEER the arranger's
-  // NTT resolution (D24), never stack a second voicing on top. The recorded
-  // ChordSequencer and `chord play` keep going through sound(); this is the
-  // one setter that updates the context alone.
-  constexpr void set_context(std::uint8_t root_pc, ChordQuality quality) noexcept {
-    m_state = ChordState{.root_pc = static_cast<std::uint8_t>(root_pc % 12),
-                         .quality = quality,
-                         .valid = true};
+  // --- Followed-context owner facade (the single write surface) --------------
+  // Every producer reaches the followed chord through these; nothing writes it
+  // directly. The D47 gate and the explicit latch live inside FollowedContext.
+
+  // Publishes a producer's chord WITHOUT sounding a voicing — the live-detect
+  // path (the played keys already sound / are suppressed, so detection only
+  // STEERS). `quantize` chooses the shift-staged next-bar path (stage) over the
+  // immediate default (commit_now).
+  constexpr void steer_detect(std::uint8_t root_pc, ChordQuality quality, bool quantize) noexcept {
+    const ChordState chord{
+        .root_pc = static_cast<std::uint8_t>(root_pc % 12), .quality = quality, .valid = true};
+    if (quantize) {
+      m_followed.stage(Producer::kDetect, chord);
+    } else {
+      m_followed.commit_now(Producer::kDetect, chord);
+    }
   }
 
+  // The ONLY quantized writer: promotes a staged chord at the bar boundary.
+  constexpr void commit_bar() noexcept { m_followed.commit_bar(); }
+  // Drops a staged next chord (transport-start / style-load).
+  constexpr void reset_pending() noexcept { m_followed.reset_pending(); }
+  // Home-key default; a no-op once any producer set an explicit chord.
+  constexpr void establish_default() noexcept { m_followed.establish_default(m_key); }
+  // Genuine new-song reset (forgets the explicit chord too).
+  constexpr void reset_context() noexcept { m_followed.reset(m_key); }
+
+  // D47 chord-follow selector, owned here.
+  constexpr void set_follow(ChordFollow follow) noexcept { m_followed.set_follow(follow); }
+  constexpr ChordFollow follow() const noexcept { return m_followed.follow(); }
+
   constexpr bool sounding() const noexcept { return m_sounding_count > 0; }
-  constexpr const ChordState& state() const noexcept { return m_state; }
+  constexpr const ChordState& state() const noexcept { return m_followed.state(); }
+  // The staged next chord (invalid when nothing is pending), for the host
+  // `next key:` readout.
+  constexpr const ChordState& pending() const noexcept { return m_followed.pending(); }
 
  private:
   Key m_key{};
@@ -175,7 +206,7 @@ class ChordEngine {
   std::uint8_t m_out_channel = 0;
   std::uint8_t m_sounding[4] = {0, 0, 0, 0};
   std::uint8_t m_sounding_count = 0;
-  ChordState m_state{};
+  FollowedContext m_followed{};  // the single owner of `current` + `next`
 };
 
 }  // namespace arrangrr

@@ -210,23 +210,26 @@ void test_manual_gates_out_detect_and_sequencer() {
   CHECK(b.followed().quality == kManualQuality);
 }
 
-// --- Case 5: restore edge --------------------------------------------------
-// A gated producer firing while the followed context was never set must NOT
-// falsely harmonize the band: restore_context reinstates valid == false.
-void test_restore_keeps_unset_context_invalid() {
+// --- Case 5: gated producer + lifecycle default ----------------------------
+// A gated-out producer firing at transport start must NOT harmonize the band to
+// ITS chord. Transport start seeds the home-key tonic via the lifecycle default
+// (establish_default), so the followed context is the TONIC, never the gated
+// sequencer's G7.
+void test_gated_sequencer_does_not_steer_over_seeded_tonic() {
   Band b;
   b.setup();
   b.cmd(Param::kChordFollow, static_cast<std::int32_t>(ChordFollow::kDetect), 0, 0, Op::kSet);
 
-  CHECK(!b.followed().valid);  // nothing has steered yet
+  CHECK(!b.followed().valid);  // nothing has steered yet (no transport start)
 
   arm_seq_G(b);
-  b.cmd(Param::kTransportStart);  // sequencer sounds G7 but is gated out
+  b.cmd(Param::kTransportStart);  // sequencer sounds G7 but is gated out (kDetect)
 
-  // The sequencer sounded (side effect) but the followed context must remain
-  // unset — a restore of an invalid state, not a false harmonization.
+  // The sequencer sounded (side effect), but the gate blocked it from steering:
+  // the followed context is the seeded home-key tonic, NOT the sequencer's G.
   CHECK(b.saw_chord_event(60 + kSeqRootPc));
-  CHECK(!b.followed().valid);
+  CHECK(b.followed().valid);                  // seeded tonic, not unset
+  CHECK(b.followed().root_pc != kSeqRootPc);  // never the gated-out sequencer's G
 }
 
 }  // namespace
@@ -236,7 +239,7 @@ int main() {
   test_detect_gates_out_the_sequencer();
   test_sequencer_gates_out_detection();
   test_manual_gates_out_detect_and_sequencer();
-  test_restore_keeps_unset_context_invalid();
+  test_gated_sequencer_does_not_steer_over_seeded_tonic();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_chord_follow: all OK\n");
   }

@@ -3,7 +3,7 @@
 # type `transport start` when you are ready.
 key C major
 chord out out0:4
-style load basic
+style load pop
 # All 8 style parts routed to distinct channels so the enriched styles
 # (pad/perc/chord2/arp) sound. Percussion shares the GM drum channel (10).
 style route drums out0:10
@@ -13,11 +13,17 @@ style route chord1 out0:3
 style route chord2 out0:7
 style route pad out0:5
 style route arp out0:6
-seq new verse
-seq add C 1bar
-seq add A 1bar
-seq add F 1bar
-seq add G 1bar
-seq loop on
-seq play
+# Optional backing chord loop -- a chord SEQUENCER, separate from the style.
+# Left OFF so the style follows YOUR live chords and holds until you change
+# them (pure live arranging). Uncomment for a C-A-F-G backing loop, but note:
+# while it plays it drives the chord every bar and, under the current
+# arbitration, overrides a chord you press live. Live-transpose over a running
+# loop is a deferred feature.
+# seq new verse
+# seq add C 1bar
+# seq add A 1bar
+# seq add F 1bar
+# seq add G 1bar
+# seq loop on
+# seq play
 transport tempo 96

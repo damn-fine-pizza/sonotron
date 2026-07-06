@@ -122,14 +122,17 @@ struct Band {
   }
 };
 
-void test_drums_play_without_chord_but_tonal_roles_wait() {
+// Transport start seeds the home-key tonic (lifecycle default), so the band
+// starts IN the home key: drums groove and the tonal roles sound their NTT parts
+// against the seeded tonic from bar 1 -- no chord press needed.
+void test_band_starts_in_home_key() {
   Band b;
   b.setup_basic();
   b.cmd(Param::kTransportStart);
   b.advance(kTicksPerBar - 1);
-  CHECK(b.ons(9) > 0);   // drums are fixed: they groove chord-less
-  CHECK(b.ons(1) == 0);  // bass silent until a chord exists (NTT needs one)
-  CHECK(b.ons(2) == 0);
+  CHECK(b.ons(9) > 0);  // drums groove
+  CHECK(b.ons(1) > 0);  // bass plays the seeded home-key tonic
+  CHECK(b.ons(2) > 0);  // tonal roles sound from bar 1
 }
 
 void test_ntt_resolution_follows_chord() {
@@ -653,7 +656,7 @@ void test_note_source_vocabulary() {
 }  // namespace
 
 int main() {
-  test_drums_play_without_chord_but_tonal_roles_wait();
+  test_band_starts_in_home_key();
   test_ntt_resolution_follows_chord();
   test_role_anchor_and_gm_voices();
   test_groove_apply();

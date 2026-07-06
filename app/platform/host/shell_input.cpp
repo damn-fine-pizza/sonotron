@@ -85,6 +85,19 @@ void Shell::toggle_surface_key(std::uint8_t port, ActiveNoteTracker& held, char 
     return;
   }
 
+  // Single-finger harmony steering: one key == one chord, so a genuinely NEW key
+  // REPLACES the previous single-finger note instead of accumulating it. Without
+  // this the toggle held-set piles up (A then S -> {A,S}, G then H -> {G,A}); the
+  // detector roots on the lowest held note and names a wrong chord (Asus2, Em)
+  // that never moves to the key just pressed. Fingered mode (min_notes > 1) keeps
+  // accumulation so the player can spell a chord by holding several keys, and the
+  // sounding piano surface (kPianoInputPort) is untouched. A re-press of the held
+  // key still toggles it off (handled below), so we only clear on a new note.
+  if (port == kHarmonyInputPort && m_engine.chord_min_notes() == 1 &&
+      !surface_note_held(held, midi_note)) {
+    surface_all_notes_off(port, held);
+  }
+
   if (surface_note_held(held, midi_note)) {
     held.note_off(port, m_piano.channel, midi_note);
     surface_send_note(port, held, key, midi_note, false);
@@ -297,10 +310,11 @@ bool Shell::parts_key(std::uint8_t byte) {
     (void)push_panels();
   };
   switch (byte) {
-    case 'm':
+    case 'm':  // 'm' is not a note-letter, so it survives the global steer choke.
       toggle(Param::kPartMute, !m_engine.arranger().muted(role));
       return true;
-    case 's':
+    case 'i':  // solo = "isolate": migrated off 's' (a note-letter that now steers
+               // the band); the `part <role> solo on|off` command stays too.
       toggle(Param::kPartSolo, !m_engine.arranger().soloed(role));
       return true;
     default:
@@ -483,9 +497,18 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return true;
   }
 
+  // GLOBAL chord steering (the ONE choke point): with ANY panel focused (never
+  // the REPL) a musical NOTE-letter key steers the band SILENTLY, TAKING PRIORITY
+  // over that panel's own letter shortcuts — from the piano, chords, parts,
+  // groove, styles or arp panel alike. Runs BEFORE the per-panel handlers, so a
+  // note-letter never reaches a panel shortcut; non-note keys fall through.
+  if (try_global_steer(byte)) {
+    return true;
+  }
+
   // The styles panel absorbed the chooser: while it is focused it owns every
-  // other byte (digits/backspace/apply/steps/musical keys) so nothing leaks to
-  // the piano or the line editor.
+  // other byte (digits/backspace/apply/steps) so nothing leaks to the piano or
+  // the line editor. (Note-letters were already routed to the band above.)
   if (styles_focused()) {
     return chooser_key(byte);
   }
@@ -521,22 +544,37 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
     return false;  // help/filter focus: keys fall through to the editor
   }
 
-  // SPACE flips the key mode (momentary <-> toggle) — shared with the harmony
-  // surface, never a musical note.
-  if (byte == ' ') {
-    return surface_key_mode_toggle("piano", "sound");
-  }
+  return piano_panel_key(byte);
+}
 
+bool Shell::try_global_steer(std::uint8_t byte) {
+  // Only a focused panel steers; the REPL types normally. SPACE (shared) flips
+  // the harmony key mode; a note-letter (piano_binding_for is exactly that
+  // predicate — the white A S D F G H J K L ; ' and black W E T Y U O P) steers
+  // the band silently through the harmony surface. The octave/transpose keys
+  // (./ []) are NOT note-letters, so they stay per-panel and fall through here.
+  if (m_panels.focus_kind() != PanelFocus::kPanel) {
+    return false;
+  }
+  if (byte == ' ') {
+    return surface_key_mode_toggle("harmony", "steer");
+  }
+  if (piano_binding_for(byte) != nullptr) {
+    return surface_musical_key(kHarmonyInputPort, m_harmony_held, byte);
+  }
+  return false;
+}
+
+bool Shell::piano_panel_key(std::uint8_t byte) {
   // Variation/style stepping (-/= sections, _/+ styles). Works in piano focus;
   // the same keys also drive the chooser (chooser_key) while it is up.
   if (style_step_key(byte)) {
     return true;
   }
 
-  // Piano-ONLY view shortcuts take priority over musical keys (none collide, and
-  // they are deliberately not shared with the chords surface). TAB is the way out
-  // of play mode; 'P' is deliberately NOT a shortcut — it sits right next to 'O'
-  // (C#5) and a stray press must never close the panel.
+  // Piano-ONLY view shortcuts (none collide with the note-letters, which the
+  // global steer choke already consumed). 'P' is deliberately NOT a shortcut — it
+  // sits right next to 'O' (C#5) and a stray press must never close the panel.
   const char upper = static_cast<char>(std::toupper(static_cast<int>(byte)));
   switch (upper) {
     case 'N': {
@@ -564,13 +602,12 @@ bool Shell::handle_ui_key(std::uint8_t byte) {
       break;
   }
 
-  // Octave/transpose + musical keys, shared with the harmony surface.
-  if (surface_musical_key(kPianoInputPort, m_piano_held, byte)) {
-    return true;
-  }
-
-  // Piano focus swallows everything else so stray keys never leak into a
-  // half-typed REPL command.
+  // Octave/transpose (./ []) on the piano panel. Note-letters were already routed
+  // to the harmony surface by the global steer choke (the piano's kMelody port no
+  // longer sounds anything — the melody surface is deferred), so this only picks
+  // up the non-note octave/transpose keys. Everything else is swallowed so stray
+  // keys never leak into a half-typed REPL command.
+  (void)surface_musical_key(kHarmonyInputPort, m_harmony_held, byte);
   return true;
 }
 
@@ -623,7 +660,15 @@ bool Shell::surface_musical_key(std::uint8_t port, ActiveNoteTracker& held, std:
       break;
   }
   if (const PianoKeyBinding* binding = piano_binding_for(byte); binding != nullptr) {
+    // Input model: a plain note-letter steers the band IMMEDIATELY (`current`
+    // changes now); a SHIFTED one (an uppercase letter) STAGES the chord for the
+    // next bar (`next`), like a pro arranger applying a chord on the downbeat.
+    // In a plain TTY the only per-key modifier signal is the letter case, and
+    // the piano keymap is case-insensitive, so uppercase == shift is unambiguous.
+    const bool shifted = byte >= 'A' && byte <= 'Z';
+    m_engine.set_detect_quantize(shifted);
     toggle_surface_key(port, held, binding->key, binding->semitone_from_base);
+    m_engine.set_detect_quantize(false);  // immediate is the default; do not leak
     return true;
   }
   return false;
@@ -640,12 +685,10 @@ bool Shell::chords_key(std::uint8_t byte) {
   // observed by the ChordDetector, so playing re-harmonizes the band without a
   // sound. It shares the piano's SPACE key-mode and the octave/transpose/musical
   // keys (surface_* helpers), differing only in the (port, held-set) it drives —
-  // single-finger here = one key -> the scale-aware triad (Phase 1). The piano's
-  // view-only shortcuts N/V/C/Z are NOT bound here, so those letters play their
-  // note on the chords surface where on the piano they are shortcuts.
-  if (byte == ' ') {
-    return surface_key_mode_toggle("harmony", "steer");
-  }
+  // single-finger here = one key -> the scale-aware triad (Phase 1). The
+  // note-letters and SPACE (key mode) are handled by the global choke point in
+  // handle_ui_key BEFORE this runs, so here we only pick up the octave/transpose
+  // keys (./ []) for the harmony surface and swallow everything else.
   if (surface_musical_key(kHarmonyInputPort, m_harmony_held, byte)) {
     return true;
   }
@@ -662,6 +705,17 @@ void Shell::configure_default_surfaces() {
   m_engine.set_input_zone(kPianoInputPort, InputZone::kMelody);
   m_engine.set_input_zone(kHarmonyInputPort, InputZone::kHarmony);
   m_engine.set_chord_detect(true, kHarmonyInputPort);
+  // Single-finger is the launch default (one held key = the scale-aware maj/min
+  // triad): the CODE default stands on its own so a fresh launch starts in single
+  // mode regardless of ~/.arrangrr.init. The kChordMode command also sets the
+  // detector's min-notes (1) and single-finger flag, so it is the whole switch.
+  {
+    Command c;
+    c.op = Op::kSet;
+    c.param = Param::kChordMode;
+    c.a = static_cast<std::int32_t>(ChordMode::kSingle);
+    m_engine.push_command(c, m_sink);
+  }
   (void)push_panels();
 }
 
@@ -691,14 +745,11 @@ void Shell::set_momentary_available(bool available) {
 }
 
 bool Shell::piano_key_event(char key, bool pressed) {
-  // Only a playable surface turns keys into notes (matches handle_ui_key): the
-  // piano panel (melody) or the chords panel (harmony). Any other focus lets the
-  // caller fall back to the normal byte path.
-  const bool piano = m_panels.focus_kind() == PanelFocus::kPanel &&
-                     m_panels.focused_panel() == PanelId::kPiano;
-  const bool chords = m_panels.focus_kind() == PanelFocus::kPanel &&
-                      m_panels.focused_panel() == PanelId::kChords;
-  if (!piano && !chords) {
+  // Momentary (kitty) counterpart of the global steer choke in handle_ui_key:
+  // with ANY panel focused (never the REPL) a musical note-letter steers the band
+  // SILENTLY through the harmony surface — uniform across the piano, chords,
+  // parts, groove, styles and arp panels. REPL focus falls back to the byte path.
+  if (m_panels.focus_kind() != PanelFocus::kPanel) {
     return false;
   }
 
@@ -707,11 +758,10 @@ bool Shell::piano_key_event(char key, bool pressed) {
     return false;  // TAB / SPACE / shortcuts: caller drives the byte path
   }
 
-  // Route to the focused surface: the piano port (kMelody, sounds) or the harmony
-  // port (kHarmony, silent + steers). The held sets are separate so a note-off on
-  // one surface never clears the other.
-  const std::uint8_t port = chords ? kHarmonyInputPort : kPianoInputPort;
-  ActiveNoteTracker& held = chords ? m_harmony_held : m_piano_held;
+  // All note-letters route to the harmony port (kHarmony, silent + steers): the
+  // melody surface is deferred, so kPianoInputPort/kMelody is fed by nothing now.
+  const std::uint8_t port = kHarmonyInputPort;
+  ActiveNoteTracker& held = m_harmony_held;
 
   if (m_piano_key_mode == PianoKeyMode::kToggle) {
     // In toggle mode a key-down toggles; the key-up carries no meaning.

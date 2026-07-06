@@ -88,6 +88,13 @@ void Engine::cmd_transport(const Command& cmd, EventSink sink) {
         (void)m_seq.play(0);  // rebase to the new tick 0
       }
       m_arranger.on_transport_start();
+      // The band starts in the home key WITHOUT clobbering an explicit chord:
+      // establish_default is a no-op once any producer has steered a real chord,
+      // so a manual/detected chord survives transport-start. Drop any staged
+      // shift chord so bar 0 plays with `next` empty. A time-aligned producer
+      // that fires on tick 0 (the ChordSequencer below) still overrides this.
+      m_chords.establish_default();
+      m_chords.reset_pending();
       fire_timeline(0, sink);  // grid step 0 plays on start, like the F8
       fire_chord_seq(0, sink);
       fire_arranger(0, sink);
@@ -152,151 +159,31 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
 void Engine::cmd_chord(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kKeySet:
-      if (cmd.a < 0 || cmd.a > 11 || cmd.b < 0 || cmd.b >= kModeCount) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else {
-        const Key key{static_cast<std::uint8_t>(cmd.a), static_cast<Mode>(cmd.b)};
-        m_chords.set_key(key);
-        m_detector.set_key(key);  // scale-aware single-finger reads the same key
-      }
+      chord_key_set(cmd, sink);
       break;
-    case Param::kChordOut: {
-      const auto port = static_cast<std::uint8_t>(cmd.a & 0xFF);
-      const auto channel = static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF);
-      if (port >= kMaxPorts || channel > 15) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-        break;
-      }
-      // Release the sounding voicing on the OLD destination first, or its
-      // NoteOffs would chase the chord onto the new port and strand it.
-      if (m_chords.sounding()) {
-        m_chords.release([&](std::uint8_t p, const MidiMessage& msg) {
-          schedule_or_warn(p, m_now, msg, sink);
-        });
-        flush(sink);
-      }
-      m_chords.set_output(port, channel);
+    case Param::kChordOut:
+      chord_out(cmd, sink);
       break;
-    }
     case Param::kChordHold:
       // Reserved by the ABI, not implemented yet (live-keyboard gestures):
       // refusing honestly beats nodding and doing nothing.
       sink(OutEvent::warn(WarnCode::kUnsupported, m_now));
       break;
     case Param::kChordMode:
-      if (cmd.a < 0 || cmd.a >= kChordModeCount) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else {
-        const auto mode = static_cast<ChordMode>(cmd.a);
-        m_chords.set_mode(mode);
-        // "single" is single-finger everywhere: the typed chord path already
-        // reads only the root (play_single), and the live piano detector drops
-        // its minimum to one held note so a lone key steers the band; the other
-        // modes keep the fingered triad minimum. The detector also flips into
-        // scale-aware single-finger so a lone key resolves the diatonic maj/min
-        // triad of its root (Dxx), matching the typed play_single path.
-        const bool single = mode == ChordMode::kSingle;
-        m_detector.set_min_notes(single ? 1 : kMinChordNotes);
-        m_detector.set_single_finger(single);
-      }
+      chord_mode(cmd, sink);
       break;
-    case Param::kChordDetect: {
-      // Live piano->chord: a = 0/1 enable, b = input port (default 0). The
-      // held notes on that port re-harmonize the arranger in real time.
-      const std::int32_t port = cmd.b;
-      if (port < 0 || static_cast<std::size_t>(port) >= kMaxPorts) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-        break;
-      }
-      set_chord_detect(cmd.a != 0, static_cast<std::uint8_t>(port));
+    case Param::kChordDetect:
+      chord_detect_cmd(cmd, sink);
       break;
-    }
     case Param::kChordFollow:
-      if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(ChordFollow::kManual)) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else {
-        set_chord_follow(static_cast<ChordFollow>(cmd.a));
-      }
+      chord_follow_cmd(cmd, sink);
       break;
     case Param::kInputZone:
-      // Dxx: a = input port, b = InputZone. kHarmony silences that port's notes
-      // (silent chord recognition); kMelody routes/sounds. Whole-port decision,
-      // no pitch split yet.
-      if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPorts || cmd.b < 0 ||
-          cmd.b > static_cast<std::int32_t>(InputZone::kHarmony)) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else {
-        set_input_zone(static_cast<std::uint8_t>(cmd.a), static_cast<InputZone>(cmd.b));
-      }
+      chord_input_zone(cmd, sink);
       break;
-    case Param::kChordPlay: {
-      const auto vel = static_cast<std::uint8_t>(cmd.c);
-      // Up to 4 packed notes, zero-terminated (one per byte).
-      std::uint8_t notes[4];
-      std::uint8_t note_count = 0;
-      for (int i = 0; i < 4; ++i) {
-        const auto n = static_cast<std::uint8_t>((cmd.a >> (8 * i)) & 0xFF);
-        if (n == 0) {
-          break;
-        }
-        if (n > 127) {
-          note_count = 0;
-          break;
-        }
-        notes[note_count++] = n;
-      }
-      if (note_count == 0 || vel == 0 || vel > 127 || cmd.b >= kQualityCount) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-        break;
-      }
-      const auto schedule = [&](std::uint8_t port, const MidiMessage& msg) {
-        schedule_or_warn(port, m_now, msg, sink);
-      };
-      // Manual `chord play` always SOUNDS its notes; whether it STEERS the
-      // followed context is gated (D47) — threaded into play*/sound so a
-      // non-selected producer never publishes it.
-      const bool steer = manual_may_follow();
-      ChordResult r;
-      switch (m_chords.mode()) {
-        case ChordMode::kSingle:
-          r = m_chords.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule, steer);
-          break;
-        case ChordMode::kShell:
-          r = m_chords.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b), vel, schedule,
-                                  steer);
-          break;
-        case ChordMode::kDiatonic:
-        default:
-          r = m_chords.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule, steer);
-          break;
-      }
-      if (r.degree < 0) {
-        sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
-        break;
-      }
-      // Recording captures only diatonic degrees (D28 functional storage);
-      // keyless modes record when the root happens to fit the seq key.
-      if (m_seq.recording()) {
-        const int deg = r.degree == static_cast<std::int8_t>(kNoDegree)
-                            ? theory::degree_of(m_seq.current()->key,
-                                                static_cast<std::uint8_t>(r.root_note % 12))
-                            : r.degree;
-        if (deg >= 0) {
-          const std::int8_t ovr =
-              r.degree == static_cast<std::int8_t>(kNoDegree)
-                  ? static_cast<std::int8_t>(r.quality)  // pin the resolved quality
-                  : static_cast<std::int8_t>(cmd.b);
-          m_seq.capture(m_now, static_cast<std::int8_t>(deg), ovr, vel);
-        } else {
-          sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
-        }
-      }
-      sink(OutEvent::chord(m_chords.out_port(), static_cast<std::uint8_t>(r.degree),
-                           static_cast<std::uint8_t>(r.quality), r.root_note, r.shape.count, vel,
-                           m_now));
-      flush(sink);
+    case Param::kChordPlay:
+      chord_play(cmd, sink);
       break;
-    }
     case Param::kChordStop:
     default:
       m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
@@ -305,6 +192,152 @@ void Engine::cmd_chord(const Command& cmd, EventSink sink) {
       flush(sink);
       break;
   }
+}
+
+void Engine::chord_key_set(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || cmd.a > 11 || cmd.b < 0 || cmd.b >= kModeCount) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const Key key{.root_pc = static_cast<std::uint8_t>(cmd.a), .mode = static_cast<Mode>(cmd.b)};
+  m_chords.set_key(key);
+  m_detector.set_key(key);  // scale-aware single-finger reads the same key
+}
+
+void Engine::chord_out(const Command& cmd, EventSink sink) {
+  const auto port = static_cast<std::uint8_t>(cmd.a & 0xFF);
+  const auto channel = static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF);
+  if (port >= kMaxPorts || channel > 15) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  // Release the sounding voicing on the OLD destination first, or its
+  // NoteOffs would chase the chord onto the new port and strand it.
+  if (m_chords.sounding()) {
+    m_chords.release(
+        [&](std::uint8_t p, const MidiMessage& msg) { schedule_or_warn(p, m_now, msg, sink); });
+    flush(sink);
+  }
+  m_chords.set_output(port, channel);
+}
+
+void Engine::chord_mode(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || cmd.a >= kChordModeCount) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto mode = static_cast<ChordMode>(cmd.a);
+  m_chords.set_mode(mode);
+  // "single" is single-finger everywhere: the typed chord path already
+  // reads only the root (play_single), and the live piano detector drops
+  // its minimum to one held note so a lone key steers the band; the other
+  // modes keep the fingered triad minimum. The detector also flips into
+  // scale-aware single-finger so a lone key resolves the diatonic maj/min
+  // triad of its root (Dxx), matching the typed play_single path.
+  const bool single = mode == ChordMode::kSingle;
+  m_detector.set_min_notes(single ? 1 : kMinChordNotes);
+  m_detector.set_single_finger(single);
+}
+
+void Engine::chord_detect_cmd(const Command& cmd, EventSink sink) {
+  // Live piano->chord: a = 0/1 enable, b = input port (default 0). The
+  // held notes on that port re-harmonize the arranger in real time.
+  const std::int32_t port = cmd.b;
+  if (port < 0 || static_cast<std::size_t>(port) >= kMaxPorts) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  set_chord_detect(cmd.a != 0, static_cast<std::uint8_t>(port));
+}
+
+void Engine::chord_follow_cmd(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(ChordFollow::kManual)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  set_chord_follow(static_cast<ChordFollow>(cmd.a));
+}
+
+void Engine::chord_input_zone(const Command& cmd, EventSink sink) {
+  // Dxx: a = input port, b = InputZone. kHarmony silences that port's notes
+  // (silent chord recognition); kMelody routes/sounds. Whole-port decision,
+  // no pitch split yet.
+  if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPorts || cmd.b < 0 ||
+      cmd.b > static_cast<std::int32_t>(InputZone::kHarmony)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  set_input_zone(static_cast<std::uint8_t>(cmd.a), static_cast<InputZone>(cmd.b));
+}
+
+void Engine::chord_play(const Command& cmd, EventSink sink) {
+  const auto vel = static_cast<std::uint8_t>(cmd.c);
+  // Up to 4 packed notes, zero-terminated (one per byte).
+  std::uint8_t notes[4];
+  std::uint8_t note_count = 0;
+  for (int i = 0; i < 4; ++i) {
+    const auto n = static_cast<std::uint8_t>((cmd.a >> (8 * i)) & 0xFF);
+    if (n == 0) {
+      break;
+    }
+    if (n > 127) {
+      note_count = 0;
+      break;
+    }
+    notes[note_count++] = n;
+  }
+  if (note_count == 0 || vel == 0 || vel > 127 || cmd.b >= kQualityCount) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto schedule = [&](std::uint8_t port, const MidiMessage& msg) {
+    schedule_or_warn(port, m_now, msg, sink);
+  };
+  // Manual `chord play` always SOUNDS its notes and always attempts to steer;
+  // the owner's D47 gate decides whether Producer::kManual actually publishes.
+  // Immediate by default (`current` changes now); a shift/quantized variant
+  // (idx != 0) STAGES it for the next bar like a SHIFT-note, additive and POD.
+  const bool steer = true;
+  const bool quantize = cmd.idx != 0;
+  ChordResult r;
+  switch (m_chords.mode()) {
+    case ChordMode::kSingle:
+      r = m_chords.play_single(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule, steer,
+                               quantize);
+      break;
+    case ChordMode::kShell:
+      r = m_chords.play_shell(notes, note_count, static_cast<std::int8_t>(cmd.b), vel, schedule,
+                              steer, quantize);
+      break;
+    case ChordMode::kDiatonic:
+    default:
+      r = m_chords.play(notes[0], static_cast<std::int8_t>(cmd.b), vel, schedule, steer, quantize);
+      break;
+  }
+  if (r.degree < 0) {
+    sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
+    return;
+  }
+  // Recording captures only diatonic degrees (D28 functional storage);
+  // keyless modes record when the root happens to fit the seq key.
+  if (m_seq.recording()) {
+    const int deg =
+        r.degree == static_cast<std::int8_t>(kNoDegree)
+            ? theory::degree_of(m_seq.current()->key, static_cast<std::uint8_t>(r.root_note % 12))
+            : r.degree;
+    if (deg >= 0) {
+      const std::int8_t ovr = r.degree == static_cast<std::int8_t>(kNoDegree)
+                                  ? static_cast<std::int8_t>(r.quality)  // pin the resolved quality
+                                  : static_cast<std::int8_t>(cmd.b);
+      m_seq.capture(m_now, static_cast<std::int8_t>(deg), ovr, vel);
+    } else {
+      sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
+    }
+  }
+  sink(OutEvent::chord(m_chords.out_port(), static_cast<std::uint8_t>(r.degree),
+                       static_cast<std::uint8_t>(r.quality), r.root_note, r.shape.count, vel,
+                       m_now));
+  flush(sink);
 }
 
 void Engine::cmd_seq(const Command& cmd, EventSink sink) {
@@ -325,36 +358,11 @@ void Engine::cmd_seq(const Command& cmd, EventSink sink) {
       }
       break;
     case Param::kSeqStop:
-      if (m_seq.recording()) {
-        (void)m_seq.stop_record(m_now, cmd.a > 0 ? static_cast<Tick>(cmd.a) : kTicksPerBar);
-      } else {
-        m_seq.stop_playback([&] {
-          m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
-            schedule_or_warn(port, m_now, msg, sink);
-          });
-        });
-        flush(sink);
-      }
+      seq_stop(cmd, sink);
       break;
-    case Param::kSeqAdd: {
-      ChordSequence* seq = m_seq.current();
-      const auto note = static_cast<std::uint8_t>(cmd.a & 0x7F);
-      const std::int8_t quality_ovr = static_cast<std::int8_t>((cmd.b & 0xFF) - 1);
-      const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0x7F);
-      if (seq == nullptr || cmd.a < 0 || cmd.a > 127 || cmd.c <= 0 || vel == 0 ||
-          quality_ovr >= static_cast<std::int8_t>(kQualityCount)) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-        break;
-      }
-      const int degree = theory::degree_of(seq->key, static_cast<std::uint8_t>(note % 12));
-      if (degree < 0) {
-        sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
-      } else if (!seq->append(static_cast<std::int8_t>(degree), quality_ovr, vel,
-                              static_cast<Tick>(cmd.c))) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      }
+    case Param::kSeqAdd:
+      seq_add(cmd, sink);
       break;
-    }
     case Param::kSeqLoop:
       if (ChordSequence* seq = m_seq.current(); seq != nullptr) {
         seq->loop = cmd.a != 0;
@@ -371,17 +379,7 @@ void Engine::cmd_seq(const Command& cmd, EventSink sink) {
       }
       break;
     case Param::kSeqTranspose:
-      if (ChordSequence* seq = m_seq.current(); seq == nullptr) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else if (cmd.a >= 0) {
-        if (cmd.a > 11 || cmd.b >= kModeCount) {
-          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-        } else {
-          seq->transpose_to(static_cast<std::uint8_t>(cmd.a), static_cast<std::int8_t>(cmd.b));
-        }
-      } else {
-        seq->transpose_by(static_cast<std::int8_t>(cmd.c));
-      }
+      seq_transpose(cmd, sink);
       break;
     case Param::kSeqDel:
       if (ChordSequence* seq = m_seq.current();
@@ -398,6 +396,55 @@ void Engine::cmd_seq(const Command& cmd, EventSink sink) {
       }
       break;
   }
+}
+
+void Engine::seq_stop(const Command& cmd, EventSink sink) {
+  if (m_seq.recording()) {
+    (void)m_seq.stop_record(m_now, cmd.a > 0 ? static_cast<Tick>(cmd.a) : kTicksPerBar);
+    return;
+  }
+  m_seq.stop_playback([&] {
+    m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+      schedule_or_warn(port, m_now, msg, sink);
+    });
+  });
+  flush(sink);
+}
+
+void Engine::seq_add(const Command& cmd, EventSink sink) {
+  ChordSequence* seq = m_seq.current();
+  const auto note = static_cast<std::uint8_t>(cmd.a & 0x7F);
+  const std::int8_t quality_ovr = static_cast<std::int8_t>((cmd.b & 0xFF) - 1);
+  const auto vel = static_cast<std::uint8_t>((cmd.b >> 8) & 0x7F);
+  if (seq == nullptr || cmd.a < 0 || cmd.a > 127 || cmd.c <= 0 || vel == 0 ||
+      quality_ovr >= static_cast<std::int8_t>(kQualityCount)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const int degree = theory::degree_of(seq->key, static_cast<std::uint8_t>(note % 12));
+  if (degree < 0) {
+    sink(OutEvent::warn(WarnCode::kNotInKey, m_now));
+  } else if (!seq->append(static_cast<std::int8_t>(degree), quality_ovr, vel,
+                          static_cast<Tick>(cmd.c))) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+void Engine::seq_transpose(const Command& cmd, EventSink sink) {
+  ChordSequence* seq = m_seq.current();
+  if (seq == nullptr) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  if (cmd.a < 0) {
+    seq->transpose_by(static_cast<std::int8_t>(cmd.c));
+    return;
+  }
+  if (cmd.a > 11 || cmd.b >= kModeCount) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  seq->transpose_to(static_cast<std::uint8_t>(cmd.a), static_cast<std::int8_t>(cmd.b));
 }
 
 void Engine::cmd_track(const Command& cmd, EventSink sink) {
@@ -465,6 +512,12 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else {
         apply_arranger_voices(sink);  // pick the style's default voices
+        // Owner decision: loading a style changes the BAND, keeps the HARMONY.
+        // establish_default seeds the home key only when nothing explicit is in
+        // force, so a chord the user steered persists across a style load; the
+        // staged shift chord is dropped.
+        m_chords.establish_default();
+        m_chords.reset_pending();
       }
       break;
     case Param::kStyleSection:
@@ -475,24 +528,9 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
       }
       break;
-    case Param::kStyleSwitch: {
-      // A combined style + section switch (D24). Immediate on explicit request
-      // (CTRL+\ "now") or whenever the transport is stopped — a queued switch
-      // could never land without ticks; otherwise it rides the next bar
-      // boundary (ENTER "next-bar"), matching kStyleSection's quantization.
-      const bool immediate = cmd.c != 0 || !m_transport.playing();
-      const bool ok = cmd.a >= 0 && cmd.a < static_cast<std::int32_t>(styles::kBuiltinCount) &&
-                      cmd.b >= 0 && cmd.b < kSectionTypeCount &&
-                      m_arranger.request_style(styles::kBuiltins[static_cast<std::uint8_t>(cmd.a)],
-                                               static_cast<SectionType>(cmd.b), immediate);
-      if (!ok) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else if (immediate) {
-        sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
-        apply_arranger_voices(sink);  // the new style's voices land with the cut
-      }
+    case Param::kStyleSwitch:
+      style_switch(cmd, sink);
       break;
-    }
     case Param::kPartMute:
     case Param::kPartSolo: {
       if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc)) {
@@ -515,18 +553,41 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       }
       break;
     case Param::kStyleRoute:
-    default: {
-      const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
-      const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
-      if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) ||
-          !m_arranger.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
-        sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-      } else {
-        apply_arranger_voices(sink);  // a role just gained a route: voice it now
-      }
+    default:
+      style_route(cmd, sink);
       break;
-    }
   }
+}
+
+void Engine::style_switch(const Command& cmd, EventSink sink) {
+  // A combined style + section switch (D24). Immediate on explicit request
+  // (CTRL+\ "now") or whenever the transport is stopped — a queued switch
+  // could never land without ticks; otherwise it rides the next bar
+  // boundary (ENTER "next-bar"), matching kStyleSection's quantization.
+  const bool immediate = cmd.c != 0 || !m_transport.playing();
+  const bool ok = cmd.a >= 0 && cmd.a < static_cast<std::int32_t>(styles::kBuiltinCount) &&
+                  cmd.b >= 0 && cmd.b < kSectionTypeCount &&
+                  m_arranger.request_style(styles::kBuiltins[static_cast<std::uint8_t>(cmd.a)],
+                                           static_cast<SectionType>(cmd.b), immediate);
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  if (immediate) {
+    sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+    apply_arranger_voices(sink);  // the new style's voices land with the cut
+  }
+}
+
+void Engine::style_route(const Command& cmd, EventSink sink) {
+  const auto port = static_cast<std::uint8_t>(cmd.b & 0xFF);
+  const auto channel = static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF);
+  if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) ||
+      !m_arranger.set_route(static_cast<TrackRole>(cmd.a), port, channel)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  apply_arranger_voices(sink);  // a role just gained a route: voice it now
 }
 
 // Voice selection: a Program Change on a port+channel so the arranger (or the
