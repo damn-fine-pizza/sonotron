@@ -251,7 +251,7 @@ void Engine::chord_detect_cmd(const Command& cmd, EventSink sink) {
 }
 
 void Engine::chord_follow_cmd(const Command& cmd, EventSink sink) {
-  if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(ChordFollow::kManual)) {
+  if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(ChordFollow::kLivePriority)) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
     return;
   }

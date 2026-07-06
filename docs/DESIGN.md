@@ -20,73 +20,24 @@ portable musical core  +  host simulator  +  I/O adapters (host / STM32)
 1. Create **`docs/DESIGN.md`** in the `arrangrr` repo = a full copy of this document (versioned source of truth in the project, D31/Francesco #9).
 2. Create a minimal **`README.md`** (one line: what arrangrr is + a pointer to docs/DESIGN.md) and **`.gitignore`** (build/, .cache, etc.).
 3. **`git add -A && git commit`** — first commit of the repo (today branch `main` has no commits).
-4. No other code in this step; M0 (scaffold/CMake/core) starts afterwards, as per §27.
+4. No other code in this step; the scaffold/CMake/core work (band `1000`) starts afterwards, as per the numbered roadmap in §22.
 
 ---
 
-## 0. Consolidated decisions (living — updated during the discussion)
+## 0. Roadmap & decisions — unified into the numbered tree
 
-Facts confirmed with the user, in order of confirmation. This section is the source of truth on the choices made; the rest of the document must be read in its light.
+The former "consolidated decisions" log (the `D1..D54` codes) and the milestone
+roadmaps (the `M0..M13` / `Phased #` / `H*` codes, formerly §22/§23/§26/§27) are
+**retired as nomenclature**. There is now ONE canonical structure: the **numbered
+roadmap** in §22, where the hierarchical number is the only identity — every
+former milestone and every former decision is a NODE in that tree, with its
+rationale folded in. Cross-cutting principles live in the invariants band `0000`;
+the old `M*`/`D*`/`Phased #*`/`H*` codes map to their new numeric IDs in the
+migration appendix at the end of §22.
 
-| # | Decision | Status |
-|---|---|---|
-| D1 | **Never audio.** MIDI-only, no synth/sampler/FX/audio-looper. | ✅ Locked |
-| D2 | **Primary runtime STM32**, realtime-first; Linux only devenv/sim; **stay OS-generic**. | ✅ Locked |
-| D3 | **C++26 where reasonable + embedded subset**; dual-build (host GCC16 + arm-none-eabi) **green from day one**; a feature enters the core only if it compiles on both. | ✅ Locked |
-| D4 | **Few dependencies**, unless for discussed reasons. Deps to install: `arm-none-eabi-gcc`. To be discussed: test framework, host MIDI backend. | ✅ Locked |
-| D5 | `../seed-arranger` **irrelevant** to the design (separate project). | ✅ Locked |
-| D6 | **Target physical IO**: 1× MIDI **DIN-5 in** + 1× **DIN-5 out** *and* **USB MIDI in/out** → **multi-port (≥2 ports, each in+out) from the initial design**. | ✅ Locked |
-| D7 | **Immediate focus = CLI-driven Linux version.** Buttons/encoders/display **out of scope now**: no physical UI, no `ui_model` for now; the **CLI is the interface** (+ virtual MIDI). | ✅ Locked |
-| D8 | **Live + studio use 50/50.** The design balances immediate performance and editing. | ✅ Locked |
-| D9 | **Philosophy: minimal-deep + deep core with optional layers** (progressive disclosure; constraints as features). | ✅ Locked |
-| D10 | **Architecture/identity = "Living Timeline" (Timeline Vivente) (unifying primitive).** The heart is `Timeline × Track × Transform`: every track gets filled in 3 ways — *write* (sequencer), *generate-from-chord* (arranger), *capture* (looper). Arranger/sequencer/looper are NOT separate engines but **layers/gestures** on top of the same timeline. | ✅ Locked |
-| D11 | **Hero gesture / first WOW = "Chord Intelligence + Chord Sequencer": from sparse input → full chord → recordable/loopable progression** that becomes the *harmony source* for everything (arranger, arp, pads, re-harmonize). It is the harmonic Transform layer, the deepest and most reused building block. Roadmap order: spine → timeline/track → **Chord Engine + Chord Sequencer (first WOW)** → arranger → other gestures. | ✅ Locked |
-| D12 | **Chord input interpretation (first mode) = B: Key-aware diatonic** — you set a key, one note = the diatonic chord of that degree. Modes **A (absolute single-finger)** and **C (shell/partial→completion)** as *selectable* modes right after (`chord_mode`). | ✅ Locked |
-| D13 | **Chord intelligence output = double from day one**: (i) *live harmonizer* (the chord goes out now to the external synth) **and** (ii) *recorded ChordSequence* (editable/loopable/transposable progression that drives arranger/arp/pads). | ✅ Locked |
-| D14 | **ChordSequence = free durations.** Step-based structure but each chord lasts N beats/bars at will (Cmaj7 for 2 bars, then G7 for 1). Input **both live** (recorded in time, quantize-after) **and step-editable**. | ✅ Locked |
-| D15 | **NORTH-STAR / signature = BALANCED MIX of the four**, none dominant: **(1) Chord intelligence** (sparse input → rich, musical harmony), **(2) Unified timeline** (write/generate/capture as a continuum, with re-harmonize), **(3) Perfect MIDI glue** (timing/compliance/interop toward your gear), **(4) Open/hackable** (inspectable, mappable, scriptable). The signature is the *combination*, not a single axis. | ✅ Locked |
-| D16 | **DETERMINISM = an instrument-property, applied WHERE NEEDED, not always.** "Determinism is useful when it's needed, which doesn't mean always." → Deterministic *where it helps*: **logical core reproducible given identical inputs** (enables golden tests/replay/debug), storage/serialization, **seeded** PRNG (so humanize is reproducible *when you want it*, e.g. in tests). **NOT** deterministic *where musical life matters*: live feel, expressive humanize/swing, real timing, human interaction — these may vary and rightly so. Rule: *determinism is an available switch, not a cage.* | ✅ Locked |
-| D17 | **Consequences of "Open/hackable" (D15.4) = first-class architecture** (not P2): **(a)** **headless** core with a stable, versioned **text protocol commands→/events←**, **scriptable and replayable** (the CLI is a thin client on this protocol); **(b)** **uniformly addressable parameter space** — every parameter/state has a **stable ID/path**, readable/settable via CLI/MIDI/automation/mapping; **(c)** **deep assignability / MIDI-learn** as a first-class citizen; **(d)** **state dump/inspect** at any moment; **(e)** golden/replay as a central development workflow. | ✅ Locked |
-| D18 | **Dream ambition = broad AND deep across all four areas** (harmonic transform, arranger/style, sequencer/looper, interop/rig). Long roadmap accepted; the "core-first + layers" discipline keeps it manageable. | ✅ Locked |
-| D19 | **Chord richness = "smart per degree/context"** (default): `V`→dominant 7 (G7), `I`/`IV`→maj7, `ii`/`iii`/`vi`→min7, `vii`→ø7. Automatic musical rules, **override always possible** via modifier. | ✅ Locked |
-| D20 | **Harmonic scope = diatonic + explicit modifiers.** Pure diatonic by default (no surprises); borrowed chords, **secondary dominants**, alterations/extensions available only on **explicit request** (modifiers). No automatic chromaticism. | ✅ Locked |
-| D21 | **Persistence in the CLI phase = both.** Ephemeral live state in RAM **+** `state dump`/`load` to an inspectable text file (enables replay/golden). Versioned+CRC binary project available but not mandatory from day one. | ✅ Locked |
-| D22 | **CLI usage model = REPL on a scriptable text protocol.** The CLI is a *thin client* on a line-oriented commands→/events← protocol; **same protocol** for (a) interactive REPL (real clock) and (b) batch/replay (virtual clock, deterministic → golden). Headless-friendly. Detail in §28. | ✅ Locked |
-| D24 | **NTT / "Style-Follow Note-Transposition Resolver" = first-class core module** (previously it was drowned inside the "voicing resolver"). It is the musical logic that adapts the style's MIDI phrases to the live chord **without wrong notes** (degree/root mapping + transposition rules/tables per source-chord, a public concept à la Yamaha NTR/NTT). Lives in the Transform layer, consumed by "generate-from-chord". Arranger quality = NTT quality. Design in M5, core concept from now. | ✅ Locked |
-| D25 | **"MIDI-FX chain" (Transform insert chain) = first-class concept** (aligns with the "open/hackable" north-star, D15.4). A composable, **bounded** chain (fixed max inserts) of MIDI transformations applicable per-track/zone: transpose · scale-filter · velocity-proc · humanize · note-repeat/ratchet · echo/MIDI-delay · strum · arpeggiate · **harmonize** · probability · randomize · **chord-memory-expand**. Arp/groove/scale-lock become *instances* of this chain, not disconnected modules. Incremental design M6/M8. **Unifying model CONFIRMED** by the user. | ✅ Locked |
-| D27 | **Timing = high internal PPQN 960 (Francesco fix #3/C1).** The scheduler runs at **960 internal PPQN** (0.52 ms @120 BPM), **decoupled** from MIDI clock: F8 every **40 ticks** (960/24, integer). **96 PPQN remains the musical grid** (quantize/notation/view). `Event.tick` is `i32` at 960; swing/humanize/micro-timing = **integer offsets in ticks at 960** (no sub-tick, no float). The `@` field of §29 is in ticks at 960. All-integer ⇒ deterministic goldens. 480 acceptable as a fallback; the "jitter <1 ms" budget is now coherent (grid 0.52 ms). | ✅ Locked |
-| D28 | **ChordSequence = functional storage as degrees + overrides (Francesco fix C2).** Each step = **degree + quality/alterations** relative to a **per-sequence reference key**; chromatic/borrowed chords (`mod sec/borrow`, D20) = **explicit absolute overrides** on the degree. `transpose to <key>` re-derives the degrees in the new key (musical); `transpose ±semi` shifts the reference key by N and re-derives; mode change (major↔minor) re-derives the degrees in the new mode. Enables **re-harmonize / key change / mode change**. The degree→concrete chord→voicing resolution (via **NTT**, D24) happens at playback. Updates §16; **redefines golden G2** (transpose is no longer blind-chromatic). | ✅ Locked |
-| D29 | **Virtual clock determinism & total event order (Francesco fix C3/M10).** In `--clock virtual`, **`transport.advance` is the only engine of time**: it advances the clock and fires all events with `@ ≤ target` in **total order `(@tick, class_priority, seq_no)`** — `class_priority` fixes NoteOff < NoteOn (and realtime/clock first), `seq_no` is a monotonic emission counter from the core as final tie-break (⇒ stable min-heap, goldens reproducible build-to-build). `transport.start/stop/continue` are **events on the timeline**, not prerequisites of `advance`. `@tick` **only schedules** (it does not auto-advance). Golden G2 must be rewritten with `advance` interleaved with the recording. | ✅ Locked |
-| D26 | **Core ABI = typed BINARY commands/events on a ring buffer; L0-JSONL+string-path = HOST-ONLY encoding.** (Francesco fix #1+#2.) The core **never parses** JSON nor strings: it receives `Command{op, coll:u16, idx:u16, param_id:u16, value:Variant}` and emits POD `Event{…}`. The *string-path→(coll,idx,param)* resolution and JSONL (de)serialization live in `platform/host`. **Collections are fixed-capacity arrays** indexed by `u16`; **user names live only on the host side** (a standalone device shows numeric slots: SEQ 1, TRK 3). On-device MIDI-learn/automation bind to **integer param-IDs**. Thus §28/§29 remain the *host* API, but the core's contract is binary and STM32-safe. | ✅ Locked |
-| D23 | **CLI API design = layered on 3 levels.** **L2 Surface** = "Musician REPL" (terse verb-first sugar, for playing by hand). **L1 Model** = addressable parameter space (`get`/`set`/`do <path>`): every command is a path, mappable/automatable/learnable (D17b). **L0 Wire** = structured, versioned **JSONL** protocol (`{"cmd":…}`→ / `{"ev":…}`←) for replay/daemon/GUI (D17a, D16). L2 sugar expands into L1 operations, which serialize into L0 messages. The CLI operates at any level (`--format human\|jsonl`, sugar on/off). | ✅ Locked |
-| D30 | **Scope honesty (Francesco #6): M0–M5 = PRODUCT, M6–M13 = ASPIRATION.** "Minimal-deep" (D9) is honored by doing **M0–M5 well and vertically** (spine → chord intelligence → chord-sequencer → arranger), not by opening everything up horizontally. The Dream List (§26), "broad and deep" (D18), remains the horizon, but M6–M13 (looper/arp/pads/MIDI-FX chain/performance/device/tooling/STM32) are explicitly aspiration, reprioritizable. Risk #1 when working solo: starting horizontally and closing nothing vertically. | ✅ Locked |
-| D31 | **`arm-none-eabi-gcc` = BLOCKING prerequisite of M0** (Francesco #7), not a "dependency to be discussed": without it, M0's ARM build does not exist (today it is not installed). And **commit `docs/DESIGN.md` into the repo** (Francesco #9): today the whole design lives outside the project, the repo is empty. | ✅ Locked |
-| D32 | **MAXIMUM realtime-first + compile-time-first + ZERO dynamic allocations (user directive, sovereign principle).** **(a) No heap anywhere in the core** (not just the hot path): no `new`/`delete`/`malloc`/`std::vector`/`std::string`/`std::map`/`std::function`. **Bounded** static/stack/arena storage (`StaticVector`, `StaticString`, `RingBuffer`, `std::array`, fixed pools); **even load/init fills pre-sized pools**, it does not allocate. **(b) Compile-time-first**: prefer `constexpr`/`consteval`/`constinit`, templates, `concepts`, **`constexpr` tables** (chord qualities, scales, NTT rules, velocity curves, GM map), **compile-time enum→handler** dispatch, `static_assert` everywhere on sizes/limits. **(c)** Callbacks via **function-pointer / non-owning callable / template**; **compile-time polymorphism (template/CRTP) in the hot path**, `virtual` only at coarse HAL boundaries. No RTTI/exceptions/`<iostream>` in the core. **(d)** Allocations and non-determinism (if ever) **only in host tools**. Hot path = everything **O(bounded)**, lock-free **SPSC**, no syscalls, no blocking locks. | ✅ Locked |
-| D34 | **Live piano→chord harmonizer = host-live driver over a core-portable `ChordDetector`.** While the arranger plays, notes held on the chord-detect input port are recognized as a chord (shell-completion, D12 mode C: ≥3 held notes, lowest = root, smart quality per D19) by a freestanding `ChordDetector` and pushed into the `ChordEngine` via a new `set_context(root_pc, quality)` that steers the existing NTT `ChordState` (D24) **without sounding a voicing** — the held keys already sound through normal routing, so there is **no double-voicing**. This is the third live source of the harmonic context, alongside `chord play` and the recorded `ChordSequencer` (D13). Two locked behaviors: **(a) chord-memory / hold-last** — the context updates only on a recognized chord (≥3 notes); dropping below 3 held notes leaves the last chord in place (band keeps playing on it) as on pro arranger keyboards; **(b) whole-keyboard toggle for the MVP** — `chord detect on\|off`; keyboard split/zones (low=chords, high=melody) explicitly **deferred**. ABI: `Param::kChordDetect = 34` (`set: a=0/1 enable, b=input port`), the next stable id after `kStyleSwitch=33`; `kChordHold=17` stays reserved/unsupported. Detector is core-portable (zero heap, 16-byte held-note set, D32); **honest STM32 cost:** grows the engine object by roughly a couple dozen bytes (not zero). Detail in §11; command/panel surface in the Host UI track (§27) and docs/TUI_SPEC.md. | ✅ Locked |
-| D33 | **STM32 anchor = STM32H743 (Cortex-M7 @480 MHz, 1 MB RAM, 2 MB flash) + disciplined 512 KB envelope** (Francesco fix M2/M3). It is not the final hardware choice (that remains M13): it is the **nail** that makes the budgets falsifiable. Rules: **(a)** all `MAX_*` pools must fit in **≤512 KB** (half the part) with `static_assert(TOTAL_POOLS ≤ 512*1024)`; **(b)** hot path (I/O queues, scheduler, note tracker) in the **192 KB DTCM** zero-wait (deterministic-by-design, avoids reasoning about the M7's D/I caches); big pools in AXI SRAM; **(c)** **compiled read-only content (factory styles/patterns) in FLASH, memory-mapped `const`, read in-place** (the §21 format is indices+POD) — RAM is only for the *mutable* (loops, recordings, live state); **(d)** `Event` = **8-byte POD** (`{u32 tick; u8 status; u8 d1; u8 d2; u8 meta}`, NoteOff = separate event, `static_assert(sizeof(Event)==8)`); **(e)** budgets derived, not eyeballed: looper 8×3072 ev (192 KB) · live-rec 8k ev (64 KB) · user content 8k ev (64 KB) · chordseq 16×128 steps (24 KB) · scheduler 4096×12 B (48 KB) · ring I/O 4 ports (16 KB) · tracker/routing/state (24 KB) · headroom ~80 KB ⇒ **≤512 KB**. Replaces "~64k events/project": now **≤40k RAM-resident events** + unlimited-in-practice read-only in flash. | ✅ Locked |
-| D35 | **Program change / voice selection = a thin ABI slice of the full §18 model, not yet a `Program`/`ExternalSound` entity.** `Param::kProgram = 35` (`set: a = GM program 0..127, b = port \| (channel_0based << 8)`), the next stable id after `kChordDetect=34`; `Engine::cmd_voice` emits a Program Change on the given port:channel so `arrangrr` itself can pick the external synth's voice, not only the player by hand. Host surface: `program <port>[:ch] <voice>`, resolved against a 128-name GM instrument table (host-only, D26 — the core carries no display names, only the numeric program id). Deliberately narrow: no bank-select, no CC-init sequence, no `DeviceProfile` yet — those remain M10. | ✅ Locked |
-| D36 | **All-roles styles enablers: per-role register anchor + per-role default GM voice.** Two small, NTT-adjacent additions that make every `TrackRole` (not only Bass/Chord1) usable in a style pattern without timbral mush or manual per-synth setup: **(a)** `Arranger::kRoleAnchor[kRoleCount]` gives each role its own default register (chord-tone 0 at octave 0) — bass low (36), pad under the comp (48), chord/drums/perc/cc mid (60), arp/phrase/lead above (72) — so stacked tonal roles no longer collide in the same octave; **(b)** `StylePattern.gm_program` (`-1` = leave the synth's current voice alone) is emitted as a Program Change via `Arranger::emit_voices` whenever a style loads, switches, or reroutes a role — reusing the D35 ABI. Together these are the prerequisite that unblocks the in-progress 8-style-parts effort (§27): a style author can now add `kPad`/`kPerc`/`kChord2`/`kArp` patterns and get a sane register + voice for free, without hand-tuning every part. Housekeeping alongside this: the previously-monolithic `style.hpp` was split into `style_model.hpp` (format: `SectionType`/`RolePolicy`/`StyleEvent`/`StylePattern`/`StyleSection`/`Style`) plus one header per built-in style under `arranger/styles/` (16 styles: `basic`, `rock`, `pop`, `funk`, `disco`, `house`, `motown`, `reggae`, `blues`, `swing`, `shuffle`, `country`, `latin`, `samba`, `bossa`, `ballad`) — pure maintainability, no behavior change. | ✅ Locked |
-| D37 | **Generative Director ("Musical Director" / target-based generative meta-controller) = the phased roadmap's CAPSTONE, a new layer above Arranger+Sequencer, not a replacement for either.** Deliberately **not "AI"**: a deterministic parameter-trajectory engine, not a model. It holds a `DirectorState` (current values on expressive axes — energy, density, tension, brightness, complexity) and a `DirectorTarget` (target values on those axes + transition length in bars + a deterministic seed); instead of jumping to the target it interpolates **gradually, bar by bar** (e.g. bar 4 more hihat, bar 8 busier bass, bar 12 tenser chords, bar 16 more fills, bar 24 reaches target), emitting per-bar parameter deltas that **pilot** — never bypass — the existing Arranger/Style/Sequencer/Arpeggiator parameter inputs (density, energy, tension, complexity, swing, velocity, ghost-note amount, fill probability, pattern/groove variant, chord extensions, voicing width, register, arp rate/octaves/gate, drum openness, bass activity, syncopation, part mute/unmute). Same state + target + seed ⇒ same trajectory (D16); no heap, static state, bounded per-tick/per-bar step (D32) — cheap enough for STM32, a small interpolation state machine, not a generation engine. **Hard dependency, this is why it is last:** it has nothing to drive until the groove engine, `ArpeggiatorEngine`, step-sequencer probability/density and voicing controls exist (roadmap items 2/3/5/6 below) — those parameters are precisely today's gaps (§27 gap table). Detail in §27. | 📋 Planned |
-| D38 | **Desktop GUI = a Dear ImGui CLIENT of the core over the host protocol, never a core dependency.** A native C++ (Dear ImGui) desktop app that is a SEPARATE PROCESS and a pure client: it never links `arrangrr_core`, never ships on the STM32 target, and never sits on the realtime/MIDI path. It commands via `Command`/L1 and mirrors state via `OutEvent`/JSONL over a small host-only adapter (a Unix-domain-socket transport that reuses `to_jsonl` verbatim — D26/D17/D23/D30: one protocol, three consumers = goldens, REPL, GUI). Immediate-mode by design → the GUI holds NO authoritative state: each frame redraws from the mirrored stream (state dump on connect + `OutEvent` diffs), and if it ever diverges the core wins; killing/reopening the GUI cannot touch playback. **Live-played notes never round-trip through the GUI** — they enter via `push_midi_in` as always; the GUI is for structure/editing/inspection (its high-value view is the pattern-relative editor with `ScaleDegree`/`ChordRole`/`ChordGesture` overlay from the reflection gap-analysis). Rejected alternatives and rationale in `docs/reflections/hybrid-arranger-gap-analysis.md`: JUCE (audio/plugin gravity, excluded by D1), web/Tauri/Electron (extra alien toolchain in a C++/embedded tree), Qt (heavy, invites linking the core). Enabling step (do-anyway, host-only, small): the UDS-JSONL adapter — **landed** as `host/uds_server.{hpp,cpp}` (`--control PATH`, live-mode-only, opt-in): inbound is the same L1 grammar via `Shell::exec_line`, outbound broadcasts the same canonical `to_jsonl` stream; a pure `LineBuffer` frames it, the script/golden path never constructs it. The ImGui client itself remains 📋. | 🔄 In progress |
-| D39 | **Pattern-relative note model = additive per-event `NoteSource`, not a rewrite (foundation pass of the gap-analysis #1 rework).** A `StyleEvent` now names its pitch via `NoteSource src`: `kChordTone` (default — the exact historical NTT chord-tone index, so all 16 builtin styles stay byte-identical), `kScaleDegree` (a signed scale degree of the live **Key**, resolved through `theory::degree_to_semitones` — the melodic/diatonic parts D24's §883 gap said were impossible because `resolve()` never saw the `Key`), and `kInterval` (a signed semitone offset from the chord root — tensions 9/♯11/♭13 and chromatic approach notes). `Arranger::resolve()` and `on_tick()` now take `const Key&`, threaded from `ChordEngine::key()` at the single engine call site; `kFixed` roles ignore `src` (drums never transpose). Cost is **flash-only** (`StyleEvent` 8→10 B ⇒ ~+9 KB `.rodata`/`.text`, **0 B RAM/`.data`**), freestanding/ARM-green. Deferred to a follow-up: `ChordGesture` (the generative gesture layer that builds on this vocabulary). | ✅ Locked |
-| D40 | **Arranger resolution pipeline = a targeted, behaviour-preserving refactor, not a rewrite.** `resolve()` was a `static` 1-event→1-note kernel; that blocks both stateful voice-leading and multi-note gestures. The per-event fire loop is now a named pipeline: *gather a role's step events → `gesture::expand` (1 event → N specs) → `resolve()` each (the UNCHANGED wrong-note-proof kernel) → a bounded voice group (`kMaxVoiceNotes`=16) → `VoicingState::voice()` → groove + schedule per note.* Two new extension headers (`arranger/gesture.hpp`, `arranger/voicing.hpp`) and two per-record fields (`StyleEvent.gesture`, `StylePattern.voicing`, both last-with-default, fitting existing padding — `static_assert(sizeof(StyleEvent)==10)`, **0 flash growth** from the fields). With the default `kNone`/`kAsWritten` the output is byte-identical (goldens prove it) up to the cap; a denser step truncates with an `ARR_ASSERT` net. `on_tick` control flow and the engine call site are untouched. | ✅ Locked |
-| D41 | **Voice-leading = per-role nearest-octave smoothing, opt-in per pattern (`VoicingPolicy::kLead`).** `VoicingState` remembers each role's previous voicing and re-octaves the current chord's tones so each authored slot (root/third/fifth/…) follows the nearest octave of where that slot last sounded: common tones stay put, other voices move minimally. Only chord tones are re-voiced — melodic (`kScaleDegree`/`kInterval`) and fixed (drum) notes pass through untouched, so the NTT guarantee holds. Memory resets on style load and transport start (and is preserved across a melodic-only step). `kAsWritten` (default) is a pure identity, so all existing styles are byte-identical. Deliberately simple (per-slot, not full optimal-assignment voice-leading); harmonic spillover/open-voicing remain future work. | ✅ Locked |
-| D42 | **ChordGesture = per-event generative fan-out over the live chord.** Four variants (`kStrumUp`/`kStrumDown` = chord tones staggered by a fixed micro-offset low→high / high→low; `kRollUp`/`kRollDown` = tones spread evenly across the event's gate). Each emits `shape_of(chord).count` chord-tone specs the arranger resolves through the NTT kernel — so the gesture never computes a pitch itself and stays wrong-note-proof. Deterministic, bounded (`kMaxGestureFan`=8), no heap. A gesture only fires on a chord-tone event of a chord-tone part (on a drum/melodic event it passes through); `kNone` (default) is the byte-identical passthrough. Deferred: a part-wide continuous generator and voicing applied to gesture output. | ✅ Locked |
-| D43 | **`melodd` audio companion + peer-module topology (DIRECTION, not the core).** arrangrr (the MIDI brain) and `melodd` (a host-only audio engine) are **peer modules wired by an orchestrator** — mutually *name-blind*, talking only through a small **POD interface** (`Command`/`OutEvent`+clock, D26), **transport-agnostic** (in-proc queue / socket / hardware link between distinct chips). **Audio never crosses the interface** — only MIDI/clock/control does; `melodd` owns all sound and is authoritative over *sound* but never over *time* (clock flows orchestrator→melodd, look-ahead-scheduled against melodd's own audio clock — Link-style shared *reference*, never ReWire-style shared *buffer*). This keeps **D1 intact in its true form**: *the core never has audio*; audio exists only as a downstream host-only peer the core is ignorant of (the same status the GUI already has, D38). External audio **input** (voice/instrument) enters only inside `melodd` as an **opaque, content-addressed asset** the seed/command log *points to but never regenerates* — so "seed = musical object" stays literally true (it owns every note and not one sample); loop-to-clock yes, warp/edit on a linear timeline no (that is the DAW gravity, refused). **Deployment matrix:** *Linux* = dev simulation of arrangrr (today's `host` preset); *STM32* = firmware using arrangrr alone (today's `arm` preset); *SBC* = one binary (or two processes/threads — a local overhead choice) using **arrangrr + melodd**, the same name-blind libraries with an orchestrator choosing which peers to wire; `melodd` targets audio-capable HW (Daisy-class / Cortex-A / DSP), never STM32. Consequence: keep the port contract POD/heap-free even host-side, so the same interface can descend to an MCU. NOT scheduled work — a captured direction. Rationale: `docs/reflections/melodd-audio-companion.md` + `docs/reflections/external-audio-input.md`; positioning in `docs/product-identity.md`. | 📋 Direction |
-| D44 | **Style data format + a C++-style generator (DIRECTION, roadmapped — not now).** Today the 16 built-in styles are hand-authored C++ (`inline constexpr StyleEvent[]` tables), compiled into the binary and memory-mapped from flash on STM32 (D33) — zero RAM, zero parsing. The two representations should **coexist**: keep the compiled path for the device, and add a **pure-data** representation for interchange/authoring/runtime-loading, with a **generator that emits the C++-style form from the data** so STM32 can keep using compiled styles if we want. The loading side is several SW pieces to foresee (owner's steer): a style **inspector**, **generators**, **serialize/deserialize**, a **style compiler** (data → `.cpp`), and a **non-binary** interchange format (an on-device text/JSON parser is refused — no heap/parse-latency on the live style-switch path; Prospero's verdict). The forced constraint: only `StyleEvent` is blittable (10 B, no pointers); `StylePattern`/`StyleSection`/`Style` carry `Span`s, so any on-disk form must be **offset/index-based** and rebuilt into `Span`s at load (DESIGN "references are indices, not pointers"). Reuse the existing `arrstyle-converter` `StyleModel` + `canon-builder` codegen; smallest first step = teach the converter to emit today's constexpr header from its `StyleModel`. Rationale + layered proposal: `docs/reflections/style-data-format.md`. NOT scheduled — a captured direction. | 📋 Direction |
-| D45 | **Single-finger chord mode = the live piano→chord detector honors `ChordMode::kSingle` by lowering its held-note minimum from 3 (fingered) to 1.** One key = a major chord on that root; a second key colours it (minor/7th/etc. via the SAME shell interpretation `complete_shell_full` already applies — a lone root already returns `kMaj`, so only the minimum count changes, not the recognition logic); three or more resolve the full chord. Reuses the existing `Param::kChordMode` ABI and the `chord mode single|shell|diatonic` host command (NO new ABI param): the typed `chord play` path already used `play_single` (root only) under `kSingle`, so "single" is now single-finger on BOTH the typed and the live paths — one unified minimal-input mode, matching how a real arranger's chord-scan setting governs the whole left hand. Fingered modes (`diatonic`/`shell`) keep the triad minimum (chord memory holds the band on the last chord until a full chord is pressed). Freestanding, no new state beyond a `std::uint8_t` threshold in `ChordDetector` (`set_min_notes`, clamped to ≥1). | ✅ Locked |
-| D46 | **Step-sequencer parameter-locks (first increment) + the per-tick fire-order invariant.** Elektron-style per-step locks land as an additive, POD, neutral-default extension of `Step` (kept 8 bytes, `static_assert`): `probability` (a D16 seeded position hash keyed on track index + global step; 100 % bypasses the hash so the neutral path is byte-identical), `ratchet` (1..8 evenly-spaced retriggers, each note-off anchored to its own on so a mono ratchet never double-attacks a sounding note), `micro` (honest FORWARD-ONLY 0..127 lay-back — a step is evaluated only at its boundary so anticipation would need step look-ahead, deferred), and `tie` = a **real sustain chain**: a maximal run of tied steps on the SAME note is ONE held note (one on at the run start, one off spanning the run, absorbed steps suppressed, the run governed by the START step's single probability verdict). The `kTrackStep` ABI carries the locks opt-in in the free high bits of `b`/`c` (bit 31 of `c` flags them); the short form and `Command`'s POD shape are unchanged. Paired invariant: `test_engine_fire_order` promotes the per-tick producer order (`timeline → chord-seq → arranger → arp`) from comment to a mutation-verified test — chord-seq must resolve BEFORE the arranger on the same tick (else the band harmonizes on the previous chord). Reworked twice under review (ratchet note-stack via tick-aware `cancel_note_off`; tie modelled as a chain, not a one-step gate extension; absorbed-step probability re-verdict fixed). Deferred: rest/conditional-trig/euclidean/rotation, bidirectional micro, the tie loop-seam. | ✅ Locked |
-| D47 | **Explicit chord-follow harmony-source selector.** Three producers can update the arranger-followed chord context (`m_chords.state()`): live MIDI **detect** (`observe_chord_input`), the **sequencer** (`fire_chord_seq`) and manual **`chord play`** (`cmd_chord`). Before D47 they raced implicit last-writer-wins; D47 replaces the coincidence with a NAMED selector `enum class ChordFollow { kAuto, kDetect, kSequencer, kManual }` on the Engine (`m_chord_follow`, default `kAuto` = all three may steer = byte-identical legacy). Root-cause shape (Fabrizio's review): rather than capture-and-restore the context around each producer, the steer decision is a `bool steer` threaded into `ChordEngine::sound`/`play*` — a non-selected producer still SOUNDS its chord and emits its events but never PUBLISHES the followed context in the first place (detect already gated its `set_context` the same way). This keeps the "who sounds" and "who steers" concerns separate and leaves no restore to forget when `sound()` grows. ABI: `Param::kChordFollow = 41` (`set: a = ChordFollow`); `Command` stays POD. Host: `chord follow auto\|detect\|sequencer\|manual` command, a `follow:` line in the chords panel, and a label clarification — the tonality line reads `scale: <root> <mode> (scale-degree parts)` (it does NOT transpose the band) vs the live `chord: … (whole band follows)`, with a `scale` command as an alias of `key`. Functional tests (`test_chord_follow`) lock all five modes and were proven red-first by defeating the gate. Deferred to D48 (Fabrizio's domain note): `m_sounding` is a single shared voicing, so in `kManual` a running sequencer can still release/replace the manual pad's notes — separating who-steers is done, separating who-plays-the-pad is next. | ✅ Locked |
-| D49 | **Two-zone harmony input (the §11 split un-deferred) + scale-aware single-finger.** The chord-recognition zone becomes an explicit surface instead of living on the piano. Whole-keyboard zones selected by *surface* (host panel focus / an on-device keyboard split), NO pitch split_point yet (few keys). Core: `enum class InputZone { kMelody, kHarmony }` **per input port** (`m_input_zone[kMaxPorts]`, default `kMelody` = byte-identical legacy); in `push_midi_in` a NOTE on a `kHarmony` port is output-SUPPRESSED (never reaches `m_router`) while the detect port still OBSERVES it — one parser, one path, the zone decides route-vs-suppress (Prospero's shape, not a parallel `push_harmony_in`). Rides D47 `kDetect`: one `ChordDetector`, one held-set, one steer surface, **no new follow axis**. ABI additive: `Param::kInputZone = 42` (`a = port, b = InputZone`); `Command` stays POD. This **demotes D34(b)**: the piano is no longer the detect port — a `kMelody` detect port is still the FullKeyboard branch (sounds+steers), a `kHarmony` one is the silent Split zone. Host: piano panel = MELODY (`kPianoInputPort`, sounds, steers nobody), chords panel = HARMONY (`kHarmonyInputPort`, silent, the detect port) and is now focusable + captures the piano key bindings (plumbing generalized over `(port, ActiveNoteTracker&)`, separate `m_harmony_held`); `configure_default_surfaces()` pins the topology at launch; `~/.arrangrr.init` reconciled. **Scale-aware single-finger** (refines D45, Casio-Chord lineage, NOT Yamaha): `theory::single_finger_quality(key, pc)` → the diatonic maj/min triad of the pressed root; **dim → minor, aug → major** by fifth-restoration (principled, third-bit collapse); **chromatic root → major** (secondary dominant, never stalls); triads only — distinct from D20-strict diatonic on three invariants (triads-only, no out-of-key rejection, dim/aug snapped). Functional tests (`test_input_zone`) lock silent-re-harmonize + the single-finger rules, red-first. Verdict: `docs/reflections/harmony-input-chord-zone.md`. (D48 stays reserved for the shared-voicing split from D47's note.) | ✅ Locked |
-| D50 | **Per-style feel = tempo + default groove (and eventually a triplet grid) become properties of the `Style`, not one global runtime knob.** Ottorino's corpus measurement (`docs/reflections/style-differentiation-and-generation.md`) found the root cause of the "same song, different clothes" complaint: 98.7% of the 3766 note-events are chord-tone comping or fixed drums, `RolePolicy` has only two values, and — decisively — the `Style` struct carries only `name` + `sections`, so **it owns no tempo and no swing/feel**; `GrooveParams` is a single global runtime state and the grid is 16th-only, so a triplet/shuffle/bossa feel is **not even expressible in note placement**. D50 gives each `Style` its own default `GrooveParams` + tempo (and roadmaps a triplet grid), making feel a per-style property. This is an ABI/struct change (owner-approved) and is ranked the **single biggest lever** against style sameness. **Owner decision (2026-07-06): approved, ASAP** — the next musical milestone after the in-flight global-steer refactor. | 📋 Planned (next) |
-| D51 | **Generative style = a new "generative" style kind alongside the hand-authored ones, under Style.** Rather than only fixed hand-written note tables, a style may be *generated*: a small deterministic melody/variation module (Ottorino's Dir.1 = motif + transforms — diatonic transposition, retrograde, rhythmic displacement, ornaments — constrained to Key/NTT, seed-deterministic, SHIPPABLE; and/or Dir.2 = offline-trained Markov/grammar on scale degrees, baked `constexpr`, runtime-SHIPPABLE). It is a NEW module layered above the arranger (a cousin of the D37 Director): the model already has the source (`kScaleDegree`/`kInterval`) and empty melodic roles (`kPhrase` = used by 0 styles today), only the generator is missing. So a real melody that *changes* (not one fixed line reused across styles) becomes possible. **Owner decision (2026-07-06): add it as a `generative` style mode under Style.** Scope of the generator (Dir.1 vs Dir.2) TBD; stays no-heap/dual-target for the on-device path (any ML training is host-only). | 📋 Planned |
-| D52 | **MIDI stylizer = a host tool that renders a plain MIDI in a genre, as TWO distinctly-named modes.** Ottorino's enabling insight: "apply live" and "generate offline" are the SAME `resolve()` with a different chord argument, so a stylizer is mostly reuse. Owner-named, two operations: **(1) `Accompany`** (Ottorino's A) — KEEP the input's melody, detect its chord progression + form (reusing the `ChordDetector`, D34), and play the genre's band UNDER those chords; rule-based, offline, reuses the engine, **zero new core code, zero dependencies** → ships first. **(2) `Restyle`** (Ottorino's B) — transform the input's OWN parts into the genre idiom (re-groove / re-voice); **depends on D50** per-style feel; host-only. Both operate on a note range via `resolve()`/chord-detect, so **global** (whole input) vs **granular** (per-track / per-region) is just the input scope — start **global** (easiest to test), granular is a later selector. ML style-transfer (Ottorino's C) stays OUT: on-device infeasible, host-only would need a dependency flag. Analysis: `docs/reflections/style-differentiation-and-generation.md`. **Owner decision (2026-07-06): do `Accompany` + `Restyle` as two named modes, global-first.** | 📋 Planned |
-| D53 | **Quantized (next-bar) chord entry + `original`/`current`/`next` key readout.** Chord steering, immediate since D34/D49, becomes QUANTIZED to the bar (owner's revised model after live testing — supersedes the earlier "immediate + confirm" choice): a pressed/steered chord is STAGED as a pending "next" chord and only COMMITS to the followed context ("current") at the NEXT BAR boundary, then the pending clears — exactly how a pro arranger applies a chord change on the downbeat. Core: a pending `ChordState` + flag, staged by the D47-selected producer(s) instead of an immediate `set_context`, committed at the bar boundary BEFORE the arranger fires the bar (respecting the D46 fire-order so the bar plays on the freshly-committed chord), reset on transport-start / style-load; no heap, POD. Readout (chords panel) is REORDERED so the key lines sit at the TOP — visible even when the panel is only a few rows tall (the clipping that hid `scale`/`playing`/`holding` under the fold): **`original key:`** (song tonic, FIXED — renamed from `home key:`), **`current key:`** (the chord sounding THIS bar; persists; changes only at the bar; **initialised to the `original key`** so the band starts in the song tonic), **`next key:`** (the pending pressed chord; starts `-`; `-` until a chord is pressed; back to `-` once it enters). Supersedes the D-nothing `home:`/`playing:`/`holding:` lines added mid-session. Quantization granularity = bar as specified; can be refined to beat/half-bar if the feel is too slow. **Owner decision (2026-07-06).** | 📋 Planned (next) |
-| D54 | **Piano-keyboard source-coloured visualizer.** The piano panel keyboard lights each key by WHY its note is active, so the panel becomes a live read of the harmony: **GREEN** = notes sounding in the CURRENT bar (the band/arranger on the current chord) — both the key letter and its note-name cell light (e.g. play C4 → `A` and `C 4` go green); **ORANGE** = notes of the NEXT (pending) chord staged to enter next bar (D53) — a preview; ONLY the next chord is orange, and once it enters at the bar it turns green until the next chord change (orange again); **WHITE** = notes played DIRECTLY on the piano. White is DEFERRED: after the global-steer refactor the piano is a silent chord-steer surface (pressed keys form the next chord = orange), so "white = direct sounding play" has no source until a sounding melody surface returns — **owner decision (2026-07-06): GREEN + ORANGE now, WHITE later** with the melody surface. Host-only (piano render + note-source attribution via the `MidiMonitor` and the D53 `pending()`); needs coloured per-key rendering (letter + note cell). Model for the impl: sonnet. | 📋 Planned |
-| — | *Status:* understanding ~99%; **all of Francesco's red blockers resolved** (D26 #1/#2, D27 #3, D28 C2, D29 C3); maintenance folded in; **budgets anchored (D33)**. Core M0–M5 spine, the live piano→chord harmonizer (D34), program/voice selection (D35) and the all-roles register/voice enablers (D36) are landed; Host UI **H1+H2 landed** (§27); 8-style-parts, the groove engine and the live-keyboard `ArpeggiatorEngine` have since landed too. The **pattern-relative note vocabulary** (D39), the **host UDS-JSONL control adapter** (D38 enabling step), the **arranger resolution pipeline** (D40), **voice-leading** (D41) and **ChordGesture** (D42) have now landed as well — and, as of the styles-modern-vocab milestone, the built-in styles finally USE that vocabulary (§27 item 6: kLead/gesture/scale-degree/interval/break content across 15 of 16 styles). The step-sequencer parameter-locks (§27 item 5 first increment: probability/ratchet/micro/tie) and the per-tick fire-order invariant have now landed too (D46); the **explicit chord-follow harmony-source selector** (D47) makes WHICH producer steers the band a named choice instead of last-writer-wins. On the QA side the arpeggiator gained a functional-test suite and coverage is now reported as **three metrics** (unit ≥80% enforced core gate; functional + regression report-only) via CTest labels — see project memory `coverage-metrics`. The live TUI now auto-runs a **`~/.arrangrr.init`** command script on launch (lenient; `--init FILE` overrides it, strict), so a saved session — e.g. single-finger + `chord follow detect` — comes up configured with no flag (`docs/arrangrr.init.example`). The **two-zone harmony input** (D49) then un-defers the §11 keyboard split: the chords panel is a silent chord-recognition surface (play there → the band re-harmonizes, no sound), the piano panel is a pure melody surface, and single-finger is now scale-aware (one key → the diatonic maj/min triad). **Next (§27 gap analysis + `docs/reflections/hybrid-arranger-gap-analysis.md` + `docs/reflections/live-daw-around-arrangrr-ux.md` + `docs/research/yamaha-style-corpus-and-rules.md` — a validated corpus of 1010 Yamaha SFF styles + 79 genre rules mapped to arrangrr constructs):** harmonic spillover + open voicing; the reversible MIDI looper; the CASM→NTT importer body in `arrstyle-converter`; the style data format + C++-style generator (D44); then the Generative Director (D37) capstone; the Dear ImGui client (D38) rides on the now-landed UDS-JSONL adapter, off the core's critical path. | 🔄 In progress |
-
----
-
+See §22 for the tree, the recommended sequence, the open owner-decisions, and the
+migration cross-reference. (Residual inline `M*`/`D*` references still present in
+the architecture/spec sections resolve through that appendix.)
 ## 1. Product vision
 
 **What it is.** A "MIDI brain" for live performance and composition: you play chords/notes from a master keyboard, and the device generates accompaniments in real time (drums/bass/chord/pad/arp), manages arrangement sections (Intro/Variation/Fill/Break/Ending), sequences patterns, records MIDI loops in overdub, and routes/transforms MIDI toward multiple external devices on different channels/ports. It syncs to/from external clock.
@@ -663,286 +614,589 @@ Two separate worlds (golden rule: **text on the tool side, binary on the device 
 
 ---
 
-## 22. Three possible MVPs
+## 22. Canonical numbered roadmap (WBS) — single roadmap & decision record
 
-### MVP-α "very small" — *MIDI Brain + Step Sequencer*
-- **Included**: Transport/Clock (96 PPQN, master+basic slave), MIDI In/Out/Router, Note tracker+Panic, basic Compliance, multi-track Sequencer with quantized live record, load 1 binary project, headless runner + golden tests, `sim_live` with ALSA virtual MIDI.
-- **Excluded**: arranger, chord engine, looper, arp, pads, rich performance, storage save.
-- **Risks**: low; the risk is "it does not demonstrate the arranger identity".
-- **Complexity**: small (foundations).
-- **Demonstrates**: solid timing/compliance/determinism + a usable groove sequencer with real hardware. It is the **non-negotiable base**.
+This section is the ONE canonical roadmap and decision record. It replaces the
+former §22 (MVPs), §23 (incremental roadmap), §26 (dream list), §27 (milestone
+roadmap) and the §0 decision log. One nomenclature only: the hierarchical number
+is the identity — every former milestone and every former decision is a node
+here, with its rationale folded in. History is preserved in the migration
+appendix at the end (old code → new numeric ID).
 
-### MVP-β "realistic" — *Chord-aware arranger* (RECOMMENDED)
-- **Included**: everything in α + Chord Engine (SingleFinger+Fingered, chord hold, split), Arranger with 1 Style (Intro/VarA/VarB/Fill/Ending), roles Drums(fixed)/Bass(follows)/Chord/Pad(follow) with basic voicing resolver, quantized section switching, Program/Bank/PC init toward external devices, minimal Performance (1 slot), full slave sync (Start/Stop/Continue/SPP).
-- **Excluded**: looper, arp, pads, chord sequencer, CC lanes, SysEx, SMF, device profile editor, song mode.
-- **Risks**: medium (chord→voicing→timing is the difficult heart).
-- **Complexity**: medium.
-- **Demonstrates**: *this product* — you play chords, the accompaniment follows, you change variation/fill, you drive external synths, you sync with a DAW. It is the realistic target of the first credible milestone.
+### How to read and maintain this tree
 
-### MVP-γ "ambitious" — *Complete live performance*
-- **Included**: everything in β + MIDI Looper (record/overdub/undo), Arpeggiator, Phrase Pads, Chord Sequencer, Groove/Humanize, Scene/Song mode, Performance/SetList, Device Profile Registry, save project, full Debug UI + fault injection.
-- **Excluded**: full SysEx, SMF, MIDI 2.0, graphical style editor (they remain P2 tools).
-- **Risks**: high (broad surface, integration).
-- **Complexity**: large.
-- **Demonstrates**: a complete MIDI "one-man-band", nearly feature-complete pre-STM32.
+**Numbering.** Hierarchical numeric IDs, 0000–99999:
+- **thousands** = major area (band), e.g. `5000` MIDI-FX chain;
+- **hundreds** = sub-area, e.g. `5100` insert-chain framework;
+- **tens/units** = leaf item, e.g. `5310` echo/MIDI-delay insert;
+- **decimals** = sub-item, e.g. `9130.1` triplet grid pass.
 
----
+**The number is the only ID.** No prefixes. A node is cited as `5100`, never as a
+milestone or decision code. IDs are stable for life: reordering the WORK does not
+renumber the TREE — sequence lives in the "Recommended sequence" section, not in the
+IDs. A new item takes the next free number in its sub-area (tens are left sparse);
+a new sub-area the next free hundred; a new band the next free thousand.
 
-## 23. Roadmap (incremental)
+**The 0000 band is different: invariants, not work.** Cross-cutting principles
+(determinism, no-heap, dual-target, the STM32 budget, scope-honesty, the open
+protocol, ABI discipline, dependency policy, product identity) are not schedulable
+leaves — they are constraints every work-node must obey. They live in band `0000` as
+declared invariants with stable numbers, so any work-node can be checked against them
+("does `6000` honor `0400`?"). They have no status and no sequence; they simply hold.
 
-Recommended order (slightly revised compared to yours: I consolidate timing+MIDI+tests before everything, and bring the end-to-end "vertical slice" forward):
+**Each work leaf carries:** a stable ID, a short title, a STATUS, a feasibility
+regime if open, and a folded one-line rationale (the WHY, formerly the decision text).
+Where the work came from is recoverable via the migration appendix, not via inline
+codes.
 
-- **Phase 0 — Foundations, dual-target build, HAL & test harness.** Repo scaffold + **CMake with two toolchains (host GCC16 + arm-none-eabi cortex-m stub) green from day one** (the core compiles as a `.a` for both; a bare-metal firmware stub links and "runs" in QEMU or at least links cleanly). HAL interfaces, `StaticVector`/`Span`/`RingBuffer`/`fixed`, Transport/Clock, MIDI In/Out/Router, Panic, headless runner + golden test format, `sim_live` (host MIDI backend). CI that compiles **both targets** on every commit. *Vertical slice: note in → routing → note out with timing, tested headless and live; same core cross-compiled for arm.*
-- **Phase 1 — Sequencer.** Multi-track patterns, live record + quantize, mute/solo, basic CC lanes, minimal song/scene.
-- **Phase 2 — Chord Engine.** Fingering modes, chord hold, split, `ChordState`, Key/Scale engine.
-- **Phase 3 — Arranger/Style.** Sections, voicing/transpose resolver, section switching, fill, Program/Bank init. *(= MVP-β)*
-- **Phase 4 — MIDI Looper.** Record/overdub/replace/undo, quantize-after, sync, capture.
-- **Phase 5 — Arpeggiator & Pads & Chord Sequencer.** Reusable ArpEngine, Pad Engine, Chord Sequencer.
-- **Phase 6 — Performance/Project/Storage.** Performance/Scene/Song, SetList, binary serializer + CRC, save/load, Device Profile Registry, Groove/Humanize.
-- **Phase 7 — Tool pipeline.** Style Compiler (YAML→binary), limit validator, SMF import/export, device profile editor, fault injection.
-- **Phase 8 — STM32 port.** STM32 HAL (USB MIDI device class + UART DIN + timer + storage), real budget validation, watchdog/crash-recovery, display/encoder/LED, optimization.
+**Status legend.** ✅ done · ◑ partial · ▶ in-flight (this branch) · ○ planned.
 
-*Why foundations+tests first:* with a core that is not deterministically testable, every subsequent phase accumulates debt; the golden-test harness is what makes it safe to refactor for embedded.
-
----
-
-## 24. Open questions (decisions to make soon)
-
-With my recommendation in parentheses:
-
-| Decision | Recommendation |
-|---|---|
-| **Internal PPQN** | 960 scheduling (D27); 96 = musical grid |
-| **BPM repr** | `bpm_x100` fixed-point |
-| **Max tracks** | ~16 arranger-role + ~16 sequencer (to be confirmed vs RAM) |
-| **Max events (looper/pattern)** | 3072 ev/loop-track (×8 tracks), ≤40k total RAM-resident events; read-only in flash (D33) |
-| **Max sections/style** | ~16 (Intro×2, Var×4, Fill×4, Break, End×2 + margin) |
-| **Max projects / storage** | anchor D33: 2 MB flash → ~512 KB factory contents + project slots; optional SD for more |
-| **Max patterns** | ~256–512 per project (u16 indices) |
-| **Max MIDI ports** | 2–4 (1 USB + 1–2 DIN) as initial target |
-| **Chord modes MVP** | SingleFinger + Fingered (FullKeyboard P1) |
-| **Button/encoder count** | defines the `ui_model`; propose ~8 buttons + 2–4 encoders (from HW) |
-| **Display assumptions** | small mono/OLED (e.g. 128×64) or char LCD; abstract `ui_model` |
-| **Storage assumptions** | internal flash for config + optional SD for projects (HAL) |
-| **MIDI 1.0 vs 2.0** | MIDI 1.0 now; abstraction ready, 2.0 not implemented |
-| **SysEx** | Yes only for backup/device profile, P2, bounded/chunked |
-| **SMF import/export** | Yes, laptop tool only, P2 |
-| **External device profiles** | Yes, data in the project (P1), tool editor (P2) |
-| **Arpeggiator MVP** | No (MVP2), but ArpEngine architecturally planned |
-| **Section switch quantize default** | end-of-bar |
-| **Note On v0 in output** | real Note Off by default (configurable) |
-| **Running status in output** | off by default (max compat), enableable for bandwidth |
-
-The first ones to lock down *now* (they impact the data format and the core): **PPQN, BPM repr, C++26+embedded subset (verified dual-build), u16 indices, main bounded limits (tracks/events/patterns/sections)**.
+**Feasibility regime (from invariants `0200`/`0300`/`0400`).** Every OPEN leaf is
+labelled **SHIPPABLE** (dual-target core, no heap, bounded, cross-builds), **HOST-ONLY**
+(`platform/host`/`tools`, never on device), or **NEEDS-DECISION** (an ABI shape, scope,
+or dependency the owner must settle first).
 
 ---
 
-## 25. Final recommendation
+### 0000 — Invariants & product identity (declared constraints; not schedulable work)
 
-**Definitely include (now).** The deterministic core with **Transport/Clock, MIDI In/Out/Router, Note tracker+Panic, Compliance layer, Sequencer** and the headless **golden-test harness** + `sim_live` on virtual MIDI. Lock down immediately: PPQN=96, `bpm_x100`, C++26 with green dual-build embedded subset, our own `StaticVector`/`Span`, `u16` IDs, 6-interface HAL, binary format `magic+version+CRC`. Aim for **MVP-β** as the first product milestone (chord-aware arranger).
+These bind every node below. They are the "why the schedule is honest" layer.
 
-**Plan for architecturally but do not implement right away.** Looper, Arpeggiator (reusable ArpEngine), Phrase Pads, Chord Sequencer, Performance/Scene/Song/SetList, Device Profile Registry, CC automation, SysEx, SMF, MIDI Learn, Style Compiler/Editor. Leave the hooks: reserved fields in the format, `phase`/priority in the scheduler, pluggable chord source, multiple ArpEngine instances, `Zone[]` in the routing.
-
-**Avoid.** Any audio/DSP/synth/sampler/FX; notation; desktop UI in the core; scripting/embedded VM; JSON/XML/YAML parser in the core; networking in the MVP; full MIDI 2.0; dynamic allocations/unlimited undo in realtime.
-
-**First prototype on laptop.** The **Phase 0 vertical slice**: core with Transport + MIDI In → Router → Out, driven by `sim_headless` (virtual clock, MIDI input from file, output diffed against golden), and then the same core in `sim_live` creating virtual ALSA/PipeWire ports.
-
-**First end-to-end test with virtual MIDI.** *Clock + echo + panic:* master keyboard (or virtual port) → `arrangrr` in `sim_live` → one track in Reaper/Bitwig. Verify: (a) notes pass through with correct timing and no stuck notes; (b) `arrangrr` as master sends MIDI Clock 24 PPQN + Start/Stop and the DAW follows the tempo; (c) `arrangrr` as slave follows the DAW's clock; (d) Panic turns off all notes on all channels. This test validates the five compliance axes (protocol/musical/timing/interop/routing) on the minimal path, before building arranger and sequencer on top.
-
----
-
-### Verification (how to validate the execution of this plan)
-1. **Scaffold + dual-build**: create `app/{core,platform/{host,stm32},tools,firmware}` with CMake and **two toolchain files** (host, arm-none-eabi cortex-m). Compile the core both with host GCC16 and with arm-none-eabi (`-std=c++26 -fno-exceptions -fno-rtti`, freestanding) — green CI on both *is* the gate of the subset. **Dependency to install: `arm-none-eabi-gcc`** (ARM GNU toolchain).
-2. **Headless**: `sim_headless` runs a "note-in→note-out" scenario and produces output identical to the golden file (determinism).
-3. **Live**: `sim_live` creates virtual ports; `aconnect`/`aseqdump` show the flow; a DAW receives notes and clock.
-4. **Compliance smoke**: run the §9 checklist on the minimal path (v0→Off, running status parse, panic, clock master/slave).
-
-### Note on the proposed repo structure
-Your structure is **correct and well thought out**. Minor recommended adjustments:
-- Add `app/core/hal/` (interfaces) and `app/core/common/` (`StaticVector`, `Span`, `RingBuffer`, `fixed`, `crc`).
-- Add `app/core/routing/` (Router + Zones) and `app/core/scheduler/` (Out Scheduler) as modules distinct from `midi/`.
-- `app/core/tests/` is fine; add `app/tests/golden/` for the golden files and `app/tools/regression_runner/`.
-- `platform/host/` (generic, not "linux") will contain the desktop adapters; the Linux MIDI backends (ALSA/JACK/PipeWire) are interchangeable sub-modules (`platform/host/midi_alsa`, etc.) so a future macOS/Windows backend hooks in without touching the core. `platform/stm32/` the HW adapters. The `firmware/stm32h7/` (or generic `firmware/<board>/`) remains the firmware build project that links `core` + `platform/stm32`.
-- **Dependencies to discuss:** `arm-none-eabi-gcc` (necessary for the STM32 build — not installed). Test framework: evaluate **minimal roll-our-own** vs a lightweight header-only lib (e.g. doctest) — "few dependencies" decision. Host MIDI backend: RtMidi vs direct native ALSA/JACK APIs (a thin dependency, to discuss).
-
----
-
-## 26. Dream Feature List (the "dream" — aspirational, without priority constraints)
-
-This is the *maximum wishlist*: not everything will be built, but it serves to fix the horizon. Organized according to the **Living Timeline** architecture (`Timeline × Track × Transform`): an invariant backbone, a harmonic Transform layer (the heart), the timeline/track primitive, the three gestures as layers, then expression, structure, interop and tools. Tags: **[backbone]** invariant · **[transform]** harmonic heart · **[gesture]** way of filling a track · **[system]** quality/robustness · **[interop]** toward the external world · **[tool]** laptop only · **[hw]** physical device only.
-
-### 26.1 Realtime MIDI backbone — [backbone]
-- Integer-tick Transport (PPQN 96, ready for 192), `bpm_x100`, play/stop/continue, locate/song-position.
-- Multi-port MIDI engine: **DIN in/out + USB in/out**, each addressable; compliant parsing (running status, v0→Off, real-time interleaved).
-- Timestamped Out Scheduler with look-ahead, deterministic order (NoteOff before NoteOn), DIN bandwidth throttling, prioritization (clock > notes > CC).
-- Router/in→out matrix, thru/soft-thru, filters by channel/type/range, input merge, mute-thru-in-record.
-- Note/Voice tracker + **Panic** (All Notes Off / All Sound Off / Reset Controllers) per port/channel, anti-stuck.
-- Master/slave clock with PLL/anti-jitter filter, Start/Stop/Continue/SPP, drift handling.
-- Full compliance (§9 checklist) as a first-class feature.
-
-### 26.2 Harmonic transform — the heart — [transform]
-- **Chord intelligence from sparse input** → full chord, selectable modes: **B key-aware diatonic**, **A absolute single-finger**, **C shell/partial→completion**, (D intelligent hybrid as a distant dream).
-- Key/Scale engine (key, scale, mode), optional scale-lock.
-- Voicing / voice-leading resolver (close/open/drop-2, root-position, smoothing between chords), clamp to device range.
-- Bass/inversion resolver (root, on-bass/slash chord, walking).
-- Re-harmonize: apply a new progression to existing material (pattern/loop) that "follows".
-- Global + per-track transpose/octave engine, with the rule "who follows the chord and who doesn't".
-- Chord-hold / chord-memory; suggestions/extensions (dream).
-
-### 26.3 Timeline / Track primitive — [backbone/transform]
-- **Timeline** of bounded, deterministic events; **Track** = role + destination (port+channel) + transform policy (follow-chord? transpose? voicing?).
-- Every track fillable with **3 gestures** (write / generate-from-chord / capture), interchangeable.
-- Mute/solo, recallable track enable mask; per-track length (polymeter).
-- Reusable bounded Snapshot/Undo ring.
-
-### 26.4 "Generate-from-chord" gesture — Arranger — [gesture]
-- **ChordSequence** recordable/editable/loopable/transposable as harmony source (from the chord engine).
-- Style = Section[] (Intro 1/2, Variation A–D, Fill A–D, Break, Ending 1/2), degree-relative patterns per role.
-- Roles: Drums/Perc (fixed), Bass/Chord1/Chord2/Pad/Arp/Phrase/Lead/CC with individual follow-chord policy.
-- Quantized section switching (bar/beat), auto-fill on-change, one-shot intro/ending.
-- Split/Full-keyboard, Zones (key-range→destination), single-finger/fingered/full-keyboard recognition.
-
-### 26.5 "Write" gesture — Deep sequencer — [gesture]
-- Per-track steps with per-step **locks**: velocity, gate/length, tie, rest, probability, ratchet, micro-timing, **conditional trig** ("1 in N", "only in the fill").
-- Polymeter, CC-lanes (automation), pattern chain, song mode.
-
-### 26.6 "Capture" gesture — MIDI Looper — [gesture]
-- Record/overdub/replace/erase/undo, quantize-after (non-destructive), loop length (fixed/auto/quantized), per-track or global.
-- **Retroactive capture** (always-on ring: "grab the last N bars").
-- Sync to arranger and to external clock; captures that can **follow-chord** (re-harmonize).
-
-### 26.7 Expression — [gesture/transform]
-- Reusable **Arpeggiator** (up/down/updown/random/as-played/chord-repeat/gated, octave, latch, sync, pattern/rhythm arp), fed by held notes *or* by the ChordState.
-- **Phrase/Pad engine**: phrase/chord/drum/CC/fill/scene pads, one-shot/loop/hold/toggle modes, sync to beat/bar, fixed vs transpose-with-chord; banks of 4.
-- Deterministic **Groove/Humanize** (swing, micro-timing, velocity, seeded PRNG).
-- Metronome/click, tap-tempo, tempo-nudge.
-
-### 26.8 Structure & recall — [system]
-- Recallable **Performance/Registration** (style, variation, split, mute mask, routing, transpose, program refs, pad map, arp state, chord seq).
-- **Song/Scene**: timed scene snapshots, chaining, tempo map, time-signature engine.
-- **SetList** (setlist of performances/songs).
-- Project/Preset manager (slots, defaults).
-
-### 26.9 External interop — [interop]
-- **DeviceProfile** (drum map, known CCs, ranges, velocity curve, init/panic, quirks) + **Program/ExternalSound** (port+ch+bank MSB/LSB+PC+CC init+transpose+range).
-- Ordered Program/Bank/PC emission on activation; RPN/NRPN, 14-bit CC, pitch-bend, aftertouch/poly-pressure, sustain.
-- **MIDI Learn** / ControllerMap (physical control → function).
-- **SysEx** (backup/device profile, bounded/chunked) — [interop, opt.].
-
-### 26.10 System / quality — [system]
-- Total determinism, golden-test harness, replay, fault injection.
-- Diagnostics/MIDI monitor, jitter/latency meter.
-- Versioned binary storage + CRC + graceful degradation; watchdog/crash-recovery (all-notes-off at boot) — [hw].
-- Firmware update — [hw, to evaluate].
-
-### 26.11 Laptop tools — [tool]
-- Style compiler (YAML/JSON → binary, with **limit validator** against STM32 overshoot).
-- Pattern/style editor, device-profile editor.
-- **SMF import/export** (Type 1), regression runner, fault injector, debug UI (which reuses the future `ui_model`).
-
-### 26.12 "Beyond the horizon" dreams (to evaluate, non-binding)
-- Intelligent re-harmonization and generative variation/mutation of patterns.
-- Assisted scale-lock lead, chord-scale suggestions.
-- Multi-project/backup via SysEx or external storage; shareable device profiles.
-- MIDI 2.0 / MIDI-CI (abstraction only for now).
-- Rich physical UI (pads/encoders/display) when in scope — [hw].
+- **0100 Determinism as an instrument-property, where needed — not a cage.** The core
+  is reproducible given identical inputs (enables golden tests, replay, debug);
+  randomness only via seeded PRNG, so humanize/probability vary in live play but
+  reproduce on demand. Determinism must never stiffen musical life.
+- **0200 Zero dynamic allocation, compile-time-first.** No heap anywhere in the core;
+  bounded static/stack/arena storage; `constexpr`/`consteval` tables; no
+  RTTI/exceptions/iostream/std::string in the core. Allocation and non-determinism
+  only in host tools.
+- **0300 Dual-target, green from day one.** The core cross-builds host GCC +
+  arm-none-eabi (freestanding subset); a feature enters the core only if it compiles
+  on both. Linux is a dev/sim environment only; the platform layer stays OS-generic.
+- **0400 STM32 budget envelope (falsifiable).** Anchor STM32H743 (Cortex-M7, 1 MB RAM,
+  2 MB flash); all pools fit ≤512 KB with `static_assert`; hot path in DTCM;
+  read-only content memory-mapped from flash; `Event` = 8-byte POD;
+  ≤40k RAM-resident events + unlimited read-only in flash. Any plan that assumes
+  device capacity beyond this is a fantasy.
+- **0500 Scope honesty / vertical-first.** The foundational spine and the two WOWs are
+  done VERTICALLY, not by opening everything horizontally. The dream list is the
+  horizon; the solo-developer risk #1 is starting horizontally and closing nothing —
+  so in-flight work finishes before a new band opens.
+- **0600 Open / hackable, first-class.** Headless core with a stable versioned text
+  protocol (commands→/events←), a uniformly addressable parameter space (stable
+  ID/path per parameter), MIDI-learn/automation as first-class, state dump/inspect,
+  golden/replay as the central dev workflow.
+- **0700 ABI discipline.** The core contract is typed BINARY commands/events on a ring
+  buffer (POD `Command`/`OutEvent`); string-path resolution and JSONL live host-side.
+  Param IDs are append-only, never reused; collections are fixed-capacity `u16`-indexed
+  arrays; user names live only on the host.
+- **0800 Dependency policy.** The core stays dependency-free. Host-layer deps are
+  allowed only if lightweight/self-contained AND evaluated with the owner first. Any
+  move implying a dependency is flagged, never assumed.
+- **0910 Captured direction — `melodd` audio companion (not scheduled).** arrangrr (the
+  MIDI brain) and a future host-only audio engine are peer modules wired by an
+  orchestrator, name-blind, talking only through the POD interface; audio never
+  crosses the interface; the core stays audio-ignorant (identity `0110` intact). A
+  recorded direction, not work.
+- **Product identity (what the tree is building toward):** `0110` MIDI-only, never
+  audio (drives external gear, syncs by clock); `0120` live + studio use, 50/50;
+  `0130` the signature is the COMBINATION — chord intelligence + unified
+  write/generate/capture timeline + perfect MIDI glue + open/hackable — none dominant.
 
 ---
 
-## 27. Milestone roadmap (ordered — supersedes the indicative order of §23)
+### The canonical tree
 
-Principles: every milestone has **exit criteria demonstrable via CLI + virtual MIDI + golden test**, the **dual-build (host + arm-none-eabi) stays green from M0**, the physical UI is **out of scope** until decided (interaction via CLI). "First WOW" = **M3**, "second WOW" = **M5**.
+#### 1000 — Foundations, build, harness + Timeline×Track primitive — ✅ done
 
-| Milestone | Goal (what goes in) | Gesture/feature unlocked | Exit criteria (demo) |
-|---|---|---|---|
-| **M0 — Foundations & dual-build & harness** | Repo scaffold, **CMake 2 toolchains** (host GCC16 + arm-none-eabi cortex-m stub), `StaticVector`/`Span`/`RingBuffer`/`fixed`/`crc`, Transport/Clock (96 PPQN, `bpm_x100`), MIDI In parse, Out scheduler, **multi-port HAL (abstract DIN+USB)**, Router+thru, Note tracker+**Panic**, headless golden runner, **CLI shell**, host virtual-MIDI backend. | [backbone] | note-in → router → note-out with correct timing on virtual MIDI (aseqdump/Bitwig); golden test green; **the core cross-compiles for arm** in CI. |
-| **M1 — Timeline & Track** | The `Timeline × Track × Transform` primitive with minimal "write" gesture (basic steps) and playback; Track = role+destination; mute/solo; per-track length. | [minimal write gesture] | define tracks via CLI, play patterns toward a DAW, timing/golden ok. |
-| **M2 — Diatonic Chord Engine (B) + live harmonizer** | Key/Scale engine; **note input → key-aware diatonic chord**; live output toward synths; chord-hold. | [transform: mode B] | `key=C; play D → Dm7` goes out on virtual MIDI; golden. |
-| **M3 — Chord Sequencer 🌟 FIRST WOW** | You record the progression from sparse input, **edit/loop/transpose**, playback that emits chords; dual output (live harmonizer + ChordSequence). | [first product] | build `\| Dm7 \| G7 \| Cmaj7 \| Am7 \|` via CLI/MIDI, loop, transpose, play toward gear; golden. |
-| **M4 — Chord modes A & C** | Add **A absolute single-finger** and **C shell/partial→completion**, switchable (`chord_mode`). | [transform: modes A/C] | same tests in the three modes; golden per mode. |
-| **M5 — Arranger 🌟 SECOND WOW** | Style + Section[] (Intro/VarA-B/Fill/Ending), roles with follow-chord policy, **voicing/voice-leading resolver**, quantized section switching, driven by ChordSequence or live input; basic Program/Bank init. | [generate-from-chord gesture] | ChordSequence → multi-track band toward gear, Variation/Fill changes; golden. |
-| **M6 — Deep sequencer** | Per-step locks (velocity/prob/ratchet/tie/rest/micro-timing/**conditional trig**), polymeter, CC-lanes, pattern chain. | [rich write gesture] | surgical deterministic patterns; golden. |
-| **M7 — MIDI Looper** | Record/overdub/replace/undo/erase, quantize-after, **retroactive capture**, per-track/global loop, sync; **follow-chord** captures (re-harmonize). | [capture gesture] | live loop + re-harmonize on ChordSequence change; golden. |
-| **M8 — Expression** | Reusable Arpeggiator (from notes or ChordState), Phrase/Pad engine (banks of 4), deterministic Groove/Humanize, metronome/tap-tempo. | [expression] | arp follows ChordSequence; pad triggers phrase/chord/fill; golden. |
-| **M9 — Structure & recall** | Song/Scene (snapshot+chaining+tempo/time-sig), **Performance/Registration**, SetList. | [structure] | recall performances, chain scenes, play back a song. |
-| **M10 — External interop** | DeviceProfile + Program/ExternalSound, ordered Program/Bank/PC init, velocity curve, RPN/NRPN/pitch-bend/aftertouch/sustain, MIDI Learn/ControllerMap. | [interop] | activate a program → init toward a real device; map a controller. |
-| **M11 — Persistence & robustness** | Versioned binary storage + **CRC**, save/load project, graceful degradation; Diagnostics/MIDI monitor; **fault injection** suite. | [system] | save/load round-trip with CRC; broad regression + fault injection green. |
-| **M12 — Laptop tools** | Style compiler (YAML→bin) + **limit validator** against overshoot, pattern/device editor, **SMF import/export**. | [tool] | compile a style from YAML validating the budgets; export/import SMF. |
-| **M13 — Real STM32 port** | STM32 HAL (USB-MIDI device + UART DIN + timer + storage), real budget validation, watchdog/crash-recovery; physical UI (pads/encoders/display) **if/when in scope**. | [hw] | runs on hardware with DIN+USB; panic and sync verified on the device. |
+- **1100 Build & toolchain**
+  - `1110` Repo scaffold + CMake, two toolchains (host GCC + arm-none-eabi) — ✅
+  - `1120` Freestanding containers (StaticVector/Span/RingBuffer/fixed/crc) — ✅
+  - `1130` Dual-build green-from-day-one CI gate — ✅
+- **1200 Realtime MIDI backbone**
+  - `1210` Transport/Clock (960 PPQN scheduler, 96 grid, bpm_x100) — ✅
+  - `1220` MIDI-In parser (running status, v0→Off, merge) — ✅
+  - `1230` Out scheduler (4096 bounded queue, total-order emission) — ✅
+  - `1240` Router + thru (in→out matrix, filters) — ✅
+  - `1250` Note/Voice tracker + Panic — ✅
+  - `1260` Multi-port HAL (DIN+USB abstract, 4×16) — ✅
+  - `1270` Realtime hardening — sustained-play crackle — ✅ resolved (downstream)
+    *investigated: the core/output path is clean — 0 scheduler drops over a 300-bar
+    sustained run. The sustained-play crackle was a DOWNSTREAM integrated-audio
+    (PipeWire) buffer underrun, NOT a core defect — fixed by sizing FluidSynth's
+    period (`demo/lib/launch.sh`, `audio.period-size=2048`, rate-matched to PipeWire).
+    Distinct from the already-fixed demo-launcher "first note after stream-open"
+    crackle (same file, warm-note workaround). No longer gates the GUI freeze line
+    (`11700`).*
+- **1300 Test & protocol harness**
+  - `1310` Headless golden runner (virtual clock, total order) — ✅
+  - `1320` CLI shell, 3-layer protocol (Surface/Model/Wire, thin client) — ✅
+  - `1330` Core binary ABI (Command/OutEvent POD ring) — ✅
+  - `1340` Three-metric coverage (unit ≥80 / functional / regression) — ✅
+- **1400 Timeline × Track primitive**
+  - `1410` Timeline of bounded deterministic events — ✅
+  - `1420` Track = role+destination+length; mute/solo; polymeter — ✅
 
-### Host UI track (interleaves with the core roadmap)
+#### 2000 — Harmony core: key/scale, chord modes, detector, chord-sequencer (1st WOW) — ✅ done
 
-A parallel host-only track (classification: host-live/host-tool, zero core impact — see docs/TUI_SPEC.md for the full specification):
+- **2100 Key/Scale engine**
+  - `2110` Key/scale/mode + theory tables (diatonic default, explicit modifiers) — ✅
+- **2200 Chord intelligence (modes)**
+  - `2210` Diatonic mode (key-aware: one note → diatonic chord of the degree) — ✅
+  - `2220` Single-finger mode (scale-aware, Casio lineage: one key → diatonic triad) — ✅
+  - `2230` Shell / partial → completion mode — ✅
+  - `2240` Smart quality per degree/context (V→dom7, I/IV→maj7, ii/iii/vi→min7…) — ✅
+- **2300 Live harmonizer & detector**
+  - `2310` ChordDetector (freestanding, chord-memory hold, no double-voice) — ✅
+  - `2320` Live piano→chord steer of the running band — ✅
+  - `2330` Two-zone harmony input (melody vs harmony per port) — ✅
+  - `2340` Chord-follow source selector + live-priority arbitration — ✅
+    *selector (detect / sequencer / manual / auto) + owner-decided default
+    `ChordFollow::kLivePriority` (ABI-additive value 4, engine constructor default;
+    host `chord follow live`). LIVE-PRIORITY: live input overrides the sequencer while
+    a chord is HELD — the band follows it and the sequencer comps its rhythm on the
+    live root+quality without publishing its own chord; on RELEASE the sequencer's next
+    step resumes committing. With no sequencer running a live chord LATCHES (chord
+    memory) — momentary with a sequencer, latching without. `kAuto` kept as the explicit
+    legacy last-writer mode. The held-vs-released decision is made at the
+    `fire_chord_seq` call site (dynamic engine state), not in the static D47 gate.
+    Replaces the former `kAuto`-race characterization.*
+- **2400 Chord sequencer (1st WOW)**
+  - `2410` ChordSequence functional storage (degree + overrides, free durations) — ✅
+  - `2420` Record / loop / transpose / re-harmonize — ✅
+  - `2430` Dual output (live harmonizer + editable ChordSequence) — ✅
+- **2500 Followed-context ownership (✅ landed)**
+  - `2510` Immediate-commit + SHIFT-quantize chord entry — ✅
+    *shipped model: a lowercase note-letter commits the followed chord IMMEDIATELY;
+    an uppercase/SHIFT letter stages it to the next bar boundary. Transport-start
+    seeds the home-key tonic so the band starts in the home key.*
+  - `2520` original / current / next key readout (panel top, clip-safe) — ✅ HOST-ONLY
+  - `2530` Single-owner FollowedContext consolidation — ✅ done (merged)
+    *one owner of the followed chord + pending; folds the follow-gate and the
+    reset-vs-persist policy inside; killed three bugs by construction (transport-start
+    clobber, style-load reset, self-drift). No ABI, no dep. Merged to `main`
+    (`96dbb72` / merge `6667d6c`). Source:
+    `docs/reviews/followed-chord-context-ownership.md`*
+  - `2540` Delete dead `set_context` seam — ○ SHIPPABLE
+  - `2590` *(reserved: shared-voicing split — separate "who plays the pad" from "who
+    steers"; specified, not yet scheduled)* — ○ SHIPPABLE
 
-| Milestone | Goal (what lands) | Exit criteria | Status |
-|---|---|---|---|
-| **H1 — TUI foundation** | Multi-panel manager (help/piano/filter, focus, vertical stack, per-panel caps), canonical `panel ...` command family (lifecycle moves out of `help open/close`), note-name utilities (CDE + DoReMi, C4=60) extracted from the JSONL encoder, static two-row piano renderer (wide/compact/minimal by named width thresholds, octave on every key), resize robustness (state-as-data, regenerate on geometry change). | panels coexist and survive resize; goldens byte-identical; ARM ELF untouched; coverage gate ≥80%×3. | ✅ Done |
-| **H2 — Piano/monitor MVP** | `piano` behavior commands (octave/channel/velocity/view/panic), `notes names cde\|doremi\|toggle`, live key dispatch before the line editor (piano focus only; TAB/P/N/V/C/[/]), MIDI through `Shell::feed_midi` with the documented toggle note-off policy, bounded ActiveNoteTracker + visual event ring (32/5 rows), duration formatter (`dur=240t 1/16`), minimal MidiLogEvent monitor + channel/port/event filters and `view show ...` options as data. | keys sound through the normal input path; REPL typing untouched; all buffers bounded; script/non-TTY unchanged. | ✅ Done |
-| **H3 — Presentation layer** | Colors + themes (semantic UiRole roles, `--theme`, runtime `colors`/`theme` commands), unicode with ASCII fallback, side-by-side layout with narrow fallback, GM drum names, richer views/filters, host benchmarks (scheduler high-water, per-port DIN bandwidth accounting). | deferred until H2 is stable. | ⏳ Planned |
+#### 3000 — Arranger & style engine (2nd WOW) — ✅ done
 
-**Live piano→chord harmonizer (D34, §11):** the driver that lets held piano keys re-harmonize the running band belongs to this **host-live** track — the `chord detect on|off` toggle and the `kChords` panel readout (recognized chord name + detect state) are host-live, riding over the core-portable `ChordDetector` + `ChordEngine::set_context`. Command/panel surface in docs/TUI_SPEC.md.
+- **3100 Arranger resolution**
+  - `3110` NTT resolver (degree/root map, wrong-note-proof) — ✅
+  - `3120` Resolution pipeline (gather→expand→resolve→voice→groove) — ✅
+  - `3130` Pattern-relative NoteSource (chord-tone / scale-degree / interval) — ✅
+  - `3140` Voice-leading (nearest-octave, opt-in per pattern) — ✅
+  - `3150` ChordGesture (strum / roll fan-out over the live chord) — ✅
+  - `3160` Section model (13 section types, fills, endings, break) — ✅
+- **3200 Style engine**
+  - `3210` Style format (sections, per-role patterns) — ✅
+  - `3220` 8 style parts (drums/bass/chord1/2/pad/perc/arp/lead) — ✅
+  - `3230` Per-role register anchor + default GM voice — ✅
+  - `3240` Program change per role (thin ABI slice of the external-sound model) — ✅
+  - `3250` Groove engine (swing/accent/humanize/quantize-strength, seeded) — ✅
+  - `3260` 16 built-ins using the modern vocab (15/16; basic kept as baseline) — ✅
+- **3300 Arranger refinements (○ planned)**
+  - `3310` Harmonic spillover + open voicing — ○ SHIPPABLE
+  - `3320` Slash-chord / on-bass resolver — ○ SHIPPABLE
+  - `3330` Per-part groove + ghost-note amount — ○ SHIPPABLE
+  - `3340` Voicing applied to gesture output — ○ SHIPPABLE
 
-**Path notes:** M0–M2 are the *shared backbone* (identical for any identity). M3 is the first showable "product" milestone. M5 closes the hero-gesture (arranger). From M6 onward the order is more flexible and can be reprioritized based on what you feel is missing "with the object in hand". The physical UI and the specific HW choice remain deliberately deferred (D7), without ever blocking the core. The full host-TUI plan now lives in the Host UI track above and docs/TUI_SPEC.md.
-- Plan for `app/core/device/` (DeviceProfile/Program) and `app/core/performance/` already present.
+#### 4000 — Deep sequencer — ◑ partial
 
-**Recently landed (post-M5) and in progress.** Since M5 closed the arranger's hero gesture, four things landed and one is underway:
-- **Landed:** the live piano→chord harmonizer (D34) — held keys re-harmonize the running band in real time, the third live harmonic source alongside `chord play` and the `ChordSequencer`; program change / voice selection (D35) — `program <port>[:ch] <voice>` + `kProgram=35`, a thin ABI slice ahead of the full §18 model; the all-roles styles enablers (D36) — per-role register anchors + per-role default GM voice, the prerequisite for putting every `TrackRole` into a style pattern; Host UI **H1** (TUI foundation) and **H2** (piano/monitor MVP).
-- **In progress:** the **8 style parts** effort — enriching all 16 builtin styles from the historical 3 roles (drums/bass/chord1) to ~8 (adding `kPad` as a sustained bed, `kPerc`, `kChord2`, `kArp`), across parallel per-style authoring. Goal: a played chord should be audible across the whole bar (a held pad), not only on sparse chord-stab hits — today's styles stab and go silent between hits, which reads as thin next to a real arranger keyboard.
+- **4100 Step parameter-locks (first increment ✅)**
+  - `4110` probability (seeded position hash) — ✅
+  - `4120` ratchet (evenly-spaced retriggers) — ✅
+  - `4130` micro (forward-only lay-back) — ✅
+  - `4140` tie (real sustain chain) — ✅
+  - `4150` fire-order invariant (mutation-tested: chord-seq before arranger) — ✅
+- **4200 Remaining step params (○ planned, SHIPPABLE)**
+  - `4210` rest / conditional-trig — ○
+  - `4220` euclidean / rotation — ○
+  - `4230` bidirectional micro (needs step look-ahead) — ○
+  - `4240` tie loop-seam (carry across loop restart) — ○
+- **4300 Track record / overdub** — ○ SHIPPABLE *(also gates 6000)*
+- **4400 CC / pitchbend / aftertouch lanes in patterns** — ○ SHIPPABLE
+- **4500 External clock-in (slave sync)** — ○ SHIPPABLE
+  *the one pure-interop MIDI-engine/sequencer gap; master-out only today*
 
-### Target architecture & gaps (six-module view)
+#### 5000 — MIDI-FX / Transform chain — ○ planned (behind the GUI freeze line, `11700`)
 
-The user's target shape for the musical core is **six modules**: Arranger, Sequencer, Style engine, Arpeggiator engine, MIDI engine, Controller/input. This is a checkpoint against that shape — not a new architecture, a *lens* on the modules already named in §3/§7 — so the gaps translate directly into ordered roadmap items (below). Percentages are rough, code-checked, not a burndown metric.
+*A composable bounded chain (fixed max inserts) of MIDI transforms per track/zone —
+the open/hackable north-star (`0600`) made concrete. Arp/groove/scale-lock become
+INSTANCES of the chain, not disconnected modules.*
+- **5100 Insert-chain framework** (bounded, per-track/zone, POD) — ○ SHIPPABLE,
+  **shape pre-fixed at the GUI freeze line (`11700`)**: `kMaxInserts=8` in the
+  on-disk/ABI format, UI exposes 4; per-track first (per-zone deferred); ABI-none
+  for this data-model increment — locked so the GUI (`11600`) is born aware of
+  this surface and is not rebuilt when `5000` lands. The earlier
+  **NEEDS-DECISION is RESOLVED** by that lock; implementing the framework body +
+  inserts remains ○ planned, behind the freeze line.
+- **5200 Refactor existing modules into chain instances**
+  - `5210` groove as a chain instance — ○ SHIPPABLE
+  - `5220` arp as a track MIDI-FX instance — ○ SHIPPABLE *(= 7130)*
+  - `5230` scale-lock / scale-filter as a chain instance — ○ SHIPPABLE
+- **5300 New inserts (SHIPPABLE)**
+  - `5310` echo / MIDI-delay — ○
+  - `5320` note-repeat / ratchet insert — ○
+  - `5330` velocity-proc / probability / randomize — ○
+  - `5340` harmonize / chord-memory-expand — ○
 
-| Module | ~Done | DONE | PARTIAL / MISSING |
-|---|---|---|---|
-| **Arranger** | ~60% | Chord recognition (triads, inversions via shell/lowest-root, 7ths, incomplete chords, single-finger, chord-memory latch); harmonic state + live change; 13 `SectionType`s; NTT relative patterns (root/fifth/octave/chord-tone, auto major/minor third, seventh); relative→MIDI `resolve()`; part coordination (3→8 roles in progress, D36); one-shot fills that return to the variation; crash accents. | ~~no voice-leading~~ **(voice-leading landed, D41: `VoicingPolicy::kLead` per-role nearest-octave smoothing)**; still no open voicing, no inversion policy, no max-jump clamp, no extensions on/off toggle, and no harmonic spillover. ~~No scale-degree melodic resolution~~ **(resolved, D39):** `resolve()` now takes the live `Key` and a per-event `NoteSource` lets a role read scale degrees (`kScaleDegree`) or intervals/tensions (`kInterval`), not only chord tones. The resolution path is now a **pipeline** (D40) with a per-event **`ChordGesture`** stage (D42: strum/roll). ~~Still open: no builtin style yet authors scale-degree / kLead / gesture parts~~ **(resolved — the styles-modern-vocab milestone authors kLead / gesture / scale-degree / interval content across 15 of 16 built-ins).** ~~`SectionType::kBreak` is defined but referenced by zero style files~~ **(resolved — funk/rock/disco/blues/motown/latin now carry real `kBreak` sections).** No explicit slash-chord/bass-note (on-bass) resolver, despite §11 describing the policy. |
-| **Sequencer** | ~50% | Timeline bar/beat/step/tick; PPQN 960; loop; 16 tracks with mute/solo/length/port/channel (per-track length = natural polymeter); transport start/stop/pause/continue; MASTER clock-out + BPM; chord sequencer (16 sequences × 128 steps, functional degree-relative storage, D28). | No external clock-**in** (slave sync) — master-out only. No track record/overdub. No advanced step params: tie/accent/probability/ratchet/micro-timing all absent from `Step`. No transforms: swing/humanize/quantize-strength/euclidean/rotation/deterministic seed. `Step` is note-only — no CC/pitchbend/aftertouch storage. No scene/song mode/linear arrangement. |
-| **Style engine** | ~55% | 13 sections; per-section/per-part patterns; chord-relative NTT; quality adaptation (maj/min/7/sus/dim); part→channel/port mapping; program change per role (D35/D36, new); fills/endings. **In progress:** 8 style parts. | No groove engine — swing/velocity-feel/ghost-notes/humanize exist today only as hand-authored notes in the pattern data, not as tunable **parameters** applied uniformly. No per-part CC. No break-section content (see Arranger row). |
-| **Arpeggiator engine** | ~5% (biggest gap) | — | Missing almost entirely: there is **no `ArpeggiatorEngine` module**. `kArp` is only a `TrackRole` with hand-written chord-tone patterns in the style tables — indistinguishable from any other role, no shared arp logic. Target: a reusable, parametric engine (rate/direction/octaves/gate/latch/sync + deterministic seed, per §14) usable in **three** integration points — (1) as a style part (replacing the hand-written `kArp` patterns), (2) as a track MIDI-FX (§26.7's chain), (3) as a live-keyboard performance effect (a Zone effect). Data model: `ArpeggiatorParams` (rate, direction, octave span, gate length, latch on/off, sync mode, seed) + `ArpeggiatorState` (current step, held-note set, latched set) — both POD, no heap, shared across the three call sites. |
-| **MIDI engine** | ~85% (most mature) | Parser with running status; router; out-scheduler (4096-entry bounded queue); 4 ports × 16 channels; note/CC/program-change/pitchbend/realtime messages; no-heap throughout. | No external slave-sync-in (same gap as Sequencer, one fix). No finer aftertouch/MPE (poly pressure exists at the message-type level per §9 but isn't exercised end-to-end). |
-| **Controller / input** | ~35% | Transport, tempo, sections, chords, mute/solo, program (D35), sequencer transpose. | No musical intensity/density/energy controls. No timing-feel controls (swing/humanize) — because the groove engine they'd drive doesn't exist yet. No probability/variation-seed control. No voicing controls (would require the voicing work above). No CC/bank/expression control. No arp control (no arp to control). No scene/song control (no scenes exist). |
+#### 6000 — Looper (the missing "capture" gesture) — ○ planned (behind the GUI freeze line, `11700`)
 
-**Static limits — already aligned with the target.** `kMaxTracks = 16`, 16 channels × 4 ports, 13 sections (room for 16), no-heap, deterministic — these already match or exceed the target shape. Two small deltas worth flagging, not fixing: the target sketch suggests `MAX_STYLE_PARTS = 8` while the code already has `kRoleCount = 10` (8 musical roles + `kLead` + `kCc`) — the code is ahead here; and the target sketch suggests `MAX_PATTERN_LENGTH_BARS = 8` while every builtin section is currently 1 bar — the `StyleSection.bars` field already supports multi-bar sections, nothing blocks using it, no one has authored a multi-bar pattern yet.
+*Completes the write/generate/capture triad of the unified timeline (`0130`). Budget
+pre-sized by `0400` (8×3072 ev = 192 KB).*
+- `6100` Record / overdub / replace / erase / undo — ○ SHIPPABLE
+- `6200` Quantize-after (non-destructive) — ○ SHIPPABLE
+- `6300` Retroactive capture (always-on ring, "grab last N bars") — ○ SHIPPABLE
+- `6400` Loop length (fixed/auto/quantized), per-track/global — ○ SHIPPABLE
+- `6500` Sync + follow-chord capture (re-harmonize on chord change) — ○ SHIPPABLE
 
-### Phased future roadmap (ranked, post-M5/H2)
+#### 7000 — Expression — ◑ partial
 
-Order implied by the gap table above — each item unblocks the next, and every item keeps the D32 constraints (no heap, deterministic where it matters, static pools):
+- **7100 Arpeggiator engine**
+  - `7110` Live-keyboard arp (rate/dir/octaves/gate/latch/seed) — ✅
+  - `7120` Arp as a style part (replace hand-written kArp patterns) — ○ SHIPPABLE
+  - `7130` Arp as a track MIDI-FX — ○ SHIPPABLE *(= 5220)*
+- **7200 Phrase/Pad engine** (banks of 4; one-shot/loop/hold/toggle) — ○ SHIPPABLE
+- **7300 Groove/Humanize** — ✅ *(shared with 3250)*
+- **7400 Metronome/click, tap-tempo, tempo-nudge** — ○ SHIPPABLE
 
-1. ✅ **DONE — 8 style parts** (Pad/Perc/Chord2/Arp across all 16 styles) — closed the Style-engine gap; a played chord is now audible across the bar (held pad), not just on stabs. Shipped with the `parts` mixer panel (per-role mute/solo/voice/activity) and per-role register anchors + default GM voices (D36).
-2. ✅ **DONE — Groove engine** (swing/accent/humanize as tunable **parameters**, deterministic seeded position-hash per D16) — `arranger/groove.hpp` post-processes every arranger event; ABI `kGroove`; shipped with the `groove` panel. **Quantize-strength landed** (a seventh `kGroove` field, `kGrooveFieldCount 6→7`: as the final step of `groove::apply` it scales the accumulated swing+humanize timing offset back toward the grid, `offset * (100 - quantize) / 100`, integer-only, timing-only so the gate is preserved; `0 %` = groove untouched and byte-identical to before, `100 %` = event dead-on grid). Per-part groove (currently global) and ghost-note amount are the remaining refinements.
-3. ✅ **DONE (live-keyboard mode) — ArpeggiatorEngine** (`arp/arpeggiator.hpp`) — pure, deterministic, freestanding engine: held notes + params (rate/direction/octaves/gate/latch/seed) + transport clock → rhythmic stream; random is a seeded position hash (D16). Wired as the **live-keyboard** effect (ABI `kArp`/`kArpOut`, engine capture-and-replay) with the `arp` panel. Still to wire (the engine is reusable, so no rebuild): the **style-part** mode (replace the hand-written `kArp` patterns) and the **track MIDI-FX** mode.
-4. **Scenes / song mode** — snapshot + chain sections/patterns/mutes/routing over time (§17/§26.8); needed before "Controller: scene control" or "Sequencer: song mode" can mean anything.
-5. 🔄 **Advanced step-sequencer params — first increment DONE.** The Elektron-style per-step "parameter locks" (§8.5). **Landed:** `probability` (D16 seeded position hash, 100 % bypasses it), `ratchet` (evenly-spaced micro-shifted retriggers), `micro` (honest forward-only lay-back 0..127), and `tie` (a real sustain chain — one held note across a same-note run, single probability verdict at the run start). Additive POD, neutral-default on `Step` (8 bytes, `static_assert`), byte-identical neutral path; locks ride opt-in in the `kTrackStep` ABI's free high bits. Landed alongside the **fire-order invariant** (`test_engine_fire_order`: chord-seq resolves before the arranger on the same tick, mutation-verified). **Deferred:** rest/conditional-trig/euclidean/rotation, and bidirectional micro (needs step look-ahead) + the tie loop-seam (a tie on the last step does not carry across the loop restart — locked by a test).
-6. ✅ **DONE — Scale-degree melodic parts + synchronized break (the D39–D42 content cash-in).** *Machinery (D39/D40/D41/D42)* is now actually USED across 15 of the 16 built-ins (basic kept plain as the golden baseline): `VoicingPolicy::kLead` on block-chord comps (pad/chord2/chord1 stabs), `ChordGesture` strum/roll on guitar/harp/string parts, `kScaleDegree`/`kInterval` melodic lines (horn/sax/harmonica/lead — diatonic-to-key vs chord-tracking blue notes) on `kLead` roles, and real `SectionType::kBreak` sections (funk/rock/disco/blues/motown/latin). Two goldens (`arranger_gesture`, `arranger_voicing`) lock the new behavior; `basic`/`arranger_band` stay byte-identical. Data-only in the style tables + one host fix (`style load <name>` resolves any builtin, not just "basic"). Still open (future): harmonic spillover + open voicing; voicing applied to gesture output (deferred D42); per-section morph.
-7. **External clock-in (slave sync)** — the one MIDI-engine/Sequencer gap that is pure interop, not new musical logic; lower risk, do it once the musical gaps above stop moving the Step/Event shapes underneath it.
-8. **CC/pitchbend/aftertouch in patterns + Controller expansion** (bank/expression, probability-seed control, voicing control, arp control) — closes the remaining Controller/input surface once the modules it would control (groove, arp, scenes) exist to be controlled.
-9. **Generative Director (D37) — CAPSTONE.** A target-based generative meta-controller layered above Arranger + Sequencer: it does not generate music, it **pilots** the parameters of the modules above by morphing them gradually, bar by bar, from a current expressive state toward a target. Explicitly **last**: it has nothing to drive until items 2 (groove engine), 3 (`ArpeggiatorEngine`), 5 (step-sequencer probability/density) and 6 (voicing controls) land — those are exactly the tunable parameters it needs to exist first. See the dedicated subsection below.
+#### 8000 — Structure & recall + persistence — ○ planned (behind the GUI freeze line, `11700`)
 
-### Generative Director — target-based parameter morphing (D37, capstone)
+- `8100` Scenes / song mode (snapshot + chain + tempo/time-sig) — ○ SHIPPABLE
+- `8200` Performance/Registration (recall live state) — ○ SHIPPABLE
+- `8300` SetList — ○ SHIPPABLE
+- `8400` Project/Preset manager (slots, defaults) — ○ SHIPPABLE
+- `8500` Versioned binary storage + CRC (save/load round-trip) — ○ SHIPPABLE
+- `8600` Diagnostics/MIDI monitor + fault-injection suite — ○ HOST-ONLY
 
-**Position in the architecture.** A new top layer, above the six modules in the gap table above, that **complements, does not replace**, the Arranger and Sequencer:
+#### 9000 — Style content & tooling — ◑ partial / decided
 
-```
-User / Scene / Emotion target → Generative Director → (Arranger params, Style params, Sequencer params, Arpeggiator params) → Arranger + Sequencer → MIDI out
-```
+- **9100 Per-style feel — ○ planned (next musical lever, owner-approved ASAP)**
+  - `9110` Style owns its default GrooveParams — ○ SHIPPABLE (**ABI/struct change, approved**)
+  - `9120` Style owns its tempo — ○ SHIPPABLE
+  - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE
+  *ranked the single biggest lever against style sameness (corpus measurement,
+  `docs/reflections/style-differentiation-and-generation.md`)*
+- **9200 Generative style — ○ planned**
+  - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE
+  - `9220` Offline-trained Markov/grammar on scale degrees, baked constexpr — ○ runtime SHIPPABLE / training HOST-ONLY
+- **9300 MIDI stylizer — ○ planned (host-only)**
+  - `9310` Accompany (keep the melody, play the genre band under detected chords) — ○ HOST-ONLY *(zero new core, ships first)*
+  - `9320` Restyle (transform the input's own parts into the genre idiom) — ○ HOST-ONLY *(depends on 9100)*
+- **9400 Style data format + generator — ○ direction**
+  - `9410` Style inspector + serialize/deserialize (offset/index-based) — ○ HOST-ONLY
+  - `9420` Style compiler (data → .cpp constexpr for the device path) — ○ HOST-ONLY
+  - `9430` CASM→NTT importer body (arrstyle-converter; 1010-style corpus) — ○ HOST-ONLY
 
-**Layered mental model.** Style = *material* · Arranger = *harmonic adaptation* · Sequencer = *time* · Generator = *variation* · Director = *musical direction over time*. Each layer below already exists (or is roadmapped) in its own right; the Director is the only layer that reasons about *where the music is headed*, not what it sounds like right now.
+#### 10000 — Generative Director — ○ planned, CAPSTONE (last; also behind `11700`)
 
-**Name, deliberately.** "Generative Director" (aka "Musical Director" / "Target-Based Generative Controller") — **not "AI"**. It is a deterministic parameter-trajectory engine: given the same current state, the same target, and the same seed, it always produces the same trajectory (D16). No model, no training, no uncontrolled randomness, and it must never disturb timing (D27/D29).
+*A top layer that PILOTS (never bypasses) the parameters of the modules below,
+morphing them gradually bar-by-bar from a current expressive state toward a target.
+Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
+- `10100` DirectorState / DirectorTarget (energy/density/tension/brightness/complexity) — ○ SHIPPABLE
+- `10200` Bar-by-bar interpolation engine (seeded, bounded per-bar step) — ○ SHIPPABLE
+- `10300` Parameter-delta drive into arranger/style/sequencer/arp inputs — ○ SHIPPABLE
+  *hard-gated: needs 3250 ✅, 7110 ✅, 4100 ✅, the voicing/scene tunable surface (3140
+  done; per-part exposure open) and ideally 5000 — see sequence*
 
-**What it holds.** A `DirectorState` (POD): the current values on a small set of expressive axes — energy, density, tension, brightness, complexity — optionally summarized by an "emotion" label that maps onto those axes for convenience at the surface. A `DirectorTarget` (POD): target values on the same axes, a transition length in bars, and a deterministic seed. Both no-heap, static, embedded-friendly (D32).
+#### 11000 — Host UI / clients — ◑ partial
 
-**What it does.** Instead of snapping to the target, it interpolates the axes **gradually, bar by bar**, over the requested transition length — e.g. bar 4 brings in a busier hihat, bar 8 a busier bass line, bar 12 tenser chord voicings, bar 16 more fills, bar 24 the target is fully reached. Each tick/bar it emits a step of parameter deltas that feed into the Arranger/Style/Sequencer/Arpeggiator parameter inputs — it never writes notes itself.
+- `11100` TUI foundation — ✅
+- `11200` Piano/monitor MVP — ✅
+- `11300` Presentation layer (colors/themes/unicode, richer views) — ○ HOST-ONLY (deferred)
+- **11400 Piano source-coloured visualizer**
+  - `11410` GREEN (current bar) + ORANGE (next/pending chord) — ○ HOST-ONLY
+  - `11420` WHITE (direct play) — ○ HOST-ONLY *(deferred: needs a sounding melody surface)*
+- `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅
+- `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`): separate
+  process, pure client, never links core. Tech stack (Dear ImGui or an alternative)
+  is an OPEN dependency decision, evaluated WITH the owner under `0800` when the
+  freeze line's pre-GUI batch (`11710`) closes — NOT picked here. — ○ HOST-ONLY
+  (**dependency flag: GUI toolkit — decision deferred to freeze-line crossing**)
 
-**What it drives.** The parameters it slowly moves are exactly the tunable surface the rest of this roadmap builds: density, energy, tension, complexity, swing, velocity, ghost-note amount, fill probability, pattern/groove variant, chord extensions, voicing width, register, arp rate/octaves/gate, drum openness, bass activity, syncopation, and part mute/unmute.
+- **11700 GUI freeze line — pivot from core-feature work to the host GUI**
+  (owner-decided). STATUS: DECIDED (gate, not a schedulable work item — see the `0000`
+  numbering note on invariants vs. work; this node governs sequencing of everything
+  below it, the way `0000` governs everything in the tree).
+  *Through-line: **validate feel in the hands, then grow on a living instrument.** The
+  product is a MIDI arranger — a live instrument whose value is in the hands. The TUI
+  structurally cannot validate FEEL (timing, the chord-steer sensation, the piano
+  visualizer's readability): feel lives in the hands, not in a text panel. So
+  core-feature work STOPS at a small, well-defined batch, and the product PIVOTS to
+  building the host GUI (`11600`). Every remaining musical feature (`5000`, `6000`,
+  `8000`, `10000`, and the rest of `9000`) is grown AFTER, on an instrument that
+  already exists and already sounds — reprioritized by real feel-in-the-hands testing,
+  not by this document's current ranked order.*
+  - `11710` Pre-GUI gating batch — ALL FOUR must be ✅ before the line is crossed
+    (invariant `0500`, vertical-first: the GUI is built on solid, verified ground, not
+    raced onto half-built cells). **2 of 4 cleared: `2530` ✅, `1270` ✅; remaining:
+    `11410` (piano visualizer) and the `9100` per-style-feel family:**
+    1. `2530` Single-owner FollowedContext consolidation — ✅ done (merged, band
+       `2500`). The GUI's central interaction — steer/follow — is now correct and
+       un-raced, so a visual surface can be built on top of it. **Batch item cleared.**
+    2. `11410` Piano source-coloured visualizer, GREEN (current bar) / ORANGE
+       (pending) — ○ HOST-ONLY, small. The GUI's central *readable* surface; must
+       exist and be verified standalone before the GUI is built around it, not
+       invented inside the GUI build itself.
+    3. `9100` family (`9110`/`9120`/`9130`) Per-style feel / anti-sameness — ○
+       SHIPPABLE, **owner-approved**. Gates the GUI's style picker: it must present
+       genuinely different styles, not 16 clones of one feel.
+    4. `1270` Realtime hardening — sustained-play crackle — ✅ resolved (downstream
+       PipeWire buffer, not a core defect; core path proven clean). **Batch item
+       cleared** — no longer gates the line.
+  - `11720` At-the-freeze-line actions (executed once `11710` is all ✅):
+    - Freeze the CURRENT ABI command/event surface (`0700`) as of this point. Corelli's
+      architecture verdict: the ABI is additive/healthy, so freezing now is safe —
+      later features (`5000`, `6000`, `8000`, `10000`) extend it, they do not break it.
+    - Pre-fix the SHAPE of the MIDI-FX ABI verbs (`5100`, updated above) even though
+      unimplemented, so the GUI is born aware of that surface and is never rebuilt
+      when `5000` lands.
+  - `11730` Behind the line — reprioritized on a living instrument, no longer ordered
+    by this document alone:
+    - `11600` itself (the GUI build) is the FIRST thing behind the line — it is what
+      the line pivots TO, not one of the deferred items.
+    - `5000` MIDI-FX / Transform chain (framework body + inserts; shape pre-fixed).
+    - `6000` Looper.
+    - `8000` Structure & recall / song mode.
+    - `10000` Generative Director (capstone, unchanged: still last).
+    - the remainder of `9000` not in the gating batch (`9200` generative style,
+      `9300` stylizer, `9400` format/tooling), `7000` remainder, `12000` device/HW.
+  *Dual-target note: this whole node is HOST-ONLY by construction — the GUI is a
+  desktop client. The STM32 target (`12000`) keeps its OWN separate physical UI
+  (`12400`); `11600` is never the device front-end — do not conflate the two
+  (`0300` dual-target discipline).*
 
-**Why it must be last.** The Director has nothing to drive until those parameters actually exist as addressable, tunable knobs — today they mostly don't (§27 gap table): no groove engine (swing/velocity-feel/ghost/humanize are still hand-authored notes, not parameters), no `ArpeggiatorEngine` (rate/octaves/gate), no step-sequencer probability/density, no voicing controls. Building the Director before those land would give it nothing real to steer. It is therefore the final capstone item of the phased roadmap (item 9 above), landing only after items 2/3/5/6 close those gaps.
+#### 12000 — Device / STM32 / HW + outward interop — ○ planned / ◑
 
-**Constraints (non-negotiable, same as everywhere else in the core).** Deterministic given state+target+seed (D16); **no heap** in the realtime path, static state, bounded per-tick/per-bar step (D32); STM32-friendly by construction — it is cheap, a small interpolation state machine over a handful of scalar axes, not a generative model.
-
-**Prior art (validation, not novelty).** The pattern is well established outside arrangrr: video-game adaptive music systems, REMAST (real-time emotion-based arrangement with soft transitions), MorpheuS (tension-profile-constrained generation), and generative sequencers such as Torso T-1 and Wotja all morph parameters toward a target rather than generating from scratch.
+- `12100` STM32H743 HAL (USB-MIDI + UART DIN + timer + storage) — ○ device
+- `12200` Real budget validation (≤512 KB envelope, static_assert) — ◑ *(asserts exist; no HW run)*
+- `12300` Watchdog / crash-recovery (all-notes-off at boot) — ○ device
+- `12400` Physical UI (pads/encoders/display) if/when in scope — ○ device
+- `12500` External interop: DeviceProfile + ExternalSound, ordered Bank/PC/CC init, RPN/NRPN/14-bit/aftertouch, MIDI-Learn/ControllerMap — ○ SHIPPABLE
+- `12600` Laptop tools: SMF import/export, style/device editor — ○ HOST-ONLY
 
 ---
+
+### Recommended sequence for the open work (the through-line)
+
+**Superseded in part by the GUI freeze line (`11700`), owner-decided.** The arc now
+reads: **sparse input → rich harmony (done) → a band that follows correctly and no
+longer sounds the same twice, hardened against realtime defects (the pre-GUI batch,
+`11710`) → FREEZE (`11700`) → a living, playable GUI (`11600`) → every remaining
+musical feature grown on that instrument, reprioritized by real feel-in-the-hands
+testing, not by this document's ranking.** Steps 1–4 below are the pre-GUI gating
+batch verbatim; everything from step 6 onward now sits BEHIND the freeze line and its
+mutual order is advisory only — `11700`/`11730` is the binding word on what's deferred,
+this list is kept for continuity and for ordering WITHIN the behind-the-line set.
+
+#### NEXT — the pre-GUI gating batch, in order (invariant `0500`: don't open a front over a half-built one; all four gate `11700`)
+1. **`2530` — Single-owner FollowedContext consolidation.** ✅ DONE (merged, no ABI, no
+   dep). Finished `2510` (immediate-commit + SHIFT-quantize) and removed the three
+   reported bugs by construction. The GUI's central interaction (`11410`, and everything
+   downstream: `9320`, `10000`) reads through this cell. `2540` (delete dead seam) folded
+   in. **Cleared — the next open batch item is step 2.**
+2. **`11410` — Piano visualizer GREEN+ORANGE.** HOST-ONLY, small, rides the pending
+   state that `2530` stabilizes. Cheap, high perceived value: it makes the harmony
+   visible, not just correct — and it is the GUI's central readable surface, so it
+   must be verified standalone before `11600` is built around it.
+3. **`1270` — Realtime hardening: sustained-play crackle.** ✅ RESOLVED — it was a
+   downstream integrated-audio (PipeWire) buffer underrun, not a core defect (the core
+   output path is proven clean); fixed by sizing FluidSynth's period in the demo
+   launcher. **Cleared as a `11700` precondition.**
+4. **`9110`/`9120`/`9130` — Per-style feel.** SHIPPABLE, ABI/struct change **already
+   owner-approved**, ranked the single biggest lever against style sameness. Gates the
+   GUI's style picker (`11700`/`11710`.3): it must present genuinely different styles,
+   not 16 clones. GrooveParams+tempo per style, flash-resident, dual-target clean;
+   `9130` triplet grid follows as a second pass.
+
+#### AT THE FREEZE LINE — `11700`
+5. **Freeze `0700` (current ABI) + lock the `5100` shape** (`kMaxInserts=8`, UI-limited
+   4, per-track first, ABI-none for the data-model increment — already locked, see the
+   updated `5100` entry). **Build `11600`, the host GUI.** Tech stack (ImGui or
+   alternative) is a **NEEDS-DECISION / dependency flag** for the owner under `0800` —
+   evaluate it now, at this exact point, not before (nothing to build it for yet) and
+   not after (the batch is closed, nothing left gating it).
+
+#### BEHIND THE LINE — grown on a living instrument (`11730`), reprioritize on real feel-in-the-hands
+6. **`9310` — Stylizer: Accompany.** HOST-ONLY, **zero new core, zero dependencies**,
+   reuses the resolver + detector. Cheapest possible demo of the engine's worth inside
+   the new GUI: feed a plain MIDI, get the band under it. Good first candidate to
+   exercise the GUI itself. Ships before `9320` (Restyle), which depends on `9100`.
+7. **`5100`+`5200` — MIDI-FX / Transform chain, first increment.** SHIPPABLE core,
+   shape now locked (step 5). Owner's stated strong current interest AND the `0600`
+   north-star made concrete. Strategic payoff beyond the inserts: refactoring groove
+   (`5210`) and arp (`5220`=`7130`) into instances gives `10000` a wider, uniform
+   tunable surface. Start with the framework + 2–3 inserts (`5310`, `5320`, `5230`);
+   defer `5340`.
+8. **`9210` (generative style) + `9320` (Restyle).** The anti-sameness arc's second
+   half. Both unblocked once step 4 lands.
+9. **`4300` → `6000` — track record/overdub → Looper.** The "capture" leg of the
+   unified-timeline triad (`0130`), the one gesture still entirely missing. Heavy but
+   budget-sized (`0400`). Pair `4500` (external clock-in) — a looper that can't slave
+   to the DAW clock is half a looper.
+10. **`8100`–`8400` — Scenes / song / performance / setlist.** Structure & recall;
+    prerequisite for the Director's scene targets. Storage+CRC (`8500`) rides here.
+11. **`10000` — Generative Director.** Capstone, unchanged in position: only real once
+    `3250`/`7110`/`4100` (done), `5000` (step 7) and the voicing/scene surface (steps
+    7, 10) exist, AND it now has a living GUI to be felt through.
+
+#### DEFER (specified, not now)
+- **`9400` style data format + CASM importer** — HOST-ONLY tooling; the compiled-C++
+  style path works today (`0400`). Defer until authoring pain is real or the corpus
+  import becomes the priority. Smallest first step: teach `arrstyle-converter` to emit
+  today's constexpr header from its model.
+- **`11300` presentation layer; `4200` remaining step params; `3300` arranger
+  refinements** — incremental polish; interleave opportunistically, none on the
+  critical arc.
+
+#### CUT / hold at the horizon (no schedule)
+- MIDI 2.0 / MIDI-CI, full SysEx, SMF (`12600` tail) — remain horizon per `0500`;
+  nothing depends on them.
+- ML style-transfer — stays OUT (`9300` scope): on-device infeasible, host-only would
+  need a dependency flag.
+
+---
+
+### Constraints & flags that gate ordering
+
+- **The GUI freeze line (`11700`) is the binding gate** on this whole sequence: nothing
+  in "BEHIND THE LINE" schedules before `11710` is all ✅ and `11720` has executed.
+- **ABI / struct changes:** `9110` is owner-approved. `5100`'s shape is now LOCKED at
+  the freeze line (`11720`) — the former NEEDS-DECISION is resolved. All other open
+  leaves are additive or internal.
+- **No new core dependency** is introduced by any SHIPPABLE item. The dependency flag
+  in the open set is the **GUI toolkit** for `11600` (HOST-ONLY, policy `0800`,
+  decided AT the freeze line, not before).
+- **Dual-target / no-heap reality (`0200`/`0300`/`0400`):** every SHIPPABLE leaf is
+  bounded and flash/static-resident; `6000` is pre-budgeted; all ML training (`9220`)
+  is HOST-ONLY, only the baked table ships. `11700`/`11600` are HOST-ONLY by
+  construction — the STM32 target (`12000`) has its own separate physical UI (`12400`)
+  and is never this front-end. No open leaf assumes device capacity that isn't there.
+- **In-flight-first (`0500`):** `2530` and `1270` are now BOTH closed (the two hardest
+  pre-freeze cells), so the remaining gate is the readable/musical surface — `11410`
+  and the `9100` family. The `0500` failure this guards against (opening `11600` or
+  `5000`/`6000` over a racing followed-context cell or an open crackle defect) no
+  longer applies to those two.
+
+---
+
+### Owner decisions this proposal surfaces
+
+1. **Style-load semantics** (`2530`) — **DECIDED: keep the chord.** A style-load means
+   "change the band under the same chord", not "new song" — the followed chord survives
+   a style change. Shipped in the consolidation.
+1b. **Live-vs-sequencer arbitration** (`2340`) — **DECIDED: live-priority.** When a
+   ChordSequencer is running and the player also plays live, the live chord WINS while
+   held: the band follows it and the sequencer's comp follows it too (no clash); on
+   release the sequencer resumes its own progression. With no sequencer a live chord
+   latches. `kAuto` (last-writer race) is retained only as an explicit legacy mode.
+   **Shipped** (`ChordFollow::kLivePriority`, ABI-additive, engine default); supersedes
+   the former "deferred / `kAuto`-race" note.
+2. **MIDI-FX chain scope & ABI** (`5100`) — **RESOLVED by the GUI freeze line
+   (`11720`):** `kMaxInserts=8`, UI-limited 4, per-track first, ABI-none for the
+   data-model increment. Locked; no longer open.
+3. **Sequence fork — MIDI-FX vs Looper** — **SUPERSEDED by the freeze line (`11700`):**
+   neither `5000` nor `6000` runs before the GUI now; both sit behind it (`11730`).
+   Their relative order (this proposal's steps 7 vs 9) is advisory only — it should be
+   re-decided by real feel-in-the-hands testing once `11600` exists and sounds, not by
+   this document.
+4. **GUI tech stack** (`11600`, surfaced by `11700`/`11720`): ImGui or an alternative —
+   a genuine dependency fork under policy `0800`, to be evaluated WITH the owner when
+   the pre-GUI batch (`11710`) closes. Not picked here; flagged.
+
+---
+
+### Appendix — migration cross-reference (old identifier → new numeric ID)
+
+The old milestone and decision codes are retired from the canonical text. This table
+exists only so existing references in code/docs still resolve; the owner may drop it
+once references are migrated. A single old code may map to several nodes (it was
+realized across them) and several old codes may share a node.
+
+#### Former milestones
+
+| Old | New node(s) |
+|-----|-------------|
+| M0  | 1000 (1100/1200/1300) |
+| M1  | 1400 |
+| M2  | 2100, 2210, 2300 |
+| M3  | 2400 (1st WOW) |
+| M4  | 2220, 2230 |
+| M5  | 3000 (2nd WOW) |
+| M6  | 4000 |
+| M7  | 6000 |
+| M8  | 7000 |
+| M9  | 8000 (8100–8400) |
+| M10 | 12500 |
+| M11 | 8500, 8600 |
+| M12 | 12600 |
+| M13 | 12100–12400 |
+| H1  | 11100 |
+| H2  | 11200 |
+| H3  | 11300 |
+| Phased #1..#9 | 3220 · 3250 · 7110 · 8100 · 4100 · 3260 · 4500 · 4400/12500 · 10000 |
+
+#### Former decisions
+
+| Old | New node(s) |
+|-----|-------------|
+| D1  | 0110 |
+| D2  | 0300 |
+| D3  | 0300, 1110, 1130 |
+| D4  | 0800 |
+| D5  | *(historical context — dropped)* |
+| D6  | 1260, 1220 |
+| D7  | 0500, 1320 |
+| D8  | 0120 |
+| D9  | 0500 |
+| D10 | 1400, 0130 |
+| D11 | 2000 (band identity) |
+| D12 | 2210, 2220, 2230 |
+| D13 | 2430 |
+| D14 | 2410 |
+| D15 | 0130 |
+| D16 | 0100 |
+| D17 | 0600, 1320, 1330 |
+| D18 | 0500 |
+| D19 | 2240 |
+| D20 | 2110, 2240 |
+| D21 | 8400, 8500 |
+| D22 | 1320 |
+| D23 | 1320 |
+| D24 | 3110 |
+| D25 | 5000 |
+| D26 | 1330, 0700 |
+| D27 | 1210 |
+| D28 | 2410 |
+| D29 | 1310, 1230 |
+| D30 | 0500 |
+| D31 | 1110, 1130 |
+| D32 | 0200 |
+| D33 | 0400, 12200 |
+| D34 | 2310, 2320 |
+| D35 | 3240, 12500 |
+| D36 | 3230 |
+| D37 | 10000 |
+| D38 | 11500, 11600 |
+| D39 | 3130 |
+| D40 | 3120 |
+| D41 | 3140 |
+| D42 | 3150 |
+| D43 | 0910 |
+| D44 | 9400 |
+| D45 | 2220 |
+| D46 | 4100 (4110–4150) |
+| D47 | 2340 |
+| D48 | 2590 (reserved: shared-voicing split) |
+| D49 | 2330, 2220 |
+| D50 | 9100 |
+| D51 | 9200 |
+| D52 | 9300 |
+| D53 | 2510, 2520 |
+| D54 | 11400 |
 
 ## 28. CLI API Design (final — 3-layer architecture, D23)
 

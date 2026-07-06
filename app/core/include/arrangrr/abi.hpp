@@ -98,9 +98,11 @@ enum class Param : std::uint16_t {
   kArpOut = 40,            // set: a = port | (channel_0based << 8). Where the
                            //     arpeggiator plays.
   kChordFollow = 41,       // set: a = ChordFollow (0 auto, 1 detect, 2 sequencer,
-                           //     3 manual). Selects WHICH producer may update the
-                           //     arranger-followed chord context. kAuto keeps the
-                           //     legacy last-writer-wins behavior.
+                           //     3 manual, 4 live-priority). Selects WHICH producer
+                           //     may update the arranger-followed chord context.
+                           //     kAuto keeps the legacy last-writer-wins behavior;
+                           //     kLivePriority (engine default) lets a held live
+                           //     chord beat a running sequencer. Values append-only.
   kInputZone = 42,         // set: a = input port, b = InputZone (0 melody, 1
                            //     harmony). kHarmony suppresses the port's note
                            //     output (silent chord recognition, the Split

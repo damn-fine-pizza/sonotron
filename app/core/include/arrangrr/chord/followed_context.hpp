@@ -32,11 +32,24 @@ namespace arrangrr {
 // the update down to a single named source. Gating touches ONLY the followed
 // context update — the other side effects (sounding a chord, advancing the
 // sequencer, tracking the held detect set) always run.
+//
+// kLivePriority (the engine DEFAULT) is the arbitrated model: every
+// producer MAY publish (like kAuto at the gate), but while a live chord is
+// actively HELD the engine suppresses the ChordSequencer's own publish AND
+// redirects its comping onto the live chord — so a held live chord always wins
+// over a running sequencer, and the sequencer resumes driving the instant the
+// keys are released. That held-vs-released decision is DYNAMIC engine state
+// (the detector's held set), so it lives at the fire_chord_seq call site, not
+// in this static gate; here kLivePriority simply admits every producer.
+//
+// ABI note: values are append-only (0..4 are stable, never reused); the wire id
+// is Param::kChordFollow's `a`.
 enum class ChordFollow : std::uint8_t {
-  kAuto = 0,       // all three producers may steer (legacy last-writer-wins)
-  kDetect = 1,     // only live piano->chord detection steers
-  kSequencer = 2,  // only the ChordSequencer steers
-  kManual = 3,     // only manual `chord play` steers
+  kAuto = 0,          // all three producers may steer (legacy last-writer-wins)
+  kDetect = 1,        // only live piano->chord detection steers
+  kSequencer = 2,     // only the ChordSequencer steers
+  kManual = 3,        // only manual `chord play` steers
+  kLivePriority = 4,  // engine default: live held chord beats a running sequencer
 };
 
 // The three producers that can publish the followed chord. The owner's gate
@@ -126,6 +139,11 @@ class FollowedContext {
         return who == Producer::kSequencer;
       case ChordFollow::kManual:
         return who == Producer::kManual;
+      case ChordFollow::kLivePriority:
+        // Every producer may publish; the live-vs-sequencer arbitration is
+        // enforced at the engine's fire_chord_seq call site (it withholds the
+        // sequencer's publish while a live chord is held), not in this gate.
+        return true;
     }
     return true;
   }
@@ -139,7 +157,7 @@ class FollowedContext {
   ChordState m_state{};     // `current`: the chord the band follows this bar
   ChordState m_pending{};   // `next`: the shift-staged chord, committed at the bar
   bool m_explicit = false;  // a real producer has set a context since the reset
-  ChordFollow m_follow = ChordFollow::kAuto;  // D47: who may steer
+  ChordFollow m_follow = ChordFollow::kLivePriority;  // D47 gate; live-priority default
 };
 
 }  // namespace arrangrr

@@ -107,6 +107,8 @@ inline const char* chord_follow_label(ChordFollow follow) {
       return "sequencer";
     case ChordFollow::kManual:
       return "manual";
+    case ChordFollow::kLivePriority:
+      return "live";
     case ChordFollow::kAuto:
     default:
       return "auto";
@@ -120,6 +122,8 @@ inline const char* chord_follow_hint(ChordFollow follow) {
       return "the sequence steers";
     case ChordFollow::kManual:
       return "chord play steers";
+    case ChordFollow::kLivePriority:
+      return "held live chord beats the sequence";
     case ChordFollow::kAuto:
     default:
       return "any source steers";
@@ -138,6 +142,8 @@ inline bool parse_chord_follow(const std::string& s, ChordFollow& out) {
     out = ChordFollow::kSequencer;
   } else if (s == "manual") {
     out = ChordFollow::kManual;
+  } else if (s == "live" || s == "livepriority") {
+    out = ChordFollow::kLivePriority;
   } else {
     return false;
   }

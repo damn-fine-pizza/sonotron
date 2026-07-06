@@ -297,21 +297,42 @@ class Engine {
   }
 
   void fire_chord_seq(Tick transport_tick, EventSink sink) {
+    // LIVE-PRIORITY arbitration (the engine default): while a live chord is
+    // actively HELD on the detect port, the band follows that live chord and the
+    // sequencer must COMP on it (sound its rhythm/voicing on the live root+quality)
+    // WITHOUT publishing its own chord — no clash. On release the held set empties
+    // and the sequencer's next fired step resumes committing normally. This dynamic
+    // held-vs-released state cannot live in FollowedContext's static gate, so the
+    // decision is made here. Under any other ChordFollow value (kAuto legacy,
+    // kDetect/kSequencer/kManual explicit) the sequencer behaves exactly as before:
+    // it sounds its own chord and its publish is arbitrated by the D47 gate.
+    const bool live_priority = m_chords.follow() == ChordFollow::kLivePriority;
+    const bool live_held = m_chord_detect && m_detector.held_count() > 0;
+    const bool comp_on_live = live_priority && live_held && m_chords.state().valid;
     m_seq.on_tick(
         transport_tick,
         [&](std::uint8_t root_note, ChordQuality quality, std::uint8_t degree, std::uint8_t vel) {
-          // The sequencer always SOUNDS its chord; whether it STEERS the followed
-          // context is decided by the owner's D47 gate (Producer::kSequencer).
-          // It is time-aligned, so it steers IMMEDIATELY (commit_now), never
-          // staged.
+          // While comping on a held live chord, sound the LIVE root+quality and do
+          // NOT steer (the live chord already owns the followed context). Otherwise
+          // sound the sequencer's own chord and let the D47 gate decide the publish.
+          std::uint8_t sound_root = root_note;
+          ChordQuality sound_quality = quality;
+          bool steer = true;
+          if (comp_on_live) {
+            const ChordState& live = m_chords.state();
+            sound_root = static_cast<std::uint8_t>(60 + live.root_pc);
+            sound_quality = live.quality;
+            steer = false;
+          }
           m_chords.sound(
-              root_note, quality, vel,
+              sound_root, sound_quality, vel,
               [&](std::uint8_t port, const MidiMessage& msg) {
                 schedule_or_warn(port, m_now, msg, sink);
               },
-              Producer::kSequencer, /*steer=*/true, /*quantize=*/false);
-          sink(OutEvent::chord(m_chords.out_port(), degree, static_cast<std::uint8_t>(quality),
-                               root_note, theory::shape_of(quality).count, vel, m_now));
+              Producer::kSequencer, steer, /*quantize=*/false);
+          sink(OutEvent::chord(m_chords.out_port(), degree,
+                               static_cast<std::uint8_t>(sound_quality), sound_root,
+                               theory::shape_of(sound_quality).count, vel, m_now));
         },
         [&] {
           m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {

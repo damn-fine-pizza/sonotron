@@ -50,13 +50,13 @@ arrangrr_test(test_followed_context unit)
 # Currently RED where it pins an open, unfixed defect (see the printed
 # timeline and the CHECK comments in the file); do not silence it.
 arrangrr_test(test_chord_context_diagnosis functional)
-# test_chord_seq_vs_live_steer: Torquato QA reproduction of the owner's
-# live-testing report -- a live chord press only transposes the bar it lands
-# in, the next bar reverts to "the song" (a running ChordSequencer). Subject
-# is the Engine's cross-tick arbitration between fire_chord_seq and a live
-# steer through the FollowedContext owner -> functional. RED under
-# ChordFollow::kAuto (the engine's own default) where it pins the measured
-# clobber; green under ChordFollow::kDetect (the documented mitigation).
+# test_chord_seq_vs_live_steer: the LIVE-PRIORITY arbitration (engine
+# default) between fire_chord_seq and a live steer through the FollowedContext
+# owner. Locks: a held live chord beats a running sequencer (band follows live,
+# the seq comps ON the live chord), release resumes the sequencer, no-seq
+# latches (Strada 1), the `chord follow sequencer` override, and kAuto's kept
+# legacy last-writer clobber. Subject is the Engine's cross-tick arbitration ->
+# functional.
 arrangrr_test(test_chord_seq_vs_live_steer functional)
 # test_input_zone: the Engine's per-port InputZone route-vs-suppress split and
 # the detector's scale-aware single-finger steering, driven through the ABI ->
