@@ -875,19 +875,22 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
 
 #### 9000 — Style content & tooling — ◑ partial / decided
 
-- **9100 Per-style feel — ◑ partial (model + tempo landed; feel-genre swing deferred)**
+- **9100 Per-style feel — ✅ done (model + tempo + feel-genre swing; only 9130 refinement left)**
   - `9110` Style owns its default GrooveParams — ✅ done (`Style::groove`, ABI/struct-additive,
-    seeded into the arranger on every style load/switch; all 16 builtins keep the no-op default
-    this pass, so note output is byte-identical)
+    seeded into the arranger on every style load/switch)
   - `9120` Style owns its tempo — ✅ done (`Style::tempo`, wired through `Engine::apply_style_tempo`
     → `Transport::set_bpm` on load/switch, no new ABI; Ottorino's per-style tempos applied to all
     16 builtins; `latin` held at 120 BPM behind an owner TODO)
+  - **Feel-genre swing (swing/shuffle/blues)** — ✅ done. Each of the three now seeds its `.groove`
+    (swing 62/12, shuffle 72/10, blues 75/10, `swing_grid=8`) and its note table was re-authored
+    (Rule R: swung eighths moved from steps 3/7/11/15 onto the even off-8ths 2/6/10/14 that
+    `groove::apply` actually swings; fills/pickups/chromatic-approach exceptions preserved). The
+    other 13 styles stay byte-identical. Three regression goldens (`feel_swing/shuffle/blues`) lock
+    the swung ticks. Spec in `docs/proposals/per-style-feel-swing-reauthoring.md`.
   - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE, deferred
-    *(analysis: only `blues` needs a true 3-equal-subdivision grid; swing/shuffle ship as 2-note
-    swing via `GrooveParams.swing`, so this is a blues-only quality upgrade, not a blocker)*
-  - **Feel-genre swing values + re-authoring (swing/shuffle/blues)** — ○ deferred to the instrument:
-    the model is ready; applying Ottorino's swing/accent table and re-authoring those three onto
-    straight off-8ths is ear-validated feel-work, best grown after the GUI (`11700` philosophy)
+    *(analysis: only `blues` needs a true 3-equal-subdivision grid to refine its 12/8 beyond the
+    shipped 2-note shuffle; swing/shuffle are complete as 2-note swing — this is a blues-only
+    quality upgrade, not a blocker)*
   *ranked the single biggest lever against style sameness (corpus measurement,
   `docs/reflections/style-differentiation-and-generation.md`); feel values in
   `docs/proposals/per-style-feel-values.md`*
@@ -946,8 +949,9 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   not by this document's current ranked order.*
   - `11710` Pre-GUI gating batch — must be ✅ before the line is crossed
     (invariant `0500`, vertical-first: the GUI is built on solid, verified ground, not
-    raced onto half-built cells). **3 of 4 cleared: `2530` ✅, `1270` ✅, `11410` ✅;
-    remaining: the `9100` per-style-feel family, now partially landed (see item 3):**
+    raced onto half-built cells). **ALL FOUR cleared: `2530` ✅, `1270` ✅, `11410` ✅,
+    `9100` ✅ — the line is READY TO CROSS; the next action is `11720` (freeze) then
+    `11600` (build the GUI). (Owner-directed: freeze this code, then GUI.)**
     1. `2530` Single-owner FollowedContext consolidation — ✅ done (merged, band
        `2500`). The GUI's central interaction — steer/follow — is now correct and
        un-raced, so a visual surface can be built on top of it. **Batch item cleared.**
@@ -956,13 +960,12 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
        verified standalone (bold green committed, amber pending, off at rest), so the
        GUI can be built around it rather than inventing it inside the GUI build.
        **Batch item cleared.**
-    3. `9100` family Per-style feel / anti-sameness — ◑ partial. `9110`/`9120` landed
-       (per-style default groove + tempo; styles now differ audibly by tempo), but the
-       feel-genre swing (the strongest differentiator) and `9130` are deferred as
-       ear-validated feel-work best grown on the GUI/instrument. **OWNER CALL: cross the
-       line now on tempo-differentiation + a ready feel model, or hold for the swing
-       pass?** — this is the one open gate; note the chicken-and-egg (swing feel wants
-       ears, ears want the GUI).
+    3. `9100` family Per-style feel / anti-sameness — ✅ done. `9110`/`9120` (per-style
+       default groove + tempo) and the feel-genre swing (swing/shuffle/blues re-authored
+       for engine-driven swing, regression goldens locked) all landed; the GUI's style
+       picker now presents genuinely different styles, not 16 clones. Only `9130` (a
+       blues-only true-triplet refinement) remains, and it is a post-freeze nicety.
+       **Batch item cleared.**
     4. `1270` Realtime hardening — sustained-play crackle — ✅ resolved (downstream
        PipeWire buffer, not a core defect; core path proven clean). **Batch item
        cleared** — no longer gates the line.
@@ -1026,14 +1029,12 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
    downstream integrated-audio (PipeWire) buffer underrun, not a core defect (the core
    output path is proven clean); fixed by sizing FluidSynth's period in the demo
    launcher. **Cleared as a `11700` precondition.**
-4. **`9110`/`9120`/`9130` — Per-style feel.** ◑ PARTIAL. `9110`/`9120` DONE (merged):
-   per-style default `GrooveParams` + tempo, flash-resident, dual-target clean, ABI-additive,
-   byte-identical goldens; Ottorino's per-style tempos applied (styles now differ audibly by
-   tempo). DEFERRED to the instrument: the feel-genre swing values + re-authoring
-   (swing/shuffle/blues) — the strongest differentiator, but ear-validated feel-work — and
-   `9130` (true triplet grid, needed only by blues). Gates the GUI's style picker
-   (`11700`/`11710`.3); **owner call whether the tempo pass + ready feel model is enough to
-   cross, or the line holds for the swing pass** (which itself wants the GUI's ears).
+4. **`9110`/`9120` + feel-genre swing — Per-style feel.** ✅ DONE (merged). Per-style default
+   `GrooveParams` + tempo (flash-resident, dual-target, ABI-additive) and the feel-genre swing:
+   swing/shuffle/blues re-authored for engine-driven swing (Rule R) with their `.groove` seeded,
+   three regression goldens locking the swung ticks, the other 13 styles byte-identical. The GUI's
+   style picker (`11700`/`11710`.3) now presents genuinely different styles. Only `9130` (a
+   blues-only true-triplet refinement) remains, deferred as a post-freeze nicety.
 
 #### AT THE FREEZE LINE — `11700`
 5. **Freeze `0700` (current ABI) + lock the `5100` shape** (`kMaxInserts=8`, UI-limited
@@ -1098,12 +1099,12 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
   is HOST-ONLY, only the baked table ships. `11700`/`11600` are HOST-ONLY by
   construction — the STM32 target (`12000`) has its own separate physical UI (`12400`)
   and is never this front-end. No open leaf assumes device capacity that isn't there.
-- **In-flight-first (`0500`):** `2530`, `1270` and now `11410` are closed, and the
-  `9100` model + tempo pass has landed — so the readable surface exists and styles
-  already differ by tempo. The only open gate is the `9100` feel-genre swing pass
-  (deferred as ear-work). The `0500` failure this guards against (opening `11600` or
-  `5000`/`6000` over a racing followed-context cell, an open crackle defect, or an
-  un-readable harmony surface) no longer applies.
+- **In-flight-first (`0500`):** the whole pre-GUI batch is closed — `2530`, `1270`,
+  `11410` and `9100` (model + tempo + feel-genre swing) all landed and verified. The
+  readable surface exists and the styles genuinely differ (tempo + swing). Nothing that
+  `0500` guards against (opening `11600`/`5000`/`6000` over a racing followed-context
+  cell, an open crackle defect, an un-readable harmony surface, or 16 same-feel styles)
+  remains — the freeze line `11700` is ready to cross.
 
 ---
 
