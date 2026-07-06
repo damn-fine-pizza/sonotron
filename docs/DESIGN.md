@@ -935,9 +935,10 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   (**dependency flag: GUI toolkit — decision deferred to freeze-line crossing**)
 
 - **11700 GUI freeze line — pivot from core-feature work to the host GUI**
-  (owner-decided). STATUS: DECIDED (gate, not a schedulable work item — see the `0000`
-  numbering note on invariants vs. work; this node governs sequencing of everything
-  below it, the way `0000` governs everything in the tree).
+  (owner-decided). STATUS: ✅ CROSSED (2026-07-06). The pre-GUI batch `11710` is all ✅
+  and `11720` (freeze) has executed — the ABI is frozen v1 and the `5100` shape is
+  reserved. Core-feature work is now BEHIND the line; the next action is `11600` (build
+  the host GUI). This node still governs sequencing of everything below it.
   *Through-line: **validate feel in the hands, then grow on a living instrument.** The
   product is a MIDI arranger — a live instrument whose value is in the hands. The TUI
   structurally cannot validate FEEL (timing, the chord-steer sensation, the piano
@@ -950,8 +951,8 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   - `11710` Pre-GUI gating batch — must be ✅ before the line is crossed
     (invariant `0500`, vertical-first: the GUI is built on solid, verified ground, not
     raced onto half-built cells). **ALL FOUR cleared: `2530` ✅, `1270` ✅, `11410` ✅,
-    `9100` ✅ — the line is READY TO CROSS; the next action is `11720` (freeze) then
-    `11600` (build the GUI). (Owner-directed: freeze this code, then GUI.)**
+    `9100` ✅ — batch complete; the line has been CROSSED (`11720` freeze done). The next
+    action is `11600` (build the GUI). (Owner-directed: freeze this code, then GUI.)**
     1. `2530` Single-owner FollowedContext consolidation — ✅ done (merged, band
        `2500`). The GUI's central interaction — steer/follow — is now correct and
        un-raced, so a visual surface can be built on top of it. **Batch item cleared.**
@@ -969,13 +970,17 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
     4. `1270` Realtime hardening — sustained-play crackle — ✅ resolved (downstream
        PipeWire buffer, not a core defect; core path proven clean). **Batch item
        cleared** — no longer gates the line.
-  - `11720` At-the-freeze-line actions (executed once `11710` is all ✅):
-    - Freeze the CURRENT ABI command/event surface (`0700`) as of this point. Corelli's
-      architecture verdict: the ABI is additive/healthy, so freezing now is safe —
-      later features (`5000`, `6000`, `8000`, `10000`) extend it, they do not break it.
-    - Pre-fix the SHAPE of the MIDI-FX ABI verbs (`5100`, updated above) even though
-      unimplemented, so the GUI is born aware of that surface and is never rebuilt
-      when `5000` lands.
+  - `11720` At-the-freeze-line actions — ✅ DONE (merged):
+    - ✅ Froze the current ABI command/event surface (`0700`): `abi.hpp` carries a
+      FROZEN-v1 banner with the additive-only invariant, and `test_abi_frozen.cpp`
+      compile-time-pins every id value, `kWarnCodeCount`, `sizeof(Command)==20`,
+      `sizeof(OutEvent)==16` and `kProtocolVersion==1` — a breaking change now fails the
+      build (fix = append, or bump to v2). Corelli's verdict held: the ABI is
+      additive/healthy, so later features (`5000`/`6000`/`8000`/`10000`) extend it.
+    - ✅ Reserved the `5100` MIDI-FX shape as ABI-none: `constexpr kMaxInserts=8` +
+      a RESERVED block documenting the future per-track `kFx…` verbs and their
+      `(idx,a,b,c)` packing, no live enum values — the GUI is born aware, appended when
+      `5000` lands.
   - `11730` Behind the line — reprioritized on a living instrument, no longer ordered
     by this document alone:
     - `11600` itself (the GUI build) is the FIRST thing behind the line — it is what
