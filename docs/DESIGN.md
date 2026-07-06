@@ -875,12 +875,22 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
 
 #### 9000 — Style content & tooling — ◑ partial / decided
 
-- **9100 Per-style feel — ○ planned (next musical lever, owner-approved ASAP)**
-  - `9110` Style owns its default GrooveParams — ○ SHIPPABLE (**ABI/struct change, approved**)
-  - `9120` Style owns its tempo — ○ SHIPPABLE
-  - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE
+- **9100 Per-style feel — ◑ partial (model + tempo landed; feel-genre swing deferred)**
+  - `9110` Style owns its default GrooveParams — ✅ done (`Style::groove`, ABI/struct-additive,
+    seeded into the arranger on every style load/switch; all 16 builtins keep the no-op default
+    this pass, so note output is byte-identical)
+  - `9120` Style owns its tempo — ✅ done (`Style::tempo`, wired through `Engine::apply_style_tempo`
+    → `Transport::set_bpm` on load/switch, no new ABI; Ottorino's per-style tempos applied to all
+    16 builtins; `latin` held at 120 BPM behind an owner TODO)
+  - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE, deferred
+    *(analysis: only `blues` needs a true 3-equal-subdivision grid; swing/shuffle ship as 2-note
+    swing via `GrooveParams.swing`, so this is a blues-only quality upgrade, not a blocker)*
+  - **Feel-genre swing values + re-authoring (swing/shuffle/blues)** — ○ deferred to the instrument:
+    the model is ready; applying Ottorino's swing/accent table and re-authoring those three onto
+    straight off-8ths is ear-validated feel-work, best grown after the GUI (`11700` philosophy)
   *ranked the single biggest lever against style sameness (corpus measurement,
-  `docs/reflections/style-differentiation-and-generation.md`)*
+  `docs/reflections/style-differentiation-and-generation.md`); feel values in
+  `docs/proposals/per-style-feel-values.md`*
 - **9200 Generative style — ○ planned**
   - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE
   - `9220` Offline-trained Markov/grammar on scale degrees, baked constexpr — ○ runtime SHIPPABLE / training HOST-ONLY
@@ -908,8 +918,11 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
 - `11100` TUI foundation — ✅
 - `11200` Piano/monitor MVP — ✅
 - `11300` Presentation layer (colors/themes/unicode, richer views) — ○ HOST-ONLY (deferred)
-- **11400 Piano source-coloured visualizer**
-  - `11410` GREEN (current bar) + ORANGE (next/pending chord) — ○ HOST-ONLY
+- **11400 Piano source-coloured visualizer — ◑ partial (11410 done, 11420 deferred)**
+  - `11410` GREEN (current bar) + AMBER (next/pending chord) — ✅ done (green note-on now bold;
+    new `kMidiNotePending` amber role; `PianoChordOverlay` from existing host chord state, no core
+    ABI; committed-green gated OFF at rest — lit only when transport plays or the chord is
+    explicitly steered)
   - `11420` WHITE (direct play) — ○ HOST-ONLY *(deferred: needs a sounding melody surface)*
 - `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅
 - `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`): separate
@@ -931,20 +944,25 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   `8000`, `10000`, and the rest of `9000`) is grown AFTER, on an instrument that
   already exists and already sounds — reprioritized by real feel-in-the-hands testing,
   not by this document's current ranked order.*
-  - `11710` Pre-GUI gating batch — ALL FOUR must be ✅ before the line is crossed
+  - `11710` Pre-GUI gating batch — must be ✅ before the line is crossed
     (invariant `0500`, vertical-first: the GUI is built on solid, verified ground, not
-    raced onto half-built cells). **2 of 4 cleared: `2530` ✅, `1270` ✅; remaining:
-    `11410` (piano visualizer) and the `9100` per-style-feel family:**
+    raced onto half-built cells). **3 of 4 cleared: `2530` ✅, `1270` ✅, `11410` ✅;
+    remaining: the `9100` per-style-feel family, now partially landed (see item 3):**
     1. `2530` Single-owner FollowedContext consolidation — ✅ done (merged, band
        `2500`). The GUI's central interaction — steer/follow — is now correct and
        un-raced, so a visual surface can be built on top of it. **Batch item cleared.**
-    2. `11410` Piano source-coloured visualizer, GREEN (current bar) / ORANGE
-       (pending) — ○ HOST-ONLY, small. The GUI's central *readable* surface; must
-       exist and be verified standalone before the GUI is built around it, not
-       invented inside the GUI build itself.
-    3. `9100` family (`9110`/`9120`/`9130`) Per-style feel / anti-sameness — ○
-       SHIPPABLE, **owner-approved**. Gates the GUI's style picker: it must present
-       genuinely different styles, not 16 clones of one feel.
+    2. `11410` Piano source-coloured visualizer, GREEN (current bar) / AMBER
+       (pending) — ✅ done. The GUI's central *readable* surface now exists and is
+       verified standalone (bold green committed, amber pending, off at rest), so the
+       GUI can be built around it rather than inventing it inside the GUI build.
+       **Batch item cleared.**
+    3. `9100` family Per-style feel / anti-sameness — ◑ partial. `9110`/`9120` landed
+       (per-style default groove + tempo; styles now differ audibly by tempo), but the
+       feel-genre swing (the strongest differentiator) and `9130` are deferred as
+       ear-validated feel-work best grown on the GUI/instrument. **OWNER CALL: cross the
+       line now on tempo-differentiation + a ready feel model, or hold for the swing
+       pass?** — this is the one open gate; note the chicken-and-egg (swing feel wants
+       ears, ears want the GUI).
     4. `1270` Realtime hardening — sustained-play crackle — ✅ resolved (downstream
        PipeWire buffer, not a core defect; core path proven clean). **Batch item
        cleared** — no longer gates the line.
@@ -999,19 +1017,23 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
    reported bugs by construction. The GUI's central interaction (`11410`, and everything
    downstream: `9320`, `10000`) reads through this cell. `2540` (delete dead seam) folded
    in. **Cleared — the next open batch item is step 2.**
-2. **`11410` — Piano visualizer GREEN+ORANGE.** HOST-ONLY, small, rides the pending
-   state that `2530` stabilizes. Cheap, high perceived value: it makes the harmony
-   visible, not just correct — and it is the GUI's central readable surface, so it
-   must be verified standalone before `11600` is built around it.
+2. **`11410` — Piano visualizer GREEN+AMBER.** ✅ DONE (merged, HOST-ONLY, no core ABI).
+   Bold green committed chord + amber pending, gated off at rest; sourced from existing
+   host chord state. It makes the harmony visible, not just correct — the GUI's central
+   readable surface, now verified standalone before `11600` is built around it.
+   **Cleared.**
 3. **`1270` — Realtime hardening: sustained-play crackle.** ✅ RESOLVED — it was a
    downstream integrated-audio (PipeWire) buffer underrun, not a core defect (the core
    output path is proven clean); fixed by sizing FluidSynth's period in the demo
    launcher. **Cleared as a `11700` precondition.**
-4. **`9110`/`9120`/`9130` — Per-style feel.** SHIPPABLE, ABI/struct change **already
-   owner-approved**, ranked the single biggest lever against style sameness. Gates the
-   GUI's style picker (`11700`/`11710`.3): it must present genuinely different styles,
-   not 16 clones. GrooveParams+tempo per style, flash-resident, dual-target clean;
-   `9130` triplet grid follows as a second pass.
+4. **`9110`/`9120`/`9130` — Per-style feel.** ◑ PARTIAL. `9110`/`9120` DONE (merged):
+   per-style default `GrooveParams` + tempo, flash-resident, dual-target clean, ABI-additive,
+   byte-identical goldens; Ottorino's per-style tempos applied (styles now differ audibly by
+   tempo). DEFERRED to the instrument: the feel-genre swing values + re-authoring
+   (swing/shuffle/blues) — the strongest differentiator, but ear-validated feel-work — and
+   `9130` (true triplet grid, needed only by blues). Gates the GUI's style picker
+   (`11700`/`11710`.3); **owner call whether the tempo pass + ready feel model is enough to
+   cross, or the line holds for the swing pass** (which itself wants the GUI's ears).
 
 #### AT THE FREEZE LINE — `11700`
 5. **Freeze `0700` (current ABI) + lock the `5100` shape** (`kMaxInserts=8`, UI-limited
@@ -1076,11 +1098,12 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
   is HOST-ONLY, only the baked table ships. `11700`/`11600` are HOST-ONLY by
   construction — the STM32 target (`12000`) has its own separate physical UI (`12400`)
   and is never this front-end. No open leaf assumes device capacity that isn't there.
-- **In-flight-first (`0500`):** `2530` and `1270` are now BOTH closed (the two hardest
-  pre-freeze cells), so the remaining gate is the readable/musical surface — `11410`
-  and the `9100` family. The `0500` failure this guards against (opening `11600` or
-  `5000`/`6000` over a racing followed-context cell or an open crackle defect) no
-  longer applies to those two.
+- **In-flight-first (`0500`):** `2530`, `1270` and now `11410` are closed, and the
+  `9100` model + tempo pass has landed — so the readable surface exists and styles
+  already differ by tempo. The only open gate is the `9100` feel-genre swing pass
+  (deferred as ear-work). The `0500` failure this guards against (opening `11600` or
+  `5000`/`6000` over a racing followed-context cell, an open crackle defect, or an
+  un-readable harmony surface) no longer applies.
 
 ---
 
