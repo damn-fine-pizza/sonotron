@@ -252,6 +252,18 @@ class Engine {
     flush(sink);
   }
 
+  // Seeds the transport tempo from the loaded style's default (9120). Called on
+  // every path that (re)loads the arranger's style — an explicit load, an
+  // immediate live switch, or a deferred switch landing at the bar boundary.
+  // Scheduling is tick-based, so this only sets the playback rate, never note
+  // tick positions; set_bpm rejects out-of-range values (all builtins are in
+  // range). This is pure internal wiring: no new ABI command is introduced.
+  void apply_style_tempo() noexcept {
+    if (const Style* style = m_arranger.current_style(); style != nullptr) {
+      m_transport.set_bpm(style->tempo);
+    }
+  }
+
   void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
     if (!m_scheduler.schedule(port, tick, msg)) {
       sink(OutEvent::warn(WarnCode::kSchedulerFull, m_now));
@@ -349,6 +361,9 @@ class Engine {
                            });
     if (r.section_changed) {
       sink(OutEvent::section(static_cast<std::uint16_t>(r.section), m_now));
+    }
+    if (r.style_changed) {
+      apply_style_tempo();  // 9120: a deferred live style switch adopts the new tempo at the bar
     }
     if (r.stop_transport) {
       m_transport.stop();

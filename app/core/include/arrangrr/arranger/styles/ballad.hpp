@@ -237,7 +237,7 @@ inline constexpr StyleSection kSections[] = {
     {.type=SectionType::kEnding1, .bars=1, .patterns=Span<const StylePattern>(kEndPatterns)},
     {.type=SectionType::kEnding2, .bars=1, .patterns=Span<const StylePattern>(kEnd2Patterns)},
 };
-inline constexpr Style kStyle{.name="ballad", .sections=Span<const StyleSection>(kSections)};
+inline constexpr Style kStyle{.name="ballad", .sections=Span<const StyleSection>(kSections), .tempo=7200};
 
 }  // namespace ballad
 

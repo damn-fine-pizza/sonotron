@@ -512,6 +512,7 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else {
         apply_arranger_voices(sink);  // pick the style's default voices
+        apply_style_tempo();          // 9120: adopt the style's default tempo
         // Owner decision: loading a style changes the BAND, keeps the HARMONY.
         // establish_default seeds the home key only when nothing explicit is in
         // force, so a chord the user steered persists across a style load; the
@@ -576,6 +577,7 @@ void Engine::style_switch(const Command& cmd, EventSink sink) {
   if (immediate) {
     sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
     apply_arranger_voices(sink);  // the new style's voices land with the cut
+    apply_style_tempo();          // 9120: the new style's tempo lands with the cut
   }
 }
 

@@ -2,8 +2,10 @@
 
 #include <cstdint>
 
+#include "arrangrr/arranger/groove.hpp"  // GrooveParams (per-style default feel, 9110)
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/common/span.hpp"
+#include "arrangrr/common/time.hpp"  // BpmX100, kDefaultBpm (per-style default tempo, 9120)
 #include "arrangrr/timeline/timeline.hpp"
 
 // Style model (D24 groundwork): sections hold DEGREE-RELATIVE patterns per
@@ -125,6 +127,18 @@ struct StyleSection {
 struct Style {
   const char* name;  // host display only; the core matches by index
   Span<const StyleSection> sections;
+  // Default groove FEEL this style loads with (9110). Loading the style seeds
+  // the arranger's live GrooveParams from this; later user `groove`-panel edits
+  // override it until the next style load/switch. Kept as a defaulted member so
+  // every existing constexpr style table stays valid AND — while all 16 builtins
+  // keep the no-op all-zero default this pass — the arranger output stays
+  // byte-identical. constexpr data in flash (D32/D33): zero RAM cost.
+  GrooveParams groove{};
+  // Default transport TEMPO this style loads with (9120). Scheduling is
+  // tick-based, so this changes only the playback rate / tempo meta, never note
+  // tick positions. Defaulted to kDefaultBpm and kept last so existing tables
+  // are unchanged; a style load/switch seeds the transport bpm from it.
+  BpmX100 tempo = kDefaultBpm;
 
   constexpr const StyleSection* find(SectionType t) const noexcept {
     for (const StyleSection& s : sections) {

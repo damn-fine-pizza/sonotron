@@ -146,6 +146,8 @@ inline constexpr StyleSection kSections[] = {
     {.type=SectionType::kBreak, .bars=1, .patterns=Span<const StylePattern>(kBrkP)},
     {.type=SectionType::kEnding1, .bars=1, .patterns=Span<const StylePattern>(kE1P)}, {.type=SectionType::kEnding2, .bars=1, .patterns=Span<const StylePattern>(kE2P)},
 };
+// TODO(owner): Ottorino proposes 18000 (180 BPM cut-time salsa) — pending owner confirm.
+// Left at kDefaultBpm (9120) until the owner confirms the aggressive cut-time tempo.
 inline constexpr Style kStyle{.name="latin", .sections=Span<const StyleSection>(kSections)};
 }  // namespace latin
 

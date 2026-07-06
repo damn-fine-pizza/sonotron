@@ -28,6 +28,16 @@ constexpr StyleSection kVoiceSections[] = {
 constexpr Style kVoiceTestStyle{.name = "voicetest",
                                 .sections = Span<const StyleSection>(kVoiceSections)};
 
+// A style carrying a NON-default per-style feel (9110) and tempo (9120), to
+// prove a style load seeds the arranger's live groove and the transport bpm.
+// The builtins all keep the no-op default this pass, so these seams need an
+// explicitly non-default fixture to exercise them.
+constexpr GrooveParams kFeelGroove{.swing = 40, .accent = 12, .swing_grid = 16};
+constexpr Style kFeelTestStyle{.name = "feeltest",
+                               .sections = Span<const StyleSection>(kVoiceSections),
+                               .groove = kFeelGroove,
+                               .tempo = 15000};
+
 void test_role_anchor_and_gm_voices() {
   Arranger arr;
   CHECK(arr.load_style(&kVoiceTestStyle));
@@ -68,6 +78,44 @@ void test_role_anchor_and_gm_voices() {
   });
   CHECK(bass_c2);
   CHECK(pad_c3);
+}
+
+// 9110: a style load seeds the arranger's live GrooveParams from Style::groove;
+// a user groove edit overrides it until the next load, which re-seeds. A
+// default-groove style leaves the feel a no-op (byte-identical output).
+void test_style_seeds_groove() {
+  Arranger arr;
+  // (a) a non-default-groove style seeds m_groove on load.
+  CHECK(arr.load_style(&kFeelTestStyle));
+  CHECK(arr.groove_params().swing == 40);
+  CHECK(arr.groove_params().accent == 12);
+  CHECK(arr.groove_params().swing_grid == 16);
+
+  // A user groove-panel edit overrides the style default...
+  arr.set_groove_field(GrooveField::kSwing, 70);
+  CHECK(arr.groove_params().swing == 70);
+
+  // (b)+(c) loading a DEFAULT-groove style re-seeds from B (no-op feel), so the
+  // prior style's feel AND the user edit are both discarded.
+  CHECK(arr.load_style(&kVoiceTestStyle));
+  CHECK(arr.groove_params().swing == 0);
+  CHECK(arr.groove_params().accent == 0);
+  CHECK(arr.groove_params().swing_grid == 8);
+
+  // (c) loading the non-default style again re-seeds its feel.
+  CHECK(arr.load_style(&kFeelTestStyle));
+  CHECK(arr.groove_params().swing == 40);
+}
+
+// 9110: an immediate live style switch (transport-stopped path) also adopts the
+// new style's feel, matching the load semantics.
+void test_style_switch_seeds_groove() {
+  Arranger arr;
+  CHECK(arr.load_style(&kVoiceTestStyle));
+  CHECK(arr.groove_params().swing == 0);
+  CHECK(arr.request_style(&kFeelTestStyle, SectionType::kVarA, /*immediate=*/true));
+  CHECK(arr.groove_params().swing == 40);
+  CHECK(arr.groove_params().accent == 12);
 }
 
 struct Band {
@@ -133,6 +181,54 @@ void test_band_starts_in_home_key() {
   CHECK(b.ons(9) > 0);  // drums groove
   CHECK(b.ons(1) > 0);  // bass plays the seeded home-key tonic
   CHECK(b.ons(2) > 0);  // tonal roles sound from bar 1
+}
+
+// 9120: a DEFERRED live style switch (queued while playing) adopts the new
+// style's tempo when it lands at the bar boundary, exercising the engine's
+// fire_arranger style_changed seam.
+void test_deferred_style_switch_seeds_tempo() {
+  Band b;
+  b.setup_basic();  // loads basic (12000)
+  b.cmd(Param::kTransportStart);
+  CHECK(b.e.transport().bpm() == 12000);
+  // Queue a combined switch to rock/varA while playing (cmd.c == 0 -> deferred).
+  b.cmd(Param::kStyleSwitch, 2, static_cast<std::int32_t>(SectionType::kVarA), 0, Op::kSet);
+  CHECK(b.e.transport().bpm() == 12000);  // not yet: waits for the bar boundary
+  b.advance(kTicksPerBar);                // cross into the next bar
+  CHECK(b.e.transport().bpm() == 13000);  // rock tempo landed with the switch
+}
+
+// 9120: loading a builtin style seeds the transport tempo from Style::tempo,
+// through the engine's internal wiring (no new ABI command). Ottorino's
+// per-style values; loading style B after A re-seeds; the default styles keep
+// 120.00; latin stays at the default pending owner confirm.
+void test_style_seeds_transport_tempo() {
+  Band b;
+  // (b) a default-tempo style keeps 120.00 (basic index 0, tempo 12000).
+  b.cmd(Param::kStyleLoad, 0);
+  CHECK(b.e.transport().bpm() == 12000);
+
+  // (a) a non-default-tempo style seeds the transport (rock index 2 -> 13000).
+  b.cmd(Param::kStyleLoad, 2);
+  CHECK(b.e.transport().bpm() == 13000);
+
+  // (c) loading style B after A re-seeds from B (ballad index 3 -> 7200,
+  // blues index 12 -> 6600).
+  b.cmd(Param::kStyleLoad, 3);
+  CHECK(b.e.transport().bpm() == 7200);
+  b.cmd(Param::kStyleLoad, 12);
+  CHECK(b.e.transport().bpm() == 6600);
+
+  // A user tempo override is re-seeded by the next style load (documented
+  // semantic: a style load adopts the style's default tempo).
+  b.cmd(Param::kTransportTempo, 20000, 0, 0, Op::kSet);
+  CHECK(b.e.transport().bpm() == 20000);
+  b.cmd(Param::kStyleLoad, 15);  // motown -> 12400
+  CHECK(b.e.transport().bpm() == 12400);
+
+  // Owner exception: latin (index 14) stays at the default until confirmed.
+  b.cmd(Param::kStyleLoad, 14);
+  CHECK(b.e.transport().bpm() == 12000);
 }
 
 void test_ntt_resolution_follows_chord() {
@@ -657,6 +753,10 @@ void test_note_source_vocabulary() {
 
 int main() {
   test_band_starts_in_home_key();
+  test_style_seeds_groove();
+  test_style_switch_seeds_groove();
+  test_style_seeds_transport_tempo();
+  test_deferred_style_switch_seeds_tempo();
   test_ntt_resolution_follows_chord();
   test_role_anchor_and_gm_voices();
   test_groove_apply();
