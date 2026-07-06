@@ -9,6 +9,26 @@
 // resolves L1 string paths to these POD commands; the core emits POD events.
 // Both directions are trivially copyable and cross the boundary on ring
 // buffers or direct calls.
+//
+// ============================================================================
+// FROZEN v1 ABI BASELINE — locked at the GUI freeze line (node 11720).
+// ----------------------------------------------------------------------------
+// This command/event surface (node 0700) is the STABLE v1 baseline the host GUI
+// (node 11600) is built against. The single invariant is ADDITIVE-ONLY:
+//   * Existing enumerator values are STABLE FOREVER. Never renumber, reuse,
+//     remove, or re-semanticize an id that already ships. A shipped id keeps its
+//     number and its meaning for the entire life of protocol v1.
+//   * Growth is ONLY by APPENDING new enumerators at the end. Next free ids:
+//     Param = 43, OutEvent::Kind = 5, WarnCode = 10 (== kWarnCodeCount).
+//   * Command/OutEvent field order, types, and size are stable. New data must
+//     ride existing reserved bits/fields or an APPENDED field, guarded by the
+//     size static_asserts below. Never reorder or resize an existing field.
+//   * A BREAKING change (renumber, remove, re-semanticize, shrink, reorder)
+//     requires bumping kProtocolVersion to 2 (version.hpp) — never an in-place
+//     edit of v1.
+// The frozen values are pinned by test_abi_frozen.cpp; that test fails the build
+// the instant this invariant is violated. If it fails, APPEND — do not edit.
+// ============================================================================
 
 namespace arrangrr {
 
@@ -110,6 +130,38 @@ enum class Param : std::uint16_t {
                            //     the same parsed input path; the detect port
                            //     (kChordDetect) still decides who OBSERVES.
 };
+
+// ============================================================================
+// RESERVED — MIDI-FX / Transform chain (node 5000/5100). NOT YET IMPLEMENTED.
+// ----------------------------------------------------------------------------
+// The SHAPE of the insert-chain ABI is pre-fixed at the GUI freeze line (node
+// 11720) so the GUI (node 11600) is born aware of this surface and is not
+// rebuilt when node 5000 lands. This increment assigns NO live enum values
+// (ABI-none): kMaxInserts below is the only committed symbol; the kFx... Param
+// ids described here do NOT exist yet and MUST NOT be added until node 5000 is
+// implemented, at which point they are APPENDED as new Param enumerators (next
+// free id = 43), honoring the additive-only freeze above.
+//
+// Chain model: a bounded chain of MIDI transforms, per-track first (per-zone is
+// deferred). On disk / on the ABI the chain holds up to kMaxInserts slots; the
+// UI exposes 4. When the verbs are appended, each future kFx... command is
+// addressed as:
+//     idx = track index
+//     a   = insert slot (0 .. kMaxInserts-1)
+//     b   = insert type + per-insert flags (e.g. on/off, order)
+//     c   = insert parameter value
+// Anticipated (RESERVED, unassigned) verbs, to append when node 5000 lands:
+//     kFxSet    — set the insert type in a slot (a = slot, b = insert type)
+//     kFxParam  — set an insert parameter (a = slot, b = param id, c = value)
+//     kFxEnable — toggle an insert on/off (a = slot, b = 0/1)
+//     kFxClear  — clear a slot / the whole chain (a = slot, -1 = all)
+// These names/argument packings are documentation only for this increment.
+//
+// kMaxInserts is the on-disk / ABI format maximum number of chain slots per
+// track (the UI intentionally exposes only 4). It is stable ABI surface even
+// though the chain body is unimplemented.
+inline constexpr std::uint16_t kMaxInserts = 8;
+// ============================================================================
 
 struct Command {
   Op op = Op::kDo;

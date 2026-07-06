@@ -24,6 +24,10 @@ endfunction()
 
 arrangrr_test(test_common unit)
 arrangrr_test(test_midi unit)
+# test_abi_frozen: the frozen-ABI guard (node 11720). Pins every command/event
+# id and the exact wire-struct sizes via static_assert so a break in the
+# additive-only v1 freeze fails the BUILD. Subject is the ABI surface itself -> unit.
+arrangrr_test(test_abi_frozen unit)
 arrangrr_test(test_engine functional)
 arrangrr_test(test_engine_fire_order functional)
 arrangrr_test(test_timeline unit)
