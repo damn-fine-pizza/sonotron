@@ -5,7 +5,7 @@
 //   arrangrr [--events jsonl|human]                 live: ALSA virtual ports +
 //                                                   real clock + REPL on stdin
 //
-// The script mode is the golden-test driver (DESIGN.md §29.5): same shell,
+// The script mode is the golden-test driver (DESIGN.md §24.5): same shell,
 // same engine, no wall clock anywhere near the core.
 
 #include <poll.h>

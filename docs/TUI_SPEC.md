@@ -123,7 +123,7 @@ Everything below is explicitly **out of scope** until Phase 2 has shipped and be
 
 ## 3. Command grammar (canonical, no aliases)
 
-All commands below are **L2 surface** syntax (DESIGN.md D23/§28) — verb-first, space-separated, no dotted paths. There are no aliases for any command in this section: one name, one meaning, so `--echo-expand` and scripts stay unambiguous. Where a namespace has both content commands and lifecycle commands (`help`), the split is explicit — see §3.5.
+All commands below are **L2 surface** syntax (DESIGN.md `1320`/§23) — verb-first, space-separated, no dotted paths. There are no aliases for any command in this section: one name, one meaning, so `--echo-expand` and scripts stay unambiguous. Where a namespace has both content commands and lifecycle commands (`help`), the split is explicit — see §3.5.
 
 ### 3.1 `panel` — lifecycle for every panel, uniformly
 

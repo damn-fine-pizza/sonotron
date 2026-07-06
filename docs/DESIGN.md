@@ -27,7 +27,8 @@ portable musical core  +  host simulator  +  I/O adapters (host / STM32)
 ## 0. Roadmap & decisions — unified into the numbered tree
 
 The former "consolidated decisions" log (the `D1..D54` codes) and the milestone
-roadmaps (the `M0..M13` / `Phased #` / `H*` codes, formerly §22/§23/§26/§27) are
+roadmaps (the `M0..M13` / `Phased #` / `H*` codes, formerly the §22–§27 block —
+MVPs, incremental & milestone roadmaps, dream list) are
 **retired as nomenclature**. There is now ONE canonical structure: the **numbered
 roadmap** in §22, where the hierarchical number is the only identity — every
 former milestone and every former decision is a NODE in that tree, with its
@@ -388,9 +389,9 @@ I distinguish five levels (as requested):
 
 **Track enable / mute mask** as a recallable object (Performance/Scene).
 
-**Live piano→chord harmonizer (host-live driver + core-portable detector) (D34).** The problem: on a *running* arrangement, playing a chord on the keyboard should make the whole band follow it from there on — the "substantial impact" a pro arranger keyboard gives the player, not just a one-shot voicing. Today the arranger's NTT resolution (D24) reads the `ChordState` set by `chord play` or by the recorded `ChordSequencer` (D13); this feature adds a **third, live source**: the keys you are holding right now. `Arranger::on_tick` / `fire_arranger` keep reading `m_chords.state()` unchanged — only the *origin* of that state can now be the live keys.
+**Live piano→chord harmonizer (host-live driver + core-portable detector) (`2310`/`2320`).** The problem: on a *running* arrangement, playing a chord on the keyboard should make the whole band follow it from there on — the "substantial impact" a pro arranger keyboard gives the player, not just a one-shot voicing. Today the arranger's NTT resolution (`3110`) reads the `ChordState` set by `chord play` or by the recorded `ChordSequencer` (`2430`); this feature adds a **third, live source**: the keys you are holding right now. `Arranger::on_tick` / `fire_arranger` keep reading `m_chords.state()` unchanged — only the *origin* of that state can now be the live keys.
 
-- **Detector (core-portable).** A freestanding `ChordDetector` (`app/core/include/arrangrr/chord/chord_detector.hpp`) maintains the set of currently-held input notes — a 128-bit held-note set (16 bytes), zero heap, bounded, `constexpr`-friendly, in the same flash/RAM discipline as the rest of the core (D32). When ≥3 notes are held it recognizes the chord exactly like shell-mode entry (`theory::complete_shell_full`, D12 mode C): the lowest held note is the root, the pitch classes above it complete the quality (smart per D19, override rules unchanged).
+- **Detector (core-portable).** A freestanding `ChordDetector` (`app/core/include/arrangrr/chord/chord_detector.hpp`) maintains the set of currently-held input notes — a 128-bit held-note set (16 bytes), zero heap, bounded, `constexpr`-friendly, in the same flash/RAM discipline as the rest of the core (`0200`). When ≥3 notes are held it recognizes the chord exactly like shell-mode entry (`theory::complete_shell_full`, `2210`/`2230` mode C): the lowest held note is the root, the pitch classes above it complete the quality (smart per `2240`, override rules unchanged).
 - **Steering, not sounding.** The recognized chord is pushed into the `ChordEngine` through a new `ChordEngine::set_context(root_pc, quality)` that updates the harmonic context **without** emitting a voicing. The played notes already sound through normal routing; the detector only *steers* the arranger's NTT `ChordState`, so there is **no double-voicing**.
 - **Engine wiring (host-live driver).** The engine gains a live-detection toggle and a designated chord-detect input port. When enabled, `push_midi_in` on that port taps note-on/note-off into the detector and updates the context on every successful recognition.
 
@@ -399,13 +400,13 @@ Two locked behavioral decisions:
 - **Chord-memory / hold-last.** The context updates *only* when a chord is recognized (≥3 notes). Releasing the keys (dropping below 3 held) leaves the **last** recognized chord in place — the band keeps playing on it until you play a new one. This matches professional arranger keyboards and extends the "Chord hold / memory" rule above.
 - **Whole-keyboard toggle (MVP).** For the MVP the *whole* simulated keyboard acts as chord input while `chord detect` is ON (a simple toggle). Keyboard SPLIT / zones (low = chords, high = melody) — the special chord-recognition Zone of "Split & layer" above — is an explicitly **deferred** refinement (core-portable too, out of this pass).
 
-**ABI (D26).** New stable command `Param::kChordDetect = 34` — `set: a = 0/1` (enable live chord detection from the input port), `b = input port`; the next id after `kStyleSwitch = 33`. `kChordHold = 17` (previously reserved for "live-keyboard gestures") stays reserved/unsupported; this feature uses the dedicated `kChordDetect` id.
+**ABI (`0700`/`1330`).** New stable command `Param::kChordDetect = 34` — `set: a = 0/1` (enable live chord detection from the input port), `b = input port`; the next id after `kStyleSwitch = 33`. `kChordHold = 17` (previously reserved for "live-keyboard gestures") stays reserved/unsupported; this feature uses the dedicated `kChordDetect` id.
 
-**STM32 footprint (honest, D33).** Not zero: the `ChordDetector` (16-byte held-set + small counters) plus the two engine flags and the port add a small, honest amount — roughly a couple dozen bytes on the engine object. The detector and `set_context` are core-portable (compile on both targets, D3); the `chord detect on\|off` command surface and the `kChords` panel that shows the recognized chord name are host-live (Host UI track, §27 / docs/TUI_SPEC.md).
+**STM32 footprint (honest, `0400`/`12200`).** Not zero: the `ChordDetector` (16-byte held-set + small counters) plus the two engine flags and the port add a small, honest amount — roughly a couple dozen bytes on the engine object. The detector and `set_context` are core-portable (compile on both targets, `0300`); the `chord detect on\|off` command surface and the `kChords` panel that shows the recognized chord name are host-live (Host UI track, band `11000` / docs/TUI_SPEC.md).
 
-**Register anchors + per-role default voice (D36).** `resolve()` (the NTT core) anchors each `TrackRole` at its own default register — `kRoleAnchor[kRoleCount]` = chord-tone 0 at octave 0 for that role: bass low (36), pad under the mid comp (48), chord1/chord2/drums/perc/cc mid (60), arp/phrase/lead above (72). Before this, only Bass and Chord1 had a sane register; adding Pad/Perc/Chord2/Arp to a style meant either silence-by-omission or every new role fighting Chord1 for the same octave. `StyleEvent.octave` still fine-tunes per pattern; `RolePolicy::kFixed` roles (drums/perc) ignore the anchor entirely (their `tone` is already a literal MIDI note). Paired with this, `StylePattern.gm_program` (default `-1` = leave the synth's voice as-is) lets a style declare a default GM instrument per role, emitted as a Program Change by `Arranger::emit_voices` on style load/switch/route (same ABI as `kProgram`, D35) — so switching from `basic` to `bossa` can also switch the pad from a string patch to a nylon guitar patch without a manual `program` command. Both are the direct enabler for the 8-style-parts effort (§27): they are what makes a `kPad`/`kArp`/`kChord2` addition to a style *sound* right by default instead of requiring hand-tuned octave/voice per pattern.
+**Register anchors + per-role default voice (`3230`).** `resolve()` (the NTT core) anchors each `TrackRole` at its own default register — `kRoleAnchor[kRoleCount]` = chord-tone 0 at octave 0 for that role: bass low (36), pad under the mid comp (48), chord1/chord2/drums/perc/cc mid (60), arp/phrase/lead above (72). Before this, only Bass and Chord1 had a sane register; adding Pad/Perc/Chord2/Arp to a style meant either silence-by-omission or every new role fighting Chord1 for the same octave. `StyleEvent.octave` still fine-tunes per pattern; `RolePolicy::kFixed` roles (drums/perc) ignore the anchor entirely (their `tone` is already a literal MIDI note). Paired with this, `StylePattern.gm_program` (default `-1` = leave the synth's voice as-is) lets a style declare a default GM instrument per role, emitted as a Program Change by `Arranger::emit_voices` on style load/switch/route (same ABI as `kProgram`, `3240`) — so switching from `basic` to `bossa` can also switch the pad from a string patch to a nylon guitar patch without a manual `program` command. Both are the direct enabler for the 8-style-parts effort (band `9000`): they are what makes a `kPad`/`kArp`/`kChord2` addition to a style *sound* right by default instead of requiring hand-tuned octave/voice per pattern.
 
-**Program change / voice selection (D35).** `Engine::cmd_voice` (ABI `Param::kProgram = 35`) sends a Program Change on a given `port:channel` so `arrangrr` — not only the player twiddling the external synth by hand — can pick the voice a role plays through. Host surface: `program <port>[:ch] <voice>`, where `<voice>` resolves against a 128-entry GM instrument name table (host-side only, per D26: the core never carries display strings, just the numeric 0..127 program id). This is deliberately the thin slice of the full §18 `Program`/`ExternalSound` model — no bank-select (CC0/CC32), no CC-init sequence, no `DeviceProfile` — those remain M10; today it is exactly one MIDI message (Program Change) per invocation, wired for both manual use (`program 1:3 "Nylon Guitar"`) and automatic use (`emit_voices` above).
+**Program change / voice selection (`3240`/`12500`).** `Engine::cmd_voice` (ABI `Param::kProgram = 35`) sends a Program Change on a given `port:channel` so `arrangrr` — not only the player twiddling the external synth by hand — can pick the voice a role plays through. Host surface: `program <port>[:ch] <voice>`, where `<voice>` resolves against a 128-entry GM instrument name table (host-side only, per `0700`/`1330`: the core never carries display strings, just the numeric 0..127 program id). This is deliberately the thin slice of the full §18 `Program`/`ExternalSound` model — no bank-select (CC0/CC32), no CC-init sequence, no `DeviceProfile` — those remain `12500`; today it is exactly one MIDI message (Program Change) per invocation, wired for both manual use (`program 1:3 "Nylon Guitar"`) and automatic use (`emit_voices` above).
 
 ---
 
@@ -617,8 +618,8 @@ Two separate worlds (golden rule: **text on the tool side, binary on the device 
 ## 22. Canonical numbered roadmap (WBS) — single roadmap & decision record
 
 This section is the ONE canonical roadmap and decision record. It replaces the
-former §22 (MVPs), §23 (incremental roadmap), §26 (dream list), §27 (milestone
-roadmap) and the §0 decision log. One nomenclature only: the hierarchical number
+former §22–§27 block (MVPs, incremental roadmap, dream list, milestone roadmap)
+and the §0 decision log. One nomenclature only: the hierarchical number
 is the identity — every former milestone and every former decision is a node
 here, with its rationale folded in. History is preserved in the migration
 appendix at the end (old code → new numeric ID).
@@ -1198,19 +1199,19 @@ realized across them) and several old codes may share a node.
 | D53 | 2510, 2520 |
 | D54 | 11400 |
 
-## 28. CLI API Design (final — 3-layer architecture, D23)
+## 23. CLI API Design (final — 3-layer architecture, `1320`)
 
-**Philosophy (D22 + D17 + D23).** The `arrangrr` CLI is a **thin client** over a headless core, designed in **3 stacked layers** — so a single API honors musical ergonomics, openness and determinism all at once:
+**Philosophy (`1320` CLI design + `0600` openness).** The `arrangrr` CLI is a **thin client** over a headless core, designed in **3 stacked layers** — so a single API honors musical ergonomics, openness and determinism all at once:
 
 | Layer | Name | What it is | Who it serves |
 |---|---|---|---|
 | **L2** | **Surface — "Musician REPL"** | Terse verb-first sugar (`key C major`, `play D`, `loop on`, `start`). Convenient aliases, little punctuation, designed for **playing by hand**. | Live use, minimal-deep. |
 | **L1** | **Model — addressable paths** | Every command is an operation on a **parameter space** (`get`/`set`/`do <path>`). Every piece of state is readable/settable/**mappable (MIDI-learn)**/automatable in a uniform way (D17b). | Openness/hackability, tooling. |
-| **L0** | **Wire — JSONL protocol** | **Machine-first** wire: `{"cmd":…}` → / `{"ev":…}` ←, versioned. Deterministic, replay, **daemon+client, future GUI** (D17a, D16). | Integration, golden, GUI. |
+| **L0** | **Wire — JSONL protocol** | **Machine-first** wire: `{"cmd":…}` → / `{"ev":…}` ←, versioned. Deterministic, replay, **daemon+client, future GUI** (`0600`, `0100`). | Integration, golden, GUI. |
 
-**Expansion rule:** L2 sugar **expands** into L1 operations (`play D` → `do chord.play D`), which **serialize** into L0 messages (`{"cmd":"chord.play","note":"D"}`). No hidden magic: `--echo-expand` shows the L2→L1→L0 expansion. The CLI can speak at **any layer** (`--format human|jsonl`, `--sugar on|off`). **Warning (D26, Francesco fix #1/#2):** L0-JSONL with string paths is the **host encoding** (for CLI/GUI/tools); the **core sees neither JSONL nor strings** — it receives **binary typed** `Command`s (`{op, coll:u16, idx:u16, param_id:u16, value}`) over a ring buffer and emits POD `Event`s. The *string/JSONL → binary* translation happens in `platform/host`. That way there is no JSON parser nor `std::string` in the STM32 realtime path; collections are fixed-capacity arrays and user names stay host-side (standalone device: numeric slots).
+**Expansion rule:** L2 sugar **expands** into L1 operations (`play D` → `do chord.play D`), which **serialize** into L0 messages (`{"cmd":"chord.play","note":"D"}`). No hidden magic: `--echo-expand` shows the L2→L1→L0 expansion. The CLI can speak at **any layer** (`--format human|jsonl`, `--sugar on|off`). **Warning (`0700`/`1330`, Francesco fix #1/#2):** L0-JSONL with string paths is the **host encoding** (for CLI/GUI/tools); the **core sees neither JSONL nor strings** — it receives **binary typed** `Command`s (`{op, coll:u16, idx:u16, param_id:u16, value}`) over a ring buffer and emits POD `Event`s. The *string/JSONL → binary* translation happens in `platform/host`. That way there is no JSON parser nor `std::string` in the STM32 realtime path; collections are fixed-capacity arrays and user names stay host-side (standalone device: numeric slots).
 
-### 28.1 Invocation
+### 23.1 Invocation
 ```
 arrangrr [--backend alsa|jack|pipewire|null]   # host MIDI sink/source (default: auto)
          [--in <port|alias>]... [--out <port|alias>]...
@@ -1226,14 +1227,14 @@ arrangrr [--backend alsa|jack|pipewire|null]   # host MIDI sink/source (default:
 - **`--script s.acmd`** (or `arrangrr < s.acmd`) → runs and (without `--repl`) exits. With `--clock virtual` it is deterministic.
 - **`--replay r.acmd`** → virtual clock driven by the timestamps, prints the **canonical event-log** on stdout for the **golden diff**.
 
-### 28.2 Syntax
+### 23.2 Syntax
 - One line = one command: `namespace verb [args…]`. Very frequent commands have short aliases.
 - **Parameter paths** with dots: `set transport.tempo 120`, `get track.bass.dest.channel`.
 - **Comments** `# …`. Optional **timestamp** at the start of the line (batch/virtual only): `@<tick>` or `@<bar:beat:tick>`; absent ⇒ "now / next tick".
 - Notes: name (`C`, `F#3`, `Bb`) or MIDI number (`60`). Tempo BPM: `120` or `120.00` (internally `bpm_x100`).
 - **Responses:** `ok [value]` / `err <code> <msg>`. In `--format jsonl`, acks and events are per-line JSON objects.
 
-### 28.3 Namespaces & commands (v0)
+### 23.3 Namespaces & commands (v0)
 
 **Transport / clock**
 ```
@@ -1257,13 +1258,13 @@ key <root> <mode>              # key C major | key A minor
 scale <name>                   # override current scale
 ```
 
-**Chord intelligence** (D19 smart per degree, D20 diatonic+modifiers)
+**Chord intelligence** (`2240` smart per degree, `2110`/`2240` diatonic+modifiers)
 ```
 chord mode diatonic|single|shell
 chord play <note> [mod …]      # mod: maj7 min7 dom7 dim7 sus2 sus4 add9 9 11 13
                                #      sec (secondary dominant) borrow (borrowed) inv<n>
 chord hold on|off | chord stop
-chord detect on|off [<port>]   # D34: held keys on the input port re-harmonize live
+chord detect on|off [<port>]   # 2310/2320: held keys on the input port re-harmonize live
 ```
 Default: *smart* richness per degree; `mod`s override it. Examples:
 ```
@@ -1274,7 +1275,7 @@ chord play G mod sec    # -> D7   (V/V, secondary dominant)
 chord play A mod borrow # -> Ab   (bVI borrowed) [explicit]
 ```
 
-**Chord sequence** (D14 — free durations; live-rec quantize-after or step-edit)
+**Chord sequence** (`2410` — free durations; live-rec quantize-after or step-edit)
 ```
 seq new <name> | seq use <name>
 seq rec [quantize <grid>] | seq stop
@@ -1293,12 +1294,12 @@ track voicing <name> close|open|drop2|smooth
 track mute|solo|unmute <name>
 ```
 
-**Arranger / style** (syntax planned for M5)
+**Arranger / style** (syntax planned for `3000`)
 ```
 style load <name> | style section intro1|varA|varB|fill|break|ending1
 ```
 
-**Program / voice selection** (D35 — thin ABI slice ahead of the full §18 model)
+**Program / voice selection** (`3240`/`12500` — thin ABI slice ahead of the full §18 model)
 ```
 program <port>[:ch] <voice>    # <voice> = GM instrument name or 0..127; kProgram=35
 ```
@@ -1309,7 +1310,7 @@ get <path> | set <path> <value> | ls <path>
 # e.g.: transport.tempo · chord.mode · track.bass.dest.channel · seq.verse.loop
 ```
 
-**State / persistence** (D21)
+**State / persistence** (`8400`/`8500`)
 ```
 state dump [file] | state load <file> | state inspect [path]
 project save <name> | project load <name>     # versioned binary + CRC
@@ -1333,13 +1334,13 @@ help [topic] | echo <text> | wait <ms|Nt> | seed <N> | quit
 panel list | open <p> | close <p> | toggle <p> | close all
 panel focus <p>|repl|next | panel status | panel help
 piano octave <N>|up|down | piano channel <1..16> | piano velocity <1..127>
-piano view keyboard|active-notes|event-log | piano panic       (H2)
-notes names cde|doremi|toggle                                   (H2)
-view show ... | filter channel|port|event|clear                 (H2)
+piano view keyboard|active-notes|event-log | piano panic       (11200)
+notes names cde|doremi|toggle                                   (11200)
+view show ... | filter channel|port|event|clear                 (11200)
 ```
 Panel lifecycle lives ONLY under `panel ...` (the earlier `help open`/`help close` forms are removed); `help <topic>` remains — it sets help content and opens the help panel.
 
-### 28.4 Event stream (←)
+### 23.4 Event stream (←)
 Each event is a line `ev <type> <fields…>` (or JSON with `--format jsonl`), filterable with `monitor`:
 ```
 ev clock    tick 96 bar 1 beat 1
@@ -1350,8 +1351,8 @@ ev warn     buffer-full dropped cc
 ```
 In **replay/batch** the ordered event-log is the **canonical output** compared against the golden file.
 
-### 28.5 Determinism & replay (M0 bridge)
-- With `--clock virtual` time advances **only** via `advance`/`@tick` ⇒ a session file with timestamps produces **identical output** (golden). `seed N` pins the PRNG (humanize/probability) when needed; without it, live may vary (D16).
+### 23.5 Determinism & replay (`1000` bridge)
+- With `--clock virtual` time advances **only** via `advance`/`@tick` ⇒ a session file with timestamps produces **identical output** (golden). `seed N` pins the PRNG (humanize/probability) when needed; without it, live may vary (`0100`).
 - Deterministic session example (`hello_chord.acmd`):
 ```
 # key + one smart diatonic chord, towards a virtual port
@@ -1364,7 +1365,7 @@ advance 192
 ```
   `arrangrr --clock virtual --replay hello_chord.acmd` → deterministic event-log → `diff` against golden.
 
-### 28.6 Live REPL example (FIRST WOW, M3)
+### 23.6 Live REPL example (FIRST WOW, `2400`)
 ```
 arrangrr> key C major
 arrangrr> port open out virt as synth
@@ -1380,7 +1381,7 @@ arrangrr> transport start     # the progression loops and plays towards 'synth'
 arrangrr> seq transpose +2    # the whole progression goes up a whole tone, live
 ```
 
-### 28.7 Resolved conventions (D23) & layer mapping
+### 23.7 Resolved conventions (`1320`) & layer mapping
 - **Syntax:** L2 uses `verb` / `namespace verb` **with the space** (musician: `play D`, `seq verse`); L1 uses **dotted paths** (`do chord.play D`, `set seq.verse.loop on`, `get transport.tempo`). They are not "two conflicting styles": they are **two layers** — the former expands into the latter. `--sugar off` forces the L1 form.
 - **Traceable expansion:** `--echo-expand` prints for each line the `L2 → L1 → L0` chain, so the surface is never magic (consistent with "open/inspectable").
 - **Time in batch:** both mechanisms — `@<tick>`/`@<bar:beat:tick>` prefix to **schedule** a line, and `advance <ticks|Nbars>` to **advance** the virtual clock deterministically.
@@ -1394,23 +1395,23 @@ L0 (wire):     {"cmd":"chord.play","note":"D"}
                {"ev":"midi-out","port":"synth","ch":1,"noteon":62,"vel":100,"@":0}
 ```
 
-### 28.8 Open task: parameter-space schema (L1)
-The **complete schema of addressable paths** (`transport.*`, `chord.*`, `seq.<name>.*`, `track.<name>.*`, `port.*`, `style.*`, `state.*`, `map.*`) is **itself a mini-spec** and must be defined in **M0/M1** together with the (versioned) L0 protocol. It is the contract that underpins CLI, MIDI-learn, automation, replay and (tomorrow) the GUI: it must be designed once and with care. Principles: stable names, explicit types, declared units (tick, `bpm_x100`, semitones), closed enums, every path `get`-able and (where sensible) `set`/`learn`-able. **The v0 spec is §29.**
+### 23.8 Open task: parameter-space schema (L1)
+The **complete schema of addressable paths** (`transport.*`, `chord.*`, `seq.<name>.*`, `track.<name>.*`, `port.*`, `style.*`, `state.*`, `map.*`) is **itself a mini-spec** and must be defined in **`1000`/`1400`** together with the (versioned) L0 protocol. It is the contract that underpins CLI, MIDI-learn, automation, replay and (tomorrow) the GUI: it must be designed once and with care. Principles: stable names, explicit types, declared units (tick, `bpm_x100`, semitones), closed enums, every path `get`-able and (where sensible) `set`/`learn`-able. **The v0 spec is §24.**
 
 ---
 
-## 29. L1 Param-Space & L0 Protocol — Spec v0 (contract)
+## 24. L1 Param-Space & L0 Protocol — Spec v0 (contract)
 
 This section is the **contract**: the addressable parameter space (**L1**) and the wire protocol (**L0**). The musician surface (**L2**) is pure sugar that expands into L1 operations. It covers what is needed up to **M5** (arranger); later namespaces (looper, arp, pad, performance, device) are added following the same schema.
 
-### 29.1 Types & conventions
+### 24.1 Types & conventions
 - **Types:** `bool` · `int` · `int(a..b)` (range) · `fixed(bpm_x100)` (integer ×100) · `enum{…}` · `string` · `note` (name `C`/`F#3`/`Bb` **or** 0..127) · `pos` (`bar:beat:tick`) · `ticks` · `semitones` · `array<T>` · `id` (string alias).
 - **Access:** `r` (get) · `rw` (get+set) · `do` (action). **`learn`** = path bindable via MIDI-learn.
 - **Units always declared.** No floats on the wire for realtime values: tempo is `bpm_x100`, durations in `ticks`/`bars`.
 - **Collections** with parametric paths: `seq.<name>.*`, `track.<name>.*`, `port.<alias>.*`. The name is a stable user-chosen `id`.
 - **Closed, versioned enums:** adding a value = `proto` minor bump.
 
-### 29.2 L1 catalog (v0)
+### 24.2 L1 catalog (v0)
 
 **transport.**
 | path | type | access | notes |
@@ -1521,7 +1522,7 @@ This section is the **contract**: the addressable parameter space (**L1**) and t
 | `meta.help` | do(topic?) | do |
 | `meta.echo` / `meta.wait` / `meta.quit` | do | | `wait` in ms (real) or ticks (virtual) |
 
-### 29.3 L0 protocol (JSONL, versioned)
+### 24.3 L0 protocol (JSONL, versioned)
 One JSON object per line, UTF-8. **client→core = commands**, **core→client = responses + events**.
 
 **Command envelope** (any of the 4 ops — `get`/`set`/`do`/`ls` — on an L1 path):
@@ -1559,7 +1560,7 @@ One JSON object per line, UTF-8. **client→core = commands**, **core→client =
 ```
 Error codes (stable enum): `bad_path` · `bad_arg` · `bad_note` · `not_found` · `read_only` · `busy` · `unsupported` · `overflow`.
 
-### 29.4 L2 → L1 → L0 expansion (examples)
+### 24.4 L2 → L1 → L0 expansion (examples)
 ```
 L2:  play D
 L1:  do chord.play note=D
@@ -1578,7 +1579,7 @@ L1:  do chord.play note=G mod=[sec]
 L0:  {"op":"do","path":"chord.play","args":{"note":"G","mod":["sec"]}}
 ```
 
-### 29.5 Golden sessions (deterministic, virtual clock)
+### 24.5 Golden sessions (deterministic, virtual clock)
 Format `.acmd` (L2 sugar with `@tick`); running with `--clock virtual --format jsonl` produces the canonical event-log compared against the `.golden`. (MIDI notes and ticks are illustrative; the exact values get pinned once the core exists — these files *are* the spec of the expected behavior.)
 
 > **Robust goldens (Francesco #4):** separate the **protocol/timing** goldens (stable: event order, ticks, ports, `@`) from the **musical** ones. For harmony, **assert on chord identity + degree** (`{"ev":"chord","out":"Dm7","deg":"ii"}`), **not** on the exact MIDI notes of the voicing — otherwise every tweak to the voicing/NTT rewrites all the goldens and the tests become noise. Exact notes are asserted only in dedicated voicing goldens.
@@ -1644,13 +1645,13 @@ advance 192
 ```
 Expected: `{"ev":"chord","in":"G","out":"D7","deg":"V/V","@":0}` + D7 notes.
 
-### 29.6 What remains to be pinned once the core exists
+### 24.6 What remains to be pinned once the core exists
 - Exact default voicing/octave per degree (the precise notes in the golden event-logs).
 - Loop note-off policy on chord change (legato vs re-trigger).
 - Final names of some enums (e.g. sections beyond M5).
 - Whether `@tick` implies auto-`advance` up to that tick in "dense" script mode (proposed: no — `advance` is explicit, `@` is scheduling only).
 
-### 29.7 Folded review nits (Francesco minor/major)
+### 24.7 Folded review nits (Francesco minor/major)
 - **Chord modifiers on ORTHOGONAL axes (M11):** `chord.play` does not take a flat array but **separate axes** — `quality` (maj/min/dom/dim/halfdim/…), `extensions[]` (add9/9/11/13/…), `function` (diatonic/sec/borrow), `inversion` (0..3). Per-axis conflict validation; no ambiguous `[min7,maj7]`.
 - **Durations in MUSICAL UNITS (M12):** steps/patterns store durations in **beats/fractions** (ticks at 960 are *derived*), so changing resolution does not reinterpret the contents. `transport.ppqn` in any case immutable **after** contents have been loaded.
 - **`state.dump` does NOT touch the filesystem in the core (M13):** the core op is `serialize → Span<byte>`; file writing lives in `platform/host`. `state.dump [file]` is host sugar (consistent with D26).
@@ -1665,38 +1666,38 @@ Expected: `{"ev":"chord","in":"G","out":"D7","deg":"V/V","@":0}` + D7 notes.
 
 ---
 
-## 30. "Auto-accompaniment" feature evaluation (the classic 17)
+## 25. "Auto-accompaniment" feature evaluation (the classic 17)
 
-Mapping of the 17 "the keyboard plays by itself" features onto the project. **Verdict: 12 already covered, 5 additive/to be elevated.** It confirms that the Living Timeline model, with chord intelligence first, contains them all. The chain the user summarizes — *minimal human input → harmonic interpretation → intelligent MIDI generation* — **is** exactly the north-star (D11/D15) and the first/second WOW.
+Mapping of the 17 "the keyboard plays by itself" features onto the project. **Verdict: 12 already covered, 5 additive/to be elevated.** It confirms that the Living Timeline model, with chord intelligence first, contains them all. The chain the user summarizes — *minimal human input → harmonic interpretation → intelligent MIDI generation* — **is** exactly the north-star (`2000`/`0130`) and the first/second WOW.
 
 | # | Feature | In arrangrr? | Where | Milestone | Note |
 |---|---|---|---|---|---|
-| 1 | **Arranger** | ✅ core | §11, §26.4 (generate-from-chord gesture) | M5 | it is the 2nd WOW |
-| 2 | **Chord recognition** (single/fingered/**multi**/full/**bass-inv**) | ✅ (add multi-finger) | §11, D12 | M2/M4 | multi-finger = variant to add; bass-inversion/slash already in §11 |
-| 3 | **Style engine** | ✅ | §26.4, §8 | M5 | adapted MIDI phrases, not audio |
-| 4 | **NTT / Note Transposition Table** | 🔼 **elevated** | D24, §8.2 | M5 (concept from now) | was buried in the voicing resolver → now a core module |
-| 5 | **Arpeggiator** | ✅ | §14, §26.7 | M8 | reusable ArpEngine |
-| 6 | **Chord memory** (1 key → chord) | 🔼 **elevated** | was §11 "opt P2" | M4/M8 | maps key→memorized chord; becomes a MIDI-FX insert (D25) |
-| 7 | **Chord sequencer / looper** | ✅ **1st WOW** | D11, §16 | M3 | frees the left hand |
-| 8 | **Auto-accompaniment** (the whole chain) | ✅ | §11+§14+§16 integrated | M5 | = integrated arranger |
-| 9 | **OTS / Keyboard Set** | ✅ | §17, §8 | M9 | MIDI-only: auto-emits program/bank/CC + split/tempo/routing to the Style |
-| 10 | **Registration / Performance / Scene** | ✅ | §17, §26.8 | M9 | recallable snapshot |
-| 11 | **Pads / Multi / Phrase Pads** | ✅ | §15, §26.7 | M8 | follow the chord or fixed; banks of 4 |
-| 12 | **Quantization** | ✅ | §12, §10 | M6 (+quantize-after M7) | grid/swing/groove templates |
-| 13 | **Scale assist / quantizer** | ✅ (elevate input-quantize) | §26.2 scale-lock | M6/M8 | force input into scale → MIDI-FX insert (D25) |
-| 14 | **Harmonizer** (melody → harmony) | 🔼 **additive** | new | M8 | distinct from chord intelligence: 1 line → harmonized voices over chord/scale; MIDI-FX insert |
-| 15 | **MIDI effects** (echo/strum/ratchet/prob/humanize/vel/scale-filter/delay/repeat/random/transpose) | 🔼 **elevated to a chain** | D25 | M6/M8 | new unifying concept "MIDI-FX chain" |
-| 16 | **Pattern sequencer / clip launcher** | ✅ | §12, §26.5 | M6 | "write" gesture + scene launch |
-| 17 | **Song mode / Scene chain** | ✅ | §12, §26.8 | M9 | Intro→Verse→Chorus→…→Ending |
+| 1 | **Arranger** | ✅ core | §11, band `3000` (generate-from-chord gesture) | `3000` | it is the 2nd WOW |
+| 2 | **Chord recognition** (single/fingered/**multi**/full/**bass-inv**) | ✅ (add multi-finger) | §11, `2210`/`2220`/`2230` | `2100`/`2220` | multi-finger = variant to add; bass-inversion/slash already in §11 |
+| 3 | **Style engine** | ✅ | band `3000`, §8 | `3000` | adapted MIDI phrases, not audio |
+| 4 | **NTT / Note Transposition Table** | 🔼 **elevated** | `3110`, §8.2 | `3000` (concept from now) | was buried in the voicing resolver → now a core module |
+| 5 | **Arpeggiator** | ✅ | §14, band `7000` | `7000` | reusable ArpEngine |
+| 6 | **Chord memory** (1 key → chord) | 🔼 **elevated** | was §11 "opt P2" | `2220`/`7000` | maps key→memorized chord; becomes a MIDI-FX insert (`5000`) |
+| 7 | **Chord sequencer / looper** | ✅ **1st WOW** | `2000`, §16 | `2400` | frees the left hand |
+| 8 | **Auto-accompaniment** (the whole chain) | ✅ | §11+§14+§16 integrated | `3000` | = integrated arranger |
+| 9 | **OTS / Keyboard Set** | ✅ | §17, §8 | `8000` | MIDI-only: auto-emits program/bank/CC + split/tempo/routing to the Style |
+| 10 | **Registration / Performance / Scene** | ✅ | §17, band `8000` | `8000` | recallable snapshot |
+| 11 | **Pads / Multi / Phrase Pads** | ✅ | §15, band `7000` | `7000` | follow the chord or fixed; banks of 4 |
+| 12 | **Quantization** | ✅ | §12, §10 | `4000` (+quantize-after `6000`) | grid/swing/groove templates |
+| 13 | **Scale assist / quantizer** | ✅ (elevate input-quantize) | scale-lock (band `5000`) | `4000`/`7000` | force input into scale → MIDI-FX insert (`5000`) |
+| 14 | **Harmonizer** (melody → harmony) | 🔼 **additive** | new | `7000` | distinct from chord intelligence: 1 line → harmonized voices over chord/scale; MIDI-FX insert |
+| 15 | **MIDI effects** (echo/strum/ratchet/prob/humanize/vel/scale-filter/delay/repeat/random/transpose) | 🔼 **elevated to a chain** | `5000` | `4000`/`7000` | new unifying concept "MIDI-FX chain" |
+| 16 | **Pattern sequencer / clip launcher** | ✅ | §12 | `4000` | "write" gesture + scene launch |
+| 17 | **Song mode / Scene chain** | ✅ | §12, band `8000` | `8000` | Intro→Verse→Chorus→…→Ending |
 
-### 30.1 The 5 additive / elevated items (what changes in the plan)
-- **#4 NTT — Style-Follow Resolver → first-class core module (D24).** It is *the* reason a phrase in Cmaj sounds right even over Am/D7/Fsus4/G-B without wrong notes: not mechanical transposition, but musical rules (degree, source-chord→target-chord tables, avoiding the "wrong" notes). It is the arranger's number-1 quality factor: without a decent NTT, "generate-from-chord" sucks. It must be designed in M5, but its place in the architecture (Transform layer, between ChordState and the track's output) must be reserved from now.
-- **#15 MIDI-FX chain → first-class unifying concept (D25).** Instead of treating arp, humanize, scale-lock, transpose as scattered modules, they become **inserts** of a composable, bounded per-track/zone chain. Extremely strong for the "open/hackable" north-star (every insert has L1-addressable, mappable/automatable parameters). Many inserts are easy wins (transpose, velocity, scale-filter, note-repeat, echo/delay, strum, ratchet, probability, randomize, humanize).
-- **#14 Harmonizer → additive insert.** A single melodic line → added voices following chord/scale. Different from chord intelligence (which starts from sparse input *as a chord*): here the input is *melody* and the output *harmonized*. Lives as an insert of the MIDI-FX chain (D25). M8.
-- **#6 Chord memory → explicit insert/feature.** Maps "1 key → memorized chord". Realizable as a `chord-memory-expand` insert (D25) or as a Chord Engine mode. Elevated from a P2 note to a named feature. M4/M8.
-- **#2 multi-finger → `chord.mode` variant.** Add `multi` to the `chord.mode` enum (§29.2) alongside diatonic/single/shell/full. M4.
+### 25.1 The 5 additive / elevated items (what changes in the plan)
+- **#4 NTT — Style-Follow Resolver → first-class core module (`3110`).** It is *the* reason a phrase in Cmaj sounds right even over Am/D7/Fsus4/G-B without wrong notes: not mechanical transposition, but musical rules (degree, source-chord→target-chord tables, avoiding the "wrong" notes). It is the arranger's number-1 quality factor: without a decent NTT, "generate-from-chord" sucks. It must be designed in `3000`, but its place in the architecture (Transform layer, between ChordState and the track's output) must be reserved from now.
+- **#15 MIDI-FX chain → first-class unifying concept (`5000`).** Instead of treating arp, humanize, scale-lock, transpose as scattered modules, they become **inserts** of a composable, bounded per-track/zone chain. Extremely strong for the "open/hackable" north-star (every insert has L1-addressable, mappable/automatable parameters). Many inserts are easy wins (transpose, velocity, scale-filter, note-repeat, echo/delay, strum, ratchet, probability, randomize, humanize).
+- **#14 Harmonizer → additive insert.** A single melodic line → added voices following chord/scale. Different from chord intelligence (which starts from sparse input *as a chord*): here the input is *melody* and the output *harmonized*. Lives as an insert of the MIDI-FX chain (`5000`). `7000`.
+- **#6 Chord memory → explicit insert/feature.** Maps "1 key → memorized chord". Realizable as a `chord-memory-expand` insert (`5000`) or as a Chord Engine mode. Elevated from a P2 note to a named feature. `2220`/`7000`.
+- **#2 multi-finger → `chord.mode` variant.** Add `multi` to the `chord.mode` enum (§24.2) alongside diatonic/single/shell/full. `2220`.
 
-### 30.2 Impact on modules/roadmap (no substantial ordering change)
-- §3 (module table) and §26 (dream list): add **NTT Resolver** and **MIDI-FX chain** as first-class modules; **Harmonizer** and **Chord-memory** as inserts; **multi-finger** as a mode.
-- §29 (L1 contract): provide for the **`fx.<track>.<slot>.*`** namespace for the MIDI-FX chain (insert type, parameters, on/off, order) and `chord.mode += multi`. NTT has its parameters under `style.*`/`track.*` (follow rule, table).
-- Roadmap: NTT inside M5 (non-negotiable part of the arranger); MIDI-FX chain started in M6 (transpose/velocity/scale-filter/note-repeat) and extended in M8 (arp/harmonize/strum/echo as inserts). No slippage of the WOWs (M3/M5).
+### 25.2 Impact on modules/roadmap (no substantial ordering change)
+- §3 (module table) and §22 (roadmap tree): add **NTT Resolver** and **MIDI-FX chain** as first-class modules; **Harmonizer** and **Chord-memory** as inserts; **multi-finger** as a mode.
+- §24 (L1 contract): provide for the **`fx.<track>.<slot>.*`** namespace for the MIDI-FX chain (insert type, parameters, on/off, order) and `chord.mode += multi`. NTT has its parameters under `style.*`/`track.*` (follow rule, table).
+- Roadmap: NTT inside `3000` (non-negotiable part of the arranger); MIDI-FX chain started in `4000` (transpose/velocity/scale-filter/note-repeat) and extended in `7000` (arp/harmonize/strum/echo as inserts). No slippage of the WOWs (`2400`/`3000`).

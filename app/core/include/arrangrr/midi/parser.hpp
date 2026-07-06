@@ -8,7 +8,7 @@
 // implements (DESIGN.md §9.A):
 //  - running status on input;
 //  - realtime bytes (F8..FF) pass through immediately and do NOT disturb
-//    the running-status state, even mid-message (§29.7 nit);
+//    the running-status state, even mid-message (§24.7 nit);
 //  - system common resets running status;
 //  - NoteOn velocity 0 is normalized to a real NoteOff (release velocity 0) —
 //    downstream always emits genuine NoteOff (§9.A output policy default);

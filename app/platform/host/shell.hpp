@@ -260,7 +260,7 @@ class Shell {
   bool quit_requested() const { return m_quit; }
 
   // Enharmonic spelling for event rendering, derived from the current key
-  // (flat-side keys print Bb, sharp-side keys print A#). §29.7 nit.
+  // (flat-side keys print Bb, sharp-side keys print A#). §24.7 nit.
   bool prefer_flats() const { return m_prefer_flats; }
 
  private:

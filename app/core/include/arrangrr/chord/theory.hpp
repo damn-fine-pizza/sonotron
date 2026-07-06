@@ -7,7 +7,7 @@
 // stacking thirds on the mode's scale (so every mode is automatically
 // correct), with one deliberate musical exception: in the minor (aeolian)
 // mode the V degree is raised to a dominant 7th (harmonic-minor practice,
-// resolving the DESIGN §29.6 open point). Overrides are always possible
+// resolving the DESIGN §24.6 open point). Overrides are always possible
 // (D19/D20) via explicit qualities.
 
 namespace arrangrr {
