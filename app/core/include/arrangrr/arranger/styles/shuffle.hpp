@@ -98,7 +98,7 @@ inline constexpr StyleSection kSections[] = {
     {.type=SectionType::kFillA, .bars=1, .patterns=Span<const StylePattern>(kFAP)}, {.type=SectionType::kFillB, .bars=1, .patterns=Span<const StylePattern>(kFBP)}, {.type=SectionType::kFillC, .bars=1, .patterns=Span<const StylePattern>(kFCP)}, {.type=SectionType::kFillD, .bars=1, .patterns=Span<const StylePattern>(kFDP)},
     {.type=SectionType::kEnding1, .bars=1, .patterns=Span<const StylePattern>(kE1P)}, {.type=SectionType::kEnding2, .bars=1, .patterns=Span<const StylePattern>(kE2P)},
 };
-inline constexpr Style kStyle{.name="shuffle", .sections=Span<const StyleSection>(kSections)};
+inline constexpr Style kStyle{.name="shuffle", .sections=Span<const StyleSection>(kSections), .tempo=13000};
 }  // namespace shuffle
 
 }  // namespace styles

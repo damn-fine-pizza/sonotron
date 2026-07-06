@@ -55,7 +55,8 @@ class Arranger {
     m_return_to = SectionType::kVarA;
     m_pending_valid = false;
     m_section_start = 0;
-    m_voicing.reset();  // a new style must not voice-lead from the old one
+    m_voicing.reset();         // a new style must not voice-lead from the old one
+    m_groove = style->groove;  // 9110: adopt the style's default feel (user edits re-apply after)
     return true;
   }
 
@@ -177,6 +178,7 @@ class Arranger {
       }
       m_pending_valid = false;
       m_pending_style = nullptr;
+      m_groove = style->groove;  // 9110: a live style switch adopts the new style's feel
       return true;
     }
 
@@ -251,6 +253,7 @@ class Arranger {
           if (m_pending_style != nullptr && m_pending_style != m_style) {
             m_style = m_pending_style;
             style_switched = true;
+            m_groove = m_style->groove;  // 9110: deferred switch adopts the new style's feel
           }
           m_pending_style = nullptr;
           next = m_pending;
