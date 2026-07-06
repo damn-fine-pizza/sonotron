@@ -1,0 +1,19 @@
+# Golden: roadmap 9100 feel-genre swing pass — "swing" style, varD (the busiest
+# ride pattern), one held Cmaj7. Locks the engine-driven swing (D-implementer
+# spec docs/proposals/per-style-feel-swing-reauthoring.md): the ride's off-8ths
+# now sit on the straight grid (steps 2/6/10/14) and groove::apply pushes them
+# late by (480*62)/300 = 99 ticks, landing at 579/1539/2499/3459. On-beats
+# (steps 0/4/8/12) stay at exact step*240 (0/960/1920/2880) — the groove offset
+# is zero there. This golden is the regression guard for that feel: any
+# accidental change to swing.hpp's .groove or its re-authored ride table would
+# move these ticks and fail this test.
+key C major
+port open out virt as synth
+chord out synth:4
+style load swing
+style route drums synth:10
+play C
+style section varD
+transport start
+advance 3840
+quit
