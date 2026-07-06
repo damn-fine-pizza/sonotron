@@ -45,6 +45,7 @@ enum class UiRole {
   kMidiNoteOn,
   kMidiNoteOff,
   kMidiDrum,
+  kMidiNotePending,
   kWarning,
   kError,
   kSuccess,
