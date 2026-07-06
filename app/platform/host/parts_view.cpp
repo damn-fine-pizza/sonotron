@@ -105,7 +105,7 @@ std::vector<std::string> render_parts_panel(const Arranger& arranger, const Midi
     }
     out.push_back(ansi::visible_truncate(line, static_cast<std::size_t>(cols > 0 ? cols : 0)));
   }
-  out.push_back("up/down part | m mute | s solo | (voice: program cmd) | TAB exit");
+  out.push_back("up/down part | m mute | i solo | (voice: program cmd) | TAB exit");
   return out;
 }
 

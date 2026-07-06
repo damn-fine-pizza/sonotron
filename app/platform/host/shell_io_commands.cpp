@@ -77,9 +77,9 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
     return {
         "help: parts  (the arranger band mixer; focus it, then:)",
         "  up/down  select a part (Drums Perc Bass Chord1 Chord2 Pad Arp Phrase)",
-        "  m  mute the part      s  solo (only soloed parts play)",
+        "  m  mute the part      i  solo/isolate (only soloed parts play)",
         "  voice: use the program command on the part's channel",
-        "  CLI: part <role> mute|solo on|off",
+        "  note keys steer the band (chord); CLI: part <role> mute|solo on|off",
     };
   }
   if (topic == "program") {
@@ -118,14 +118,15 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "help: piano",
         "  panel open piano, then TAB to enter/leave play mode",
         "  white: A S D F G H J K L ; '     black: W E T Y U O P (P = D#5)",
-        "  SPACE key mode: momentary (hold; needs kitty terminal) <-> toggle (any)",
-        "  toggle: press = note-on, same key again = note-off",
-        "  play keys: TAB exit | N names | V view | C clear | Z layout",
+        "  note keys STEER the band silently (global): any panel but the REPL",
+        "  SPACE harmony key mode: momentary (hold; needs kitty) <-> toggle (any)",
+        "  toggle: press = steer on, same key again = off",
+        "  shortcuts: TAB exit | N names | V view | C clear | Z layout",
         "             . octave- | / octave+ | [ ] transpose",
         "  CTRL+P play/stop (global) | ` style/section chooser | CTRL+C quit",
         "  piano octave <N>|up|down | channel <1..16> | velocity <1..127>",
         "  piano view keyboard|active-notes|event-log | piano panic",
-        "  chord detect on|off: held keys re-harmonize the band (chords panel)",
+        "  the chord readout (playing/holding) lives in the chords panel",
     };
   }
   if (topic == "styles") {
@@ -133,7 +134,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
         "help: styles  (` focuses this panel; TAB cycles here too)",
         "  up/down: style       left/right: section (variation)",
         "  - / = : prev / next variation        _ / + : prev / next style",
-        "  digits: filter styles by number      piano keys: set the tonality",
+        "  digits: filter styles by number      note keys: steer the band (chord)",
         "  ENTER: apply next bar                CTRL+\\ : apply now",
         "  steps are debounced ~0.5s (skip fast); the selection stays put",
     };

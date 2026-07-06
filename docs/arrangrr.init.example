@@ -8,18 +8,19 @@
 # line aborts). Blank lines and '#' comments are ignored.
 #
 # This example configures the "single-finger live steering" session: you play
-# one key on the CHORDS panel and that key alone imposes the chord the whole
-# band follows.
+# one key and that key alone imposes the chord the whole band follows.
 #
-# TWO PLAYABLE SURFACES (selected by which panel is focused — no pitch split):
-#   - the PIANO panel is the MELODY surface: its keys SOUND and steer nobody.
-#   - the CHORDS panel is the HARMONY surface: the SAME keys are SILENT there
-#     but re-harmonize the band (they feed the chord detector). Focus it (TAB or
-#     its panel number) and play to steer. Detection is ON out of the box, so no
-#     `chord detect on` is needed here anymore — the chords panel already steers.
+# GLOBAL CHORD STEERING (no pitch split): whenever ANY panel has focus (anything
+# but the REPL command line), a musical NOTE-letter key steers the band SILENTLY
+# — from the piano, chords, parts, groove, styles or arp panel alike. The
+# note-key takes priority over that panel's own letter shortcuts. Detection is ON
+# out of the box, so no `chord detect on` is needed. The live chord readout
+# (playing / holding) lives in the CHORDS panel.
 
 # Single-finger chords: one held key = the scale-aware maj/min triad (a second
-# key colours it). This applies to the harmony surface (the chords panel).
+# key colours it). This line is now REDUNDANT — configure_default_surfaces()
+# already starts a fresh launch in single mode — but it is kept as documentation
+# and to make an explicit session self-describing.
 chord mode single
 
 # Only your live keys (played on the chords panel) steer the band. The chord

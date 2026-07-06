@@ -138,12 +138,20 @@ bool Shell::cmd_play(const std::vector<std::string>& t, std::string& error) {
   if (next < t.size() && parse_quality(t[next], quality)) {
     ++next;
   }
-  if (next < t.size() && (!parse_u64(t[next], vel) || vel < 1 || vel > 127)) {
-    error = "bad velocity: " + t[next];
-    return false;
+  // Optional velocity (skipped when the next token is the quantize keyword).
+  if (next < t.size() && t[next] != "next" && t[next] != "shift") {
+    if (!parse_u64(t[next], vel) || vel < 1 || vel > 127) {
+      error = "bad velocity: " + t[next];
+      return false;
+    }
+    ++next;
   }
+  // A trailing `next` (or `shift`) STAGES the chord for the next bar, consistent
+  // with a SHIFTed note-letter on the harmony surface; otherwise it is immediate.
+  const bool quantize = next < t.size() && (t[next] == "next" || t[next] == "shift");
   Command c;
   c.param = Param::kChordPlay;
+  c.idx = quantize ? 1 : 0;
   c.a = packed;
   c.b = quality;
   c.c = static_cast<std::int32_t>(vel);

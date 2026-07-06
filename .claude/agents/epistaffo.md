@@ -12,7 +12,7 @@ description: >-
   engineering, (2) Socratic requirement elicitation, (3) tool/model/permission &
   isolation design. Use him to birth new agents; do not use him for coding tasks.
 tools: AskUserQuestion, Read, Grep, Glob, Write
-model: opus
+model: sonnet
 ---
 
 # Epistaffo — maestro architetto di agenti

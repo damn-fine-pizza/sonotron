@@ -362,7 +362,9 @@ void test_shell_chord_detect_panel() {
   });
   CHECK(f.run("panel open chords"));
   CHECK(block_contains(panel, "detect: off"));
-  CHECK(block_contains(panel, "(no chord)"));
+  // The followed-chord NAME moved to the styles panel (current key:); here we
+  // assert the DETECTION result via the engine state instead. None latched yet.
+  CHECK(!f.shell.engine().chords().state().valid);
 
   CHECK(f.run("chord detect on"));
   CHECK(block_contains(panel, "detect: on"));
@@ -374,52 +376,207 @@ void test_shell_chord_detect_panel() {
   const std::uint8_t on[9] = {0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100};
   f.shell.feed_midi(1, Span<const std::uint8_t>(on, sizeof(on)));  // harmony port
   CHECK(f.run("chord detect on"));  // idempotent toggle repaints the panel
-  CHECK(block_contains(panel, "chord: C"));
+  CHECK(f.shell.engine().chords().state().valid);
+  CHECK(f.shell.engine().chords().state().root_pc == 0);  // C, detected on the harmony port
 
   // Chord memory: releasing the keys leaves the last chord named.
   const std::uint8_t off[9] = {0x80, 60, 0, 0x80, 64, 0, 0x80, 67, 0};
   f.shell.feed_midi(1, Span<const std::uint8_t>(off, sizeof(off)));  // harmony port
   CHECK(f.run("chord detect on"));
-  CHECK(block_contains(panel, "chord: C"));
+  CHECK(f.shell.engine().chords().state().root_pc == 0);  // chord memory holds C after release
 
   // The PIANO/melody port (0) must NOT steer: a full D minor triad played there
   // sounds but leaves the followed chord untouched — the panel still names C,
   // never D. This pins the two-zone split: only the harmony surface steers.
+  // (Steering is by PORT/zone here: feed_midi bypasses UI focus, so this is the
+  // detect-source split, distinct from the global focus-steer of note-letters.)
   const std::uint8_t dmin[9] = {0x90, 62, 100, 0x90, 65, 100, 0x90, 69, 100};
   f.shell.feed_midi(0, Span<const std::uint8_t>(dmin, sizeof(dmin)));  // piano port
   CHECK(f.run("chord detect on"));
-  CHECK(block_contains(panel, "chord: C"));
-  CHECK(!block_contains(panel, "chord: D"));
+  CHECK(f.shell.engine().chords().state().root_pc == 0);  // still C
+  CHECK(f.shell.engine().chords().state().root_pc != 2);  // never D: the piano port does not steer
 
   CHECK(f.run("chord detect off"));
   CHECK(block_contains(panel, "detect: off"));
 }
 
-// The REAL live path (not feed_midi): with the default two-surface topology,
-// focusing the CHORDS panel and pressing a musical LETTER key must route through
-// chords_key -> the harmony port -> the detector and STEER the band; the same
-// key on the PIANO panel must NOT steer. This is the exact chain a user drives.
-void test_chords_panel_keys_steer_band_piano_does_not() {
+// The GLOBAL chord-steer contract (the user's actual bug, inverted by the
+// harmony-global-steer refactor): with ANY panel focused a musical LETTER key
+// steers the band SILENTLY through the harmony surface — the piano panel now
+// steers too, uniformly with chords/parts/etc — and the REPL never steers (a
+// note-letter typed at the command line moves nothing). This drives the REAL
+// live path (handle_ui_key), the exact chain a user's keystroke follows.
+void test_note_letters_steer_from_every_panel_but_repl() {
   ShellFixture f;
-  f.shell.configure_default_surfaces();          // piano=melody, harmony=detect+kHarmony
-  CHECK(f.run("chord mode single"));             // one letter key = a chord
-  CHECK(f.run("panel focus chords"));            // focus the harmony surface
+  f.shell.configure_default_surfaces();  // detect on, single-finger, kHarmony steer port
+  CHECK(f.run("chord mode single"));     // one letter key = the scale-aware triad
 
-  // 'F' letter = F4: on the chords panel it must steer the band to F.
-  CHECK(f.shell.handle_ui_key('F'));
+  // THE inverted truth: the PIANO panel now STEERS. Focus it, press 'f' (=F4):
+  // in C major single-finger that is the IV triad, so the band follows F. Nothing
+  // sounds (the harmony surface is output-suppressed) — steering is the effect.
+  // Lowercase = IMMEDIATE steer; an UPPERCASE letter SHIFT-stages to the next bar
+  // (D53), so the immediate-commit assertions here deliberately use lowercase.
+  CHECK(f.run("panel focus piano"));
+  CHECK(f.shell.handle_ui_key('f'));
   CHECK(f.shell.engine().chords().state().valid);
   CHECK(f.shell.engine().chords().state().root_pc == 5);  // F
+  CHECK(f.shell.harmony_held_count() == 1);               // held on the harmony surface
 
-  // 'G' letter = G4: the band must MOVE to G (proves it re-steers, not latches).
-  CHECK(f.shell.handle_ui_key('F'));  // release F (toggle)
-  CHECK(f.shell.handle_ui_key('G'));
+  // Re-steer from the SAME piano panel: release F (plain-byte toggle), press 'g'
+  // — the band MOVES to G (proves a live re-steer, not a one-shot latch).
+  CHECK(f.shell.handle_ui_key('f'));  // toggle F off
+  CHECK(f.shell.harmony_held_count() == 0);
+  CHECK(f.shell.handle_ui_key('g'));
   CHECK(f.shell.engine().chords().state().root_pc == 7);  // G
+  CHECK(f.shell.handle_ui_key('g'));                      // release before switching
 
-  // The PIANO/melody surface must NOT steer: focus it, press 'A' (=C4), the
-  // followed chord stays G.
-  CHECK(f.run("panel focus piano"));
-  CHECK(f.shell.handle_ui_key('A'));
-  CHECK(f.shell.engine().chords().state().root_pc == 7);  // still G
+  // The CHORDS panel steers too (its historical role). 'a' letter = C4 = the I
+  // triad: the band follows C.
+  CHECK(f.run("panel focus chords"));
+  CHECK(f.shell.handle_ui_key('a'));
+  CHECK(f.shell.engine().chords().state().root_pc == 0);  // C
+  CHECK(f.shell.handle_ui_key('a'));                      // release
+
+  // EVERY focused panel steers — even a non-harmony one like the parts mixer:
+  // the note-letter is consumed by the global choke BEFORE the parts key handler.
+  // 'h' letter = A4 = the vi triad, so the band follows A.
+  CHECK(f.run("panel focus parts"));
+  CHECK(f.shell.handle_ui_key('h'));
+  CHECK(f.shell.engine().chords().state().root_pc == 9);  // A
+  CHECK(f.shell.handle_ui_key('h'));                      // release
+
+  // The REPL is the ONE surface that must NOT steer: a note-letter falls through
+  // to the line editor (handle_ui_key returns false) and the followed chord is
+  // left exactly where it was — typing 's' does not move the band to D.
+  CHECK(f.run("panel focus repl"));
+  CHECK(!f.shell.handle_ui_key('s'));
+  CHECK(f.shell.engine().chords().state().root_pc == 9);  // still A, never moved
+  CHECK(f.shell.harmony_held_count() == 0);               // nothing captured at the REPL
+}
+
+// Permanent-transpose contract (user-required, root-cause behavior): a pressed
+// chord STAYS the followed chord across bars — there is NO auto-revert after the
+// key is released. Chord memory holds the band on it until the NEXT chord is
+// pressed. This is the exact guarantee the user asked to be pinned.
+void test_permanent_transpose_persists_across_bars() {
+  ShellFixture f;
+  f.shell.configure_default_surfaces();
+  CHECK(f.run("chord mode single"));
+  CHECK(f.run("panel focus chords"));
+
+  // Steer to F (IV) with a lowercase = IMMEDIATE press, then RELEASE the key —
+  // memory must keep the band on F.
+  CHECK(f.shell.handle_ui_key('f'));
+  CHECK(f.shell.engine().chords().state().root_pc == 5);
+  CHECK(f.shell.handle_ui_key('f'));  // release
+  CHECK(f.shell.harmony_held_count() == 0);
+  CHECK(f.shell.engine().chords().state().root_pc == 5);  // still F after release
+
+  // Run the transport across several bars: the followed chord must NOT drift or
+  // auto-revert to the home key — it stays exactly on F, bars later.
+  CHECK(f.run("transport start"));
+  std::string err;
+  CHECK(f.shell.advance_by(4 * kTicksPerBar, err));
+  CHECK(f.shell.engine().chords().state().valid);
+  CHECK(f.shell.engine().chords().state().root_pc == 5);  // still F
+
+  // A NEW press moves it (proves it is memory, not a stuck latch) and the new
+  // chord likewise persists across bars with no revert.
+  CHECK(f.shell.handle_ui_key('g'));
+  CHECK(f.shell.engine().chords().state().root_pc == 7);  // G
+  CHECK(f.shell.handle_ui_key('g'));  // release
+  CHECK(f.shell.advance_by(2 * kTicksPerBar, err));
+  CHECK(f.shell.engine().chords().state().root_pc == 7);  // stays on G
+}
+
+// Owner's live finding, folded into this investigation: "sometimes pressing A
+// then S produces the SAME chord." A and S are DIFFERENT white keys
+// (piano_binding_for: A=C4 semitone 0, S=D4 semitone 2), so each single-finger
+// press must yield a DIFFERENT root. Lowercase bytes are used throughout
+// (deliberately, NOT 'A'/'S') to keep this probe isolated from the SEPARATE
+// uppercase/shift-quantize ambiguity already pinned red elsewhere in this file
+// (test_note_letters_steer_from_every_panel_but_repl,
+// test_permanent_transpose_persists_across_bars): byte case doubles as the
+// shift signal in surface_musical_key, so an uppercase letter here would
+// confound root-collision with stage-vs-commit.
+void test_pressing_a_then_s_yields_different_roots_when_properly_released() {
+  std::printf("\n==== A/S control: 'a' alone, then 'a' released, then 's' alone ====\n");
+  ShellFixture f;
+  f.shell.configure_default_surfaces();
+  CHECK(f.run("chord mode single"));
+  CHECK(f.run("panel focus chords"));
+
+  CHECK(f.shell.handle_ui_key('a'));  // A alone: single-finger root C (pc 0)
+  std::printf("held=%zu root_pc=%u quality=%d\n", f.shell.harmony_held_count(),
+              f.shell.engine().chords().state().root_pc,
+              static_cast<int>(f.shell.engine().chords().state().quality));
+  CHECK(f.shell.engine().chords().state().valid);
+  const std::uint8_t r_a = f.shell.engine().chords().state().root_pc;
+  CHECK(r_a == 0);  // C
+
+  CHECK(f.shell.handle_ui_key('a'));  // release A (plain-byte toggle off)
+  CHECK(f.shell.harmony_held_count() == 0);
+
+  CHECK(f.shell.handle_ui_key('s'));  // S alone, A fully released first
+  std::printf("held=%zu root_pc=%u quality=%d\n", f.shell.harmony_held_count(),
+              f.shell.engine().chords().state().root_pc,
+              static_cast<int>(f.shell.engine().chords().state().quality));
+  const std::uint8_t r_s = f.shell.engine().chords().state().root_pc;
+  CHECK(r_s == 2);      // D
+  CHECK(r_s != r_a);    // a genuinely different chord from a genuinely different key
+}
+
+// The REAL-WORLD gesture: a player moving a finger from one key straight to
+// the next WITHOUT an explicit double-tap to release the first (a plain TTY
+// has no true key-up, so this is what "press A then S" means to a human). In
+// single-finger, one key == one chord, so the new key must REPLACE the previous
+// single-finger note instead of accumulating {A, S} -- otherwise the detector
+// roots on the lowest held note (A) and the root never moves to the key just
+// pressed. Regression guard for the owner's "A then S give the same chord"
+// report; the fix lives in Shell::toggle_surface_key.
+void test_single_finger_new_key_replaces_previous_root() {
+  std::printf("\n==== single-finger A->S replaces (no release between) ====\n");
+  ShellFixture f;
+  f.shell.configure_default_surfaces();
+  CHECK(f.run("chord mode single"));
+  CHECK(f.run("panel focus chords"));
+
+  CHECK(f.shell.handle_ui_key('a'));  // A alone: root C (pc 0)
+  const std::uint8_t r_a = f.shell.engine().chords().state().root_pc;
+  CHECK(r_a == 0);
+  CHECK(f.shell.harmony_held_count() == 1);
+
+  CHECK(f.shell.handle_ui_key('s'));  // S pressed with A still held (no release between)
+  std::printf("held=%zu root_pc=%u quality=%d\n", f.shell.harmony_held_count(),
+              f.shell.engine().chords().state().root_pc,
+              static_cast<int>(f.shell.engine().chords().state().quality));
+  // S REPLACES A: exactly one held note, and the root moves to S (D, pc 2) --
+  // no {A, S} accumulation, no lowest-note-wins collapse onto A.
+  CHECK(f.shell.harmony_held_count() == 1);
+  const std::uint8_t root_after_s = f.shell.engine().chords().state().root_pc;
+  CHECK(root_after_s == 2);
+  CHECK(root_after_s != r_a);
+}
+
+// Same defect, the owner's second report: pressing G then H (adjacent white keys,
+// no release) always resolved to Em because {G, A} accumulated and the detector
+// rooted on the lowest note. With single-finger replace, H replaces G and the
+// root moves to A (pc 9) -- never Em (pc 4).
+void test_single_finger_g_then_h_does_not_collapse_to_em() {
+  std::printf("\n==== single-finger G->H replaces (no Em collapse) ====\n");
+  ShellFixture f;
+  f.shell.configure_default_surfaces();
+  CHECK(f.run("chord mode single"));
+  CHECK(f.run("panel focus chords"));
+
+  CHECK(f.shell.handle_ui_key('g'));  // G: single-finger root G (pc 7)
+  CHECK(f.shell.engine().chords().state().root_pc == 7);
+
+  CHECK(f.shell.handle_ui_key('h'));  // H (=A) replaces G
+  CHECK(f.shell.harmony_held_count() == 1);
+  const std::uint8_t root_after_h = f.shell.engine().chords().state().root_pc;
+  CHECK(root_after_h == 9);  // A, not E (Em would be pc 4)
+  CHECK(root_after_h != 4);
 }
 
 void test_shell_parts_command_and_panel() {
@@ -442,6 +599,38 @@ void test_shell_parts_command_and_panel() {
   CHECK(!f.run("part nope mute on"));  // unknown role
   CHECK(!f.run("part bass flip on"));  // bad subcommand
   CHECK(!f.run("part bass"));          // too few args
+}
+
+// Parts-panel SOLO migrated off 's' (now a band-steering note-letter) onto 'i'
+// ("isolate"). This pins the migration: 'i' toggles solo on the selected part,
+// 's' does NOT touch solo — it steers the band instead — and 'm' still mutes.
+void test_parts_solo_migrated_to_i_key() {
+  ShellFixture f;
+  f.shell.configure_default_surfaces();  // detect on, single-finger: 's' will steer
+  CHECK(f.run("chord mode single"));
+  CHECK(f.run("panel focus parts"));
+  CHECK(f.shell.parts_focused());
+  const TrackRole role = TrackRole::kDrums;  // row 0 (Drums) is selected by default
+  CHECK(!f.shell.engine().arranger().soloed(role));
+
+  // 'i' toggles solo on the selected part, and again toggles it back off.
+  CHECK(f.shell.handle_ui_key('i'));
+  CHECK(f.shell.engine().arranger().soloed(role));
+  CHECK(f.shell.handle_ui_key('i'));
+  CHECK(!f.shell.engine().arranger().soloed(role));
+
+  // 's' is a NOTE-letter (D4) now: the global steer choke consumes it BEFORE the
+  // parts key handler, so it never toggles solo — it steers the band to D (ii).
+  CHECK(f.shell.handle_ui_key('s'));
+  CHECK(!f.shell.engine().arranger().soloed(role));       // solo untouched
+  CHECK(f.shell.engine().chords().state().valid);
+  CHECK(f.shell.engine().chords().state().root_pc == 2);  // D
+  CHECK(f.shell.handle_ui_key('s'));                       // release the steered note
+
+  // 'm' is not a note-letter, so it survives the choke and still mutes the part.
+  CHECK(!f.shell.engine().arranger().muted(role));
+  CHECK(f.shell.handle_ui_key('m'));
+  CHECK(f.shell.engine().arranger().muted(role));
 }
 
 void test_shell_arp_command_and_panel() {
@@ -1088,11 +1277,12 @@ void test_styles_panel_chooser() {
   CHECK(f.shell.styles_focused());
   CHECK(f.shell.panels().visible(PanelId::kStyles));
 
-  // The styles panel renders the chooser: style:/section:/hint + a `scale:` line.
+  // The styles panel renders the chooser: style:/section:/hint + the fixed
+  // `home key:` reference line (the song tonic chord).
   f.shell.refresh_panels();
   CHECK(block_contains(panel, "-- styles"));
   CHECK(block_contains(panel, "ENTER next-bar"));
-  CHECK(block_contains(panel, "scale:"));
+  CHECK(block_contains(panel, "original key:"));
 
   // A digit feeds the filter only while the styles panel is focused.
   CHECK(f.shell.handle_ui_key('0'));
@@ -1145,8 +1335,11 @@ void test_ctrl_z_layout() {
 }
 
 void test_styles_key_line() {
-  // The styles panel carries a live `scale:` line read from the chord engine
-  // (D47 renamed the label from `key:`); the `scale` command is a `key` alias.
+  // The styles panel carries the fixed reference line: `original key:` — the
+  // song's tonic CHORD (single_finger_quality of the key root), a fixed reference
+  // that does NOT move when the band is steered. `scale`/`key` set the tonic; F
+  // major -> "original key: F", A minor -> "original key: Am". The `scale` command
+  // is a `key` alias, so both spellings still drive the tonic.
   ShellFixture f;
   std::vector<std::string> panel;
   f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
@@ -1156,10 +1349,10 @@ void test_styles_key_line() {
   CHECK(f.run("panel open styles"));
   CHECK(f.run("key F major"));
   f.shell.refresh_panels();
-  CHECK(block_contains(panel, "scale: F major"));
-  CHECK(f.run("scale A minor"));
+  CHECK(block_contains(panel, "original key: F"));
+  CHECK(f.run("scale A minor"));  // `scale` alias of `key`: minor tonic -> "Am"
   f.shell.refresh_panels();
-  CHECK(block_contains(panel, "scale: A minor"));
+  CHECK(block_contains(panel, "original key: Am"));
 }
 
 void test_tab_number_focus() {
@@ -1315,88 +1508,87 @@ void test_theme_switch_restyles_titles() {
   CHECK(!still_escape);  // colors off -> no escapes anywhere
 }
 
-// A fixture with the default thru wiring, so piano input becomes visible
-// output (in0 -> router -> out0), exactly like the live default setup.
+// Harmony-global-steer fixture: the piano panel is now a STEERING surface — its
+// note keys drive the SILENT harmony port (kHarmony, output-suppressed), so a
+// press re-harmonizes the band with NO audible note. There is therefore nothing
+// on an out-port to count; configure_default_surfaces() arms detection +
+// single-finger so a pressed key shows up as a followed chord and a held note on
+// the harmony surface, which is what these tests observe (held-set + chord
+// engine) in place of the old sounding-note counts.
 struct PianoFixture : ShellFixture {
   PianoFixture() {
-    CHECK(run("port open in in0"));
-    CHECK(run("port open out out0"));
-    CHECK(run("thru in0 out0"));
-    CHECK(run("panel focus piano"));
+    shell.configure_default_surfaces();  // detect on, single-finger, kHarmony steer port
+    CHECK(run("panel focus piano"));      // the piano panel steers the band
     events.clear();
   }
 
-  int note_ons() const {
-    int n = 0;
-    for (const OutEvent& e : events) {
-      if (e.kind == OutEvent::Kind::kMidi && e.msg.type() == midi::kNoteOn && e.msg.d2 > 0) {
-        ++n;
-      }
-    }
-    return n;
-  }
-  int note_offs() const {
-    int n = 0;
-    for (const OutEvent& e : events) {
-      if (e.kind == OutEvent::Kind::kMidi &&
-          (e.msg.type() == midi::kNoteOff || (e.msg.type() == midi::kNoteOn && e.msg.d2 == 0))) {
-        ++n;
-      }
-    }
-    return n;
-  }
+  // Notes the harmony surface currently holds (the silent equivalent of the old
+  // "how many notes are sounding" — nothing sounds now, so we watch the held-set).
+  std::size_t held() const { return shell.harmony_held_count(); }
+  bool steering() const { return shell.engine().chords().state().valid; }
+  int steered_root() const { return static_cast<int>(shell.engine().chords().state().root_pc); }
 };
 
 void test_piano_key_dispatch() {
   PianoFixture f;
 
-  // 'a' (case-insensitive) = C of octave 4 = MIDI 60, through the normal path.
+  // 'a' (case-insensitive) = C of octave 4 (pc 0). In C-major single-finger that
+  // is the I triad, so the piano panel STEERS the band to C and holds one note
+  // on the (silent) harmony surface. No audible note is emitted anymore.
   CHECK(f.shell.handle_ui_key('a'));
-  CHECK(f.note_ons() == 1);
-  CHECK(f.events.back().msg.d1 == 60);
-  CHECK(f.events.back().msg.type() == midi::kNoteOn);
+  CHECK(f.held() == 1);
+  CHECK(f.steering());
+  CHECK(f.steered_root() == 0);  // C
 
-  // Toggle policy: same key again = note-off for the same note.
+  // Toggle policy: same key again releases the held note. Chord MEMORY keeps the
+  // band on C after release (it persists until the next chord is pressed).
   CHECK(f.shell.handle_ui_key('a'));
-  CHECK(f.note_offs() == 1);
-  CHECK(f.events.back().msg.d1 == 60);
+  CHECK(f.held() == 0);
+  CHECK(f.steered_root() == 0);  // still following C from memory
 
-  // Black key 'w' = C#4 = 61; velocity/channel follow the piano state.
+  // Black key 'w' = C#4 (pc 1): a chromatic root in C major snaps to major, so
+  // the band follows C#. The key->note binding is proven through the steered
+  // root now that no wire note-on carries it. (piano channel/velocity still parse
+  // but no longer colour an audible note — the harmony surface is silent.)
   CHECK(f.run("piano channel 2"));
   CHECK(f.run("piano velocity 100"));
   CHECK(f.shell.handle_ui_key('w'));
-  CHECK(f.events.back().msg.d1 == 61);
-  CHECK(f.events.back().msg.channel() == 1);  // wire 0-based for user channel 2
-  CHECK(f.events.back().msg.d2 == 100);
+  CHECK(f.held() == 1);
+  CHECK(f.steered_root() == 1);       // C#
   CHECK(f.shell.handle_ui_key('w'));  // release before the next checks
+  CHECK(f.held() == 0);
 
-  // Active notes reach the monitor via the wrapped sink.
-  CHECK(f.shell.handle_ui_key('h'));  // A4
-  CHECK(f.shell.monitor().active_notes().size() == 1);
+  // 'h' = A4 (pc 9) = the vi triad -> the band follows A, one note held.
+  CHECK(f.shell.handle_ui_key('h'));
+  CHECK(f.held() == 1);
+  CHECK(f.steered_root() == 9);  // A
+  // `piano panic` flushes BOTH surfaces' held sets (melody + harmony).
   CHECK(f.run("piano panic"));
-  CHECK(f.shell.monitor().active_notes().size() == 0);
+  CHECK(f.held() == 0);
 
-  // 'P' is the D#5 black key = base C4 (60) + 15 = 75, through the normal path.
+  // 'P' is the D#5 black key = base C4 (60) + 15 = 75 (pc 3) -> chromatic -> D#.
   CHECK(f.run("piano channel 1"));
-  f.events.clear();
   CHECK(f.shell.handle_ui_key('p'));
-  CHECK(f.note_ons() == 1);
-  CHECK(f.events.back().msg.d1 == 75);
+  CHECK(f.held() == 1);
+  CHECK(f.steered_root() == 3);       // D#
   CHECK(f.shell.handle_ui_key('p'));  // toggle release
+  CHECK(f.held() == 0);
 
-  // Out-of-range: octave 9, ' = +17 semitones -> 137 -> rejected, no event.
+  // Out-of-range: octave 9, ' = +17 semitones -> 137 -> rejected: no note is
+  // captured on the harmony surface, so the held-set does not grow.
   CHECK(f.run("piano octave 9"));
-  const int before = f.note_ons();
   CHECK(f.shell.handle_ui_key('\''));
-  CHECK(f.note_ons() == before);
+  CHECK(f.held() == 0);
 
   // TAB is the way out: focus returns to the REPL, the panel stays open.
   CHECK(f.shell.handle_ui_key('\t'));
   CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
   CHECK(f.shell.panels().visible(PanelId::kPiano));
 
-  // With REPL focus musical keys are no longer intercepted.
+  // With REPL focus musical keys are no longer intercepted (they fall through to
+  // the line editor) and nothing is captured on the harmony surface.
   CHECK(!f.shell.handle_ui_key('a'));
+  CHECK(f.held() == 0);
 }
 
 void test_piano_focus_shortcuts() {
@@ -1418,8 +1610,14 @@ void test_piano_focus_shortcuts() {
   CHECK(f.shell.handle_ui_key('/'));
   CHECK(f.shell.piano_state().base_octave == 4);
 
-  // C clears monitor buffers.
-  CHECK(f.shell.handle_ui_key('a'));
+  // C clears the monitor's active notes. Piano keys are silent now, so seed the
+  // monitor through a real SOUNDING path (an external note on a routed port) and
+  // prove the 'C' shortcut empties it.
+  CHECK(f.run("port open in mon_in"));
+  CHECK(f.run("port open out mon_out"));
+  CHECK(f.run("thru mon_in mon_out"));
+  const std::uint8_t note_on[3] = {0x90, 60, 100};
+  f.shell.feed_midi(0, Span<const std::uint8_t>(note_on, sizeof(note_on)));
   CHECK(f.shell.monitor().active_notes().size() == 1);
   CHECK(f.shell.handle_ui_key('c'));
   CHECK(f.shell.monitor().active_notes().size() == 0);
@@ -1519,72 +1717,70 @@ void test_momentary_lock() {
 
 void test_piano_momentary_mode() {
   PianoFixture f;
-  // Default is momentary: true press/release drive note-on/off.
+  // Default is momentary: true press/release drive the harmony surface's held-set.
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
 
-  // 'A' pressed = note-on for MIDI 60 through the normal feed_midi path.
+  // 'A' pressed = C4 captured on the harmony surface; the band steers to C.
   CHECK(f.shell.piano_key_event('A', true));
-  CHECK(f.note_ons() == 1);
-  CHECK(f.events.back().msg.d1 == 60);
-  CHECK(f.events.back().msg.type() == midi::kNoteOn);
-  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.held() == 1);
+  CHECK(f.steering());
+  CHECK(f.steered_root() == 0);  // C
 
-  // Re-press without release (autorepeat) must NOT double note-on.
+  // Re-press without release (autorepeat) must NOT double the held note.
   CHECK(f.shell.piano_key_event('A', true));
-  CHECK(f.note_ons() == 1);
+  CHECK(f.held() == 1);
 
-  // Release = matching note-off.
+  // Release = the held note leaves the surface.
   CHECK(f.shell.piano_key_event('A', false));
-  CHECK(f.note_offs() == 1);
-  CHECK(f.events.back().msg.d1 == 60);
-  CHECK(f.shell.monitor().active_notes().size() == 0);
+  CHECK(f.held() == 0);
 
-  // A release with nothing held is a no-op, not a spurious note-off.
-  const int offs = f.note_offs();
+  // A release with nothing held is a no-op, not a spurious extra release.
   CHECK(f.shell.piano_key_event('A', false));
-  CHECK(f.note_offs() == offs);
+  CHECK(f.held() == 0);
 
-  // Polyphony: two distinct keys held together.
-  CHECK(f.shell.piano_key_event('A', true));  // 60
-  CHECK(f.shell.piano_key_event('S', true));  // 62
-  CHECK(f.shell.monitor().active_notes().size() == 2);
+  // Polyphony: two distinct keys held together on the harmony surface.
+  CHECK(f.shell.piano_key_event('A', true));  // C4
+  CHECK(f.shell.piano_key_event('S', true));  // D4
+  CHECK(f.held() == 2);
   CHECK(f.shell.piano_key_event('A', false));
   CHECK(f.shell.piano_key_event('S', false));
-  CHECK(f.shell.monitor().active_notes().size() == 0);
+  CHECK(f.held() == 0);
 }
 
 void test_piano_space_toggles_mode() {
   PianoFixture f;
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
 
-  // SPACE flips the mode and is never a musical note.
+  // SPACE flips the harmony key mode and is never a musical note (nothing held).
   CHECK(f.shell.handle_ui_key(' '));
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
-  CHECK(f.note_ons() == 0);
+  CHECK(f.held() == 0);
   CHECK(f.shell.handle_ui_key(' '));
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
-  CHECK(f.note_ons() == 0);
+  CHECK(f.held() == 0);
 
-  // In kToggle, piano_key_event presses toggle and releases are ignored.
+  // In kToggle, piano_key_event presses toggle the held note and releases are
+  // ignored, so a press-release-press cycle ends with the note released.
   CHECK(f.shell.handle_ui_key(' '));  // -> kToggle
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
-  CHECK(f.shell.piano_key_event('A', true));  // note-on
-  CHECK(f.note_ons() == 1);
+  CHECK(f.shell.piano_key_event('A', true));  // capture
+  CHECK(f.held() == 1);
   CHECK(f.shell.piano_key_event('A', false));  // release ignored in toggle mode
-  CHECK(f.note_offs() == 0);
-  CHECK(f.shell.piano_key_event('A', true));  // same key again = note-off
-  CHECK(f.note_offs() == 1);
+  CHECK(f.held() == 1);
+  CHECK(f.shell.piano_key_event('A', true));  // same key again = release
+  CHECK(f.held() == 0);
 }
 
 void test_piano_plain_bytes_always_toggle() {
-  // The plain-byte path is toggle even in momentary mode, so a terminal
-  // without the kitty protocol still plays (graceful degradation).
+  // The plain-byte path is toggle even in momentary mode, so a terminal without
+  // the kitty protocol still steers (graceful degradation): press captures the
+  // note on the harmony surface, the same key again releases it.
   PianoFixture f;
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kMomentary);
-  CHECK(f.shell.handle_ui_key('a'));  // press = note-on
-  CHECK(f.note_ons() == 1);
-  CHECK(f.shell.handle_ui_key('a'));  // same key again = note-off
-  CHECK(f.note_offs() == 1);
+  CHECK(f.shell.handle_ui_key('a'));  // press = capture
+  CHECK(f.held() == 1);
+  CHECK(f.shell.handle_ui_key('a'));  // same key again = release
+  CHECK(f.held() == 0);
 }
 
 void test_piano_toggle_autorepeat_debounce() {
@@ -1599,12 +1795,11 @@ void test_piano_toggle_autorepeat_debounce() {
   CHECK(f.shell.handle_ui_key(' '));  // momentary -> toggle
   CHECK(f.shell.piano_key_mode() == PianoKeyMode::kToggle);
 
-  // First press sounds MIDI 60 ('a' at octave 4).
+  // First press captures MIDI 60 ('a' at octave 4) on the harmony surface.
   std::uint64_t t = 1'000'000;  // any non-zero base
   f.shell.set_input_time_us(t);
   CHECK(f.shell.handle_ui_key('a'));
-  CHECK(f.note_ons() == 1);
-  CHECK(f.note_offs() == 0);
+  CHECK(f.held() == 1);
 
   // A sustained auto-repeat burst (~30 ms cadence) inside the window is fully
   // swallowed: no machine-gun. The note simply stays held for as long as the
@@ -1614,29 +1809,29 @@ void test_piano_toggle_autorepeat_debounce() {
     f.shell.set_input_time_us(t);
     CHECK(f.shell.handle_ui_key('a'));
   }
-  CHECK(f.note_ons() == 1);   // still exactly one note-on
-  CHECK(f.note_offs() == 0);  // and never toggled off
-  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.held() == 1);  // still exactly one held note, never toggled off
 
   // A genuine re-tap AFTER the window is quiet long enough to be a fresh
   // keystroke, so it toggles the note off.
   t += kDebounceUs + 1;
   f.shell.set_input_time_us(t);
   CHECK(f.shell.handle_ui_key('a'));
-  CHECK(f.note_offs() == 1);
-  CHECK(f.shell.monitor().active_notes().size() == 0);
+  CHECK(f.held() == 0);
 
-  // ...and once more turns it back on: intentional re-tapping still works.
+  // ...and once more captures it again: intentional re-tapping still works.
   t += kDebounceUs + 1;
   f.shell.set_input_time_us(t);
   CHECK(f.shell.handle_ui_key('a'));
-  CHECK(f.note_ons() == 2);
-  CHECK(f.shell.monitor().active_notes().size() == 1);
+  CHECK(f.held() == 1);
 
-  // The debounce is per-key: a DIFFERENT key held at the same instant sounds
-  // its own note, it is not suppressed by the first key's window.
+  // The debounce is per-key: a DIFFERENT key held at the same instant captures
+  // its own note, not suppressed by the first key's window. In single-finger the
+  // new key REPLACES the previous one, so the held count stays 1 but the steered
+  // root moves to S (D, pc 2) -- proof that S registered rather than being eaten
+  // by A's debounce window.
   CHECK(f.shell.handle_ui_key('s'));  // MIDI 62, same timestamp t
-  CHECK(f.shell.monitor().active_notes().size() == 2);
+  CHECK(f.held() == 1);
+  CHECK(f.shell.engine().chords().state().root_pc == 2);
 }
 
 void test_piano_kitty_repeat_no_double_fire() {
@@ -1653,16 +1848,15 @@ void test_piano_kitty_repeat_no_double_fire() {
   CHECK(!f.shell.piano_is_musical_key(static_cast<std::uint8_t>(' ')));
 
   // Press then autorepeat (both arrive as piano_key_event(pressed=true) when a
-  // repeat is not dropped): exactly one note-on, then one note-off on release.
-  CHECK(f.shell.piano_key_event('A', true));  // press -> note-on
-  CHECK(f.note_ons() == 1);
+  // repeat is not dropped): exactly one held note, released on key-up.
+  CHECK(f.shell.piano_key_event('A', true));  // press -> capture
+  CHECK(f.held() == 1);
   for (int i = 0; i < 10; ++i) {
     CHECK(f.shell.piano_key_event('A', true));  // autorepeat re-press: idempotent
   }
-  CHECK(f.note_ons() == 1);
-  CHECK(f.shell.piano_key_event('A', false));  // release -> note-off
-  CHECK(f.note_offs() == 1);
-  CHECK(f.shell.monitor().active_notes().size() == 0);
+  CHECK(f.held() == 1);
+  CHECK(f.shell.piano_key_event('A', false));  // release -> note leaves the surface
+  CHECK(f.held() == 0);
 }
 
 void test_arp_live_stays_on_grid() {
@@ -1706,6 +1900,8 @@ void test_arp_live_stays_on_grid() {
 
 void test_tab_enters_piano_from_repl() {
   ShellFixture f;
+  f.shell.configure_default_surfaces();  // arm steering so the captured key is observable
+  CHECK(f.run("chord mode single"));
   CHECK(f.run("panel open piano"));
   // Merely opening a panel leaves focus on the REPL.
   CHECK(f.shell.panels().focus_kind() == PanelFocus::kRepl);
@@ -1715,13 +1911,12 @@ void test_tab_enters_piano_from_repl() {
   CHECK(f.shell.panels().focus_kind() == PanelFocus::kPanel);
   CHECK(f.shell.panels().focused_panel() == PanelId::kPiano);
 
-  // A musical key now sounds through the normal path.
-  CHECK(f.run("port open in in0"));
-  CHECK(f.run("port open out out0"));
-  CHECK(f.run("thru in0 out0"));
-  f.events.clear();
+  // A musical key is now CAPTURED by the piano panel and steers the band (the
+  // global-steer choke consumes it; nothing sounds — the harmony surface is silent).
   CHECK(f.shell.handle_ui_key('a'));
-  CHECK(f.midi_count() >= 1);
+  CHECK(f.shell.harmony_held_count() == 1);
+  CHECK(f.shell.engine().chords().state().valid);
+  CHECK(f.shell.engine().chords().state().root_pc == 0);  // C
 
   // With nothing open, TAB falls through to the line editor.
   ShellFixture g;
@@ -2051,10 +2246,15 @@ int main() {
   test_note_name_parsing();
   test_shell_chord_commands();
   test_shell_chord_detect_panel();
-  test_chords_panel_keys_steer_band_piano_does_not();
+  test_note_letters_steer_from_every_panel_but_repl();
+  test_permanent_transpose_persists_across_bars();
+  test_pressing_a_then_s_yields_different_roots_when_properly_released();
+  test_single_finger_new_key_replaces_previous_root();
+  test_single_finger_g_then_h_does_not_collapse_to_em();
   test_gm_program_parsing();
   test_shell_program_command();
   test_shell_parts_command_and_panel();
+  test_parts_solo_migrated_to_i_key();
   test_shell_groove_command_and_panel();
   test_shell_arp_command_and_panel();
   test_shell_seq_commands();

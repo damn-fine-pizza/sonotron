@@ -30,20 +30,10 @@
 
 namespace arrangrr {
 
-// D47: which producer is allowed to UPDATE the arranger-followed chord context
-// (m_chords). Three producers can write it — live detect, the ChordSequencer,
-// and manual `chord play` — and their implicit last-writer-wins contention is
-// the problem this selector makes explicit. kAuto keeps every producer writing
-// (exactly the legacy behavior); the other values gate the followed-chord
-// UPDATE down to a single named source. Gating touches ONLY that update: the
-// other side effects (sounding a chord, advancing the sequencer, tracking the
-// held detect set for display) always run.
-enum class ChordFollow : std::uint8_t {
-  kAuto = 0,       // all three producers may steer (legacy last-writer-wins)
-  kDetect = 1,     // only live piano->chord detection steers
-  kSequencer = 2,  // only the ChordSequencer steers
-  kManual = 3,     // only manual `chord play` steers
-};
+// ChordFollow (the D47 harmony-source selector) and Producer now live with
+// their single owner in arrangrr/chord/followed_context.hpp (included via
+// chord_engine.hpp): the gate they drive is enforced inside FollowedContext,
+// not threaded as bools through the engine.
 
 // Dxx (un-defers D34(b) / §11 split): per-input-port harmony zone. This is the
 // "observe-without-route" split as DATA — the zone of a whole port decides
@@ -164,8 +154,16 @@ class Engine {
   }
 
   // D47 chord-follow selector: which producer may steer the followed chord.
-  constexpr void set_chord_follow(ChordFollow follow) noexcept { m_chord_follow = follow; }
-  constexpr ChordFollow chord_follow() const noexcept { return m_chord_follow; }
+  // Owned by the FollowedContext inside m_chords (the single gate).
+  constexpr void set_chord_follow(ChordFollow follow) noexcept { m_chords.set_follow(follow); }
+  constexpr ChordFollow chord_follow() const noexcept { return m_chords.follow(); }
+
+  // Input model: a live-detect chord commits IMMEDIATELY by default (`current`
+  // changes now); a SHIFT-staged one is quantized to the next bar (`next`).
+  // The host sets this per keypress (shift held -> quantize). Immediate is the
+  // default, so raw MIDI in without a host steers `current` at once.
+  constexpr void set_detect_quantize(bool quantize) noexcept { m_detect_quantize = quantize; }
+  constexpr bool detect_quantize() const noexcept { return m_detect_quantize; }
   // Live piano->chord detector state, for host display (how many keys are held
   // and how many are needed before a chord is named — fingered 3 vs single 1).
   constexpr std::uint8_t chord_held_count() const noexcept { return m_detector.held_count(); }
@@ -198,6 +196,13 @@ class Engine {
         }
         fire_timeline(m_transport.tick(), sink);
         fire_chord_seq(m_transport.tick(), sink);
+        // D53: at the bar downbeat, promote any SHIFT-staged chord into the
+        // followed context BEFORE the arranger fires the bar — the same
+        // bar-boundary point at which the arranger applies pending style/section
+        // switches, ordered so the arranger reads the freshly-committed chord.
+        if (m_transport.tick() % kTicksPerBar == 0) {
+          m_chords.commit_bar();
+        }
         fire_arranger(m_transport.tick(), sink);
         fire_arp(m_transport.tick(), sink);
       }
@@ -215,6 +220,26 @@ class Engine {
   void cmd_style(const Command& cmd, EventSink sink);
   void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
   void cmd_arp(const Command& cmd, EventSink sink);    // live arpeggiator
+
+  // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
+  // complexity under the clang-tidy gate (each case validates + dispatches on
+  // its own, no behavior change from being inlined in the switch).
+  void chord_key_set(const Command& cmd, EventSink sink);
+  void chord_out(const Command& cmd, EventSink sink);
+  void chord_mode(const Command& cmd, EventSink sink);
+  void chord_detect_cmd(const Command& cmd, EventSink sink);
+  void chord_follow_cmd(const Command& cmd, EventSink sink);
+  void chord_input_zone(const Command& cmd, EventSink sink);
+  void chord_play(const Command& cmd, EventSink sink);
+
+  // cmd_seq case handlers split out for the same reason.
+  void seq_add(const Command& cmd, EventSink sink);
+  void seq_stop(const Command& cmd, EventSink sink);
+  void seq_transpose(const Command& cmd, EventSink sink);
+
+  // cmd_style case handlers split out for the same reason.
+  void style_switch(const Command& cmd, EventSink sink);
+  void style_route(const Command& cmd, EventSink sink);
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
@@ -271,31 +296,20 @@ class Engine {
                        });
   }
 
-  // D47: is producer X allowed to UPDATE the followed chord context? kAuto lets
-  // all three through (legacy); any other value narrows it to a single source.
-  constexpr bool detect_may_follow() const noexcept {
-    return m_chord_follow == ChordFollow::kAuto || m_chord_follow == ChordFollow::kDetect;
-  }
-  constexpr bool seq_may_follow() const noexcept {
-    return m_chord_follow == ChordFollow::kAuto || m_chord_follow == ChordFollow::kSequencer;
-  }
-  constexpr bool manual_may_follow() const noexcept {
-    return m_chord_follow == ChordFollow::kAuto || m_chord_follow == ChordFollow::kManual;
-  }
-
   void fire_chord_seq(Tick transport_tick, EventSink sink) {
     m_seq.on_tick(
         transport_tick,
         [&](std::uint8_t root_note, ChordQuality quality, std::uint8_t degree, std::uint8_t vel) {
           // The sequencer always SOUNDS its chord; whether it STEERS the followed
-          // context is gated (D47) — passed straight into sound() so a non-selected
-          // producer never publishes it in the first place.
+          // context is decided by the owner's D47 gate (Producer::kSequencer).
+          // It is time-aligned, so it steers IMMEDIATELY (commit_now), never
+          // staged.
           m_chords.sound(
               root_note, quality, vel,
               [&](std::uint8_t port, const MidiMessage& msg) {
                 schedule_or_warn(port, m_now, msg, sink);
               },
-              seq_may_follow());
+              Producer::kSequencer, /*steer=*/true, /*quantize=*/false);
           sink(OutEvent::chord(m_chords.out_port(), degree, static_cast<std::uint8_t>(quality),
                                root_note, theory::shape_of(quality).count, vel, m_now));
         },
@@ -335,23 +349,37 @@ class Engine {
   }
 
   // Feeds one parsed message from the chord-detect port into the detector and,
-  // on each successful recognition (>= a triad), steers the arranger's chord
-  // context. A NoteOn with velocity 0 is a running-status release. Chord
-  // memory: fewer notes recognize nothing, so the last chord holds.
+  // on a GENUINELY NEW chord, steers the arranger's chord context. A NoteOn with
+  // velocity 0 is a running-status release.
+  //
+  // Phantom-release fix (part 2): only a NoteOn that actually GREW the held set
+  // may re-recognize and publish. A NoteOff — or a duplicate NoteOn — never
+  // re-recognizes, so lifting fingers off an already-delivered chord one note at
+  // a time can no longer pass through a 3-note subset that gets named a new
+  // chord and committed at the next bar with no fresh press. The held set still
+  // holds the delivered chord (chord memory); a truly new chord is formed only
+  // by pressing more keys.
   void observe_chord_input(const MidiMessage& msg) {
+    bool grew = false;
     if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
+      const std::uint8_t before = m_detector.held_count();
       m_detector.note_on(msg.d1);
-    } else if (msg.type() == midi::kNoteOff ||
-               (msg.type() == midi::kNoteOn && msg.d2 == 0)) {
+      grew = m_detector.held_count() > before;
+    } else if (msg.type() == midi::kNoteOff || (msg.type() == midi::kNoteOn && msg.d2 == 0)) {
       m_detector.note_off(msg.d1);
     } else {
       return;  // non-note messages leave the held set (and the chord) untouched
     }
+    if (!grew) {
+      return;  // a release or a redundant press never re-harmonizes
+    }
     ChordState detected;
-    if (m_detector.recognize(detected) && detect_may_follow()) {
+    if (m_detector.recognize(detected)) {
       // The detector always tracks its held set (so the panel can display it);
-      // it only STEERS the band when detection is the selected source (D47).
-      m_chords.set_context(detected.root_pc, detected.quality);
+      // the owner's D47 gate decides whether Producer::kDetect actually steers.
+      // Input model: immediate by default (commit_now), quantized to the next
+      // bar when the host flags SHIFT (stage).
+      m_chords.steer_detect(detected.root_pc, detected.quality, m_detect_quantize);
     }
   }
 
@@ -394,9 +422,9 @@ class Engine {
   Arranger m_arranger;
   ChordDetector m_detector;                 // live piano->chord held-note set
   bool m_chord_detect = false;              // kChordDetect: detection enabled
+  bool m_detect_quantize = false;           // SHIFT staging: immediate by default
   std::uint8_t m_chord_detect_port = 0;     // input port feeding the detector
   InputZone m_input_zone[kMaxPorts] = {};   // Dxx: per-port harmony zone (kMelody default)
-  ChordFollow m_chord_follow = ChordFollow::kAuto;  // D47: who steers the band
   ArpeggiatorEngine m_arp;                  // live keyboard arpeggiator
   bool m_arp_enabled = false;               // kArp: capture + play the input port
   std::uint8_t m_arp_in_port = 0;           // keyboard the arp listens to

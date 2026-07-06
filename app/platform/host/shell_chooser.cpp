@@ -73,24 +73,9 @@ bool Shell::chooser_key(std::uint8_t byte) {
   if (style_step_key(byte)) {
     return true;
   }
-  // A piano musical key sets the style's tonality (key root) live, so you can
-  // audition the picked style/section in any key without leaving the panel.
-  if (const PianoKeyBinding* binding = piano_binding_for(byte)) {
-    constexpr std::uint8_t kPitchClasses = 12;
-    std::uint8_t note = 0;
-    if (piano_midi_note(binding->semitone_from_base, note)) {
-      const std::uint8_t root = static_cast<std::uint8_t>(note % kPitchClasses);
-      m_prefer_flats = key_prefers_flats(root, Mode::kMajor);
-      Command c;
-      c.op = Op::kSet;
-      c.param = Param::kKeySet;
-      c.a = root;
-      c.b = static_cast<std::int32_t>(Mode::kMajor);
-      m_engine.push_command(c, m_sink);
-      (void)push_panels();
-    }
-    return true;
-  }
+  // Note-letters no longer set the scale here: they are routed to the band by the
+  // global steer choke in handle_ui_key BEFORE chooser_key runs. The scale/key is
+  // set only via the `scale`/`key` command now (it does NOT transpose the band).
   // Every other byte is swallowed while the styles panel is focused.
   return true;
 }

@@ -91,8 +91,7 @@ Shell::Shell(EventSink sink)
       }),
       m_chooser(build_style_infos()) {
   m_panels.set_content(PanelId::kFilter, {"filter: channel|port|event|clear (help filter)"});
-  m_panels.set_content(PanelId::kChords,
-                       {"detect: off  (chord detect on|off)", "chord: (no chord)"});
+  m_panels.set_content(PanelId::kChords, {"detect: off  (chord detect on|off)"});
 }
 
 void Shell::print_lines(const std::vector<std::string>& lines) {
@@ -151,30 +150,32 @@ std::string live_chord_label(const ChordState& chord, const NoteNameOptions& opt
   return chord.valid ? pitch_class_name(chord.root_pc, opts) + chord_quality_suffix(chord.quality)
                      : std::string("—");
 }
-// D47: the `chord:` line reads the same in the styles and chords panels — one
-// literal so the two never drift apart.
-constexpr const char* kBandFollowsHint = "   (whole band follows)";
 }  // namespace
 
 void Shell::refresh_styles_content() {
-  // The styles panel IS the chooser: current style/section (bold+colour on the
-  // selection) plus two lines read from the chord engine — the static `key:`
-  // (tonality/frame) AND the live `chord:` the band is harmonizing against, so
-  // the thing that reacts to played keys is visible right where you drive the
-  // band (it is a different thing from the key, the #1 source of confusion).
+  // The styles panel IS the chooser (current style/section, bold+colour on the
+  // selection) plus the THREE-line D53 chord-state readout, grouped right after
+  // the chooser: `original key:` (song tonic, FIXED reference), `current key:`
+  // (the committed followed chord sounding THIS bar — starts == original,
+  // changes only at bar boundaries) and `next key:` (the staged pending chord,
+  // `-` when none, lands at the next bar). This trio used to live in the chords
+  // panel; it moved here so it sits beside the section/style it drives.
   std::vector<std::string> lines = m_chooser.render(m_piano.note_naming, m_style);
   const Key& key = m_engine.chords().key();
   const ChordState& chord = m_engine.chords().state();
+  const ChordState& next = m_engine.chords().pending();
   const NoteNameOptions opts{
       .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
-  // D47 label clarification: `scale:` is the diatonic frame for scale-degree
-  // parts only (it does NOT transpose the band); `chord:` is the live chord the
-  // whole band harmonizes against. Naming them apart kills the #1 confusion.
-  std::string key_line = "scale: " + pitch_class_name(key.root_pc, opts) + " " +
-                         mode_label(key.mode) + "   (scale-degree parts)";
-  std::string chord_line = "chord: " + live_chord_label(chord, opts) + kBandFollowsHint;
+  const ChordQuality home_quality = theory::single_finger_quality(key, key.root_pc);
+  std::string original_line = "original key: " + pitch_class_name(key.root_pc, opts) +
+                              chord_quality_suffix(home_quality) +
+                              "   (song tonic — fixed reference)";
+  std::string current_line = "current key: " + live_chord_label(chord, opts) + "   (this bar)";
+  std::string next_line =
+      "next key: " + (next.valid ? live_chord_label(next, opts) : std::string("-")) +
+      "   (lands next bar)";
   const auto insert_at = lines.empty() ? lines.end() : lines.end() - 1;  // before the hint line
-  lines.insert(insert_at, {key_line, chord_line});
+  lines.insert(insert_at, {original_line, current_line, next_line});
   m_panels.set_content(PanelId::kStyles, std::move(lines));
 }
 
@@ -201,17 +202,15 @@ void Shell::refresh_arp_content() {
 }
 
 void Shell::refresh_chords_content() {
-  // The chords panel reports the live piano->chord state: whether detection is
-  // armed and the chord the arranger is currently harmonizing against (set by
-  // held keys, `chord play`, or a recorded sequence). Chord memory means the
-  // name lingers after the keys are released, until a new chord is played.
-  const ChordState& chord = m_engine.chords().state();
+  // The chords panel is the harmony STATUS panel: detect/follow/mode/scale. The
+  // D53 chord-state trio (`original key:`/`current key:`/`next key:`) moved to
+  // the styles panel, grouped with the chooser it drives — this panel no longer
+  // carries chord-state lines.
   const bool detect = m_engine.chord_detect();
   const ChordMode mode = m_engine.chords().mode();
-  const int need = m_engine.chord_min_notes();
-  const int held = m_engine.chord_held_count();
   const NoteNameOptions opts{
       .naming = m_piano.note_naming, .prefer_flats = m_prefer_flats, .include_octave = false};
+  const Key& scale = m_engine.chords().key();
   std::vector<std::string> lines;
   // detect: say plainly whether played keys steer the band, and how to toggle it.
   lines.push_back(detect ? std::string("detect: on   (chord detect off)")
@@ -225,17 +224,10 @@ void Shell::refresh_chords_content() {
                           : mode == ChordMode::kShell ? "shell"
                                                       : "diatonic";
   lines.push_back(std::string("mode: ") + mode_name + "   (chord mode)");
-  // chord: the live chord, or — while detecting — how many more keys are needed
-  // (so a lone note that does nothing yet reads as "waiting", not "broken").
-  if (chord.valid) {
-    lines.push_back("chord: " + pitch_class_name(chord.root_pc, opts) +
-                    chord_quality_suffix(chord.quality) + kBandFollowsHint);
-  } else if (detect && held > 0) {
-    lines.push_back("chord: (hold " + std::to_string(need) + " — " + std::to_string(held) +
-                    " held)");
-  } else {
-    lines.push_back(std::string("chord: (no chord)"));
-  }
+  // scale: the diatonic frame — it drives single-finger maj/min and scale-degree
+  // parts, and does NOT transpose the band (the #1 source of confusion, D47).
+  lines.push_back("scale: " + pitch_class_name(scale.root_pc, opts) + " " + mode_label(scale.mode) +
+                  "   (single-finger + scale-degree parts)");
   // The chords panel IS the harmony surface: playing its keys steers the band
   // silently. Only worth saying when focused (that is when the keys route here).
   if (chords_focused()) {

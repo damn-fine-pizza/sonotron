@@ -89,7 +89,17 @@ launch_jam() {
 
   # --- synth + wiring ----------------------------------------------------------
   echo "Starting FluidSynth ($soundfont)..."
-  fluidsynth -a pipewire -i -s "$soundfont" >/dev/null 2>&1 &
+  # Match FluidSynth's render rate to PipeWire's (no resampling artefacts) and
+  # give it a roomy period so integrated-audio underruns don't crackle during
+  # sustained play. Bump period-size to 4096 if a crackle still slips through.
+  local pw_rate=48000
+  if command -v pw-metadata >/dev/null 2>&1; then
+    local detected
+    detected="$(pw-metadata -n settings 2>/dev/null | awk -F"'" '/clock\.rate/{print $4; exit}')" || true
+    [ -n "$detected" ] && pw_rate="$detected"
+  fi
+  fluidsynth -a pipewire -o audio.period-size=2048 -o synth.sample-rate="$pw_rate" \
+    -i -s "$soundfont" >/dev/null 2>&1 &
   SYNTH_PID=$!
   local i
   for i in $(seq 1 50); do

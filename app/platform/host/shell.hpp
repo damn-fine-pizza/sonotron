@@ -96,6 +96,13 @@ class Shell {
   const MidiMonitor& monitor() const { return m_monitor; }
   const UiStyle& ui_style() const { return m_style; }
 
+  // Test/inspection seam: how many notes the harmony (chords) surface currently
+  // holds. The harmony surface is output-SUPPRESSED (kHarmony), so it emits no
+  // OutEvent the MidiMonitor could observe; this const accessor is the only way
+  // a test can watch the held-set the way monitor().active_notes() watches the
+  // sounding surfaces. Behaviour-preserving: returns existing state, no logic.
+  std::size_t harmony_held_count() const { return m_harmony_held.size(); }
+
   // Live TUI wires the real terminal capabilities in (a fresh Shell assumes
   // no TTY / no UTF-8, so colors stay off for scripts and tests).
   void configure_terminal(bool is_tty, bool utf8);
@@ -164,6 +171,19 @@ class Shell {
   // view-only shortcuts N/V/C/Z are NOT shared — they stay in the piano branch).
   bool chords_focused() const;
   bool chords_key(std::uint8_t byte);
+
+  // The ONE global chord-steering choke point (spec: steering works from EVERY
+  // panel but the REPL). With a panel focused, a musical note-letter key steers
+  // the band silently through the harmony surface (priority over the panel's own
+  // letter shortcuts), and SPACE flips the harmony key mode. Returns true when it
+  // consumed the byte; false lets handle_ui_key continue to the per-panel
+  // handlers (non-note keys) or, with the REPL focused, to the line editor.
+  bool try_global_steer(std::uint8_t byte);
+
+  // Piano-panel-only shortcuts (variation stepping, N/V/C/Z view keys, and the
+  // octave/transpose keys). Note-letters and SPACE were already consumed by the
+  // global steer choke, so this only sees the non-note piano shortcuts.
+  bool piano_panel_key(std::uint8_t byte);
 
   // Shared surface key handling (piano + chords route through the same code):
   // the SPACE key-mode toggle (labelled per surface) and the musical/octave/

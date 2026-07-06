@@ -36,6 +36,28 @@ arrangrr_test(test_chord unit)
 arrangrr_test(test_chord_seq unit)
 arrangrr_test(test_chord_detect unit)
 arrangrr_test(test_chord_follow functional)
+# test_followed_context: the FollowedContext owner (explicit latch, D47 gate,
+# stage/commit_now/commit_bar, establish_default no-op-if-explicit) plus the
+# release-phantom regression and the immediate-default/shift-quantize input
+# model. Supersedes the old test_chord_quantize (which pinned the removed D53
+# quantized-default primitives). Torquato re-ratifies any further D53->immediate
+# expectations here.
+arrangrr_test(test_followed_context unit)
+# test_chord_context_diagnosis: Torquato QA diagnosis of two user-reported
+# chord-context bugs (idle-playback drift with zero input; a section/style
+# switch resetting a steered chord). Subject is the Engine's own cross-tick
+# and cross-command coordination of the followed chord context -> functional.
+# Currently RED where it pins an open, unfixed defect (see the printed
+# timeline and the CHECK comments in the file); do not silence it.
+arrangrr_test(test_chord_context_diagnosis functional)
+# test_chord_seq_vs_live_steer: Torquato QA reproduction of the owner's
+# live-testing report -- a live chord press only transposes the bar it lands
+# in, the next bar reverts to "the song" (a running ChordSequencer). Subject
+# is the Engine's cross-tick arbitration between fire_chord_seq and a live
+# steer through the FollowedContext owner -> functional. RED under
+# ChordFollow::kAuto (the engine's own default) where it pins the measured
+# clobber; green under ChordFollow::kDetect (the documented mitigation).
+arrangrr_test(test_chord_seq_vs_live_steer functional)
 # test_input_zone: the Engine's per-port InputZone route-vs-suppress split and
 # the detector's scale-aware single-finger steering, driven through the ABI ->
 # the subject is the integration, so `functional`.
