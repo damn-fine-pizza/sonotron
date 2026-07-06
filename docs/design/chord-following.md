@@ -58,20 +58,24 @@ As built:
   the plain-TTY toggle accumulated the held set and the detector rooted on the
   lowest note.)
 - **The `ChordSequencer` is a separate, optional backing track**, *not* the
-  style. When it runs it commits its own chord every bar; under the engine
-  default `ChordFollow::kAuto` (last-writer-wins) it **overrides** a live chord.
-  Path 1 ships with the sequencer **off** (`demo/jam/setup.acmd` leaves the
-  `seq …` block commented), so live steering is the sole writer and persists.
+  style. The engine default is now **`ChordFollow::kLivePriority`** (ABI-additive):
+  while you HOLD a live chord it beats the sequencer — the band follows your finger
+  and the sequencer comps its rhythm on your chord (no clash); when you release, the
+  sequencer's next step resumes its own progression. With no sequencer a live chord
+  latches (chord memory). `kAuto` (last-writer race) is kept only as an explicit
+  legacy mode. Path 1's demo (`demo/jam/setup.acmd`) still ships with the sequencer
+  off, but live-priority means a running sequencer no longer clobbers live steering.
 
-Remaining work to fully close the shipped standard:
+Status of the shipped standard:
 
-- **Re-ratify** the chord-context tests to the immediate-commit model and the
-  panel-label rename (`original` / `current` / `next` key). *(pending)*
-- **Decide live-vs-sequencer arbitration** for when a sequencer *is* running:
-  live input should **win** over the sequencer instead of racing under `kAuto`.
-  This is the same crossroads Pivot answers differently; until it is taken, Path 1
-  simply does not run a competing sequencer.
-- *(done)* Single-finger replace — A→S and G→H no longer collapse to one root.
+- *(done)* **Live-vs-sequencer arbitration — live-priority.** Live input wins over
+  the sequencer while held; the sequencer follows the live chord and resumes on
+  release (`kLivePriority`, decided at the `fire_chord_seq` call site, not the static
+  gate). This is the crossroads Pivot answers differently — Pivot re-*keys* the whole
+  running progression instead of momentarily overriding it.
+- *(done)* **Chord-context tests re-ratified** to the immediate-commit model and the
+  panel-label rename (`original` / `current` / `next` key).
+- *(done)* **Single-finger replace** — A→S and G→H no longer collapse to one root.
 
 ## 3. Pivot — the novel feature (PARKED)
 
@@ -99,5 +103,5 @@ replacement, determinism/ABI):
 
 | Feature | State |
 |---|---|
-| Literal chord follow (Path 1) | **Shipping.** Single-finger replace fixed; test re-ratification + seq-arbitration pending. |
+| Literal chord follow (Path 1) | **Shipping.** Single-finger replace fixed; tests re-ratified; live-vs-sequencer arbitration decided + shipped (`kLivePriority`). |
 | Pivot | **Parked**, fully specified, name assigned. Returns as an opt-in mode on a running sequencer. |

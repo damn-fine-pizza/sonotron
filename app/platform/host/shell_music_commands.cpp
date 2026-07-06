@@ -218,7 +218,7 @@ bool Shell::cmd_chord(const std::vector<std::string>& t, std::string& error) {
     // last-writer-wins; the others narrow it to a single named source.
     ChordFollow follow{};
     if (t.size() < 3 || !parse_chord_follow(t[2], follow)) {
-      error = "chord follow auto|detect|sequencer|manual";
+      error = "chord follow auto|detect|sequencer|manual|live";
       return false;
     }
     Command c;

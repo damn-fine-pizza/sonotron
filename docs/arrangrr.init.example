@@ -23,9 +23,14 @@
 # and to make an explicit session self-describing.
 chord mode single
 
-# Only your live keys (played on the chords panel) steer the band. The chord
-# sequencer and `chord play` never override your finger (DESIGN.md D47).
-chord follow detect
+# Live-priority chord following (the engine default): your live keys always beat
+# the chord sequencer while held — the band follows your finger and the sequencer
+# (if one runs) comps on your chord; when you let go the sequencer resumes. With no
+# sequencer a live chord simply latches. This line is REDUNDANT (kLivePriority is
+# already the default) but keeps the session self-describing. Alternatives:
+# `chord follow detect` (detect-only, the sequencer never steers) or
+# `chord follow sequencer` (a recorded progression drives hands-free).
+chord follow live
 
 # Load a style so there is a band to hear. Swap for any builtin:
 #   basic pop rock ballad funk disco house swing bossa samba
