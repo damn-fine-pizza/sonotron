@@ -105,9 +105,10 @@ constexpr UiTheme kDefaultTheme = {
         {.foreground = kCyan},                                 // kInputPrompt
         {.bold = true, .foreground = kCyan},                   // kHelpTopic
         {.bold = true, .reverse = true},                       // kPianoActiveKey
-        {.foreground = kGreen},                                // kMidiNoteOn
+        {.bold = true, .foreground = kGreen},                  // kMidiNoteOn
         {.dim = true},                                         // kMidiNoteOff
         {.foreground = kYellow},                               // kMidiDrum
+        {.bold = true, .foreground = kYellow},                 // kMidiNotePending
         {.bold = true, .foreground = kYellow},                 // kWarning
         {.bold = true, .foreground = kRed},                    // kError
         {.bold = true, .foreground = kGreen},                  // kSuccess
@@ -129,6 +130,7 @@ constexpr UiTheme kMonoTheme = {
         {.bold = true},                   // kMidiNoteOn
         {.dim = true},                    // kMidiNoteOff
         {.bold = true},                   // kMidiDrum
+        {.bold = true, .reverse = true},  // kMidiNotePending
         {.bold = true},                   // kWarning
         {.bold = true, .reverse = true},  // kError
         {.bold = true},                   // kSuccess
@@ -150,6 +152,7 @@ constexpr UiTheme kHighContrastTheme = {
         {.bold = true, .foreground = kGreen},    // kMidiNoteOn
         {.bold = true, .foreground = kBlue},     // kMidiNoteOff
         {.bold = true, .foreground = kMagenta},  // kMidiDrum
+        {.bold = true, .foreground = kYellow},   // kMidiNotePending
         {.bold = true, .foreground = kYellow},   // kWarning
         {.bold = true, .foreground = kRed},      // kError
         {.bold = true, .foreground = kGreen},    // kSuccess
@@ -171,6 +174,7 @@ constexpr UiTheme kDarkTheme = {
         {.bold = true, .foreground = kGreen},                  // kMidiNoteOn
         {.dim = true},                                         // kMidiNoteOff
         {.bold = true, .foreground = kYellow},                 // kMidiDrum
+        {.bold = true, .foreground = kYellow},                 // kMidiNotePending
         {.bold = true, .foreground = kYellow},                 // kWarning
         {.bold = true, .foreground = kRed},                    // kError
         {.bold = true, .foreground = kGreen},                  // kSuccess
@@ -190,9 +194,10 @@ constexpr UiTheme kLightTheme = {
         {.bold = true, .foreground = kBlue},                   // kInputPrompt
         {.bold = true, .foreground = kMagenta},                // kHelpTopic
         {.bold = true, .reverse = true},                       // kPianoActiveKey
-        {.foreground = kBlue},                                 // kMidiNoteOn
+        {.bold = true, .foreground = kBlue},                   // kMidiNoteOn
         {.dim = true},                                         // kMidiNoteOff
         {.foreground = kMagenta},                              // kMidiDrum
+        {.bold = true, .foreground = kMagenta},                // kMidiNotePending
         {.bold = true, .foreground = kMagenta},                // kWarning
         {.bold = true, .foreground = kRed},                    // kError
         {.bold = true, .foreground = kGreen},                  // kSuccess
@@ -214,6 +219,7 @@ constexpr UiTheme kMatrixTheme = {
         {.bold = true, .foreground = kGreen},                   // kMidiNoteOn
         {.dim = true, .foreground = kGreen},                    // kMidiNoteOff
         {.foreground = kGreen},                                 // kMidiDrum
+        {.reverse = true, .foreground = kGreen},                // kMidiNotePending
         {.bold = true, .foreground = kGreen},                   // kWarning
         {.bold = true, .reverse = true, .foreground = kGreen},  // kError
         {.bold = true, .foreground = kGreen},                   // kSuccess

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "arrangrr/chord/theory.hpp"
 #include "midi_monitor.hpp"
 #include "note_names.hpp"
 #include "ui_style.hpp"
@@ -53,6 +54,26 @@ enum class KeyboardNoteLabelMode { kWhiteKey, kBlackKey };
 std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming,
                                        KeyboardNoteLabelMode mode);
 
+// Harmony overlay for the keyboard visualizer (roadmap 11410): colour keys by
+// the FOLLOWED chord, not just by the live sounding notes. Each field is a
+// 12-bit pitch-class set (bit p set => pitch class p belongs to the chord),
+// applied across every octave of the keyboard. `committed_pcs` are the notes of
+// the chord the band follows THIS bar (the committed FollowedContext, shown
+// green); `pending_pcs` are the shift-quantized NEXT chord that lands on the
+// next bar (D53, shown amber). A key already sounding (live piano key or
+// arranger output) keeps its own colour; the overlay only paints keys that are
+// otherwise idle, and committed wins over pending on a shared pitch class.
+// Both zero by default, so the overloads without an overlay render unchanged.
+struct PianoChordOverlay {
+  std::uint16_t committed_pcs = 0;  // green: the chord followed this bar
+  std::uint16_t pending_pcs = 0;    // amber: the staged next chord (D53)
+};
+
+// The pitch-class set (bit p => pitch class p present) of a followed chord,
+// derived by stacking the quality's chord tones (theory::shape_of) on the root.
+// Returns an empty set when the chord is not valid.
+std::uint16_t chord_pitch_class_set(const ChordState& chord);
+
 // Renders the panel for the given terminal width. Never emits a line longer
 // than terminal_columns (defensive truncation at the end). This overload
 // renders the keyboard against an empty static monitor (no active notes, no
@@ -68,5 +89,15 @@ std::vector<std::string> render_piano_panel(const PianoViewState& state, int ter
                                             const MidiMonitor& monitor,
                                             const MidiEventFilter& filter,
                                             const MidiViewOptions& options, const UiStyle& style);
+
+// As above, plus the harmony overlay (roadmap 11410): keyboard keys whose pitch
+// class is in `overlay.committed_pcs` light green and those in
+// `overlay.pending_pcs` light amber, unless a live/arranger note already claims
+// them. The overlay only affects the keyboard view.
+std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
+                                            const MidiMonitor& monitor,
+                                            const MidiEventFilter& filter,
+                                            const MidiViewOptions& options, const UiStyle& style,
+                                            const PianoChordOverlay& overlay);
 
 }  // namespace arrangrr::host

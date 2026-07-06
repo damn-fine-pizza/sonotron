@@ -122,8 +122,25 @@ void Shell::refresh_piano_content() {
   // The piano regenerates at its CELL width (half the terminal in a two-per-row
   // grid), so its compact/minimal tiers pick the layout that fits.
   const int width = m_panels.cell_width(PanelId::kPiano, panel_columns());
-  m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, width, m_monitor, m_filter,
-                                                           m_view_options, m_style));
+  // Harmony visualizer (roadmap 11410): colour the keyboard by the FOLLOWED
+  // chord — green for the chord the band follows this bar (the committed
+  // FollowedContext), amber for the shift-staged next chord (D53). The chord
+  // status the styles panel already reads is the single source of truth here.
+  //
+  // Green only when the followed chord is genuinely ACTIVE — transport playing
+  // or a producer explicitly steered it — never for the passive home-tonic
+  // default establish_default() seeds at rest; otherwise the keyboard would
+  // show a "sounding" chord nobody is actually following (owner feedback).
+  const bool chord_active = m_engine.transport().playing() || m_engine.chords().explicit_set();
+  const std::uint16_t committed_pcs =
+      chord_active ? chord_pitch_class_set(m_engine.chords().state()) : std::uint16_t{0};
+  const PianoChordOverlay overlay{
+      .committed_pcs = committed_pcs,
+      .pending_pcs = chord_pitch_class_set(m_engine.chords().pending()),
+  };
+  m_panels.set_content(PanelId::kPiano,
+                       render_piano_panel(m_piano, width, m_monitor, m_filter, m_view_options,
+                                          m_style, overlay));
 }
 
 namespace {

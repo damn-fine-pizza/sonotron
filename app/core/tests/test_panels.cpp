@@ -670,6 +670,94 @@ void test_piano_styling() {
   CHECK(has_escape(*el_line_on));
 }
 
+// Roadmap 11410: the keyboard harmony overlay colours keys by the FOLLOWED
+// chord — green for the committed chord (this bar), amber for the staged next
+// chord — distinct from the live/arranger sounding notes, and still legible
+// with colours off.
+//
+// This exercises the pure render seam: PianoChordOverlay is constructed
+// directly here, as Shell::refresh_piano_content would once it has already
+// decided the followed chord is ACTIVE (transport playing or an explicit
+// steer) — the gate itself is Shell-side production logic, covered end to end
+// by test_piano_harmony_gate_at_rest (test_host.cpp), which also proves the
+// at-rest home-tonic default paints NO overlay green.
+void test_piano_harmony_overlay() {
+  // chord_pitch_class_set stacks the quality's chord tones on the root.
+  const ChordState c_major{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  CHECK(chord_pitch_class_set(c_major) == ((1U << 0) | (1U << 4) | (1U << 7)));  // C E G
+  const ChordState g_major{.root_pc = 7, .quality = ChordQuality::kMaj, .valid = true};
+  CHECK(chord_pitch_class_set(g_major) == ((1U << 7) | (1U << 11) | (1U << 2)));  // G B D
+  CHECK(chord_pitch_class_set(ChordState{}) == 0);  // invalid: no tones
+
+  const MidiEventFilter filter{};
+  const MidiViewOptions options{};
+
+  UiStyle on;
+  on.set_color_mode(ColorMode::kOn);  // default theme, colours forced on
+  const UiStyle off{};                // colours off: glyph-marker fallback
+
+  // Committed C major (green), pending G major (amber). They share G (pc 7): the
+  // committed chord must win that key. Base octave 4, so on the white row:
+  //   'A'=C4 'D'=E4 'G'=G4  committed;  'S'=D4 'J'=B4 pending;  green 'G' wins.
+  const PianoChordOverlay overlay{
+      .committed_pcs = chord_pitch_class_set(c_major),
+      .pending_pcs = chord_pitch_class_set(g_major),
+  };
+
+  // (a)+(b): with colours on, committed keys carry the green note-on role and
+  // pending keys carry the new amber role, and the two roles are visibly
+  // different (green != amber).
+  const MidiMonitor empty;  // no live/arranger notes: the overlay owns every key
+  const PianoViewState keyboard;
+  const std::vector<std::string> on_lines =
+      render_piano_panel(keyboard, 100, empty, filter, options, on, overlay);
+
+  const std::string green_a = on.apply(UiRole::kMidiNoteOn, "A");       // C4 committed
+  const std::string green_d = on.apply(UiRole::kMidiNoteOn, "D");       // E4 committed
+  const std::string green_g = on.apply(UiRole::kMidiNoteOn, "G");       // G4 committed (shared pc)
+  const std::string amber_s = on.apply(UiRole::kMidiNotePending, "S");  // D4 pending
+  const std::string amber_j = on.apply(UiRole::kMidiNotePending, "J");  // B4 pending
+  const std::string amber_g = on.apply(UiRole::kMidiNotePending, "G");  // must NOT appear
+  CHECK(green_a != amber_s);  // green and amber are visibly distinct roles
+  CHECK(any_line_contains(on_lines, green_a.c_str()));
+  CHECK(any_line_contains(on_lines, green_d.c_str()));
+  CHECK(any_line_contains(on_lines, green_g.c_str()));
+  CHECK(any_line_contains(on_lines, amber_s.c_str()));
+  CHECK(any_line_contains(on_lines, amber_j.c_str()));
+  CHECK(!any_line_contains(on_lines, amber_g.c_str()));  // committed wins the shared G
+
+  // A key already sounding keeps its own colour: a live piano C4 stays the piano
+  // key, not committed-green.
+  MidiMonitor live;
+  live.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
+  const std::vector<std::string> on_live =
+      render_piano_panel(keyboard, 100, live, filter, options, on, overlay);
+  CHECK(any_line_contains(on_live, on.apply(UiRole::kPianoActiveKey, "A").c_str()));
+  CHECK(!any_line_contains(on_live, green_a.c_str()));  // piano beat the overlay
+
+  // (c): colours off still distinguishes the sources by glyph marker — piano
+  // "*A*", pending "(S)"/"(J)"; committed stays plain (no marker).
+  const std::vector<std::string> off_lines =
+      render_piano_panel(keyboard, 100, live, filter, options, off, overlay);
+  CHECK(any_line_contains(off_lines, "*A*"));  // live piano key
+  CHECK(any_line_contains(off_lines, "(S)"));  // pending amber, colours-off marker
+  CHECK(any_line_contains(off_lines, "(J)"));
+  CHECK(!any_line_contains(off_lines, "(A)"));  // A is the piano key, not pending
+  CHECK(!any_line_contains(off_lines, "(D)"));  // D is committed -> plain, unmarked
+  CHECK(!any_line_contains(off_lines, "*D*"));
+  for (const std::string& line : off_lines) {  // colours off: no SGR anywhere
+    CHECK(!has_escape(line));
+  }
+
+  // No overlay -> byte-identical to the pre-11410 render (no regression).
+  const std::vector<std::string> plain_no_overlay =
+      render_piano_panel(keyboard, 100, empty, filter, options, on);
+  const std::vector<std::string> plain_empty_overlay =
+      render_piano_panel(keyboard, 100, empty, filter, options, on, PianoChordOverlay{});
+  CHECK(plain_no_overlay == plain_empty_overlay);
+  CHECK(!any_line_contains(plain_empty_overlay, green_a.c_str()));  // empty overlay lights nothing
+}
+
 }  // namespace
 
 int main() {
@@ -693,6 +781,7 @@ int main() {
   test_midi_monitor_observe();
   test_monitor_renderers();
   test_piano_styling();
+  test_piano_harmony_overlay();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_panels: all OK\n");
   }

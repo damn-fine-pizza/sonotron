@@ -20,10 +20,12 @@ constexpr unsigned kMidiChannelCount = 16;
 
 }  // namespace piano_keys
 
-// Who is sounding a given MIDI note right now: nothing, the user's piano keys,
-// or the arranger/sequencer (external). Distinguished so the keyboard can show
-// both but tell them apart (by colour) — see key_glyph.
-enum class ActiveSource : std::uint8_t { kNone, kPiano, kOther };
+// Why a given keyboard key is lit: nothing, the user's piano keys, the
+// arranger/sequencer output (external), or the harmony overlay — a committed
+// followed-chord tone (kOther, green) or a staged next-chord tone (kPending,
+// amber, roadmap 11410). Distinguished so the keyboard can show them all but
+// tell them apart by colour — see key_glyph.
+enum class ActiveSource : std::uint8_t { kNone, kPiano, kOther, kPending };
 
 // Indexed by MIDI note number so the check is a flat lookup.
 using ActiveNoteMask = std::array<ActiveSource, piano_keys::kMidiNoteCount>;
@@ -197,24 +199,55 @@ std::size_t max_label_width(const std::array<std::string, kWhiteKeyCount>& white
   return width;
 }
 
-// Renders a computer-key glyph, marking it when its note is sounding. With
-// colours ON the single char is styled in place (piano = kPianoActiveKey,
-// arranger = kMidiNoteOn) — SAME width, so the grid never shifts or truncates.
-// With colours OFF there is no colour to tell sources apart, so only the user's
-// own keys get the width-changing "*A*" marker; external notes stay plain.
+// The semantic role for a lit source: piano keys reverse-highlight, committed
+// followed-chord tones (kOther) go green note-on, staged next-chord tones
+// (kPending) go amber. kNone has no role and is never asked for.
+UiRole source_role(ActiveSource source) {
+  switch (source) {
+    case ActiveSource::kPiano:
+      return UiRole::kPianoActiveKey;
+    case ActiveSource::kPending:
+      return UiRole::kMidiNotePending;
+    case ActiveSource::kNone:
+    case ActiveSource::kOther:
+      break;
+  }
+  return UiRole::kMidiNoteOn;
+}
+
+// The colours-OFF distinguishing marker for a source (no colour is available to
+// tell sources apart, so the glyph itself must). The user's own keys wear
+// "*A*", staged next-chord keys wear "(A)"; committed/arranger keys stay plain.
+// These wrappers change the visible width, so callers position by visible
+// column, never byte size.
+std::string plain_marker(ActiveSource source, const std::string& glyph) {
+  switch (source) {
+    case ActiveSource::kPiano:
+      return "*" + glyph + "*";
+    case ActiveSource::kPending:
+      return "(" + glyph + ")";
+    case ActiveSource::kNone:
+    case ActiveSource::kOther:
+      break;
+  }
+  return glyph;
+}
+
+// Renders a computer-key glyph, marking it when its note is lit. With colours ON
+// the single char is styled in place (SAME width, so the grid never shifts or
+// truncates); with colours OFF the width-changing text markers of plain_marker
+// tell the sources apart instead.
 std::string key_glyph(char key, ActiveSource source, const UiStyle& style) {
   const std::string glyph(1, key);
   if (source == ActiveSource::kNone) {
     return glyph;
   }
 
-  const UiRole role =
-      source == ActiveSource::kPiano ? UiRole::kPianoActiveKey : UiRole::kMidiNoteOn;
   if (style.colors_enabled()) {
-    return style.apply(role, glyph);  // one visible column, colour-marked
+    return style.apply(source_role(source), glyph);  // one visible column, colour-marked
   }
 
-  return source == ActiveSource::kPiano ? "*" + glyph + "*" : glyph;
+  return plain_marker(source, glyph);
 }
 
 // Builds the four keyboard rows (black keys, black labels, white keys, white
@@ -305,13 +338,14 @@ std::vector<std::string> render_minimal_keys(const PianoViewState& state, int te
       std::size_t entry_visible = entry.size();
       const ActiveSource src = active[midi];
       if (src != ActiveSource::kNone) {
-        const UiRole role =
-            src == ActiveSource::kPiano ? UiRole::kPianoActiveKey : UiRole::kMidiNoteOn;
         if (style.colors_enabled()) {
-          entry = style.apply(role, entry);  // same visible width
-        } else if (src == ActiveSource::kPiano) {
-          entry = "*" + entry + "*";
-          entry_visible += 2;  // the surrounding "*...*" markers
+          entry = style.apply(source_role(src), entry);  // same visible width
+        } else {
+          const std::string marked = plain_marker(src, entry);
+          if (marked.size() != entry.size()) {
+            entry_visible += 2;  // the surrounding "*...*" / "(...)" markers
+          }
+          entry = marked;
         }
       }
 
@@ -368,7 +402,8 @@ std::string compact_note_name(std::uint8_t midi_note, NoteNaming naming) {
 // keys (source_key != 0) always light; the arranger/sequencer output
 // (source_key == 0) lights only when `show_external` is on, so pressing play
 // does not make the whole chord look pressed unless the user asked to see it.
-ActiveNoteMask active_note_mask(const MidiMonitor& monitor, bool show_external) {
+ActiveNoteMask active_note_mask(const MidiMonitor& monitor, bool show_external,
+                                const PianoChordOverlay& overlay) {
   ActiveNoteMask mask{};
 
   const ActiveNoteTracker& tracker = monitor.active_notes();
@@ -381,6 +416,22 @@ ActiveNoteMask active_note_mask(const MidiMonitor& monitor, bool show_external) 
       mask[n.note] = ActiveSource::kPiano;
     } else if (show_external && mask[n.note] == ActiveSource::kNone) {
       mask[n.note] = ActiveSource::kOther;
+    }
+  }
+
+  // The harmony overlay (roadmap 11410) paints keys by pitch class across every
+  // octave, but only where no live/arranger note already claims the key — those
+  // keep their own source. Committed (green) wins over pending (amber) when a
+  // pitch class belongs to both the current and the next chord.
+  for (std::size_t note = 0; note < piano_keys::kMidiNoteCount; ++note) {
+    if (mask[note] != ActiveSource::kNone) {
+      continue;
+    }
+    const auto bit = static_cast<std::uint16_t>(1U << (note % piano_keys::kSemitonesPerOctave));
+    if ((overlay.committed_pcs & bit) != 0) {
+      mask[note] = ActiveSource::kOther;
+    } else if ((overlay.pending_pcs & bit) != 0) {
+      mask[note] = ActiveSource::kPending;
     }
   }
 
@@ -408,7 +459,7 @@ UiRole note_event_role(bool is_drum, bool active) {
 
 std::vector<std::string> render_keyboard(const PianoViewState& state, int terminal_columns,
                                          const MidiMonitor& monitor, const MidiViewOptions& options,
-                                         const UiStyle& style) {
+                                         const UiStyle& style, const PianoChordOverlay& overlay) {
   // The keyboard view is just the header + the keys: the dedicated `events`
   // panel owns the live event stream now, so the old in-panel event strip is
   // redundant and only stole the height the keyboard needs. Active notes still
@@ -416,7 +467,7 @@ std::vector<std::string> render_keyboard(const PianoViewState& state, int termin
   // events inside the piano panel for anyone who wants them there.)
   std::vector<std::string> lines{header_line(state)};
 
-  const ActiveNoteMask active = active_note_mask(monitor, options.show_external_keys);
+  const ActiveNoteMask active = active_note_mask(monitor, options.show_external_keys, overlay);
 
   std::vector<std::string> keys;
   if (terminal_columns >= piano_layout::kWideMinColumns) {
@@ -579,10 +630,24 @@ std::string format_keyboard_note_label(std::uint8_t midi_note, NoteNaming naming
   return label;
 }
 
+std::uint16_t chord_pitch_class_set(const ChordState& chord) {
+  if (!chord.valid) {
+    return 0;
+  }
+  const ChordShape shape = theory::shape_of(chord.quality);
+  std::uint16_t pcs = 0;
+  for (std::uint8_t i = 0; i < shape.count; ++i) {
+    const unsigned pc = (chord.root_pc + shape.offsets[i]) % piano_keys::kSemitonesPerOctave;
+    pcs = static_cast<std::uint16_t>(pcs | (1U << pc));
+  }
+  return pcs;
+}
+
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
                                             const MidiMonitor& monitor,
                                             const MidiEventFilter& filter,
-                                            const MidiViewOptions& options, const UiStyle& style) {
+                                            const MidiViewOptions& options, const UiStyle& style,
+                                            const PianoChordOverlay& overlay) {
   if (terminal_columns < piano_layout::kMinimalMinColumns) {
     return {kTooNarrowMessage};
   }
@@ -590,7 +655,7 @@ std::vector<std::string> render_piano_panel(const PianoViewState& state, int ter
   std::vector<std::string> lines;
   switch (state.view) {
     case PianoView::kKeyboard:
-      lines = render_keyboard(state, terminal_columns, monitor, options, style);
+      lines = render_keyboard(state, terminal_columns, monitor, options, style, overlay);
       break;
     case PianoView::kActiveNotes:
       lines = render_active_notes(state, monitor, style);
@@ -603,6 +668,16 @@ std::vector<std::string> render_piano_panel(const PianoViewState& state, int ter
   truncate_lines(lines, terminal_columns);
 
   return lines;
+}
+
+std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns,
+                                            const MidiMonitor& monitor,
+                                            const MidiEventFilter& filter,
+                                            const MidiViewOptions& options, const UiStyle& style) {
+  // No harmony overlay: renders exactly as the overlay-aware path with empty
+  // pitch-class sets, so pre-11410 callers are unaffected.
+  return render_piano_panel(state, terminal_columns, monitor, filter, options, style,
+                            PianoChordOverlay{});
 }
 
 std::vector<std::string> render_piano_panel(const PianoViewState& state, int terminal_columns) {

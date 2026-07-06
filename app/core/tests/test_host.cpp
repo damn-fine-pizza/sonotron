@@ -1508,6 +1508,78 @@ void test_theme_switch_restyles_titles() {
   CHECK(!still_escape);  // colors off -> no escapes anywhere
 }
 
+// Owner follow-up to roadmap 11410: the keyboard's committed (green) harmony
+// overlay must light ONLY when the followed chord is genuinely ACTIVE —
+// transport playing or a producer explicitly steered it — never for the
+// passive home-tonic default `establish_default()` seeds on style load. This
+// is the real production gate in Shell::refresh_piano_content, exercised end
+// to end (not the pure render seam, which cannot see the gate).
+void test_piano_harmony_gate_at_rest() {
+  ShellFixture f;
+  f.shell.set_width_provider([] { return 200; });  // wide: the grid tier, single-glyph keys
+  std::vector<std::string> panel;
+  f.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel = lines;
+    return true;
+  });
+  CHECK(f.run("colors on"));
+  CHECK(f.run("panel open piano"));
+
+  const UiStyle& style = f.shell.ui_style();
+  const std::string green_a = style.apply(UiRole::kMidiNoteOn, "A");  // C4, the tonic root key
+  auto has_green = [&] {
+    for (const std::string& line : panel) {
+      if (line.find(green_a) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Loading a style seeds the home tonic via establish_default: the followed
+  // chord becomes valid (C major) but NOT explicit, and transport is stopped —
+  // this is the "at rest" state the owner called out. No green. (The piano
+  // panel is only repainted on demand — main.cpp's redraw timer does this in
+  // production — so the test drives it explicitly via refresh_panels(),
+  // exactly like `chord play`/`transport start` below.)
+  CHECK(f.run("style load basic"));
+  f.shell.refresh_panels();
+  CHECK(f.shell.engine().chords().state().valid);        // home tonic seeded
+  CHECK(!f.shell.engine().chords().explicit_set());      // but never steered
+  CHECK(!f.shell.engine().transport().playing());        // and not playing
+  CHECK(!has_green());                                   // -> overlay stays off
+
+  // An explicit steer while STILL stopped activates the overlay (part a).
+  CHECK(f.run("chord play C"));
+  f.shell.refresh_panels();
+  CHECK(f.shell.engine().chords().explicit_set());
+  CHECK(has_green());
+
+  // Transport playing also activates the overlay on its own — a second, fresh
+  // fixture that is never explicitly steered, just running.
+  ShellFixture g;
+  g.shell.set_width_provider([] { return 200; });
+  std::vector<std::string> panel2;
+  g.shell.set_panel_hook([&](const std::vector<std::string>& lines) {
+    panel2 = lines;
+    return true;
+  });
+  CHECK(g.run("colors on"));
+  CHECK(g.run("panel open piano"));
+  CHECK(g.run("style load basic"));
+  CHECK(g.run("transport start"));
+  g.shell.refresh_panels();
+  CHECK(g.shell.engine().transport().playing());
+  CHECK(!g.shell.engine().chords().explicit_set());
+  bool has_green2 = false;
+  for (const std::string& line : panel2) {
+    if (line.find(green_a) != std::string::npos) {
+      has_green2 = true;
+    }
+  }
+  CHECK(has_green2);
+}
+
 // Harmony-global-steer fixture: the piano panel is now a STEERING surface — its
 // note keys drive the SILENT harmony port (kHarmony, output-suppressed), so a
 // press re-harmonizes the band with NO audible note. There is therefore nothing
@@ -2283,6 +2355,7 @@ int main() {
   test_style_stepping_and_reclamp();
   test_step_mirrors_chooser();
   test_theme_switch_restyles_titles();
+  test_piano_harmony_gate_at_rest();
   test_piano_key_dispatch();
   test_piano_focus_shortcuts();
   test_kitty_key_parser();
