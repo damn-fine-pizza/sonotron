@@ -42,16 +42,24 @@ Band-in-a-Box + a modular generative rig it wins on ground nobody holds.
 Recording and clip-prep are in scope and central — in **MIDI / session** form.
 "Not a DAW" is only about the audio-timeline surface.
 
-## Audio (the one asterisk, and its rule)
+## Audio (arrangeable color, realized off-core)
 
-The **core is MIDI-only, forever (D1)** — it never records, edits, or plays back
-audio waveforms; that is *why* STM32 (D2/D33), determinism, and reproducibility
-work at all.
+The **core makes no sound and processes no audio, forever (D1)** — it never records,
+edits, or plays back waveforms; that is *why* STM32 (D2/D33), determinism, and
+reproducibility work at all. But it is not literally "MIDI-only": the core is a
+**realization-free SYMBOLIC arrangement brain** — it DECIDES both MIDI events *and*
+audio-clip deployment (opaque references, "deploy clip N at bar X"), and REALIZES
+neither. Symmetric to "a Program is a MIDI reference to an external sound." So
+**"MIDI-only" is retired as the PRODUCT slogan** (the workstation product is
+MIDI + audio + VST — see `docs/design/workstation-vision.md`); the core itself stays
+realization-free and STM32-capable.
 
-Sound, if you want it, lives in **`melodd`** — a host-only audio companion
-(D43): the optional soft-synth sink grown into an engine. Rules:
+Sound/audio, when present, is realized by **`melodd`** (and a sampler/clip engine) — a
+host-only audio companion (D43), a **separate, OPTIONAL peer** at the Engines tier that
+the core USES, never embeds; absent (STM32, or a host without audio) → graceful no-op.
+Rules:
 - `melodd` is authoritative over **sound**, never over **time**; the core never
-  learns that `melodd` (or a microphone) exists.
+  learns that `melodd` (or a microphone) exists — it emits symbolic decisions a peer realizes.
 - External audio **input** (voice/instrument) enters only inside `melodd` as an
   **opaque, content-addressed asset** the command/seed log *points to but never
   regenerates* — the seed owns every note and not one sample. Loop-to-clock yes;
@@ -88,13 +96,16 @@ arrangrr is the **invariant kernel** on every target (freestanding, portable).
 still means two name-blind libraries + an orchestrator layer — never mutual
 `#include`, never an `#ifdef melodd` inside the core.
 
-## Naming — open
+## Naming — decided 2026-07-07
 
 Category term to use internally instead of "DAW": **generative arranger /
-live-instrument**. Product name is undecided; candidates by register:
-- band/sideman: *Sideman*, *Bandmate*, *Combo*, *Consort*;
-- director/co-pilot: *Maestro*, *Copilot*, *Director*;
-- brand family: *arrangrr Live / Stage / Deck* (avoid *Studio/Workstation* — DAW
-  pull).
+live-instrument**.
 
-Decide the name against this page, not against a feature list.
+The names are fixed:
+- **sonotron** — the outer, host-only workstation product (the "intention-driven
+  workstation"; see `docs/design/workstation-vision.md`).
+- **arrangrr** — the core symbolic MIDI-brain component (this page): STM32-capable,
+  realization-free.
+- **melodd** — the optional host-only audio peer engine (D43) that realizes sound.
+
+Decided against this page, not against a feature list.
