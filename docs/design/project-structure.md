@@ -12,8 +12,11 @@ executed on branch `repo-restructure`. Companions: `product-identity.md` (arrang
 orchestrate them. Today the repo *is* arrangrr, undifferentiated; the restructure turns arrangrr
 into **one component among several** under the sonotron umbrella (`project(sonotron)`).
 
-- **gui-sonotron** is the principal deliverable — a **desktop app** (host, Dear ImGui) that
-  orchestrates the components into the intention-driven workstation.
+- **gui-sonotron** is the principal frontend — a **desktop app** (host, Dear ImGui) that is a
+  **pure client** (D38): it talks to the backend over the UDS-JSONL socket and **never links the
+  components**. A separate backend (**sonotron-host**) links the components and serves that socket.
+  Both are FUTURE (arrive with the GUI spike + the orchestrator); today the socket-serving role is
+  played by `cli-arrangrr`.
 - The collection can spawn **other deliverables** (other apps, other orchestrations): `apps/` is
   extensible by construction. `cli-arrangrr` is one such — a dev/util frontend on the brain alone.
 
@@ -21,19 +24,20 @@ into **one component among several** under the sonotron umbrella (`project(sonot
 
 ```
 sonotron/                    project(sonotron)
-├── apps/                    deliverables — each an orchestrator wiring a chosen set of components
-│   ├── gui-sonotron/        the product: ImGui + orchestration (host, desktop)
+├── apps/                    deliverables — orchestrators (link components) and pure clients (socket)
+│   ├── gui-sonotron/        FUTURE · desktop frontend — ImGui pure client via socket (D38, no links)
+│   ├── sonotron-host/       FUTURE · host backend — links the components + serves the socket
 │   ├── demo/                demonstration apps (clean · jam · shared lib)
-│   └── tools/               cli-arrangrr · arrstyle-converter · arrstyle-extractor
+│   └── tools/               cli-arrangrr (host CLI + today's socket server) · arrstyle-converter · arrstyle-extractor
 ├── components/              OUR libraries — flat; target-regime is a declared property, not a folder
 │   ├── arrangrr/            freestanding · the arranger (+ transport, + sequencing, + harmony,
-│   │                        + midi-fx as modules) · also carries the thin arm entrypoint
-│   ├── hostrt/              host · runtime: UDS, sink, broadcast (ex arrangrr_host)
+│   │                        + midi-fx as modules)
+│   ├── hostrt/              host · runtime + L0/L1 glue of arrangrr (UDS, sink, jsonl codec) — not a name-blind peer
 │   ├── orchestrator/        host · SLOT — composes the component/source pipeline (design apart)
 │   ├── melodd/              host · SLOT — audio engine
 │   └── samplrr/             host · SLOT — sampler
 ├── third_party/             external deps: dear imgui · glfw (host-only, off-limits to freestanding)
-├── tests/                   integration + golden (cross-component); unit tests live in each component
+├── tests/                   integration + golden + arm-smoke (freestanding link gate); unit tests live in-component
 ├── build/                   linux-x64/ · arm64/  (per-target output)
 └── cmake/ · docs/ · scripts/
 ```
@@ -44,7 +48,10 @@ We do **not** split `components/` into `core/` vs `host/` sub-trees — that wou
 axis into every top-level dir (apps/, tests/…) and read as asymmetric. Instead:
 
 - Each component **declares its target-regime** (freestanding/STM32-capable vs host-only) in its own
-  CMake, and CI **enforces** it: freestanding components must compile for `arm64` with no heap.
+  CMake. CI cross-builds the freestanding components for `arm-none-eabi` and **link-checks** them
+  (`nosys.specs`). NOTE: today this proves compile+link, not symbolic heap-absence — a real no-heap
+  symbol scan is outstanding hardening (flagged by Corelli's seam review), so the boundary is a
+  contract to be *fully* verified, not yet a complete gate.
 - The load-bearing "does it run on the chip?" boundary is therefore a **verified contract**, not a
   directory. It cannot silently erode even though the tree is flat.
 - A **target specialization is a sibling component**, created only when needed — e.g.
@@ -52,11 +59,13 @@ axis into every top-level dir (apps/, tests/…) and read as asymmetric. Instead
 
 ## Principle 2 — `apps/` are the deliverables (orchestrators)
 
-An app knows and wires a chosen set of components; a component is **name-blind** to its consumers
-(D43). So `apps/` holds the binaries: `gui-sonotron` (all components), `cli-arrangrr` (the brain
-alone), `demo/` (examples). **firmware is NOT a top-level dir** — the arm target is a *build of the
-component* (a thin entrypoint carried inside `arrangrr`, or an `arrangrr-arm64` sibling later), not
-a folder of its own.
+An app either **links** a chosen set of components (an orchestrator/daemon) or is a **pure client**
+over the socket (D38); a component is **name-blind** to its consumers (D43). So `apps/` holds:
+**sonotron-host** (backend — links the components, serves the socket; future), **gui-sonotron**
+(desktop frontend — pure client, links nothing; future), **cli-arrangrr** (host CLI on the brain,
+also today's socket server), **demo/** (examples). **Neither firmware nor an stm32 app is a
+top-level dir now** — the arm target is verified by a freestanding link gate under
+`tests/arm-smoke/`; a real chip app can become `apps/stm32/` later.
 
 ## Principle 3 — `third_party/` is external and host-only
 
@@ -114,9 +123,9 @@ never the linear-timeline free-for-all — that is sonotron's identity. Two cons
 ## What moves now vs. what is a slot
 
 - **Moves now** (existing code, relocated cleanly): `app/core` → `components/arrangrr`;
-  `app/platform/host` lib → `components/hostrt` + its CLI exe → `apps/tools/cli-arrangrr`;
-  `app/tools/*` → `apps/tools/*`; `app/tests` → `tests/`; `demo/` → `apps/demo/`;
-  `app/firmware/stub` → thin arm entrypoint inside `arrangrr`.
+  `app/platform/host` lib → `components/hostrt` + its CLI exe → `apps/tools/cli-arrangrr` (binary
+  `cli-arrangrr`); `app/tools/*` → `apps/tools/*`; `app/tests` → `tests/`; `demo/` → `apps/demo/`;
+  `app/firmware/stub` → `tests/arm-smoke/` (freestanding link gate — not an app, not inside arrangrr).
 - **Slots** (empty, no code yet): `components/orchestrator`, `components/melodd`, `components/samplrr`.
 - **NOT touched:** the core lib is not shattered. No new internal port is introduced in the move
   (that is `sequencrr`'s future milestone).
