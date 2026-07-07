@@ -1,7 +1,7 @@
 # arrstyle-converter: HOST-ONLY importer/compiler tooling. It is wired into the
 # top-level build only inside the non-firmware branch, so it never enters the
 # ARM preset and never touches the core/firmware builds. Dependency-free: it
-# links no third-party library and does not link arrangrr_core.
+# links no third-party library and does not link arrangrr.
 
 add_library(arrstyle_lib STATIC
   src/model.cpp

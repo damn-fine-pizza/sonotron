@@ -2,13 +2,13 @@
 # Shared demo launcher: FluidSynth in the background, arrangrr REPL in the
 # foreground, ALSA wiring, single-instance lock, and a teardown that leaves
 # nothing behind on quit/Ctrl-C/EOF/TERM/HUP (see the verified matrix in the
-# git history). Sourced by demo/*/start.sh wrappers, which set:
+# git history). Sourced by apps/demo/*/start.sh wrappers, which set:
 #   SETUP  — .acmd file fed via --init (may be /dev/null)
 #   MOTD   — text file shown in the REPL's persistent panel (optional)
 #   KILL_FIRST — 1 to clear leftover sessions before starting
 set -euo pipefail
 
-CLI=build/host/app/platform/host/arrangrr
+CLI=build/host/apps/tools/cli-arrangrr/cli-arrangrr
 SYNTH_PID=""
 WAITER_PID=""
 CLI_PID=""
@@ -36,13 +36,13 @@ launch_jam() {
   # --- safeguard: never start on top of leftover sessions -------------------
   if [ "${KILL_FIRST:-0}" -eq 1 ]; then
     echo "--kill: clearing previous sessions..."
-    pkill -x arrangrr 2>/dev/null || true
+    pkill -x cli-arrangrr 2>/dev/null || true
     pkill -x fluidsynth 2>/dev/null || true
     sleep 0.4
   fi
-  if pgrep -x arrangrr >/dev/null 2>&1; then
-    echo "An 'arrangrr' process is already running:"
-    pgrep -ax arrangrr
+  if pgrep -x cli-arrangrr >/dev/null 2>&1; then
+    echo "A 'cli-arrangrr' process is already running:"
+    pgrep -ax cli-arrangrr
     echo "Stop it (or rerun with --kill) — this script refuses to double up."
     exit 2
   fi
@@ -82,7 +82,7 @@ launch_jam() {
     exit 2
   fi
   if [ ! -x "$CLI" ]; then
-    echo "arrangrr binary not built yet — building (host preset)..."
+    echo "cli-arrangrr binary not built yet — building (host preset)..."
     cmake --preset host >/dev/null
     cmake --build --preset host >/dev/null
   fi

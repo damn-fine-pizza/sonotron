@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(arrangrr LANGUAGES CXX)
+project(sonotron LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,16 +21,18 @@ else()
   set(ARRANGRR_FIRMWARE OFF)
 endif()
 
-add_subdirectory(app/core)
+add_subdirectory(components/arrangrr)
 
 if(ARRANGRR_FIRMWARE)
-  add_subdirectory(app/firmware/stub)
+  add_subdirectory(tests/arm-smoke)
 else()
   enable_testing()
-  add_subdirectory(app/platform/host)
-  add_subdirectory(app/core/tests)
-  add_subdirectory(app/tests/golden)
-  add_subdirectory(app/tests/integration)
+  add_subdirectory(components/hostrt)
+  add_subdirectory(apps/tools/cli-arrangrr)
+  add_subdirectory(components/arrangrr/tests)
+  add_subdirectory(components/hostrt/tests)
+  add_subdirectory(tests/golden)
+  add_subdirectory(tests/integration)
   # Host-only importer/compiler tooling (never in the ARM/firmware build).
-  add_subdirectory(app/tools/arrstyle-converter)
+  add_subdirectory(apps/tools/arrstyle-converter)
 endif()

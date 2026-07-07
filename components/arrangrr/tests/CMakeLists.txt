@@ -17,7 +17,7 @@
 # them — doing so drops metric-1 branch coverage below the 80% gate.
 function(arrangrr_test name category)
   add_executable(${name} ${name}.cpp)
-  target_link_libraries(${name} PRIVATE arrangrr_core)
+  target_link_libraries(${name} PRIVATE arrangrr)
   add_test(NAME ${name} COMMAND ${name})
   set_tests_properties(${name} PROPERTIES LABELS ${category})
 endfunction()
@@ -78,18 +78,3 @@ arrangrr_test(test_arranger unit)
 arrangrr_test(test_scheduler unit)
 arrangrr_test(test_gesture unit)
 arrangrr_test(test_voicing unit)
-
-arrangrr_test(test_host unit)
-target_link_libraries(test_host PRIVATE arrangrr_host)
-
-arrangrr_test(test_panels unit)
-target_link_libraries(test_panels PRIVATE arrangrr_host)
-
-arrangrr_test(test_panel_nav functional)
-target_link_libraries(test_panel_nav PRIVATE arrangrr_host)
-
-arrangrr_test(test_style_chooser unit)
-target_link_libraries(test_style_chooser PRIVATE arrangrr_host)
-
-arrangrr_test(test_rc_config unit)
-target_link_libraries(test_rc_config PRIVATE arrangrr_host)

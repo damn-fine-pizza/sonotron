@@ -4,11 +4,11 @@ Host-side CLI that imports **alien** music/style/song formats into arrangrr's
 own native style/song JSON. It is a compiler frontend: *parse foreign format →
 clean canonical model → validate → emit deterministic native JSON*. A later
 stage (the style compiler) lowers that JSON onto the constexpr device format in
-`app/core/include/arrangrr/arranger/style.hpp`.
+`components/arrangrr/include/arrangrr/arranger/style.hpp`.
 
 **Host-only.** Built by the `host` preset, excluded from the ARM/firmware build.
 Dependency-free: hand-rolled JSON writer/reader and SMF parser, no third-party
-libraries, does not link `arrangrr_core`. See [`DESIGN.md`](DESIGN.md) for the
+libraries, does not link `arrangrr`. See [`DESIGN.md`](DESIGN.md) for the
 full design, model, and scope.
 
 ## Build & test
@@ -19,7 +19,7 @@ cmake --build --preset host
 ctest --preset host -R 'test_json|test_midi_import|test_chordpro_import|test_validate|test_cli'
 ```
 
-The binary is `build/host/app/tools/arrstyle-converter/arrstyle-converter`.
+The binary is `build/host/apps/tools/arrstyle-converter/arrstyle-converter`.
 
 ## Commands
 

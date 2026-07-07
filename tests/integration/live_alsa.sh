@@ -14,7 +14,7 @@ aseqdump -l >/dev/null 2>&1 || exit 77
 
 # A foreign arrangrr session (e.g. the user jamming) must never be touched:
 # ALSA name-based resolution would hit it. Skip instead of interfering.
-if pgrep -x arrangrr >/dev/null 2>&1; then
+if pgrep -x cli-arrangrr >/dev/null 2>&1; then
   echo "an arrangrr session is already running - skipping to leave it alone"
   exit 77
 fi

@@ -13,7 +13,7 @@ cmake --preset tidy > /dev/null
 
 # -co --exclude-standard: also lint NEW (not yet tracked) sources, or a fresh
 # module could land unlinted (review finding, H1).
-mapfile -t sources < <(git ls-files -co --exclude-standard 'app/**/*.cpp')
+mapfile -t sources < <(git ls-files -co --exclude-standard 'apps/**/*.cpp' 'components/**/*.cpp')
 run-clang-tidy -quiet -p build/tidy $FIX "${sources[@]}" 2>/dev/null | grep -v '^$' || true
 
 # run-clang-tidy's exit code is unreliable across versions; re-check strictly.

@@ -4,7 +4,7 @@
 function(arrangrr_golden name)
   add_test(NAME golden_${name}
     COMMAND ${CMAKE_COMMAND}
-      -DCLI=$<TARGET_FILE:arrangrr_cli>
+      -DCLI=$<TARGET_FILE:cli_arrangrr>
       -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/${name}.acmd
       -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/${name}.golden
       -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.out

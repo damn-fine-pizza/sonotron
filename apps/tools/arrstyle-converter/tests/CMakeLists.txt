@@ -1,5 +1,5 @@
 # Tool-local unit tests, wired like the project's other tests (add_test + CTest).
-# Three-metric coverage labels (same rule as app/core/tests): a test that drives
+# Three-metric coverage labels (same rule as components/arrangrr/tests): a test that drives
 # a SINGLE importer/module against fixtures is `unit`; one that drives the whole
 # converter CLI end-to-end (argparse -> import -> serialize -> output) is
 # `functional`. These do not feed the core/platform gate (gcovr filters them

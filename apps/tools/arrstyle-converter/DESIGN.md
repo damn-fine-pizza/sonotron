@@ -5,7 +5,7 @@ own **native** style/song representation. It is a tool in the classic
 compiler-frontend sense: *parse an untrusted foreign format → build a clean
 canonical model → validate → emit deterministic native JSON*. A later stage (the
 **style compiler**, out of scope for this MVP) lowers that JSON onto the
-constexpr device format in `app/core/include/arrangrr/arranger/style.hpp`.
+constexpr device format in `components/arrangrr/include/arrangrr/arranger/style.hpp`.
 
 This document is the concrete, critical design. Where the originally-proposed
 shape was heavier than an MVP needs, it is called out and simplified.
@@ -25,7 +25,7 @@ Consequences that shape everything below:
 
 - The tool uses `std::string`/`std::vector`/`<iostream>` freely — it is a laptop
   program, wired into the **host build only**, excluded from the ARM preset.
-- The tool does **not** link `arrangrr_core`. Its canonical model is a separate,
+- The tool does **not** link `arrangrr`. Its canonical model is a separate,
   tool-local set of value types (§4). This keeps the importer decoupled from the
   realtime ABI and lets the model carry rich, lossy-import metadata (source
   channel, original chord text, provenance) that has no place on the device.
@@ -93,7 +93,7 @@ to the constexpr `StyleEvent` grid.
 ## 3. Directory layout
 
 ```
-app/tools/arrstyle-converter/
+apps/tools/arrstyle-converter/
   DESIGN.md              this document
   README.md              quick usage
   CMakeLists.txt         host-only lib + exe + tests
@@ -111,7 +111,7 @@ app/tools/arrstyle-converter/
     main.cpp             thin argv shim over run()
   tests/
     CMakeLists.txt
-    test.hpp             tiny CHECK harness (mirrors app/core/tests/test.hpp)
+    test.hpp             tiny CHECK harness (mirrors components/arrangrr/tests/test.hpp)
     test_json.cpp
     test_midi_import.cpp
     test_chordpro_import.cpp
@@ -357,12 +357,12 @@ Wired into the top-level `CMakeLists.txt` **inside the non-firmware branch only*
 else()  # host
   enable_testing()
   ...
-  add_subdirectory(app/tools/arrstyle-converter)
+  add_subdirectory(apps/tools/arrstyle-converter)
 endif()
 ```
 
 The tool never appears in the ARM/firmware branch, links no third-party library,
-and does not link `arrangrr_core`. Tests use `add_test` + CTest like the rest of
+and does not link `arrangrr`. Tests use `add_test` + CTest like the rest of
 the project.
 
 ---

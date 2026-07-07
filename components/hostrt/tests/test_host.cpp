@@ -1,5 +1,5 @@
 // Host-layer unit tests: JSONL/human encoders (every branch) and the shell
-// (command parsing, @tick queue, error paths). Links arrangrr_host.
+// (command parsing, @tick queue, error paths). Links hostrt.
 
 #include <sys/socket.h>
 #include <sys/un.h>
