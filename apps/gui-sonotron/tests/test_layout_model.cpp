@@ -22,11 +22,11 @@ void test_default_layout_shape() {
   CHECK(layout.zones[0].row == 0);
   CHECK(layout.zones[0].full_span);
 
-  CHECK(layout.zones[1].id == "intention");
+  CHECK(layout.zones[1].id == "arrangement");
   CHECK(layout.zones[1].row == 1);
   CHECK(layout.zones[1].col == 0);
 
-  CHECK(layout.zones[2].id == "band");
+  CHECK(layout.zones[2].id == "intention");
   CHECK(layout.zones[2].row == 1);
   CHECK(layout.zones[2].col == 1);
 
@@ -76,10 +76,12 @@ void test_compute_rows_default_layout() {
   CHECK(approx(rows[0].cells[0].width_fraction, 1.0F));
   CHECK(layout.zones[rows[0].cells[0].zone_index].id == "transport");
 
-  // Row 1 (intention | band): two equal-weight columns.
+  // Row 1 (arrangement | intention): the wide central surface beside the
+  // narrower HUD rail — 0.72 / 0.28.
   CHECK(rows[1].cells.size() == 2);
-  CHECK(approx(rows[1].cells[0].width_fraction, 0.5F));
-  CHECK(approx(rows[1].cells[1].width_fraction, 0.5F));
+  CHECK(approx(rows[1].cells[0].width_fraction, 0.72F));
+  CHECK(approx(rows[1].cells[1].width_fraction, 0.28F));
+  CHECK(layout.zones[rows[1].cells[0].zone_index].id == "arrangement");
 
   // Row 2 (harmony | structure): two equal-weight columns.
   CHECK(rows[2].cells.size() == 2);

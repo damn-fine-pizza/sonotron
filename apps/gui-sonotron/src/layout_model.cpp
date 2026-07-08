@@ -42,6 +42,10 @@ bool operator==(const Layout& lhs, const Layout& rhs) {
 Layout default_layout() {
   Layout layout;
   layout.window_title = "sonotron";
+  // The Arrangement timeline is the big central surface; Intention/Harmony/
+  // Structure form the instantaneous-readout HUD around it (Intention beside
+  // it, Harmony/Structure in a short row below). Transport is the thin top
+  // bar. See docs/design/ux-concept.md.
   layout.zones = {
       Zone{.id = "transport",
            .title = "Transport · Seed",
@@ -49,20 +53,20 @@ Layout default_layout() {
            .col = 0,
            .full_span = true,
            .width_weight = std::nullopt,
-           .height_weight = 0.10F},
-      Zone{.id = "intention",
-           .title = "Intention",
+           .height_weight = 0.08F},
+      Zone{.id = "arrangement",
+           .title = "Arrangement",
            .row = 1,
            .col = 0,
            .full_span = false,
-           .width_weight = 0.5F,
+           .width_weight = 0.72F,
            .height_weight = std::nullopt},
-      Zone{.id = "band",
-           .title = "Band",
+      Zone{.id = "intention",
+           .title = "Intention",
            .row = 1,
            .col = 1,
            .full_span = false,
-           .width_weight = 0.5F,
+           .width_weight = 0.28F,
            .height_weight = std::nullopt},
       Zone{.id = "harmony",
            .title = "Harmony",
@@ -70,14 +74,14 @@ Layout default_layout() {
            .col = 0,
            .full_span = false,
            .width_weight = 0.5F,
-           .height_weight = 0.15F},
+           .height_weight = 0.16F},
       Zone{.id = "structure",
            .title = "Structure",
            .row = 2,
            .col = 1,
            .full_span = false,
            .width_weight = 0.5F,
-           .height_weight = 0.15F},
+           .height_weight = 0.16F},
   };
   return layout;
 }
