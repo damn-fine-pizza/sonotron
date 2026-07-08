@@ -16,6 +16,19 @@
 
 namespace sonotron {
 
+// Base UI font size, in *logical* (1x DPI) pixels — i.e. before the
+// runtime GLFW content-scale multiply applied in main.cpp. `Layout` carries
+// this as a configurable knob (the "font_size" JSON key) so the owner can
+// tune legibility without a rebuild. kMinFontSizePx/kMaxFontSizePx bound a
+// sane range; is_valid_font_size_px() is what both the JSON reader and
+// main.cpp use to reject a hand-edited value that is absent, non-finite, or
+// silly (e.g. 0 or 500), falling back to kDefaultFontSizePx instead.
+inline constexpr float kDefaultFontSizePx = 14.0F;
+inline constexpr float kMinFontSizePx = 6.0F;
+inline constexpr float kMaxFontSizePx = 64.0F;
+
+bool is_valid_font_size_px(float value);
+
 // One titled zone of the dashboard. `row`/`col` place it on the grid: `col`
 // is only meaningful relative to sibling zones sharing the same `row` (their
 // left-to-right order is by ascending `col`). `full_span` makes the zone
@@ -43,6 +56,10 @@ bool operator==(const Zone& lhs, const Zone& rhs);
 // here — the model is exactly what a hand-edited JSON file expresses.
 struct Layout {
   std::string window_title = "sonotron";
+  // See kDefaultFontSizePx above for the meaning/units and the fallback
+  // rule; the in-class default here is what a freshly-constructed Layout
+  // (or one whose JSON omitted "font_size") gets.
+  float font_size_px = kDefaultFontSizePx;
   std::vector<Zone> zones;
 };
 

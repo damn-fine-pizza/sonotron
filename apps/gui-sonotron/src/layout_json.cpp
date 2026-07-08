@@ -127,15 +127,7 @@ class Parser {
         return false;
       }
       skip_ws();
-      if (key == "window") {
-        if (!parse_string(out.window_title)) {
-          return false;
-        }
-      } else if (key == "zones") {
-        if (!parse_zones(out.zones)) {
-          return false;
-        }
-      } else if (!skip_value()) {
+      if (!parse_top_level_field(key, out)) {
         return false;
       }
       skip_ws();
@@ -157,6 +149,44 @@ class Parser {
   const std::string& error() const noexcept { return m_error; }
 
  private:
+  // Dispatches one top-level "key": value pair (parser positioned right
+  // after the ':') into the matching Layout field, or discards it via
+  // skip_value() for an unrecognized key (forward-compatible with a layout
+  // file written by a newer version of this app). Split out of parse()'s
+  // loop body purely to keep that loop's own cognitive complexity low —
+  // no behavior change from having this inline.
+  bool parse_top_level_field(const std::string& key, Layout& out) {
+    if (key == "window") {
+      return parse_string(out.window_title);
+    }
+    if (key == "font_size") {
+      return parse_font_size(out);
+    }
+    if (key == "zones") {
+      return parse_zones(out.zones);
+    }
+    return skip_value();
+  }
+
+  // Parses the "font_size" value into `out.font_size_px`. A syntactically
+  // invalid number (e.g. `"font_size": "x"`) is a parse failure like any
+  // other malformed field. A syntactically valid but out-of-range value
+  // (e.g. `0`) is NOT a parse failure: it is silently ignored, leaving
+  // `out.font_size_px` at the compiled-in default already set by
+  // `out = Layout{}` in parse() — a stray hand-edited value degrades
+  // gracefully instead of making the whole layout file unusable.
+  bool parse_font_size(Layout& out) {
+    double value = 0.0;
+    if (!parse_number(value)) {
+      return false;
+    }
+    const float candidate = static_cast<float>(value);
+    if (is_valid_font_size_px(candidate)) {
+      out.font_size_px = candidate;
+    }
+    return true;
+  }
+
   bool finish() {
     skip_ws();
     if (!at_end()) {
@@ -522,6 +552,9 @@ std::string write_layout(const Layout& layout) {
   out += "{\n";
   out += "  \"window\": ";
   append_escaped_string(out, layout.window_title);
+  out += ",\n";
+  out += "  \"font_size\": ";
+  append_number(out, layout.font_size_px);
   out += ",\n";
   out += "  \"zones\": [";
   if (layout.zones.empty()) {

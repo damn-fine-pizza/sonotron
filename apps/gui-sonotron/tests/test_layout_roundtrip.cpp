@@ -46,6 +46,7 @@ void test_modified_layout_round_trips_after_save() {
 
   sonotron::Layout layout = sonotron::default_layout();
   layout.window_title = "sonotron-modified";
+  layout.font_size_px = 18.0F;
   layout.zones[1].title = "Intention (renamed)";
   layout.zones[3].width_weight = 0.35F;
 
@@ -58,6 +59,39 @@ void test_modified_layout_round_trips_after_save() {
   const bool load_ok = sonotron::load_or_create_default(path.string(), reloaded, error);
   CHECK(load_ok);
   CHECK(layout == reloaded);
+  CHECK(reloaded.font_size_px > 17.9F && reloaded.font_size_px < 18.1F);
+
+  std::filesystem::remove_all(path.parent_path(), remove_error);
+}
+
+// Owner-facing knob: editing "font_size" in ~/.config/sonotron/layout.json
+// by hand (no rebuild) must take effect on the next load, and must survive
+// the app's on-exit save unchanged — this is the exact path main.cpp drives
+// (load_or_create_default at startup, save_layout at shutdown).
+void test_hand_edited_font_size_survives_load_and_save() {
+  const std::filesystem::path path = unique_temp_path();
+  std::error_code remove_error;
+  std::filesystem::remove_all(path.parent_path(), remove_error);
+  std::filesystem::create_directories(path.parent_path());
+
+  {
+    std::ofstream hand_edited(path);
+    hand_edited << R"({ "window": "sonotron", "font_size": 22, "zones": [] })";
+  }
+
+  sonotron::Layout loaded;
+  std::string error;
+  const bool load_ok = sonotron::load_or_create_default(path.string(), loaded, error);
+  CHECK(load_ok);
+  CHECK(loaded.font_size_px > 21.9F && loaded.font_size_px < 22.1F);
+
+  const bool save_ok = sonotron::save_layout(path.string(), loaded, error);
+  CHECK(save_ok);
+
+  sonotron::Layout reloaded;
+  const bool reload_ok = sonotron::load_or_create_default(path.string(), reloaded, error);
+  CHECK(reload_ok);
+  CHECK(reloaded.font_size_px > 21.9F && reloaded.font_size_px < 22.1F);
 
   std::filesystem::remove_all(path.parent_path(), remove_error);
 }
@@ -87,6 +121,7 @@ void test_load_reports_error_on_corrupt_file() {
 int main() {
   test_missing_file_creates_default_and_round_trips();
   test_modified_layout_round_trips_after_save();
+  test_hand_edited_font_size_survives_load_and_save();
   test_load_reports_error_on_corrupt_file();
   return sonotron::test::failures();
 }

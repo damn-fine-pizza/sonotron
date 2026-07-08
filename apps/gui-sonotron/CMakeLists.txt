@@ -23,6 +23,13 @@ add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
 target_link_libraries(gui_sonotron PRIVATE gui_sonotron_layout imgui)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
+# Bakes the source-tree assets/ path into the binary so the vendored TTF
+# (see assets/fonts/ARRGRR_VENDOR.md) is found when running straight out of
+# the build tree during development. SONOTRON_FONT_PATH (env) overrides this
+# at runtime — same escape hatch used for SONOTRON_LAYOUT_PATH. Packaging a
+# real install layout is a later milestone, not part of this font/DPI pass.
+target_compile_definitions(gui_sonotron PRIVATE
+  SONOTRON_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
 # Layout-model/JSON unit tests (host-only; this whole subtree is added only
 # in the non-firmware branch of the top-level CMakeLists, where

@@ -12,6 +12,13 @@
 // includes zero core headers — only the vendored toolkit
 // (third_party/imgui, third_party/glfw), system OpenGL, and this app's own
 // src/ files.
+//
+// DPI/font pass: text is rendered with a vendored monospace TTF (JetBrains
+// Mono NL, see assets/fonts/ARRGRR_VENDOR.md) rasterized at the window's
+// GLFW content scale instead of ImGui's small built-in bitmap font, so the
+// dashboard stays crisp on HiDPI displays. See content_scale_for(),
+// font_path(), load_font() below. A font FILE is a data asset, not a code
+// dependency — no new third-party code library was added for this.
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -69,7 +76,69 @@ int max_frames_from_env() {
 GLFWwindow* create_window() {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+  // Ask the platform to report an accurate content (DPI) scale and to size
+  // the window in scaled pixels right away, instead of only finding out
+  // about HiDPI after a content-scale-changed event fires post-creation.
+  glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
   return glfwCreateWindow(1280, 800, "sonotron", nullptr, nullptr);
+}
+
+// Queries the window's content (DPI) scale via GLFW. GLFW can report a
+// zero/degenerate scale on some platforms before the window is mapped;
+// guard against that by falling back to 1x rather than rasterizing a
+// zero-sized (or negative-sized) font atlas.
+float content_scale_for(GLFWwindow* window) {
+  float xscale = 1.0F;
+  float yscale = 1.0F;
+  glfwGetWindowContentScale(window, &xscale, &yscale);
+  if (!(xscale > 0.0F)) {
+    xscale = 1.0F;
+  }
+  return xscale;
+}
+
+// The vendored monospace TTF lives at apps/gui-sonotron/assets/fonts/
+// alongside the source (see assets/fonts/ARRGRR_VENDOR.md for provenance
+// and license). SONOTRON_FONT_PATH overrides it — used by the
+// verification path below to exercise the missing-file fallback without
+// touching the real vendored asset, exactly like SONOTRON_LAYOUT_PATH.
+std::string font_path() {
+  if (const char* override_path = std::getenv("SONOTRON_FONT_PATH"); override_path != nullptr) {
+    return override_path;
+  }
+  return std::string(SONOTRON_ASSETS_DIR) + "/fonts/JetBrainsMonoNL-Regular.ttf";
+}
+
+// Resolves the *logical* (1x DPI) base font size to use: `layout.font_size_px`
+// if it is in the sane range, kDefaultFontSizePx otherwise (absent-from-JSON
+// already lands on the default via Layout's in-class initializer; this is
+// the defense-in-depth layer for a Layout built by other means, e.g. a
+// future in-app editor writing a bad value directly).
+float resolved_base_font_size_px(const sonotron::Layout& layout) {
+  if (sonotron::is_valid_font_size_px(layout.font_size_px)) {
+    return layout.font_size_px;
+  }
+  return sonotron::kDefaultFontSizePx;
+}
+
+// Loads the vendored TTF rasterized at content_scale * base_font_size_px so
+// text stays crisp on HiDPI displays. If the file is missing or unreadable,
+// falls back to ImGui's built-in bitmap font at the same pixel size rather
+// than crashing or leaving the app without any font at all.
+void load_font(ImGuiIO& io, float content_scale, float base_font_size_px) {
+  const std::string path = font_path();
+  const float size_px = base_font_size_px * content_scale;
+
+  ImFontConfig config;
+  config.Flags |= ImFontFlags_NoLoadError;  // we check the return value ourselves below
+  ImFont* font = io.Fonts->AddFontFromFileTTF(path.c_str(), size_px, &config);
+  if (font == nullptr) {
+    std::fprintf(stderr, "sonotron: could not load font '%s' - falling back to built-in font\n",
+                 path.c_str());
+    ImFontConfig fallback_config;
+    fallback_config.SizePixels = size_px;
+    io.Fonts->AddFontDefault(&fallback_config);
+  }
 }
 
 void render_frame(const sonotron::Layout& layout) {
@@ -126,12 +195,9 @@ int main() {
   io.IniFilename = nullptr;
   ImGui::StyleColorsDark();
 
-  ImGui_ImplGlfw_InitForOpenGL(window, true);
-  ImGui_ImplOpenGL3_Init("#version 130");
-
-  std::fprintf(stdout, "sonotron: window open, GL renderer: %s\n",
-               reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
-
+  // Layout is loaded before the font because it carries the configurable
+  // logical font-size knob (Layout::font_size_px, the JSON "font_size"
+  // key) that load_font() below needs.
   const std::string path = layout_path();
   sonotron::Layout layout;
   std::string layout_error;
@@ -142,6 +208,26 @@ int main() {
   }
   std::fprintf(stdout, "sonotron: layout loaded from %s (%zu zones)\n", path.c_str(),
                layout.zones.size());
+
+  // DPI awareness: rasterize the font atlas at the monitor's real content
+  // scale (crisp on 2x/HiDPI, not upscaled-blurry) and scale the rest of
+  // the style metrics (padding, spacing, borders) to match. This is a
+  // one-shot query at startup, not a live per-monitor-move rescale — the
+  // app does not yet react to a mid-session content-scale-changed event.
+  const float content_scale = content_scale_for(window);
+  const float base_font_size_px = resolved_base_font_size_px(layout);
+  load_font(io, content_scale, base_font_size_px);
+  ImGui::GetStyle().ScaleAllSizes(content_scale);
+  std::fprintf(stdout,
+               "sonotron: content scale %.2fx, logical font size %.1fpx, effective %.1fpx\n",
+               static_cast<double>(content_scale), static_cast<double>(base_font_size_px),
+               static_cast<double>(base_font_size_px * content_scale));
+
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 130");
+
+  std::fprintf(stdout, "sonotron: window open, GL renderer: %s\n",
+               reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
 
   const int max_frames = max_frames_from_env();
   int frame = 0;

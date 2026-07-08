@@ -24,6 +24,10 @@ bool nearly_equal(const std::optional<float>& lhs, const std::optional<float>& r
 
 }  // namespace
 
+bool is_valid_font_size_px(float value) {
+  return std::isfinite(value) && value >= kMinFontSizePx && value <= kMaxFontSizePx;
+}
+
 bool operator==(const Zone& lhs, const Zone& rhs) {
   return lhs.id == rhs.id && lhs.title == rhs.title && lhs.row == rhs.row && lhs.col == rhs.col &&
          lhs.full_span == rhs.full_span && nearly_equal(lhs.width_weight, rhs.width_weight) &&
@@ -31,7 +35,8 @@ bool operator==(const Zone& lhs, const Zone& rhs) {
 }
 
 bool operator==(const Layout& lhs, const Layout& rhs) {
-  return lhs.window_title == rhs.window_title && lhs.zones == rhs.zones;
+  return lhs.window_title == rhs.window_title && nearly_equal(lhs.font_size_px, rhs.font_size_px) &&
+         lhs.zones == rhs.zones;
 }
 
 Layout default_layout() {

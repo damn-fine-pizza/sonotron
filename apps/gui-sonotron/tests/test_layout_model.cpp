@@ -4,6 +4,7 @@
 #include "src/layout_model.hpp"
 
 #include <cmath>
+#include <limits>
 
 #include "test.hpp"
 
@@ -14,6 +15,7 @@ bool approx(float a, float b, float epsilon = 1e-4F) { return std::fabs(a - b) <
 void test_default_layout_shape() {
   const sonotron::Layout layout = sonotron::default_layout();
   CHECK(layout.window_title == "sonotron");
+  CHECK(approx(layout.font_size_px, sonotron::kDefaultFontSizePx));
   CHECK(layout.zones.size() == 5);
 
   CHECK(layout.zones[0].id == "transport");
@@ -45,6 +47,22 @@ void test_layout_equality() {
   sonotron::Layout c = sonotron::default_layout();
   c.zones[0].title = "changed";
   CHECK(!(a == c));
+
+  sonotron::Layout d = sonotron::default_layout();
+  d.font_size_px = 20.0F;
+  CHECK(!(a == d));
+}
+
+void test_is_valid_font_size_px_bounds() {
+  CHECK(sonotron::is_valid_font_size_px(sonotron::kDefaultFontSizePx));
+  CHECK(sonotron::is_valid_font_size_px(sonotron::kMinFontSizePx));
+  CHECK(sonotron::is_valid_font_size_px(sonotron::kMaxFontSizePx));
+  CHECK(!sonotron::is_valid_font_size_px(0.0F));
+  CHECK(!sonotron::is_valid_font_size_px(-5.0F));
+  CHECK(!sonotron::is_valid_font_size_px(sonotron::kMinFontSizePx - 0.1F));
+  CHECK(!sonotron::is_valid_font_size_px(sonotron::kMaxFontSizePx + 0.1F));
+  CHECK(!sonotron::is_valid_font_size_px(std::numeric_limits<float>::quiet_NaN()));
+  CHECK(!sonotron::is_valid_font_size_px(std::numeric_limits<float>::infinity()));
 }
 
 void test_compute_rows_default_layout() {
@@ -140,6 +158,7 @@ void test_compute_rows_orders_columns_by_col_not_declaration_order() {
 int main() {
   test_default_layout_shape();
   test_layout_equality();
+  test_is_valid_font_size_px_bounds();
   test_compute_rows_default_layout();
   test_compute_rows_defaults_unweighted_columns_to_equal_split();
   test_compute_rows_orders_columns_by_col_not_declaration_order();
