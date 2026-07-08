@@ -14,14 +14,28 @@ add_library(gui_sonotron_layout STATIC
   src/layout_model.cpp
   src/layout_json.cpp
   src/layout_renderer.cpp
+  src/intention.cpp
+  src/intention_panel.cpp
 )
 target_include_directories(gui_sonotron_layout PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gui_sonotron_layout PUBLIC imgui)
 target_compile_options(gui_sonotron_layout PRIVATE -Wall -Wextra -Werror)
 
+# Host-only screenshot helper: a thin wrapper over the stb_image_write.h
+# already vendored under third_party/glfw/deps (no new dependency). Kept in
+# its own target so the not-warning-clean stb implementation can be compiled
+# with warnings off (-w) without relaxing -Werror anywhere else, and so the
+# layout tests never link it. Only the executable uses it (SONOTRON_GUI_
+# SCREENSHOT verification path in main.cpp).
+add_library(gui_sonotron_screenshot STATIC src/screenshot.cpp)
+target_include_directories(gui_sonotron_screenshot
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+  PRIVATE ${CMAKE_SOURCE_DIR}/third_party/glfw/deps)
+target_compile_options(gui_sonotron_screenshot PRIVATE -w)
+
 add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
-target_link_libraries(gui_sonotron PRIVATE gui_sonotron_layout imgui)
+target_link_libraries(gui_sonotron PRIVATE gui_sonotron_layout gui_sonotron_screenshot imgui)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # Bakes the source-tree assets/ path into the binary so the vendored TTF
 # (see assets/fonts/ARRGRR_VENDOR.md) is found when running straight out of

@@ -29,10 +29,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "src/layout_json.hpp"
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
+#include "src/screenshot.hpp"
 
 namespace {
 
@@ -71,6 +73,29 @@ int max_frames_from_env() {
     return -1;
   }
   return std::atoi(value);
+}
+
+// Headless-verification escape hatch, sibling to SONOTRON_GUI_MAX_FRAMES:
+// if SONOTRON_GUI_SCREENSHOT=<path> is set, the final rendered frame is
+// captured to that PNG (see capture_screenshot below). The shipped app is
+// never launched with this variable set.
+const char* screenshot_path_from_env() { return std::getenv("SONOTRON_GUI_SCREENSHOT"); }
+
+// Reads the current back buffer and writes it to `path` as a PNG. Must be
+// called AFTER the frame is drawn but BEFORE glfwSwapBuffers, while the
+// rendered image still lives in the (default GL_BACK) read buffer.
+void capture_screenshot(int width, int height, const char* path) {
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+  std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * height * 4);
+  glPixelStorei(GL_PACK_ALIGNMENT, 1);
+  glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+  if (sonotron::write_png_rgba_bottom_up(path, width, height, pixels.data())) {
+    std::fprintf(stdout, "sonotron: screenshot written to %s (%dx%d)\n", path, width, height);
+  } else {
+    std::fprintf(stderr, "sonotron: failed to write screenshot to %s\n", path);
+  }
 }
 
 GLFWwindow* create_window() {
@@ -158,7 +183,10 @@ void render_frame(const sonotron::Layout& layout) {
   ImGui::Render();
 }
 
-void present_frame(GLFWwindow* window) {
+// `screenshot_path` is non-null only on the frame that should be captured
+// (the verification path); the capture happens after the draw and before the
+// buffer swap, then normal presentation continues.
+void present_frame(GLFWwindow* window, const char* screenshot_path) {
   int display_w = 0;
   int display_h = 0;
   glfwGetFramebufferSize(window, &display_w, &display_h);
@@ -166,6 +194,9 @@ void present_frame(GLFWwindow* window) {
   glClearColor(0.10F, 0.10F, 0.12F, 1.0F);
   glClear(GL_COLOR_BUFFER_BIT);
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+  if (screenshot_path != nullptr) {
+    capture_screenshot(display_w, display_h, screenshot_path);
+  }
   glfwSwapBuffers(window);
 }
 
@@ -230,6 +261,7 @@ int main() {
                reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
 
   const int max_frames = max_frames_from_env();
+  const char* screenshot_path = screenshot_path_from_env();
   int frame = 0;
 
   while (glfwWindowShouldClose(window) == GLFW_FALSE) {
@@ -238,9 +270,14 @@ int main() {
     }
     ++frame;
 
+    // Capture only the last frame of a bounded (max-frames) run, once the UI
+    // has settled — one PNG, not one per frame.
+    const bool capture_this_frame = screenshot_path != nullptr && max_frames >= 0 &&
+                                    frame == max_frames;
+
     glfwPollEvents();
     render_frame(layout);
-    present_frame(window);
+    present_frame(window, capture_this_frame ? screenshot_path : nullptr);
   }
 
   ImGui_ImplOpenGL3_Shutdown();
