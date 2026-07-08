@@ -20,7 +20,7 @@ live. Three laws, always:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ●▶  ♩=120   key: Cm    SEED 🔒 #a3f9      Scene: “Build”      │ ← transport · seed · scene
+│ ●▶  ♩=120   key: Cm    SEED 🔒 #a3f9      Song: “Build”      │ ← transport · seed · song
 ├───────────────────────────────┬─────────────────────────────┤
 │ INTENTION (the podium)        │ BAND (live)                 │
 │  energy  ▓▓▓▓▓░░░ → ▓▓▓▓▓▓▓▓  │  Drums ▓▓▓▓  busy           │
@@ -40,8 +40,8 @@ live. Three laws, always:
   mute/solo), NOT a row of clips on a timeline. The Director's upcoming moves show as **ghosts**
   ("Pad enters → 4"): you see the machine's intent *before* it lands.
 - **Harmony** — chord now + next queued (**amber→green**), key.
-- **Structure** — where you are in the song-form; sections/fills at hand; the trajectory captured
-  as a **Scene**.
+- **Structure** — where you are in the song-form; sections/fills at hand; the path captured
+  as a **Song** (an instant config snapshot is a *Scene* — different).
 - **Transport + seed** — play/tempo and the **seed lock**: one visible control that makes the whole
   thing reproducible.
 

@@ -23,7 +23,7 @@ mixing/editing surface. It stays non-linear, non-DAW.
 2. **Steer harmony live** — play chords (even one finger); the band follows and HOLDS them; the
    human hand beats the machine (`kLivePriority`).
 3. **Build structure** — trigger sections / variations / fills / transitions; capture a trajectory
-   as a **Scene** (song-form without a linear timeline).
+   as a **Song** (song-form without a timeline you paint on).
 4. **Shape the feel** — style & section, groove / swing / humanize, mute & solo parts, arp.
 5. **Deploy audio color** — the Arranger deploys clips / loops / samples / risers / vocal-chops as
    opaque decisions; simple recording of your gear/voice becomes arrangeable material (optional
