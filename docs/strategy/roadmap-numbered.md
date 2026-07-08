@@ -122,7 +122,7 @@ These bind every node below. They are the "why the schedule is honest" layer.
     *reported by the owner as an active defect, not yet reproduced or committed on
     this branch as of HEAD `acad2c9`; DISTINCT from the already-fixed, HOST-ONLY,
     demo-launcher "first FluidSynth note after PipeWire stream-open" crackle
-    (`demo/lib/launch.sh`, commit `1bea22a`, warm-note workaround — that one is
+    (`apps/demo/lib/launch.sh`, commit `1bea22a`, warm-note workaround — that one is
     cosmetic demo tooling and solved). THIS defect is on the core/output realtime
     path and gates the GUI freeze line (`11700`): a crackling instrument is not
     shippable as something you play.*

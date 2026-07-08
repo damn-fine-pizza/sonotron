@@ -60,7 +60,7 @@ Confirmed sound **on the wire** (only text L1 out / JSONL in cross the socket). 
 - `jsonl.cpp` (which renders the JSONL) **is coupled to the core** — it includes `chord_engine.hpp`
   / `theory.hpp` / `transport.hpp` and lives in `arrangrr_host`, which links `arrangrr_core` PUBLIC.
 - **Rule 1:** the GUI target links **neither `arrangrr_core` nor `arrangrr_host`**, and `#include`s
-  **zero** core headers. Model its `CMakeLists.txt` on `app/tools/arrstyle-converter` ("does not link
+  **zero** core headers. Model its `CMakeLists.txt` on `apps/tools/arrstyle-converter` ("does not link
   arrangrr_core"), NOT on `arrangrr_host`.
 - **Rule 2:** the GUI carries its **own** wire layer — a `LineBuffer`-style newline reassembly reader
   + a minimal JSON-line parser + its **own** name tables (section↔string, chord-quality↔suffix,

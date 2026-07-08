@@ -32,7 +32,7 @@ proprietary chunks (`CASM`, `OTS`, `MDB`, `MH`). Evidence:
 - `arrstyle-converter import-sff <f.sty>` → **inspect-only MVP**: returns a graceful
   `"SFF import is not implemented (inspect-only in this MVP)"` (rc=1) on every file.
   The CASM/CSEG/OTS decode — the "runtime-compiler pass" — is the known gap
-  (`app/tools/arrstyle-converter/src/sff_import.cpp:70-76`). The recogniser routes
+  (`apps/tools/arrstyle-converter/src/sff_import.cpp:70-76`). The recogniser routes
   `.sty/.sst/.prs` to `kYamahaSff` (`cli.cpp:71`) and `looks_like_sff()` keys on the
   `CASM/Sff1/Sff2/CSEG` markers (`sff_import.cpp:38-41`), so the front door is built;
   only the decoder body is missing.

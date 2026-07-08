@@ -11,8 +11,8 @@ current hand-authored dotted placement. Roadmap 9100 (feel) swing pass.
 > doc rather than an in-place append to `per-style-feel-values.md`; treat it as
 > the "Swing re-authoring spec" section of that proposal.
 
-Read alongside: `app/core/include/arrangrr/arranger/groove.hpp` (the engine),
-`app/core/include/arrangrr/arranger/style_model.hpp` (`StyleEvent.step`, `Style.groove`),
+Read alongside: `components/arrangrr/include/arrangrr/arranger/groove.hpp` (the engine),
+`components/arrangrr/include/arrangrr/arranger/style_model.hpp` (`StyleEvent.step`, `Style.groove`),
 and the three tables `styles/{swing,shuffle,blues}.hpp`.
 
 ---

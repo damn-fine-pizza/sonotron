@@ -7,8 +7,8 @@ exact statement of what `GrooveParams.swing`/`swing_grid` can and cannot express
 (input to 9130 triplet/shuffle grid).
 
 Read first: `docs/reflections/style-differentiation-and-generation.md` (the feel-gap
-diagnosis), `app/core/include/arrangrr/arranger/groove.hpp` (the model targeted),
-`app/core/include/arrangrr/common/time.hpp` (`BpmX100`, clamps 2000..40000).
+diagnosis), `components/arrangrr/include/arrangrr/arranger/groove.hpp` (the model targeted),
+`components/arrangrr/include/arrangrr/common/time.hpp` (`BpmX100`, clamps 2000..40000).
 
 ---
 

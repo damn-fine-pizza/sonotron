@@ -13,10 +13,10 @@ reflections, on the engineering axis, the musical axis, and above all the
 intersection where both reflections actually live (a harmonically reactive
 arranger under realtime/embedded constraints).
 
-Anchored in: `docs/DESIGN.md` (D1–D37), `app/core/include/arrangrr/engine.hpp`,
+Anchored in: `docs/DESIGN.md` (D1–D37), `components/arrangrr/include/arrangrr/engine.hpp`,
 `arranger/arranger.hpp`, `arranger/style_model.hpp`, `chord/theory.hpp`,
 `chord/chord_engine.hpp`, `chord/chord_detector.hpp`, `arp/arpeggiator.hpp`,
-`arranger/groove.hpp`, `abi.hpp`, and `app/platform/host/` (jsonl, alsa_midi, TUI
+`arranger/groove.hpp`, `abi.hpp`, and `components/hostrt/` (jsonl, alsa_midi, TUI
 panels/shell).
 
 ---
