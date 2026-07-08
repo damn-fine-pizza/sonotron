@@ -1,0 +1,12 @@
+function(hostrt_test name category)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE hostrt)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS ${category})
+endfunction()
+
+hostrt_test(test_host unit)
+hostrt_test(test_panels unit)
+hostrt_test(test_panel_nav functional)
+hostrt_test(test_style_chooser unit)
+hostrt_test(test_rc_config unit)

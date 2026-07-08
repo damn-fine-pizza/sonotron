@@ -51,7 +51,7 @@ in `spikes/kchordfollowed` (the first instance of "promote a channel-B fact to a
   EVERY component is a non-trivial ABI commitment. **NEEDS-DECISION.**
 - **F. VST / hosting:** zero trace in core (correct). The seam is exactly where the binary
   `OutEvent`/`Command` ends: the outer product receives events (observability hooks) and sends
-  overrides (interaction hooks) from OUTSIDE the core process — never `#include` VST in `app/core`.
+  overrides (interaction hooks) from OUTSIDE the core process — never `#include` VST in `components/arrangrr`.
   Where the Director outer-product physically lives is a file-layout call (Palladio).
 
 ## Concurrency note

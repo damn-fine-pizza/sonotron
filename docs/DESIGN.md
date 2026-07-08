@@ -391,7 +391,7 @@ I distinguish five levels (as requested):
 
 **Live piano→chord harmonizer (host-live driver + core-portable detector) (`2310`/`2320`).** The problem: on a *running* arrangement, playing a chord on the keyboard should make the whole band follow it from there on — the "substantial impact" a pro arranger keyboard gives the player, not just a one-shot voicing. Today the arranger's NTT resolution (`3110`) reads the `ChordState` set by `chord play` or by the recorded `ChordSequencer` (`2430`); this feature adds a **third, live source**: the keys you are holding right now. `Arranger::on_tick` / `fire_arranger` keep reading `m_chords.state()` unchanged — only the *origin* of that state can now be the live keys.
 
-- **Detector (core-portable).** A freestanding `ChordDetector` (`app/core/include/arrangrr/chord/chord_detector.hpp`) maintains the set of currently-held input notes — a 128-bit held-note set (16 bytes), zero heap, bounded, `constexpr`-friendly, in the same flash/RAM discipline as the rest of the core (`0200`). When ≥3 notes are held it recognizes the chord exactly like shell-mode entry (`theory::complete_shell_full`, `2210`/`2230` mode C): the lowest held note is the root, the pitch classes above it complete the quality (smart per `2240`, override rules unchanged).
+- **Detector (core-portable).** A freestanding `ChordDetector` (`components/arrangrr/include/arrangrr/chord/chord_detector.hpp`) maintains the set of currently-held input notes — a 128-bit held-note set (16 bytes), zero heap, bounded, `constexpr`-friendly, in the same flash/RAM discipline as the rest of the core (`0200`). When ≥3 notes are held it recognizes the chord exactly like shell-mode entry (`theory::complete_shell_full`, `2210`/`2230` mode C): the lowest held note is the root, the pitch classes above it complete the quality (smart per `2240`, override rules unchanged).
 - **Steering, not sounding.** The recognized chord is pushed into the `ChordEngine` through a new `ChordEngine::set_context(root_pc, quality)` that updates the harmonic context **without** emitting a voicing. The played notes already sound through normal routing; the detector only *steers* the arranger's NTT `ChordState`, so there is **no double-voicing**.
 - **Engine wiring (host-live driver).** The engine gains a live-detection toggle and a designated chord-detect input port. When enabled, `push_midi_in` on that port taps note-on/note-off into the detector and updates the context on every successful recognition.
 
@@ -725,7 +725,7 @@ These bind every node below. They are the "why the schedule is honest" layer.
     *investigated: the core/output path is clean — 0 scheduler drops over a 300-bar
     sustained run. The sustained-play crackle was a DOWNSTREAM integrated-audio
     (PipeWire) buffer underrun, NOT a core defect — fixed by sizing FluidSynth's
-    period (`demo/lib/launch.sh`, `audio.period-size=2048`, rate-matched to PipeWire).
+    period (`apps/demo/lib/launch.sh`, `audio.period-size=2048`, rate-matched to PipeWire).
     Distinct from the already-fixed demo-launcher "first note after stream-open"
     crackle (same file, warm-note workaround). No longer gates the GUI freeze line
     (`11700`).*

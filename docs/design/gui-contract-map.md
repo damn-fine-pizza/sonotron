@@ -1,8 +1,8 @@
 # GUI ↔ Core Contract Map (node 11600, Phase 0 orientation)
 
 Status: **orientation reference** for the host GUI client. Read alongside
-`app/core/include/arrangrr/abi.hpp` (frozen v1 vocabulary, node 11720) and the shipped
-UDS-JSONL adapter (node 11500, `app/platform/host/uds_server.*`, `jsonl.cpp`, `shell.cpp`).
+`components/arrangrr/include/arrangrr/abi.hpp` (frozen v1 vocabulary, node 11720) and the shipped
+UDS-JSONL adapter (node 11500, `components/hostrt/uds_server.*`, `jsonl.cpp`, `shell.cpp`).
 
 The GUI is a **separate process, pure client**. It never links or `#include`s the core. It
 speaks to the headless core **only** over the Unix-domain-socket control adapter. Everything
@@ -34,7 +34,7 @@ The v1 ABI that is *frozen and pinned by tests* is the **binary** `Op`/`Param`/`
 - Multi-client, no handshake, no per-client subscription. Connect = raw `connect()`.
 - **Trap:** sending `quit`/`exit` over the socket **terminates the whole host process for every
   client**. Never wire window-close to a bare `quit`.
-- Best client template to imitate: `app/core/tests/test_host.cpp::test_uds_server_end_to_end()`.
+- Best client template to imitate: `components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
 
 ---
 
@@ -42,7 +42,7 @@ The v1 ABI that is *frozen and pinned by tests* is the **binary** `Op`/`Param`/`
 
 Grouped by surface. Left column is the *text* the GUI writes; right is the frozen `Param` it
 resolves to (for traceability against the freeze). Exact verb spellings live in
-`app/platform/host/shell_music_commands.cpp` / `shell_io_commands.cpp`.
+`components/hostrt/shell_music_commands.cpp` / `shell_io_commands.cpp`.
 
 ### Transport / clock
 | Text line | Param | Notes |

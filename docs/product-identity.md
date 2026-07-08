@@ -68,11 +68,14 @@ Rules:
 ## Architecture — peer modules, one orchestrator (D43)
 
 ```
-              ORCHESTRATOR (per-deployment binary)
-          ┌──────────┼───────────┐
-      arrangrr     melodd       GUI (D38)
-     (MIDI brain) (audio, host)  (ImGui client)
+          ORCHESTRATOR / host backend (per-deployment binary)
+          ┌──────────┴───────────┐
+      arrangrr                 melodd
+     (core brain)             (audio, host)
    ── mutually name-blind; only a small POD interface between them ──
+                    │  UDS-JSONL socket (D26/D38)
+                    ▼
+      GUI — SEPARATE PROCESS · pure client · links nothing (D38)
 ```
 
 - **arrangrr** exposes a port (`Command` in / `OutEvent`+clock out — D26) and

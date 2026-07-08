@@ -5,8 +5,8 @@ built-in corpus. Author: Ottorino (style-and-arrangement, dual axis: arrangement
 musicology + computational/embedded).
 Scope: diagnosis of style flatness + generative design OPTIONS. No product code.
 
-All counts below were MEASURED on `app/core/include/arrangrr/arranger/styles/*.hpp`
-(16 files) and the model in `app/core/include/arrangrr/arranger/style_model.hpp`,
+All counts below were MEASURED on `components/arrangrr/include/arrangrr/arranger/styles/*.hpp`
+(16 files) and the model in `components/arrangrr/include/arrangrr/arranger/style_model.hpp`,
 `arranger/groove.hpp`, `timeline/timeline.hpp`. Grounded against DESIGN.md
 (D24/D37/D39/D40/D41/D42/D44) and `docs/research/yamaha-style-corpus-and-rules.md`.
 

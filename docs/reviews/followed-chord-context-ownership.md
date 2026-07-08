@@ -22,7 +22,7 @@ correct, not a defect:
 
 Output destinations
 - `Router m_router` — general MIDI in→out matrix (`kRouteAdd`/`kRouteClear`),
-  `app/core/include/arrangrr/routing/router.hpp:53`; used only in `push_midi_in`
+  `components/arrangrr/include/arrangrr/routing/router.hpp:53`; used only in `push_midi_in`
   (`engine.hpp:104`).
 - Arranger per-role routes `m_routes[kRoleCount]` (`kStyleRoute`), written by
   `Arranger::set_route` (`arranger.hpp:62-69`) via `style_route` (`engine.cpp:576`).

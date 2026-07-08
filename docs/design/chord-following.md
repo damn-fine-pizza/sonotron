@@ -47,7 +47,7 @@ player expects, and it is the default.
 
 As built:
 
-- **`FollowedContext`** (`app/core/include/arrangrr/chord/followed_context.hpp`)
+- **`FollowedContext`** (`components/arrangrr/include/arrangrr/chord/followed_context.hpp`)
   is the single owner of the followed chord. Live detection commits it
   immediately; it persists (nothing overwrites it) until the next live chord.
 - **Single-finger vs fingered** (`ChordDetector`): single-finger = one key names a
@@ -63,7 +63,7 @@ As built:
   and the sequencer comps its rhythm on your chord (no clash); when you release, the
   sequencer's next step resumes its own progression. With no sequencer a live chord
   latches (chord memory). `kAuto` (last-writer race) is kept only as an explicit
-  legacy mode. Path 1's demo (`demo/jam/setup.acmd`) still ships with the sequencer
+  legacy mode. Path 1's demo (`apps/demo/jam/setup.acmd`) still ships with the sequencer
   off, but live-priority means a running sequencer no longer clobbers live steering.
 
 Status of the shipped standard:

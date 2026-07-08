@@ -16,7 +16,7 @@ confirms Prospero's layered verdict and its "smallest first step" (teach
 
 Today arranger STYLES are C++ source: `inline constexpr StyleEvent[]` tables
 wired into `StylePattern` / `StyleSection` / `Style` (16 built-ins under
-`app/core/include/arrangrr/arranger/styles/`). They are POD + `Span`, land in
+`components/arrangrr/include/arrangrr/arranger/styles/`). They are POD + `Span`, land in
 flash memory-mapped on the STM32 target, cost zero RAM and zero parsing (D32/D33).
 The question: does a NON-compiled, pure-data style representation make sense, to
 unlock what, and in what format — given a freestanding, no-heap, no-filesystem
