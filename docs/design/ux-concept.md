@@ -4,6 +4,13 @@ Status: **direction chosen 2026-07-07 → Console / dashboard on Dear ImGui.** E
 widget spec. Companions: `workstation-vision.md` (what it is/does), `flows.md` (flow #3 detailed).
 **Supersedes** `gui-ux-proposal.md` (the old panel-mirror framing, pre product-reframe).
 
+> ⚠️ **Superseded for the center-of-screen framing (2026-07-10) by `ux-workstation.md`.** The GUI
+> restart re-centres the screen on a concrete GarageBand-immediacy workstation (browser + Live-Loops
+> repeat grid + sequence editor), and **demotes the intention podium below to an optional side
+> panel/mode**. This document's *laws* (observable / overridable-you-win / hand-operable) and its
+> harmony colour semantics still hold; its *conductor-dashboard-as-the-whole-screen* layout does not.
+> Read `ux-workstation.md` for the current screen.
+
 ## Posture
 
 You are a **conductor** in front of a living band, NOT an **editor** in front of a timeline. The
