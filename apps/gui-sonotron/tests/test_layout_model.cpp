@@ -16,27 +16,38 @@ void test_default_layout_shape() {
   const sonotron::Layout layout = sonotron::default_layout();
   CHECK(layout.window_title == "sonotron");
   CHECK(approx(layout.font_size_px, sonotron::kDefaultFontSizePx));
-  CHECK(layout.zones.size() == 5);
+  CHECK(layout.zones.size() == 6);
 
   CHECK(layout.zones[0].id == "transport");
   CHECK(layout.zones[0].row == 0);
   CHECK(layout.zones[0].full_span);
 
-  CHECK(layout.zones[1].id == "arrangement");
+  CHECK(layout.zones[1].id == "browser");
   CHECK(layout.zones[1].row == 1);
   CHECK(layout.zones[1].col == 0);
 
-  CHECK(layout.zones[2].id == "intention");
+  CHECK(layout.zones[2].id == "grid");
   CHECK(layout.zones[2].row == 1);
   CHECK(layout.zones[2].col == 1);
 
-  CHECK(layout.zones[3].id == "harmony");
-  CHECK(layout.zones[3].row == 2);
-  CHECK(layout.zones[3].col == 0);
+  // The right rail: Intention over Parts, both in (row 1, col 2) — this is
+  // the nested vertical stack.
+  CHECK(layout.zones[3].id == "intention");
+  CHECK(layout.zones[3].row == 1);
+  CHECK(layout.zones[3].col == 2);
 
-  CHECK(layout.zones[4].id == "structure");
-  CHECK(layout.zones[4].row == 2);
-  CHECK(layout.zones[4].col == 1);
+  CHECK(layout.zones[4].id == "parts");
+  CHECK(layout.zones[4].row == 1);
+  CHECK(layout.zones[4].col == 2);
+
+  CHECK(layout.zones[5].id == "seqedit");
+  CHECK(layout.zones[5].row == 2);
+  CHECK(layout.zones[5].full_span);
+
+  // Every zone starts shown; the View-menu toggles flip this.
+  for (const sonotron::Zone& zone : layout.zones) {
+    CHECK(zone.visible);
+  }
 }
 
 void test_layout_equality() {
@@ -71,25 +82,37 @@ void test_compute_rows_default_layout() {
 
   CHECK(rows.size() == 3);
 
-  // Row 0 (transport): a single, full-span zone.
+  // Row 0 (transport): a single, full-span zone — one cell, one-zone stack.
   CHECK(rows[0].cells.size() == 1);
   CHECK(approx(rows[0].cells[0].width_fraction, 1.0F));
-  CHECK(layout.zones[rows[0].cells[0].zone_index].id == "transport");
+  CHECK(rows[0].cells[0].stack.size() == 1);
+  CHECK(layout.zones[rows[0].cells[0].stack[0].zone_index].id == "transport");
 
-  // Row 1 (arrangement | intention): the wide central surface beside the
-  // narrower HUD rail — 0.72 / 0.28.
-  CHECK(rows[1].cells.size() == 2);
-  CHECK(approx(rows[1].cells[0].width_fraction, 0.72F));
-  CHECK(approx(rows[1].cells[1].width_fraction, 0.28F));
-  CHECK(layout.zones[rows[1].cells[0].zone_index].id == "arrangement");
+  // Row 1 (Browser | Repeat Zone | right rail): 0.22 / 0.54 / 0.24.
+  CHECK(rows[1].cells.size() == 3);
+  CHECK(approx(rows[1].cells[0].width_fraction, 0.22F));
+  CHECK(approx(rows[1].cells[1].width_fraction, 0.54F));
+  CHECK(approx(rows[1].cells[2].width_fraction, 0.24F));
+  CHECK(layout.zones[rows[1].cells[0].stack[0].zone_index].id == "browser");
+  CHECK(layout.zones[rows[1].cells[1].stack[0].zone_index].id == "grid");
 
-  // Row 2 (harmony | structure): two equal-weight columns.
-  CHECK(rows[2].cells.size() == 2);
-  CHECK(approx(rows[2].cells[0].width_fraction, 0.5F));
-  CHECK(approx(rows[2].cells[1].width_fraction, 0.5F));
+  // The third cell of row 1 is the NESTED STACK: Intention over Parts, split
+  // 0.38 / 0.62 of the cell's height.
+  const sonotron::ZoneGeometry& rail = rows[1].cells[2];
+  CHECK(rail.stack.size() == 2);
+  CHECK(layout.zones[rail.stack[0].zone_index].id == "intention");
+  CHECK(layout.zones[rail.stack[1].zone_index].id == "parts");
+  CHECK(approx(rail.stack[0].height_fraction, 0.38F));
+  CHECK(approx(rail.stack[1].height_fraction, 0.62F));
+  CHECK(approx(rail.stack[0].height_fraction + rail.stack[1].height_fraction, 1.0F));
 
-  // Height fractions sum to 1, and the middle (unweighted-default) row
-  // dominates over the two explicitly-thin strips.
+  // Row 2 (seqedit): a single, full-span zone.
+  CHECK(rows[2].cells.size() == 1);
+  CHECK(approx(rows[2].cells[0].width_fraction, 1.0F));
+  CHECK(layout.zones[rows[2].cells[0].stack[0].zone_index].id == "seqedit");
+
+  // Height fractions sum to 1, and the tall middle row dominates the two
+  // thin strips above and below.
   const float height_sum =
       rows[0].height_fraction + rows[1].height_fraction + rows[2].height_fraction;
   CHECK(approx(height_sum, 1.0F, 1e-3F));
@@ -151,8 +174,8 @@ void test_compute_rows_orders_columns_by_col_not_declaration_order() {
   const std::vector<sonotron::RowGeometry> rows = sonotron::compute_rows(layout);
   CHECK(rows.size() == 1);
   CHECK(rows[0].cells.size() == 2);
-  CHECK(layout.zones[rows[0].cells[0].zone_index].id == "first");
-  CHECK(layout.zones[rows[0].cells[1].zone_index].id == "second");
+  CHECK(layout.zones[rows[0].cells[0].stack[0].zone_index].id == "first");
+  CHECK(layout.zones[rows[0].cells[1].stack[0].zone_index].id == "second");
 }
 
 }  // namespace

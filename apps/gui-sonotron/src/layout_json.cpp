@@ -89,6 +89,11 @@ void append_zone(std::string& out, const Zone& zone, int indent, int depth) {
     out += ",\n" + field_pad + "\"h\": ";
     append_number(out, *zone.height_weight);
   }
+  // "visible" is emitted only when false — the common (shown) case stays out
+  // of the file, and the parser defaults an omitted "visible" to true.
+  if (!zone.visible) {
+    out += ",\n" + field_pad + "\"visible\": false";
+  }
   out += "\n" + pad + "}";
 }
 
@@ -227,6 +232,61 @@ class Parser {
     }
   }
 
+  // Dispatches one "key": value pair inside a zone object (parser positioned
+  // right after the ':') into the matching Zone field, discarding an
+  // unrecognized key via skip_value() (forward-compatible). `span`/`has_span`
+  // capture the "span" string until parse_zone folds it into `full_span`.
+  // Extracted from parse_zone's loop purely to keep that loop's cognitive
+  // complexity low — no behavior change.
+  bool parse_zone_field(const std::string& key, Zone& zone, std::string& span, bool& has_span) {
+    if (key == "id") {
+      return parse_string(zone.id);
+    }
+    if (key == "title") {
+      return parse_string(zone.title);
+    }
+    if (key == "row") {
+      double value = 0.0;
+      if (!parse_number(value)) {
+        return false;
+      }
+      zone.row = static_cast<int>(std::llround(value));
+      return true;
+    }
+    if (key == "col") {
+      double value = 0.0;
+      if (!parse_number(value)) {
+        return false;
+      }
+      zone.col = static_cast<int>(std::llround(value));
+      return true;
+    }
+    if (key == "span") {
+      has_span = true;
+      return parse_string(span);
+    }
+    if (key == "w") {
+      double value = 0.0;
+      if (!parse_number(value)) {
+        return false;
+      }
+      zone.width_weight = static_cast<float>(value);
+      return true;
+    }
+    if (key == "h") {
+      double value = 0.0;
+      if (!parse_number(value)) {
+        return false;
+      }
+      zone.height_weight = static_cast<float>(value);
+      return true;
+    }
+    if (key == "visible") {
+      return parse_bool(zone.visible);
+    }
+    return skip_value();
+  }
+
   bool parse_zone(Zone& zone) {
     zone = Zone{};
     std::string span;
@@ -250,44 +310,7 @@ class Parser {
         return false;
       }
       skip_ws();
-      if (key == "id") {
-        if (!parse_string(zone.id)) {
-          return false;
-        }
-      } else if (key == "title") {
-        if (!parse_string(zone.title)) {
-          return false;
-        }
-      } else if (key == "row") {
-        double value = 0.0;
-        if (!parse_number(value)) {
-          return false;
-        }
-        zone.row = static_cast<int>(std::llround(value));
-      } else if (key == "col") {
-        double value = 0.0;
-        if (!parse_number(value)) {
-          return false;
-        }
-        zone.col = static_cast<int>(std::llround(value));
-      } else if (key == "span") {
-        if (!parse_string(span)) {
-          return false;
-        }
-        has_span = true;
-      } else if (key == "w") {
-        double value = 0.0;
-        if (!parse_number(value)) {
-          return false;
-        }
-        zone.width_weight = static_cast<float>(value);
-      } else if (key == "h") {
-        double value = 0.0;
-        if (!parse_number(value)) {
-          return false;
-        }
-        zone.height_weight = static_cast<float>(value);
-      } else if (!skip_value()) {
+      if (!parse_zone_field(key, zone, span, has_span)) {
         return false;
       }
       skip_ws();
@@ -502,6 +525,27 @@ class Parser {
       advance();
     }
     return fail("unterminated string");
+  }
+
+  // Parses a JSON `true`/`false` literal into `out`. Any other token is a
+  // parse failure (a malformed "visible" makes the field, not the whole file,
+  // the culprit — consistent with the other typed field parsers here).
+  bool parse_bool(bool& out) {
+    if (!at_end() && peek() == 't') {
+      if (!expect_literal("true")) {
+        return false;
+      }
+      out = true;
+      return true;
+    }
+    if (!at_end() && peek() == 'f') {
+      if (!expect_literal("false")) {
+        return false;
+      }
+      out = false;
+      return true;
+    }
+    return fail("expected 'true' or 'false'");
   }
 
   bool parse_number(double& out) {

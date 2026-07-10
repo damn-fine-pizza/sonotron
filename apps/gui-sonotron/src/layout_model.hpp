@@ -23,7 +23,7 @@ namespace sonotron {
 // sane range; is_valid_font_size_px() is what both the JSON reader and
 // main.cpp use to reject a hand-edited value that is absent, non-finite, or
 // silly (e.g. 0 or 500), falling back to kDefaultFontSizePx instead.
-inline constexpr float kDefaultFontSizePx = 14.0F;
+inline constexpr float kDefaultFontSizePx = 13.0F;
 inline constexpr float kMinFontSizePx = 6.0F;
 inline constexpr float kMaxFontSizePx = 64.0F;
 
@@ -33,6 +33,17 @@ bool is_valid_font_size_px(float value);
 // is only meaningful relative to sibling zones sharing the same `row` (their
 // left-to-right order is by ascending `col`). `full_span` makes the zone
 // occupy the whole row width, ignoring `col` and any sibling in that row.
+//
+// NESTED VERTICAL SPLIT: two or more zones that share the SAME (row, col)
+// stack vertically inside that one column cell, top-to-bottom in declaration
+// order, their relative heights taken from `height_weight`. This is how the
+// workstation right rail puts Intention above Parts in a single column
+// (ux-workstation.md §4.6) without a second layout mechanism — the flat zone
+// list still expresses the whole screen.
+//
+// `visible` false removes the zone from the computed geometry entirely (it
+// takes no space and its siblings redistribute); this backs the View-menu
+// toggles (e.g. hide the Intention rail) additively, defaulting to shown.
 //
 // `width_weight`/`height_weight` are RELATIVE weights, not fractions — a
 // zone that leaves one unset behaves as weight 1.0. Weights are normalized
@@ -45,6 +56,7 @@ struct Zone {
   int row = 0;
   int col = 0;
   bool full_span = false;
+  bool visible = true;
   std::optional<float> width_weight;
   std::optional<float> height_weight;
 };
@@ -65,20 +77,33 @@ struct Layout {
 
 bool operator==(const Layout& lhs, const Layout& rhs);
 
-// The built-in fallback: the 5-zone primary-screen layout from
-// docs/design/ux-concept.md (Transport · Seed / Intention | Band /
-// Harmony | Structure), written to disk the first time the app runs.
+// The built-in fallback: the workstation screen from
+// docs/design/ux-workstation.md §3 — Transport across the top; Browser,
+// the Repeat-Zone hero, and the Intention-over-Parts right rail across the
+// middle; the Sequence-Edit surface across the bottom. Written to disk the
+// first time the app runs.
 Layout default_layout();
 
 // Resolved, render-ready geometry: one row per distinct `Zone::row` value
-// present in `layout.zones` (ascending), each row's zones ordered by
-// ascending `col`, with weights normalized into fractions that sum to 1
-// (within a row for width; across all rows for height). Pure computation —
-// no ImGui, no I/O — so it is unit-testable on its own and reusable by any
-// future renderer or tool.
-struct ZoneGeometry {
+// present among the VISIBLE zones (ascending), each row split left-to-right
+// into cells by ascending `col`, and each cell a top-to-bottom stack of the
+// zones that share its (row, col). Weights are normalized into fractions
+// that sum to 1 (within a row for width; within a cell for its stack; across
+// all rows for height). Pure computation — no ImGui, no I/O — so it is
+// unit-testable on its own and reusable by any future renderer or tool.
+
+// One zone inside a cell's vertical stack. `height_fraction` is its share of
+// the cell's height; a cell holding a single zone has one entry at 1.0.
+struct StackedZone {
   std::size_t zone_index = 0;  // index into the source Layout::zones
+  float height_fraction = 1.0F;
+};
+
+// One horizontal cell of a row: a column of `width_fraction` width holding a
+// vertical stack (usually one zone; more than one is the nested split).
+struct ZoneGeometry {
   float width_fraction = 1.0F;
+  std::vector<StackedZone> stack;  // top-to-bottom
 };
 
 struct RowGeometry {

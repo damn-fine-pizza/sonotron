@@ -18,4 +18,5 @@ endfunction()
 
 gui_sonotron_test(test_layout_model unit)
 gui_sonotron_test(test_layout_json unit)
+gui_sonotron_test(test_layout_nested_split unit)
 gui_sonotron_test(test_layout_roundtrip functional)
