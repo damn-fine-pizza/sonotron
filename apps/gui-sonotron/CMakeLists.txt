@@ -14,10 +14,6 @@ add_library(gui_sonotron_layout STATIC
   src/layout_model.cpp
   src/layout_json.cpp
   src/layout_renderer.cpp
-  src/intention.cpp
-  src/intention_panel.cpp
-  src/arrangement.cpp
-  src/arrangement_panel.cpp
 )
 target_include_directories(gui_sonotron_layout PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gui_sonotron_layout PUBLIC imgui)
