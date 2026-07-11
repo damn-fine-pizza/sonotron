@@ -71,7 +71,7 @@ to review code as an artifact, fabrizio-bofh-cpp; to test, torquato-qa-lead.
   pipeline, D41 voice-leading, D42 ChordGesture, D37 Generative Director capstone,
   D44 style data format. Read the decision before you reason about the construct.
 - `docs/reflections/*` for prior musings, and
-  `docs/research/yamaha-style-corpus-and-rules.md` — a validated corpus of 1010
+  `docs/backlog/yamaha-style-corpus-and-rules.md` — a validated corpus of 1010
   Yamaha SFF styles + 79 genre rules — as external ground truth for what real
   genre differentiation looks like.
 - The known starting diagnosis (VERIFY it yourself, do not just repeat it): all 16

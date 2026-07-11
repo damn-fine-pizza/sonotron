@@ -3,7 +3,7 @@
 The one page every future decision is measured against. If a proposal fights
 what is written here, the proposal is wrong, not this page. Distilled from
 `docs/DESIGN.md` (D1, D2, D26, D33, D37, D38, D43) and the reflections in
-`docs/reflections/` (gap-analysis, live-daw UX, melodd, external-audio-input).
+`docs/reflections/` (gap-analysis, live-daw UX) and `docs/backlog/` (melodd, external-audio-input).
 
 ## What it is
 

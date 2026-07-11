@@ -213,7 +213,7 @@ command to change a part's register live.
 **Principle:** arrangrr **DECIDES** audio symbolically (opaque clip references — "deploy clip N at
 bar X, loop to clock"); **melodd/sampler REALIZE** it. No waveform editing, no linear timeline.
 **Regime:** HOST-ONLY, and melodd **does not exist yet** — this flow is **NEEDS-DECISION, deferred**
-(owner-call on the audio-host library, see `docs/reflections/melodd-audio-companion.md`).
+(owner-call on the audio-host library, see `docs/backlog/melodd-audio-companion.md`).
 
 1. **Bring in a clip** — record your voice/gear, or import a sample/loop; it becomes an **opaque,
    content-addressed asset**.

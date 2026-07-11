@@ -892,7 +892,7 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
     shipped 2-note shuffle; swing/shuffle are complete as 2-note swing — this is a blues-only
     quality upgrade, not a blocker)*
   *ranked the single biggest lever against style sameness (corpus measurement,
-  `docs/reflections/style-differentiation-and-generation.md`); feel values in
+  `docs/backlog/style-differentiation-and-generation.md`); feel values in
   `docs/proposals/per-style-feel-values.md`*
 - **9200 Generative style — ○ planned**
   - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE

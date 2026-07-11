@@ -5,7 +5,7 @@
 > current host-GUI mechanical strand (node 11600) + core P0.
 
 Status: critique / verdict (Prospero). Not a locked decision. Read against
-`docs/DESIGN.md` (D1–D42) and, above all, `docs/reflections/melodd-audio-companion.md`
+`docs/DESIGN.md` (D1–D42) and, above all, `docs/backlog/melodd-audio-companion.md`
 — this is the single open node that verdict left unresolved and named as the next
 reflection: not internal render (melodd already covers it), but **sound that enters
 from the world** (voice, guitar, microphone, line-in). Built *on top of* the melodd
