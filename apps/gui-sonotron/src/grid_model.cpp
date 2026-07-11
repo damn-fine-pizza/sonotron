@@ -1,0 +1,49 @@
+#include "grid_model.hpp"
+
+#include <algorithm>
+
+namespace sonotron {
+
+GridModel::GridModel(std::size_t scene_count)
+    : m_scene_count(scene_count == 0 ? 1 : scene_count), m_cells(kPartCount * m_scene_count) {}
+
+std::string_view GridModel::part_label(std::size_t part_index) const {
+  return kTrackRoleLabels[part_index];
+}
+
+std::size_t GridModel::index_of(std::size_t part_index, std::size_t scene_index) const {
+  return part_index * m_scene_count + scene_index;
+}
+
+const GridCell& GridModel::cell(std::size_t part_index, std::size_t scene_index) const {
+  return m_cells[index_of(part_index, scene_index)];
+}
+
+void GridModel::set_cell(std::size_t part_index, std::size_t scene_index, GridCellKind kind,
+                         std::string label) {
+  GridCell& target = m_cells[index_of(part_index, scene_index)];
+  target.kind = kind;
+  target.label = std::move(label);
+}
+
+void GridModel::clear_cell(std::size_t part_index, std::size_t scene_index) {
+  set_cell(part_index, scene_index, GridCellKind::kEmpty, std::string());
+}
+
+void GridModel::add_scene() {
+  if (m_scene_count >= kMaxSceneCount) {
+    return;
+  }
+  const std::size_t new_scene_count = m_scene_count + 1;
+  std::vector<GridCell> new_cells(kPartCount * new_scene_count);
+  for (std::size_t part = 0; part < kPartCount; ++part) {
+    for (std::size_t scene = 0; scene < m_scene_count; ++scene) {
+      new_cells[part * new_scene_count + scene] = m_cells[part * m_scene_count + scene];
+    }
+    // The freshly added scene column starts empty (default GridCell{}).
+  }
+  m_cells = std::move(new_cells);
+  m_scene_count = new_scene_count;
+}
+
+}  // namespace sonotron

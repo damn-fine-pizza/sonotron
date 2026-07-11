@@ -1,12 +1,16 @@
-// sonotron GUI — general layout step (node 11600, JSON-driven zones).
+// sonotron GUI — the 6-zone workstation screen (node 11600), G0-G3.
 //
-// The window now shows the 6-zone workstation screen (Transport across the
-// top; Browser | Repeat Zone | the Intention-over-Parts right rail across
-// the middle; Sequence Edit across the bottom) as EMPTY, titled frames, laid
-// out from a JSON layout file. No socket, no brain connection, no live
-// content in any zone yet — see docs/design/ux-workstation.md §3 for the
-// screen this lays out, and src/layout_model.hpp / layout_json.hpp /
-// layout_renderer.hpp for the three-way split (pure-data model / JSON
+// The window shows the 6-zone workstation screen (Transport across the top;
+// Browser | Repeat Zone | the Intention-over-Parts right rail across the
+// middle; Sequence Edit across the bottom), laid out from a JSON layout
+// file, with a File/Edit/View/Transport/Help menu bar and every zone
+// dispatched to its live panel (G3, docs/design/gui-fase2-mechanical-plan.md).
+// A UdsBrainSession connects (if given `--control <path>`) as a pure client
+// and drives AppState; the core-dependent surfaces (real playhead, the
+// live harmonic visualizer, real clip launch) stay honest placeholders
+// until their core work lands (§11) — see docs/design/ux-workstation.md §3
+// for the screen this lays out, and src/layout_model.hpp / layout_json.hpp
+// / layout_renderer.hpp for the three-way split (pure-data model / JSON
 // reader-writer / ImGui renderer).
 //
 // Pure client (D38): this file links neither arrangrr_core nor hostrt and
@@ -32,10 +36,19 @@
 #include <string>
 #include <vector>
 
+#include "src/app_state.hpp"
+#include "src/brain_event.hpp"
+#include "src/brain_session.hpp"
+#include "src/browser_model.hpp"
+#include "src/grid_model.hpp"
 #include "src/layout_json.hpp"
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
+#include "src/parts_model.hpp"
 #include "src/screenshot.hpp"
+#include "src/seqedit_model.hpp"
+#include "src/uds_brain_session.hpp"
+#include "src/workstation_state.hpp"
 
 namespace {
 
@@ -61,6 +74,26 @@ std::string layout_path() {
     return std::string(home) + "/.config/sonotron/layout.json";
   }
   return "sonotron-layout.json";
+}
+
+// Resolves the control-socket path the GUI connects to as a pure client
+// (docs/design/gui-contract-map.md, ux-workstation.md §9): `--control
+// <path>` (the same flag `cli-arrangrr --control` takes) wins, then the
+// SONOTRON_CONTROL_PATH env var (same override pattern as
+// SONOTRON_LAYOUT_PATH/SONOTRON_FONT_PATH above). Neither set means "run
+// disconnected" -- there is no default socket path (Edit > Preferences,
+// ux-workstation.md §12, is a later milestone for setting this from inside
+// the GUI).
+std::string control_path_from_args(int argc, char** argv) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--control") {
+      return argv[i + 1];
+    }
+  }
+  if (const char* env = std::getenv("SONOTRON_CONTROL_PATH"); env != nullptr) {
+    return env;
+  }
+  return "";
 }
 
 // Headless-smoke escape hatch: if SONOTRON_GUI_MAX_FRAMES=N is set, render
@@ -167,10 +200,96 @@ void load_font(ImGuiIO& io, float content_scale, float base_font_size_px) {
   }
 }
 
-void render_frame(const sonotron::Layout& layout) {
+// Finds a zone by id for the View-menu visibility toggles below. Returns
+// nullptr if the layout (e.g. a stale hand-edited layout.json) has no zone
+// with that id — the caller then just skips the toggle rather than crashing.
+sonotron::Zone* find_zone(sonotron::Layout& layout, std::string_view id) {
+  for (sonotron::Zone& zone : layout.zones) {
+    if (zone.id == id) {
+      return &zone;
+    }
+  }
+  return nullptr;
+}
+
+// The menu bar (ux-workstation.md §4.1): File / Edit / View / Transport /
+// Help, chrome outside the JSON-driven zone grid. Only View's
+// Intention/Parts toggles and Transport's mirrors are wired to real
+// behaviour this slice; the rest render as (mostly disabled) placeholders
+// so the bar is discoverable without inventing functionality that is not
+// there. `quit_requested` is set true on File > Quit — the GUI window only,
+// NEVER a bare `quit` on the socket (that tears down the shared host for
+// every client, gui-contract-map.md §0; BrainSession::send() blacklists it
+// anyway as defense-in-depth, but the menu never even attempts it).
+void render_menu_bar(sonotron::Layout& layout, sonotron::BrainSession& brain_session,
+                     bool& quit_requested) {
+  if (!ImGui::BeginMainMenuBar()) {
+    return;
+  }
+
+  if (ImGui::BeginMenu("File")) {
+    ImGui::MenuItem("New set", nullptr, false, false);
+    ImGui::MenuItem("Open set...", nullptr, false, false);
+    ImGui::MenuItem("Save set", nullptr, false, false);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Quit")) {
+      quit_requested = true;
+    }
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Edit")) {
+    ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
+    ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, false);
+    ImGui::Separator();
+    ImGui::MenuItem("Preferences...", nullptr, false, false);
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("View")) {
+    if (sonotron::Zone* intention = find_zone(layout, "intention")) {
+      ImGui::MenuItem("Intention", nullptr, &intention->visible);
+    }
+    if (sonotron::Zone* parts = find_zone(layout, "parts")) {
+      ImGui::MenuItem("Parts", nullptr, &parts->visible);
+    }
+    ImGui::MenuItem("Layout density...", nullptr, false, false);
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Transport")) {
+    if (ImGui::MenuItem("Start", "Ctrl+P")) {
+      brain_session.send("transport start");
+    }
+    if (ImGui::MenuItem("Stop")) {
+      brain_session.send("transport stop");
+    }
+    if (ImGui::MenuItem("Continue")) {
+      brain_session.send("transport continue");
+    }
+    if (ImGui::MenuItem("Panic")) {
+      brain_session.send("panic");
+    }
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Help")) {
+    ImGui::MenuItem("About sonotron", nullptr, false, false);
+    ImGui::MenuItem("Key bindings...", nullptr, false, false);
+    ImGui::MenuItem("Contract / version", nullptr, false, false);
+    ImGui::EndMenu();
+  }
+
+  ImGui::EndMainMenuBar();
+}
+
+void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state,
+                  bool& quit_requested) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
+
+  render_menu_bar(layout, state.brain_session, quit_requested);
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -178,7 +297,7 @@ void render_frame(const sonotron::Layout& layout) {
   ImGui::Begin("sonotron", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoBringToFrontOnFocus);
-  sonotron::render_layout(layout);
+  sonotron::render_layout(layout, state);
   ImGui::End();
 
   ImGui::Render();
@@ -203,7 +322,7 @@ void present_frame(GLFWwindow* window, const char* screenshot_path) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   glfwSetErrorCallback(glfw_error_callback);
   if (glfwInit() == GLFW_FALSE) {
     std::fprintf(stderr, "sonotron: glfwInit failed\n");
@@ -261,11 +380,51 @@ int main() {
   std::fprintf(stdout, "sonotron: window open, GL renderer: %s\n",
                reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
 
+  // The GUI as a pure client of the headless core (docs/design/
+  // gui-contract-map.md, ux-workstation.md §9): UdsBrainSession is the first
+  // concrete BrainSession, connecting (if a control path was given at all)
+  // to `cli-arrangrr --control <path>`. AppState holds no truth of its own;
+  // it is only ever reduced from the events UdsBrainSession::poll() decodes.
+  const std::string control_path = control_path_from_args(argc, argv);
+  sonotron::UdsBrainSession brain_session;
+  sonotron::AppState app_state;
+
+  // The G3 zone panels' models (docs/design/gui-fase2-mechanical-plan.md):
+  // pure data, owned here, threaded into the frame loop through
+  // WorkstationState. The core-dependent surfaces they back (grid launch,
+  // the sequence-edit note canvas) stay honest placeholders — see each
+  // model/panel pair's own header comment for the exact gap.
+  sonotron::BrowserModel browser_model;
+  sonotron::GridModel grid_model;
+  sonotron::SeqEditModel seqedit_model;
+  sonotron::PartsModel parts_model;
+  sonotron::WorkstationState workstation_state{.app_state = app_state,
+                                               .brain_session = brain_session,
+                                               .browser = browser_model,
+                                               .grid = grid_model,
+                                               .seqedit = seqedit_model,
+                                               .parts = parts_model};
+
+  if (!control_path.empty()) {
+    if (brain_session.connect_to(control_path)) {
+      std::fprintf(stdout, "sonotron: connected to control socket %s\n", control_path.c_str());
+    } else {
+      std::fprintf(stderr, "sonotron: could not connect to control socket %s: %s\n",
+                   control_path.c_str(), brain_session.last_error().c_str());
+    }
+  } else {
+    std::fprintf(stdout,
+                 "sonotron: no control socket given (--control <path> or "
+                 "SONOTRON_CONTROL_PATH) - running disconnected\n");
+  }
+
   const int max_frames = max_frames_from_env();
   const char* screenshot_path = screenshot_path_from_env();
   int frame = 0;
+  std::vector<sonotron::BrainEvent> brain_events;
+  bool quit_requested = false;
 
-  while (glfwWindowShouldClose(window) == GLFW_FALSE) {
+  while (glfwWindowShouldClose(window) == GLFW_FALSE && !quit_requested) {
     if (max_frames >= 0 && frame >= max_frames) {
       break;
     }
@@ -273,11 +432,28 @@ int main() {
 
     // Capture only the last frame of a bounded (max-frames) run, once the UI
     // has settled — one PNG, not one per frame.
-    const bool capture_this_frame = screenshot_path != nullptr && max_frames >= 0 &&
-                                    frame == max_frames;
+    const bool capture_this_frame =
+        screenshot_path != nullptr && max_frames >= 0 && frame == max_frames;
 
     glfwPollEvents();
-    render_frame(layout);
+
+    // Poll-in-frame (gui-contract-map.md §1): drain the non-blocking socket
+    // once, reduce every decoded event into AppState, then render from that
+    // state. No background reader thread.
+    brain_events.clear();
+    brain_session.poll(brain_events);
+    for (const sonotron::BrainEvent& event : brain_events) {
+      app_state.apply(event);
+      // No dedicated log/console zone exists yet in the §3 workstation
+      // wireframe (that is G3+ territory); until one lands, the scrolling
+      // event log is observable on stdout.
+      std::fprintf(stdout, "sonotron: %s\n", app_state.log().back().c_str());
+    }
+    const bool brain_connected =
+        brain_session.status() == sonotron::BrainSession::Status::kConnected;
+    app_state.set_connected(brain_connected);
+
+    render_frame(layout, workstation_state, quit_requested);
     present_frame(window, capture_this_frame ? screenshot_path : nullptr);
   }
 
