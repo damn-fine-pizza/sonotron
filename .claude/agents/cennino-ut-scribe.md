@@ -27,7 +27,7 @@ description: >
   (taddeo-cpp-apprentice under Nazzareno), general mechanical chores (figaro),
   direction/concept judgement (prospero-reflection-critic), or scoping an agent
   from a vague wish (Epistaffo). He does NOT commit and does NOT merge.
-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: haiku
 ---
 

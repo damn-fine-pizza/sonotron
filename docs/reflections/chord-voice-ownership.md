@@ -1,5 +1,12 @@
 # Chord-voice ownership (the D47 → D48 remainder)
 
+> **Status — future / not current phase.** Specified but unscheduled (DESIGN.md node `2590`,
+> reserved, behind the GUI freeze line). Note: the D47 steering half has since shipped via a
+> *different* mechanism — `ChordFollow::kLivePriority` (node `2340`) — which redirects the
+> sequencer's audible voice onto a held live chord for the *detect* case, but NOT the manual
+> `chord play` case this file opens with. D48's full sound-gates-on-follow ruling for `kManual`
+> remains unimplemented; this file stays the sole spec for node `2590`.
+
 **Status:** direction locked as **D48** — sound-ownership rides the SAME
 `ChordFollow` axis as steer-ownership. One axis, not two. Direction **A**,
 justified and scoped by direction **C**. Direction **B** rejected.

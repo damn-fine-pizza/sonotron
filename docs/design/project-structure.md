@@ -1,7 +1,7 @@
 # Project structure — sonotron as a collection of components
 
-Status: **REALIZED on-disk structure + componentization principles, owner-aligned 2026-07-07,
-executed and committed 2026-07-11.** This document is now the canonical description of the current
+Status: **REALIZED on-disk structure + componentization principles, owner-aligned and
+executed 2026-07-07 (commit `361bbfa`); doc consolidated 2026-07-11.** This document is now the canonical description of the current
 repo layout (`project(sonotron)`, `apps/` · `components/` · `tests/` · `third_party/`) — no longer a
 target. The restructure move-plan that carried the tree from `project(arrangrr)`/`app/` to here has
 been executed and retired; its placement rules are absorbed below (see "Placement rules — where new

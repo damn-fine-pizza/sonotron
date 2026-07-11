@@ -1,5 +1,10 @@
 # Reflection — Why the 16 styles feel like "one song rearranged", and how to make them genuinely different
 
+> **Status — future / not current phase.** Most of the diagnosis is realized (per-style feel/tempo
+> shipped: DESIGN.md `9100`–`9120`). The remaining generative / stylizer / corpus work
+> (`9200`/`9300`/`9400`) sits behind the GUI freeze line (`11700`) and is not scheduled for the
+> current host-GUI mechanical strand.
+
 Status: analysis + design DIRECTION (not code). Read-only measurement of the
 built-in corpus. Author: Ottorino (style-and-arrangement, dual axis: arrangement
 musicology + computational/embedded).

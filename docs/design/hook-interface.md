@@ -28,7 +28,7 @@ interaction"*), `docs/design/project-structure.md` (D43 name-blind components / 
 - **Observability is bifurcated, traced in the tree, not asserted:**
   - Channel A (crosses the process): 5 `OutEvent::Kind`s → `arrangrr::host::to_jsonl`
     (`components/hostrt/jsonl.cpp`) → `UdsServer::broadcast` (`components/hostrt/uds_server.hpp`).
-    Per `docs/design/gui-contract-map.md` §2, only `kMidi/kChord/kSection/kTransport/kWarn` cross;
+    Per `docs/design/gui-contract-map.md` §3, only `kMidi/kChord/kSection/kTransport/kWarn` cross;
     `kChord` fires **only** from the recorded-sequencer path (`fire_chord_seq`,
     `components/arrangrr/include/arrangrr/engine.hpp:311-354`), never from `chord play` nor from
     live detection.
@@ -39,7 +39,7 @@ interaction"*), `docs/design/project-structure.md` (D43 name-blind components / 
     `refresh_piano_content`, `:172-197` `refresh_styles_content`, `:206-211`
     `refresh_groove_content`, `:213-219` `refresh_arp_content`) and by `shell_input.cpp`
     (`:314,318,338,377,395,445`). The TUI's truth and the wire's truth are two different reads of
-    two different surfaces — they can (and today do, per `gui-contract-map.md` §3) disagree.
+    two different surfaces — they can (and today do, per `gui-contract-map.md` §5) disagree.
 - **The one arbitration mechanism that already exists** — `ChordFollow::kLivePriority` — lives
   split across a static gate (`FollowedContext::may_follow`,
   `components/arrangrr/include/arrangrr/chord/followed_context.hpp:132-149`) and a dynamic

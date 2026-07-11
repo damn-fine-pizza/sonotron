@@ -1,5 +1,8 @@
 # Reflection — `melodd`: an audio companion around arrangrr, without becoming a DAW
 
+> **Status — future / not current phase.** Captured direction only (DESIGN.md D43/`0910`), not
+> scheduled. Still cited live by `docs/design/flows.md`, so kept — not retired.
+
 Status: critique / verdict (Prospero). Not a locked decision. Read against
 `docs/DESIGN.md` (D1–D42), `docs/reflections/live-daw-around-arrangrr-ux.md`
 (the "kill the word DAW" verdict and its three firewalls), and

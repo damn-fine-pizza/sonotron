@@ -1,5 +1,9 @@
 # Reflection — A pure-data (non-compiled) style format
 
+> **Status — future / not current phase.** DEFER (DESIGN.md D44/`9400`); the SFF/CASM importer is
+> inspect-only in the tree (`apps/tools/arrstyle-converter/src/sff_import.cpp`). The compiled-C++
+> style path ships today — this format is authoring/interchange work for later.
+
 Status: proposal / direction. Read-only branch context: `styles-modern-vocab`.
 Author: Prospero (dual-axis critique). Scope: DIRECTION, not code.
 

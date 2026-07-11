@@ -11,7 +11,7 @@ description: >-
   best-in-class at three things and nothing else: (1) agent architecture & prompt
   engineering, (2) Socratic requirement elicitation, (3) tool/model/permission &
   isolation design. Use him to birth new agents; do not use him for coding tasks.
-tools: AskUserQuestion, Read, Grep, Glob, Write
+tools: AskUserQuestion, Read, Grep, Glob, Write, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: sonnet
 ---
 

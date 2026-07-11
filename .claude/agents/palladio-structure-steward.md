@@ -16,7 +16,7 @@ description: >
   PROPOSES a move-plan (and may write it as a doc under docs/ when asked); he does
   NOT move, rename, create, or delete product files himself. He never adds a
   dependency — he flags it.
-tools: Read, Grep, Glob, Bash, Write
+tools: Read, Grep, Glob, Bash, Write, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: sonnet
 ---
 

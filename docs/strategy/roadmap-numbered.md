@@ -298,10 +298,17 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   - `11420` WHITE (direct play) — ○ HOST-ONLY *(deferred: needs a sounding melody surface)*
 - `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅
 - `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`): separate
-  process, pure client, never links core. Tech stack (Dear ImGui or an alternative)
-  is an OPEN dependency decision, evaluated WITH the owner under `0800` when the
-  freeze line's pre-GUI batch (`11710`) closes — NOT picked here. — ○ HOST-ONLY
-  (**dependency flag: GUI toolkit — decision deferred to freeze-line crossing**)
+  process, pure client, never links core. Tech stack — **DECIDED & vendored: Dear ImGui
+  (upstream `ocornut/imgui`, pinned v1.92.8) + GLFW3, backends `imgui_impl_glfw` /
+  `imgui_impl_opengl3`, under `third_party/imgui` + `third_party/glfw` (each with an
+  `ARRGRR_VENDOR.md` pin), built and linked by `apps/gui-sonotron/`** (dependency fork
+  resolved under `0800` and executed in code; rationale as-built in
+  `docs/design/gui-contract-map.md` §1). — ◑ partial HOST-ONLY (**mechanical GUI strand
+  begun: G0 concept demolition `38b5826` + G1 workstation layout / nested split `c49f8c6`,
+  both 2026-07-10, committed & tested; screen spec `docs/design/ux-workstation.md`,
+  execution plan `docs/design/gui-fase2-mechanical-plan.md`. Core-dependent strand
+  (kChordFollowed, beat/position, clip primitive) still ahead — NOT complete. Toolkit
+  dependency flag: RESOLVED / vendored**)
 
 - **11700 GUI freeze line — pivot from core-feature work to the host GUI**
   (owner-decided). STATUS: DECIDED (gate, not a schedulable work item — see the `0000`
@@ -452,9 +459,10 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
 - **ABI / struct changes:** `9110` is owner-approved. `5100`'s shape is now LOCKED at
   the freeze line (`11720`) — the former NEEDS-DECISION is resolved. All other open
   leaves are additive or internal.
-- **No new core dependency** is introduced by any SHIPPABLE item. The dependency flag
-  in the open set is the **GUI toolkit** for `11600` (HOST-ONLY, policy `0800`,
-  decided AT the freeze line, not before).
+- **No new core dependency** is introduced by any SHIPPABLE item. The former open
+  dependency flag — the **GUI toolkit** for `11600` (HOST-ONLY, policy `0800`) — is now
+  RESOLVED: Dear ImGui + GLFW3 vendored under `third_party/` and driven by
+  `apps/gui-sonotron/` (see the `11600` entry; rationale `docs/design/gui-contract-map.md` §1).
 - **Dual-target / no-heap reality (`0200`/`0300`/`0400`):** every SHIPPABLE leaf is
   bounded and flash/static-resident; `6000` is pre-budgeted; all ML training (`9220`)
   is HOST-ONLY, only the baked table ships. `11700`/`11600` are HOST-ONLY by
@@ -479,9 +487,11 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
    Their relative order (this proposal's steps 7 vs 9) is advisory only — it should be
    re-decided by real feel-in-the-hands testing once `11600` exists and sounds, not by
    this document.
-4. **GUI tech stack** (`11600`, surfaced by `11700`/`11720`): ImGui or an alternative —
-   a genuine dependency fork under policy `0800`, to be evaluated WITH the owner when
-   the pre-GUI batch (`11710`) closes. Not picked here; flagged.
+4. **GUI tech stack** (`11600`, surfaced by `11700`/`11720`) — **DECIDED & vendored:
+   Dear ImGui (`ocornut/imgui` v1.92.8) + GLFW3.** The dependency fork under policy `0800`
+   is resolved and EXECUTED in code: vendored under `third_party/imgui` + `third_party/glfw`
+   (each with an `ARRGRR_VENDOR.md` pin) and built/linked by `apps/gui-sonotron/`
+   (`target_link_libraries(... imgui)`). Rationale as-built: `docs/design/gui-contract-map.md` §1.
 
 ---
 

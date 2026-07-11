@@ -19,7 +19,7 @@ description: >
   "main" (the top-level orchestrator) to relay verbatim to a freshly spawned
   helper instance. He defaults to the cheapest capable option and escalates
   only for cause.
-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: sonnet
 ---
 

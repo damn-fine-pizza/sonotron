@@ -169,7 +169,8 @@ needs a nested vertical split in the layout engine, which the restart adds now (
 
 ### 4.1 Menu bar (chrome)
 - **File** — new/open/save set (GUI-local for v1, §5/§11), quit *the GUI* (never a bare `quit` on
-  the socket — that kills the brain for every client; §10).
+  the socket — that kills the brain for every client; `BrainSession::send()` blacklists it, §9;
+  see also flow B10, §8).
 - **Edit** — undo/redo (GUI-side authoring), preferences (§12).
 - **View** — toggle Intention rail, toggle Parts, choose layout density.
 - **Transport** — start/stop/continue/panic mirrors of the transport bar.
@@ -189,9 +190,8 @@ restart builds up front (§11, P0-2) — a true playhead, not an inferred one.
 
 ### 4.3 Browser
 A searchable tree of the three draggable material kinds:
-- **Styles** — the 16 builtins (basic, pop, rock, ballad, funk, disco, house, swing, bossa, samba,
-  reggae, country, blues, shuffle, latin, motown). Drag a style → sets the style; drag a *section*
-  of a style → a grid cell.
+- **Styles** — the 16 builtins (see `gui-contract-map.md` §2). Drag a style → sets the style; drag
+  a *section* of a style → a grid cell.
 - **Clips** — chord-sequence and step-track material the user has authored/recorded.
 - **MIDI seqs** — recorded chord progressions (`ChordSequence`, degrees stored relative to key so
   they transpose/re-harmonise, D28).
@@ -374,7 +374,7 @@ class BrainSession {
 
 ## 10. What the GUI mirrors vs does not duplicate
 
-Carried forward from `gui-contract-map.md §4` (live) and folded in from `ux-concept.md` (retired
+Carried forward from `gui-contract-map.md §5` (live) and folded in from `ux-concept.md` (retired
 2026-07-11):
 - The GUI is **a mirror that reflects and a keyboard that commands — never a truth and never a note
   in the timing path.** The live musical gesture (the chord the band follows) enters the core via

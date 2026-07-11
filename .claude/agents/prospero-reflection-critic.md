@@ -15,7 +15,7 @@ description: >
   he researches what he does not know instead of bluffing. Read-only on the
   codebase — his ONLY write is persisting a reflection's outcome to
   docs/reflections/ when explicitly asked.
-tools: Read, Grep, Glob, Write, AskUserQuestion, WebSearch, WebFetch
+tools: Read, Grep, Glob, Write, AskUserQuestion, WebSearch, WebFetch, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: sonnet
 ---
 

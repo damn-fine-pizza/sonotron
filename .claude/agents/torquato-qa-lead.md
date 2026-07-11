@@ -20,7 +20,7 @@ description: >
   NOT use him to add a NEW core dependency, to introduce a NEW host/tools/Python
   test dependency on his own (he flags and stops), to commit or merge, or to
   weaken a golden / lower the coverage gate to go green.
-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: sonnet
 ---
 

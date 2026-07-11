@@ -77,6 +77,43 @@ Status of the shipped standard:
   panel-label rename (`original` / `current` / `next` key).
 - *(done)* **Single-finger replace** — A→S and G→H no longer collapse to one root.
 
+### 2.1 Two-zone harmony input (melody vs harmony per port)
+
+As built (node `2330`, decision `D49`): the PIANO panel and the CHORDS panel drive
+two distinct playable surfaces on the host, selected by panel focus, not by pitch
+split. The PIANO panel feeds `kPianoInputPort` (in0), zone `kMelody`: its keys
+sound and steer nobody. The CHORDS panel feeds `kHarmonyInputPort` (in1), zone
+`kHarmony`: the *same* musical key bindings are output-suppressed (silent) but
+OBSERVED by the `ChordDetector`, so playing there re-harmonizes the band without
+sounding a note (`components/hostrt/shell_internal.hpp:44-60`). On the wire the
+zone is set via `kInputZone` (ABI value 42): `a` = input port, `b` = `InputZone`
+(0 = melody, 1 = harmony); `kHarmony` suppresses the port's note output, `kMelody`
+routes/sounds and is the default (`components/arrangrr/include/arrangrr/abi.hpp:126-131`).
+This is the two-zone split that un-defers the piano-as-sole-chord-input question:
+chord recognition has its own silent surface and no longer competes with the
+piano's melodic role. *(Absorbed from `harmony-input-chord-zone.md`, retired
+2026-07-11.)*
+
+### 2.2 Scale-aware single-finger rule (triads only)
+
+As built (node `2220`, decision `D45`): single-finger mode maps one pressed key to
+the diatonic MAJOR-or-MINOR triad of that root — never diminished or augmented.
+The rule (`single_finger_quality`, `components/arrangrr/include/arrangrr/chord/theory.hpp:203`,
+self-tested at `theory.hpp:342-351`): root = the pressed key; quality = the
+diatonic degree's quality; where the diatonic degree is diminished or augmented it
+SNAPS by fifth-restoration — a diminished triad (minor third, lowered fifth) snaps
+to MINOR (keep the minor third, restore the perfect fifth), an augmented triad
+(major third, raised fifth) snaps to MAJOR (keep the major third, restore the
+perfect fifth); a chromatic (out-of-scale) root defaults to MAJOR. Single-finger
+is triads only — it never adds the richness (7ths, extensions) that diatonic
+mode's `smart_quality` (`2240`) applies, and unlike diatonic mode it never rejects
+a chromatic root (diatonic mode is D20-strict: out-of-key is silent/rejected;
+single-finger is non-rejecting by design, so a performance shortcut never blocks
+mid-phrase). This is arrangrr's own scale-aware single-finger (Casio-Chord/"smart"
+lineage), not the key-independent classic Yamaha Single Finger convention
+(root+left = 7th, root+white = minor). *(Absorbed from
+`harmony-input-chord-zone.md`, retired 2026-07-11.)*
+
 ## 3. Pivot — the novel feature (PARKED)
 
 Playing a chord relatively transposes a running chord progression by the interval
@@ -104,4 +141,6 @@ replacement, determinism/ABI):
 | Feature | State |
 |---|---|
 | Literal chord follow (Path 1) | **Shipping.** Single-finger replace fixed; tests re-ratified; live-vs-sequencer arbitration decided + shipped (`kLivePriority`). |
+| Two-zone harmony input (§2.1) | **Shipping** (`2330`/`D49`). Piano = melody (sounds, no steer), Chords = harmony (silent, steers). |
+| Scale-aware single-finger (§2.2) | **Shipping** (`2220`/`D45`). Triads only; dim→minor, aug→major, chromatic→major. |
 | Pivot | **Parked**, fully specified, name assigned. Returns as an opt-in mode on a running sequencer. |

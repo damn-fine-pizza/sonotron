@@ -25,3 +25,8 @@ compile_commands.json
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Claude Code personal settings + local usage logs (per-machine, not shared)
+.claude/settings.local.json
+.claude/codebase-memory-usage.log
+.claude/codebase-memory-gain.sh

@@ -22,7 +22,7 @@ description: >
   finished reflection into keep/rework/throw (that is prospero-reflection-critic),
   to REVIEW code line-by-line (fabrizio-bofh-cpp), or to TEST (torquato-qa-lead).
   He never adds a host/core dependency — he flags it for owner approval.
-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, Write, AskUserQuestion
+tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, Write, AskUserQuestion, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: sonnet
 ---
 

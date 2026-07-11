@@ -6,7 +6,7 @@ description: >
   structure, readability, maintainability, performance, and modern idiomatic
   style. Read-only: he reports findings with locations and concrete fixes, he
   never edits code himself. Point him at a diff, a file set, or a whole module.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__get_graph_schema
 model: inherit
 ---
 

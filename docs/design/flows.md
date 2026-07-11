@@ -37,7 +37,9 @@ in-flow.
 9. **Reproduce / recall** — lock a seed, reopen byte-exact; recall a Song / a Scene / a set (future).
    **✓ reviewed — see below.**
 10. **Author a part by hand, assisted on demand** — write notes in the sequencer yourself; ask the
-    copilot to propose / adjust / add; accept as ghosts. **✓ detailed (2026-07-07) — see below.**
+    copilot to propose / adjust / add; accept as ghosts. **✓ detailed (2026-07-07); on the current
+    screen only the manual editor ships, the copilot is deferred (`ux-workstation.md` §6) — see
+    below.**
 
 > **Vocabulary note (DESIGN.md §7):** a **Scene** is a *snapshot* of state (which variation / mute /
 > routing, recalled in an instant — Roland/Ableton sense); a **Song** is the *path over time* (an
@@ -115,11 +117,11 @@ control is still to detail — no such config field exists yet).
 2. **Express a target** — you don't set "the value now", you set **where you want it to GO and how
    fast**: e.g. *"toward more energy + more tension, rising over 8 bars"* — by moving the controls to
    where you want to ARRIVE, or with an "up" gesture.
-3. **The system walks toward the target, on musical boundaries** — the key distinction:
-   - **structure = stepped (thresholds):** halfway up the arp switches on, the pad re-enters, it
-     moves to Var C, a fill fires before the peak — with **hysteresis**, so it doesn't flap around
-     the switch point;
-   - **color = continuous:** groove intensity rises, register lifts, dynamics open — smooth.
+3. **The system walks toward the target, on musical boundaries** — halfway up the arp switches on,
+   the pad re-enters, it moves to Var C, a fill fires before the peak, groove intensity rises,
+   register lifts, dynamics open. The mechanism (structure moves in stepped, hysteresis-guarded
+   thresholds; color moves continuously) is the "How an axis behaves" section of
+   `director-vocabulary.md` — this flow is the experience it produces, not a restatement of it.
 4. **Tension builds, then RESOLVES** — at the peak a roll/fill, and on the next downbeat the
    **drop**: the resolution lands *in time*, not at random. (Build→drop is the style-default, not a
    universal law — held-and-unresolved tension is a legitimate choice; see `director-vocabulary.md`.)
@@ -199,7 +201,9 @@ you left it; the machine keeps composing everywhere except where your hand is.
 
 *Still to detail:* which levers are global vs per-part; the arp config surface; how long a "yours"
 hold persists before the Director may resume; that per-part density/dynamics is partly aspirational
-today (only register, `kRoleAnchor`/`3230`, is shipped as a manual lever).
+today — register is only an *authored* default (`kRoleAnchor`/`3230`, per-role, compiled into the
+style via `StyleEvent.octave`), not a runtime lever: the ABI's `Param` enum (`abi.hpp`) has no
+command to change a part's register live.
 
 ---
 
@@ -345,6 +349,11 @@ proposes, you command."
 **The WOW:** it's your part, in your hand — but a musical assistant is one ask away for the bass
 line you can't be bothered to voice or the fill you can't quite hear, and it never touches a note
 you didn't approve.
+
+*Honest status:* on today's screen, only step 1 (the plain piano-roll/step editor) is shipped; the
+**pull-only copilot (Propose/Adjust/Add) is deferred for v1** — the Sequence Edit surface is spec'd
+as "a plain, honest editor" today, with the copilot landing later (`ux-workstation.md` §6). This
+flow remains the product-vision target; it is simply not yet realized as such on the screen.
 
 *Still to detail:* the ask affordance (menu / keys / natural-language), and how a proposal's scope
 is chosen (selection vs region vs whole part).

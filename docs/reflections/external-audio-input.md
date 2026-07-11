@@ -1,5 +1,9 @@
 # Reflection — external audio *input*: the one un-regenerable artifact, and where it may live
 
+> **Status — future / not current phase.** Builds on the not-yet-scheduled `melodd` direction
+> (DESIGN.md D43/`0910`); no roadmap node exists for external audio input yet. Out of scope for the
+> current host-GUI mechanical strand (node 11600) + core P0.
+
 Status: critique / verdict (Prospero). Not a locked decision. Read against
 `docs/DESIGN.md` (D1–D42) and, above all, `docs/reflections/melodd-audio-companion.md`
 — this is the single open node that verdict left unresolved and named as the next

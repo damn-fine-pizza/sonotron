@@ -1,6 +1,6 @@
 # GUI Phase 2 — execution plan for the *mechanical* strand
 
-Status: **in progress — G0 and G1 DONE (2026-07-11), G2→G3 pending.** Derived from `ux-workstation.md` §13
+Status: **in progress — G0 and G1 DONE (2026-07-10), G2→G3 pending.** Derived from `ux-workstation.md` §13
 (salvage/rebuild map); this plan implements only the part **with no dependency on the core** (the GUI
 mechanical strand). The core strand (§11: `kChordFollowed`, `kBeat`, the clip primitive) is **out of scope
 for this plan** and will be sequenced afterwards. G0 (concept demolition, commit `38b5826`) and G1

@@ -124,7 +124,7 @@ the GUI MVP (song-mode territory).
 ### Parts mixer
 | Text line | Param | Notes |
 |---|---|---|
-| `part mute <role> <0\|1>` | `kPartMute` | roles: drums,perc,bass,chord1,chord2,pad,arp,phrase |
+| `part mute <role> <0\|1>` | `kPartMute` | roles: drums,perc,bass,chord1,chord2,pad,arp,phrase,lead,cc (cc = automation lane, not a musical part) |
 | `part solo <role> <0\|1>` | `kPartSolo` | any-solo ⇒ only soloed parts play |
 | `program <gm> <port:ch>` | `kProgram` | GM voice select |
 | `style route <role> <port:ch>` | `kStyleRoute` | |
@@ -186,11 +186,19 @@ additive-only, so none touches an existing id. **P0 = blocks the central live su
    side effect. → Propose an ack event; note `Command` has no correlation field to match it.
 5. **No held-notes / detector state event.** "3 of 3 fingers held" is in-process introspection
    only. → additive detector-state event.
+6. **No clip/scene primitive.** There is no first-class clip object and no `launch/stop clip`,
+   `launch scene`, or launch-quantize verbs — `track new/step/…` is a raw step-track editor, not a
+   launchable clip. → Propose `launch/stop clip <id> quantize <n>` / `launch scene <n> quantize <q>`
+   verbs plus an additive `clip` state event, launch-quantize honoured by the core clock. Blocks the
+   Repeat Zone (Live-Loops launch grid).
 
-Priority for the WOW loop: **1 and 2 first** — they make the live harmony visualizer and the
-playhead real over the wire. 3 makes reconnection honest. 4–5 are polish. The GUI can ship a
-first slice by *inferring* the current chord from the `kMidi` note stream + `kSection`, but that
-is a workaround; the proper fix is proposals 1–2.
+Priority for the WOW loop: **1, 2, and 6 are front-of-line** — they make the live harmony
+visualizer, the playhead, and the Repeat Zone real over the wire (6 was pulled forward from
+"secondary" once the Repeat Zone became the hero surface). 3 makes reconnection honest. 4–5 are
+polish. The GUI can ship a first slice by *inferring* the current chord from the `kMidi` note
+stream + `kSection`, but that is a workaround; the proper fix is proposals 1–2. **The authoritative
+sequencing of this whole additive batch is `ux-workstation.md` §11**, which supersedes any ordering
+implied here.
 
 ---
 
@@ -202,9 +210,8 @@ does keyboard-first live control well (CTRL+P, backtick chooser, parts mixer, MI
 Split: **GUI for 2-D structure, inspection, and a big readable harmony surface; live steering
 stays a first-class but not re-invented keyboard/MIDI path.**
 
-Note the doc/brief say "CTRL+SPACE chooser" but the *shipped* chooser key is **backtick** `` ` ``;
-CTRL+SPACE is the piano surface's momentary↔toggle switch. Carry the real bindings forward.
+The backtick-chooser key binding (shipped `` ` ``, not the older docs' "CTRL+SPACE") is specified in
+`ux-workstation.md` §4.1.
 
-Colour semantics to preserve exactly: **bold GREEN = chord followed THIS bar** (gated OFF at
-rest — lit only when transport plays or a chord is explicitly steered), **AMBER = pending chord
-staged for next bar**, off otherwise; green wins over amber on a shared pitch class.
+(colour semantics — green = followed this bar, amber = staged next bar — are specified in
+`ux-workstation.md` §10)

@@ -9,6 +9,12 @@ This reflection judges a **direction**, not code. Where it touches the pattern
 model, voicing, looper, arp and per-port scheduling, it defers to the prior
 gap-analysis verdict rather than re-litigating it.
 
+> **Status pointer (2026-07-11).** Parts of this direction have since been decided and
+> built: the pure-client-over-UDS boundary and the ImGui + GLFW toolkit explored below are
+> now settled and grounded — see `docs/design/gui-contract-map.md` §1 and
+> `docs/design/ux-workstation.md`. The `arrangrr_core` name used here predates the repo
+> rename; the core library target is now simply **`arrangrr`**.
+
 ---
 
 ## Assumptions / open questions (declared, not blocking)
@@ -245,7 +251,7 @@ gesture each one comes for.
 
 ### Cross-platform architecture to be Win/Linux/macOS-ready with ImGui
 
-- **Two processes, one boundary.** (a) **host daemon** — links `arrangrr_core`,
+- **Two processes, one boundary.** (a) **host daemon** — links `arrangrr` (the core library target),
   owns per-OS MIDI and the optional soft-synth sink, exposes the adapter socket;
   (b) **ImGui client** — pure UI over the socket, links no core, touches no MIDI.
 - **ImGui backend.** Platform backend **SDL2 or GLFW** + a renderer backend

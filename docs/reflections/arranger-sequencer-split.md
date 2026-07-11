@@ -1,5 +1,10 @@
 # Reflection — arrangrr vs sequencrr: split the arranger and the sequencer?
 
+> **Status — future / not current phase.** Partially executed: the fire-order invariant
+> (recommendation *d*) shipped as DESIGN.md node `4150` (2026-07-05, pre-freeze). The `TickProducer`
+> compile-time extraction remains open, gated on the step-sequencer's Step/Track model
+> (nodes `4200`/`4300`/`4400`) settling — deep-sequencer work behind the GUI freeze line.
+
 Status: DIRECTION / verdict. Read-only branch context: `chord-single-finger`.
 Author: Prospero (dual-axis critique). Scope: module/project topology, not code.
 This file is the only mutation of the review; no source was touched.

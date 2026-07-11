@@ -1,5 +1,12 @@
 # Reflection — Hybrid chord-reactive arranger: gap analysis vs arrangrr as-is
 
+> **Status pointer (2026-07-11).** This file is KEPT and still cited by current docs
+> (`gui-contract-map.md` §5, `live-daw-around-arrangrr-ux.md`). One correction: the *Desktop GUI*
+> section below ranks a **web/Tauri** client and down-ranks ImGui — that recommendation is
+> **SUPERSEDED**. The shipped decision is **Dear ImGui + GLFW3** (DESIGN.md node `11600`,
+> `gui-contract-map.md` §1). The Keep list and the Rework backlog (per-port latency compensation,
+> launch-quantize grid, MPE ingest) remain valid; only the toolkit recommendation is obsolete.
+
 Status: critique / verdict (Prospero). Not a locked decision. Read against
 `docs/DESIGN.md` (D1–D37) and the code as of branch `host-tui-h3`.
 

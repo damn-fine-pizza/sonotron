@@ -1,5 +1,9 @@
 # Alien style corpus (`projects/resources/`) — validity, structure, and 70+ genre pattern rules
 
+> **Status — research reference / future phase.** Feeds the deferred `9400` CASM→NTT importer
+> (DESIGN.md D44); not consulted by the current host-GUI / P0 work. The per-genre rules (Part 5)
+> stay a durable asset for when `9400` resumes.
+
 Study of the downloaded arranger-style corpus: are the files valid, how are they
 structured, do they work with `arrstyle-converter`, and — the real payload — a
 large set of genre-separated rules usable BOTH to apply patterns on the fly and to
