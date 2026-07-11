@@ -36,6 +36,47 @@ The v1 ABI that is *frozen and pinned by tests* is the **binary** `Op`/`Param`/`
   client**. Never wire window-close to a bare `quit`.
 - Best client template to imitate: `components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
 
+### Integration shape — how the client drains this framing
+*(extracted from gui-toolkit-decision.md, retired 2026-07-11 — the ImGui+GLFW choice was approved and vendored)*
+
+- **Single binary, single thread, poll-in-frame.** The ImGui render loop (~60 fps, ~16 ms budget)
+  drains the non-blocking UDS socket fd (`recv`/`poll`, `MSG_DONTBLOCK`, to `EAGAIN`) once per
+  frame. **No background reader thread** — it would add synchronization, a second failure point, and
+  a drop-policy to reinvent, to protect a guarantee the server does not offer anyway (its broadcast
+  is already best-effort/lossy). Max added latency = one frame; zero risk of the GUI entering the
+  timing path. This mirrors the server's own poll pattern in `main.cpp`.
+
+---
+
+## Pure-client boundary rules
+
+*(extracted from gui-toolkit-decision.md, retired 2026-07-11 — the ImGui+GLFW choice was approved and vendored)*
+
+Confirmed sound **on the wire** (only text L1 out / JSONL in cross the socket). The real trap is
+**host-side code reuse**, and the graph confirms it:
+- `jsonl.cpp` (which renders the JSONL) **is coupled to the core** — it includes `chord_engine.hpp`
+  / `theory.hpp` / `transport.hpp` and lives in `arrangrr_host`, which links `arrangrr_core` PUBLIC.
+- **Rule 1:** the GUI target links **neither `arrangrr_core` nor `arrangrr_host`**, and `#include`s
+  **zero** core headers. Model its `CMakeLists.txt` on `apps/tools/arrstyle-converter` ("does not link
+  arrangrr_core"), NOT on `arrangrr_host`.
+- **Rule 2:** the GUI carries its **own** wire layer — a `LineBuffer`-style newline reassembly reader
+  + a minimal JSON-line parser + its **own** name tables (section↔string, chord-quality↔suffix,
+  warn↔string) written as plain strings. **Never** `static_cast<ChordQuality>` / `static_cast<
+  SectionType>` a core enum. (`LineBuffer` is already dependency-free "by design" and *could* be
+  extracted to a shared host-only header to avoid duplication — a file-placement call for Palladio;
+  the extraction itself is safe. `arrstyle-converter/src/json.cpp` is an existing dependency-free
+  JSON helper worth checking for reuse.)
+- `note_names.{hpp,cpp}` is already a clean seam (takes only integers, no core includes) — reusable.
+
+### Toolkit: decided & vendored
+The desktop GUI toolkit is settled and already in the tree: **Dear ImGui vendored** (upstream
+`ocornut/imgui` core `.cpp/.h`, never a distro package) driven by the **`imgui_impl_glfw` +
+`imgui_impl_opengl3`** upstream backend pair, on **GLFW3** (window + GL context + input) rendering
+through **system OpenGL**. GLFW was chosen over SDL2/SDL3 and hello_imgui for the narrowest footprint
+(GLFW does only window/context/input, versus SDL's full multimedia layer this MIDI-only, socket-driven
+app never touches) and native Wayland support on the Fedora dev platform. None of these are core-linking
+concerns — they are pure window/render libs, isolated from the boundary rules above.
+
 ---
 
 ## 1. Commands the GUI SENDS (text line → resulting internal Op/Param)

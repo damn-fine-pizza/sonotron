@@ -144,7 +144,7 @@ the Arrangement editing timeline, *no*).
 5. **Manual and assisted both** — you drive sections by hand; the Director (flow #3) can also drive
    them toward an intention. NOTE: "you win over the Director" *on sections* is **not yet built** —
    user-wins is shipped for chords (`kLivePriority`); generalizing arbitration to sections is a real
-   ABI commitment, still-to-detail (`hooks-design-notes.md`, NEEDS-DECISION).
+   ABI commitment, still-to-detail (`hook-interface.md`, NEEDS-DECISION).
 6. **Seeded** — the Song + seed replay byte-exact (flow #9).
 
 **The WOW:** you build a song's shape by *launching sections live*, and the shape you played becomes
@@ -268,7 +268,7 @@ your hand on any decision, and you always win.
 > from "nothing is hidden" to "something is hidden, depending on the client" — the kind of lie a
 > musician finds on the second session. The hook layer (ABI-additive) is where it gets made real.
 
-*Still to detail:* the hook layer made real (`hooks-design-notes.md`) and the TUI reading from hooks
+*Still to detail:* the hook layer made real (`hook-interface.md`) and the TUI reading from hooks
 (host refactor) — engineering, tracked separately.
 
 ---

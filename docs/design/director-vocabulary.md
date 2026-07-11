@@ -2,8 +2,9 @@
 
 Status: **axis set proposed 2026-07-07** — `energy · tension · valence` (motion deferred).
 Design altitude: the Director's *perceptual* vocabulary, not ABI/param detail. Companions:
-`workstation-vision.md` (the three tiers), `flows.md` (#3 conduct intention), `ux-concept.md`
-(the podium). Supersedes the loose "working set: energy / tension / mood" mentioned there.
+`workstation-vision.md` (the three tiers), `flows.md` (#3 conduct intention), `ux-workstation.md`
+(the demoted read-only intention rail, §4.7). Supersedes the loose "working set: energy / tension /
+mood" mentioned there.
 
 ## The law this obeys
 
@@ -130,7 +131,7 @@ committing structure on boundaries, morphing color continuously.
   chord) beats the Director. In trajectory terms: the override updates `current` immediately (it is
   the truthful now), and the Director recomputes a fresh trajectory from there — it never fights the
   hand, it re-proposes from where you now are. The axes describe the Director's *intent*, never a
-  cage. (`hooks-design-notes.md`, decision 2.)
+  cage. (`hook-interface.md` §4, user-wins.)
 - **Deterministic.** Same axes + same trajectory + same seed → the same build, byte-exact next week.
   The intention is a reproducible musical object.
 

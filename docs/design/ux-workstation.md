@@ -44,6 +44,73 @@ optional side panel/mode** (§4.7), not deleted — it returns when the Director
 
 ---
 
+## Personas & use cases
+
+*(extracted from gui-ux-proposal.md, retired 2026-07-11 — the persona/JTBD and use-case record. The
+owner's later primary-persona flip to B is captured in §14.1's historical decision record.)*
+
+Personas, ranked by who the FIRST GUI is for.
+
+**A — The live arranger-keyboard player, performing solo *(PRIMARY / the WOW target)*.**
+Wedding/piano-bar/resident-gig keyboardist. Today plays a Yamaha Genos or Korg Pa (€4–6k). Lives on
+Single-Finger, fills, and variations; *is* the band's chord track, live, with the left hand.
+- **Job:** *"Let me be a whole band with two hands, in front of real people, without ever staring at
+  a screen while I play."*
+- **Success in the hands:** plays a C one-finger → the band lands on it *within the bar* and
+  **holds** it; a right-hand solo has no wrong notes; a fill before the chorus attacks quantized to
+  the bar. Success is kinaesthetic — he *feels* it, doesn't watch it.
+- **Why a desktop GUI (not the TUI, not hardware):** for HIM the GUI is the biggest risk — live, he
+  looks at nothing. The GUI serves him **before and around** the gig: prepare the set, glance once to
+  confirm the section, a music-stand-sized harmony readout legible at 2 metres (which the dense text
+  TUI cannot give). The GUI beats the TUI **only** on glanceable legibility and 2-D structure,
+  **never** on live command speed — the keyboard-first TUI already wins there. It beats hardware on
+  determinism, reproducibility, and weight (a laptop, free of a €6k board).
+
+**B — The bedroom producer sketching a song over an auto-band *(SECONDARY / depth & retention)*.**
+Makes beats/pop/lo-fi in a DAW; not a virtuoso — one-finger chords, hunting the idea. Today uses
+Scaler 2 (inside the DAW) or ChordPulse.
+- **Job:** *"Give me a progression that sounds like a real band in thirty seconds, so I can hear if
+  the idea holds before I open the DAW."*
+- **Success in the hands:** loads `funk`, one-fingers `Am F C G`, hears a credible groove, mutes the
+  pad, raises the swing, has a mood in two minutes — then **locks the seed** and finds it
+  byte-identical next week (arrangrr's edge over Scaler's static chord-grid).
+- **Why a desktop GUI:** for him it IS the primary surface (mouse + computer-keyboard, no MIDI
+  hardware required). He wants to *see* the parts mixer, style, and groove together, clickable.
+
+**C — The performer building/rehearsing a set *(REAL but NOT v1-serviceable)*.**
+Cover band / solo looper / worship leader; must prep 15 songs with different styles/sections/
+tempos/keys and recall them without panic. The set is intrinsically 2-D — exactly what the TUI does
+worst, so the GUI is the right home for it.
+- **Honest limit:** song-mode/recall (node 8000) is **behind the freeze line, not built.** In v1
+  this persona is served only by manual `style load` / `bpm` / `key` changes. A **future retention**
+  persona, not a launch persona.
+
+**D — The beginner *(plausible market, not a served job)*.**
+The "no wrong notes" claim seems made for him, but without song-mode / guided progressions /
+didactic feedback he gets only "a backing that follows your finger." A market, not a job yet. Do not
+build the WOW on him.
+
+**Explicitly NOT a persona:** the orchestral/linear-arrangement composer. That is DAW gravity,
+rejected by construction (`product-identity.md`). Promising it would be a lie.
+
+### Use cases
+
+1. **The solo piano-bar (A).** Saturday night. Loads `bossa`, 120 BPM, key F. Steers chords with the
+   left hand, improvises with the right, raises a fill into the chorus (`varB`). Glances at the GUI
+   **once** to confirm the section. The GUI is the stand, not the instrument.
+2. **The 90-second sketch (B).** Midnight idea. `funk`, one-fingers `Dm7 G7 Cmaj7`, mutes `pad` and
+   `phrase`, swing to 40, feels the groove breathe. Locks the seed; reopens it identical.
+3. **The set rehearsal (C, v1-honest).** Before the gig, preps three songs by hand-changing `style
+   load` / `bpm` / `key`, noting the settings. Clumsy without recall — but it works. The full
+   one-touch-recall case arrives with node 8000.
+4. **The group jam (A/C).** The keyboardist is band-in-a-box for a drummer + singer in rehearsal:
+   steers chords live, the MIDI band fills bass + comping. `kLivePriority` matters — while a live
+   chord is HELD, his hand beats the sequencer; on release the sequencer resumes.
+5. **The case we KILL.** "Mixing/automating audio tracks in the GUI." Does not exist: no audio in the
+   core, no mixer, no linear timeline. Whoever asks wants Ableton.
+
+---
+
 ## 3. The screen at a glance
 
 Principle: **one screen, the repeat grid is the hero.** The menu bar is chrome; everything below it
@@ -108,6 +175,12 @@ needs a nested vertical split in the layout engine, which the restart adds now (
 - **Transport** — start/stop/continue/panic mirrors of the transport bar.
 - **Help** — about, key bindings, contract/version.
 
+**Keybindings carried from the TUI (extracted from gui-ux-proposal.md, retired 2026-07-11).** Keep
+the *shipped* TUI bindings rather than inventing new ones: transport play/stop is **CTRL+P**; the
+style/section chooser is the **backtick** `` ` `` key (the older docs' "CTRL+SPACE chooser" is stale
+— CTRL+SPACE is the piano momentary↔toggle switch). Mirror these in the GUI (a global play/stop, a
+quick style/section chooser); surfaced under Help ▸ key bindings.
+
 ### 4.2 Transport
 Play/stop/continue, tempo, meter, key, current style ▸ section, brain-connection status, and a
 bar·beat readout with a bar-progress bar. Sends `transport start|stop|continue`, `bpm <20..400>`,
@@ -150,6 +223,13 @@ implications. Not the old podium, not the center, not authoritative — the Dire
 it (node 10000) is not built. Toggled by **View ▸ Intention**. Mechanism: an additive `bool visible`
 field on `Zone` (default true, backward-compatible); `render_layout` skips `!visible` zones.
 
+**Ghosts — deferred with the Director (extracted from ux-concept.md, retired 2026-07-11).** When the
+Director (node 10000) is real, its *next move* shows as a **ghost** — the machine's intent rendered
+*before it lands* — in both the band/part lanes ("Pad enters → 4") and the Sequence Edit piano-roll
+(a dashed proposed note). Distinct from the pull-only copilot's proposals (§6): a ghost is the
+Director's imminent automatic move shown ahead of the bar boundary, not something you asked for.
+Deferred until node 10000 ships (§15).
+
 ---
 
 ## 5. The Repeat Zone (Live-Loops grid) in depth
@@ -187,8 +267,17 @@ launch/stop/quantize semantics live in the core behind the new `clip` verbs.
 
 A piano-roll (and a step view for drum-style parts) over a single `Track`. Editing a note writes
 `track step <i> <note> <vel> <gate> …` (the param-locked step form in `abi.hpp`). Record arms the
-part and captures incoming notes. The **pull-only copilot** (Ask ▸ Propose/Adjust/Add, dashed ghost
-notes) from `ux-concept.md` is **deferred** — v1 is a plain, honest editor: you always hold the pen.
+part and captures incoming notes.
+
+**The pull-only copilot (deferred for v1 — spec kept inline).** *(extracted from ux-concept.md,
+retired 2026-07-11, replacing the earlier dangling cross-reference to that file.)* v1 is a plain,
+honest editor: you always hold the pen. The copilot, when it lands, is **pull-only** — silent until
+asked:
+- **Solid = your notes; dashed/dim = the copilot's proposal** (ghosts), scoped to your current
+  selection.
+- **Ask ▸** exposes three verbs — **Propose / Adjust / Add**; **⟳** cycles a new seeded proposal;
+  **⏎** accepts, **⌫** rejects. Nothing lands until you accept — until then your notes are untouched,
+  and no suggestion appears unless you ask for it.
 
 ---
 
@@ -285,7 +374,8 @@ class BrainSession {
 
 ## 10. What the GUI mirrors vs does not duplicate
 
-Carried forward from `gui-contract-map.md §4` and `ux-concept.md`:
+Carried forward from `gui-contract-map.md §4` (live) and folded in from `ux-concept.md` (retired
+2026-07-11):
 - The GUI is **a mirror that reflects and a keyboard that commands — never a truth and never a note
   in the timing path.** The live musical gesture (the chord the band follows) enters the core via
   MIDI/computer-keyboard, not through the GUI.
@@ -331,6 +421,27 @@ All additive to the frozen v1 ABI: none touches an existing id, none breaks the 
    above. Until it lands, the GUI stores its grid in its own config.
 
 Order: **1, 2, 3 up front** (the live surface and the hero grid are real, not degraded), then 4/5/6.
+
+**Roadmap orphan (extracted from gui-ux-proposal.md, retired 2026-07-11).** The
+`ScaleDegree`/`RelativeInterval` style-data extension (the relative-pattern editor's prerequisite)
+has **no node number** and needs one (likely under **~3300**), independent of when the GUI builds its
+editor — else it is a verdict with no home in the roadmap tree.
+
+### 11.1 Corelli implementation seam for `kChordFollowed`
+
+*(extracted from gui-ux-proposal.md §7.1, retired 2026-07-11 — the only design-level record of WHERE
+the event fires; preserved verbatim.)*
+
+`FollowedContext` is a pure, dependency-free value type and MUST stay so — the emit does NOT go
+inside it. It belongs in `engine.hpp` (where `EventSink sink` is already in scope) at **four** call
+sites — `chord_play` (`kManual`), `fire_chord_seq` (`kSequencer`), `observe_chord_input` (`kDetect`
+— its signature must grow a `sink` param), and the `commit_bar` bar-promote — funnelled through a
+single private `Engine::emit_chord_followed(Producer, EventSink)` helper so the four sites cannot
+diverge. The bar-promote also needs a small additive field `Producer m_pending_source` in
+`FollowedContext` (still no-heap) so `source` is honest on promote. `OutEvent`'s 16 bytes hold
+current+pending+valid+source comfortably (~20 bits of 40 available), packed like the existing
+`kChord`. Pinned in `test_abi_frozen` + a golden, rendered in `jsonl.cpp`. Still additive — no
+existing id touched.
 
 ---
 
@@ -392,6 +503,34 @@ reduction); and per-zone model+panel pairs: `transport_panel.*`, `browser_panel.
    separation); `InProcessBrainSession` proves the swap later.
 5. **No ack / no snapshot.** Follow-on additive work (§11.4–5); event-reduction covers the interim.
 
+### 14.1 Historical decision record — owner decisions locked 2026-07-07
+
+*(extracted from gui-ux-proposal.md §9, retired 2026-07-11 — the pre-restart owner decisions this
+doc's 2026-07-10 restart inherits. The primary-persona choice here is the direct antecedent of the
+demotion in §1/§4.7.)*
+
+1. **Primary persona for the first GUI = B (the producer) — EXTENDED to the experimental /
+   improvising performer** who uses the GUI as an *active surface while playing* (watches and
+   interacts, unlike Persona A the wedding-gig arranger who never looks at the screen). Persona A
+   (live finger-steering) remains the product's **soul**, not the audience of the music-stand.
+   Layout consequence: parts-mixer / groove / reseed are first-class citizens (they are B's hands on
+   a mouse-driven screen); the harmony surface stays prominent and re-justified as B's close-up
+   sketching/improvising aid (≈40 cm), not A's 2-metre performance stand; the no-central-chord-pad
+   ban stands.
+2. **ABI: the "real fix" is approved — additive `kChordFollowed` event.** The core will announce the
+   followed chord on every change, from any source (MIDI hardware / single-finger / sequencer), so
+   GREEN/AMBER is always truthful, including single-finger. This is a small, **dependency-free CORE**
+   change, additive-only (does not break the frozen v1 — it is the next free `OutEvent::Kind`), and
+   is the prerequisite of the central surface. The owner chose this over the zero-ABI optimistic-only
+   slice: the GUI's centre is built on core truth from the start, not on command-optimism.
+   **Transport heartbeat (playhead) = P1, DEFERRED** — not selected; the first GUI ships with a
+   section strip (`kSection`, free) but no moving playhead until the owner greenlights the heartbeat
+   event later.
+3. **Toolkit = Dear ImGui, settled by D38 — Phase 2 is a reconciliation, not a bake-off.** Phase 2
+   collapses to: confirm ImGui + name the concrete window/render backend dependency set (e.g. SDL2 or
+   GLFW + OpenGL3, or hello_imgui) for policy-0800 approval, and reconcile the stale §22 "toolkit is
+   OPEN" text to D38 on the next merge. No fresh 3–4-toolkit evaluation.
+
 ---
 
 ## 15. Deferred / out of scope for v1
@@ -400,3 +539,19 @@ reduction); and per-zone model+panel pairs: `transport_panel.*`, `browser_panel.
 - Audio realisation / colour (melodd).
 - The pull-only sequencer copilot (propose/adjust/add).
 - Song/Scene persistence and recall (node 8000).
+
+---
+
+## 16. Glossary
+
+**Scene vs Song** *(extracted from ux-concept.md, retired 2026-07-11 — this doc uses both terms in
+§4.4, §7 A11 and §15 without defining them; here is the crisp distinction.)* The path is
+**captured as a Song; an instant config snapshot is a Scene — different**:
+
+- **Scene** — an *instant configuration snapshot*: one column of the Repeat Zone launch grid, the set
+  of clips that fire together at one moment. A still frame.
+- **Song** — the *path* through the set captured over time: the sequence of sections/chords/launches
+  as a reproducible arrangement. The film, not a frame.
+
+Do not conflate them: "Scene ▶ all" launches a column (a Scene); recall/song-mode (node 8000)
+persists the whole path (a Song).

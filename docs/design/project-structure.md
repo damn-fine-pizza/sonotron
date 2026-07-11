@@ -1,31 +1,34 @@
 # Project structure — sonotron as a collection of components
 
-Status: **target structure + componentization principles, owner-aligned 2026-07-07.**
-Design altitude (principles + target tree), NOT yet realized in the repo. This document is the
-input for Palladio's concrete move-plan (`git mv` / CMake) and Corelli's seam validation, to be
-executed on branch `repo-restructure`. Companions: `product-identity.md` (arrangrr's identity),
+Status: **REALIZED on-disk structure + componentization principles, owner-aligned 2026-07-07,
+executed and committed 2026-07-11.** This document is now the canonical description of the current
+repo layout (`project(sonotron)`, `apps/` · `components/` · `tests/` · `third_party/`) — no longer a
+target. The restructure move-plan that carried the tree from `project(arrangrr)`/`app/` to here has
+been executed and retired; its placement rules are absorbed below (see "Placement rules — where new
+things go"). Companions: `product-identity.md` (arrangrr's identity),
 `workstation-vision.md` (the product), `director-vocabulary.md`.
 
 ## What sonotron is
 
 **sonotron** is the project: a **collection of musical-object components** plus the apps that
-orchestrate them. Today the repo *is* arrangrr, undifferentiated; the restructure turns arrangrr
-into **one component among several** under the sonotron umbrella (`project(sonotron)`).
+orchestrate them. The repo was once arrangrr, undifferentiated; the restructure made arrangrr
+**one component among several** under the sonotron umbrella (`project(sonotron)`).
 
 - **gui-sonotron** is the principal frontend — a **desktop app** (host, Dear ImGui) that is a
   **pure client** (D38): it talks to the backend over the UDS-JSONL socket and **never links the
-  components**. A separate backend (**sonotron-host**) links the components and serves that socket.
-  Both are FUTURE (arrive with the GUI spike + the orchestrator); today the socket-serving role is
-  played by `cli-arrangrr`.
+  components**. It **exists now** as `apps/gui-sonotron/` (landed with the GUI spike; ImGui + GLFW
+  vendored under `third_party/`). A separate backend (**sonotron-host**) links the components and
+  serves that socket; it is still FUTURE (arrives with the orchestrator milestone), so today the
+  socket-serving role is played by `cli-arrangrr`.
 - The collection can spawn **other deliverables** (other apps, other orchestrations): `apps/` is
   extensible by construction. `cli-arrangrr` is one such — a dev/util frontend on the brain alone.
 
-## Repo layout (target)
+## Repo layout (current)
 
 ```
 sonotron/                    project(sonotron)
 ├── apps/                    deliverables — orchestrators (link components) and pure clients (socket)
-│   ├── gui-sonotron/        FUTURE · desktop frontend — ImGui pure client via socket (D38, no links)
+│   ├── gui-sonotron/        PRESENT · desktop frontend — ImGui pure client via socket (D38, no links)
 │   ├── sonotron-host/       FUTURE · host backend — links the components + serves the socket
 │   ├── demo/                demonstration apps (clean · jam · shared lib)
 │   └── tools/               cli-arrangrr (host CLI + today's socket server) · arrstyle-converter · arrstyle-extractor
@@ -36,7 +39,7 @@ sonotron/                    project(sonotron)
 │   ├── orchestrator/        host · SLOT — composes the component/source pipeline (design apart)
 │   ├── melodd/              host · SLOT — audio engine
 │   └── samplrr/             host · SLOT — sampler
-├── third_party/             external deps: dear imgui · glfw (host-only, off-limits to freestanding)
+├── third_party/             PRESENT · vendored external deps: imgui · glfw (host-only, off-limits to freestanding)
 ├── tests/                   integration + golden + arm-smoke (freestanding link gate); unit tests live in-component
 ├── build/                   linux-x64/ · arm64/  (per-target output)
 └── cmake/ · docs/ · scripts/
@@ -62,7 +65,7 @@ axis into every top-level dir (apps/, tests/…) and read as asymmetric. Instead
 An app either **links** a chosen set of components (an orchestrator/daemon) or is a **pure client**
 over the socket (D38); a component is **name-blind** to its consumers (D43). So `apps/` holds:
 **sonotron-host** (backend — links the components, serves the socket; future), **gui-sonotron**
-(desktop frontend — pure client, links nothing; future), **cli-arrangrr** (host CLI on the brain,
+(desktop frontend — pure client, links nothing; present), **cli-arrangrr** (host CLI on the brain,
 also today's socket server), **demo/** (examples). **Neither firmware nor an stm32 app is a
 top-level dir now** — the arm target is verified by a freestanding link gate under
 `tests/arm-smoke/`; a real chip app can become `apps/stm32/` later.
@@ -120,24 +123,67 @@ never the linear-timeline free-for-all — that is sonotron's identity. Two cons
   + the host runtime; extracting it into `components/orchestrator/` is later refactor. For the move
   we create the **slot**.
 
-## What moves now vs. what is a slot
+## What moved (executed 2026-07-11) vs. what is a slot
 
-- **Moves now** (existing code, relocated cleanly): `app/core` → `components/arrangrr`;
+- **Moved** (existing code, relocated cleanly): `app/core` → `components/arrangrr`;
   `app/platform/host` lib → `components/hostrt` + its CLI exe → `apps/tools/cli-arrangrr` (binary
-  `cli-arrangrr`); `app/tools/*` → `apps/tools/*`; `app/tests` → `tests/`; `demo/` → `apps/demo/`;
-  `app/firmware/stub` → `tests/arm-smoke/` (freestanding link gate — not an app, not inside arrangrr).
+  keeps `OUTPUT_NAME arrangrr`); `app/tools/*` → `apps/tools/*`; `app/tests` → `tests/`;
+  `demo/` → `apps/demo/`; `app/firmware/stub` → `tests/arm-smoke/` (freestanding link gate — not an
+  app, not inside arrangrr).
 - **Slots** (empty, no code yet): `components/orchestrator`, `components/melodd`, `components/samplrr`.
-- **NOT touched:** the core lib is not shattered. No new internal port is introduced in the move
+- **NOT touched:** the core lib was not shattered. No new internal port was introduced in the move
   (that is `sequencrr`'s future milestone).
 
-## Execution
-1. Checkpoint today's design work on `main`.
-2. Branch `repo-restructure`.
-3. Palladio → concrete move-plan (`git mv` / CMake), reviewable, from this document; Corelli →
-   validate the seams. No file moves until that plan is reviewed with the owner.
+## Execution (done)
+The restructure was planned by Palladio (concrete `git mv` / CMake move-plan from this document),
+seam-validated by Corelli, reviewed with the owner, and executed and committed on 2026-07-11. The
+one substantive CMake change was `project(arrangrr)` → `project(sonotron)`; everything else was
+mechanical relocation of the `app/` tree into `apps/` · `components/` · `tests/`. The former
+move-plan document has been retired; its forward-looking placement rules live in the next section.
+
+## Placement rules — where new things go
+
+For "which room does a new thing belong in?" These are the forward-looking rules absorbed from the
+retired move-plan (§4). They are the operational corollary of Principles 1–3 above: `components/`
+stays flat, `apps/` holds deliverables, cross-component tests live at the repo root.
+
+- **A new arrangrr module** (new header/source inside the freestanding brain, e.g. a new MIDI-FX):
+  `components/arrangrr/include/arrangrr/<module>/*.hpp` + `components/arrangrr/src/*.cpp` if it needs
+  a translation unit (most of `arrangrr` is header-only; only 4 `.cpp` exist today for the ceremony
+  files) — never `components/arrangrr/host/` or similar, the component stays flat and the
+  target-regime is declared in `CMakeLists.txt` (`-fno-exceptions -fno-rtti`), not encoded in a
+  subfolder.
+- **A new host-only runtime facility** (new Shell command family, a new TUI panel, a new host
+  adapter): `components/hostrt/<name>.{cpp,hpp}` — flat, same convention as today's `shell_*.cpp`
+  files.
+- **A new CLI-only concern** (argument parsing, a new subcommand's `main()` wiring):
+  `apps/tools/cli-arrangrr/main.cpp` if it's part of the single entrypoint; a new file only if
+  `main.cpp` is split — that split is a legitimate FUTURE Palladio candidate (oversized-file axis)
+  but was out of scope for the restructure.
+- **A new dev/import tool** (another alien-format importer): its own `apps/tools/<name>/` sibling to
+  `arrstyle-converter`, self-contained, dependency-free unless explicitly cleared with the owner
+  (CLI-deps policy).
+- **A new cross-component test** (drives the CLI end-to-end, or spans two components once
+  `orchestrator` exists): `tests/golden/` (deterministic `.acmd`/`.golden` pair) or
+  `tests/integration/` (OS-level, may SKIP) — never inside a component's own `tests/`.
+- **A new component-local unit test**: beside its component, in that component's own `tests/`
+  (`components/arrangrr/tests/` or `components/hostrt/tests/`), following the existing
+  `arrangrr_test()` / `hostrt_test()` CMake function pattern.
+
+## Naming / coverage decisions resolved by the restructure
+
+- **Target names:** `arrangrr` (freestanding lib, was `arrangrr_core`), `hostrt` (host lib, was
+  `arrangrr_host`), `cli_arrangrr` (CLI exe target, dir `apps/tools/cli-arrangrr`).
+- **Binary name unchanged:** the CLI exe keeps `set_target_properties(cli_arrangrr PROPERTIES
+  OUTPUT_NAME arrangrr)` — the produced binary is still `arrangrr` (demo scripts and muscle memory
+  depend on it); renaming the binary is a separate, larger-blast-radius decision.
+- **CORE coverage gate scope:** the enforced unit-coverage gate measures only `components/arrangrr/`
+  (with `components/arrangrr/tests/` and `tests/` excluded); `components/hostrt/tests/` is excluded
+  from the CORE gate, preserving the pre-split boundary.
 
 ## Open / deferred
 - Extracting `sequencrr` as a component-engine (transport↔engine port, N instances).
 - Designing the orchestrator pipeline (sources, VST/audio adapters, the graph).
 - Whether `hostrt` stays separate or folds into the orchestrator later.
-- The on-disk repo-folder rename (cosmetic; `project(sonotron)` in CMake is the substantive change).
+- Standing up `apps/sonotron-host` (the socket-serving backend) so `gui-sonotron` no longer depends
+  on `cli-arrangrr` for the socket role.

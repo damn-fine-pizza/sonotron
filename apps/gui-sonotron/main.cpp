@@ -1,10 +1,11 @@
 // sonotron GUI — general layout step (node 11600, JSON-driven zones).
 //
-// The window now shows the 5-zone primary-screen dashboard (Transport ·
-// Seed / Intention | Band / Harmony | Structure) as EMPTY, titled frames,
-// laid out from a JSON layout file. No socket, no brain connection, no live
-// content in any zone yet — see docs/design/ux-concept.md for the mockup
-// this lays out, and src/layout_model.hpp / layout_json.hpp /
+// The window now shows the 6-zone workstation screen (Transport across the
+// top; Browser | Repeat Zone | the Intention-over-Parts right rail across
+// the middle; Sequence Edit across the bottom) as EMPTY, titled frames, laid
+// out from a JSON layout file. No socket, no brain connection, no live
+// content in any zone yet — see docs/design/ux-workstation.md §3 for the
+// screen this lays out, and src/layout_model.hpp / layout_json.hpp /
 // layout_renderer.hpp for the three-way split (pure-data model / JSON
 // reader-writer / ImGui renderer).
 //

@@ -67,6 +67,32 @@ interaction"*), `docs/design/project-structure.md` (D43 name-blind components / 
   freestanding, append-only-or-versioned binary ABI **as a discipline**, dependency-free core) —
   these are identity, not the frozen *shape*, and this proposal does not touch them.
 
+### 0.1 Genesis / evidence base (rescued from `hooks-design-notes.md`, retired 2026-07-11)
+
+The following grounding items are preserved verbatim in intent from the retired excavation doc, so
+the genealogy and the still-open threads survive its deletion:
+
+- **This is not a new principle — it is the unpaid debt of D17b / DESIGN.md §24.** The owner's
+  "every component exposes uniform hooks (observability + interaction)" was already designed in the
+  docs as a *uniform, addressable L1 param-space with declared get/set/do access + MIDI-learn*; it
+  was simply never made real in the binary. Everything §0 above excavates (`kGroove`/`kArp` as the
+  one lineage that already generalizes, `Op::kGet` dead, the bifurcated channels) is that debt
+  showing through. This proposal is the payment.
+- **Traceability — `kChordFollowed` is NOT in `main`.** It lives on the `spikes/kchordfollowed`
+  branch (the first instance of the "promote a channel-B fact to a channel-A event" move).
+  **Reconciliation (2026-07-11):** this spike pointer is now *superseded* by `ux-workstation.md`
+  §11, which promotes `kChordFollowed {current, pending, valid, source}` to a **front-of-line
+  [P0] CORE** deliverable, fired on every commit (manual/detect/sequencer/bar-promote). Treat that
+  plan — not the spike branch — as the live source of truth for this fact.
+- **Proposal F — the VST / hosting seam.** VST hosting has zero trace in the core, correctly. The
+  seam is exactly where the binary `OutEvent`/`Command` ends: the outer product receives events
+  (observability hooks) and sends overrides (interaction hooks) from *outside* the core process.
+  The core rule: **never `#include` a VST header inside `components/arrangrr`.** Where the Director
+  outer-product physically lives on disk is a file-layout call — "a Palladio call".
+- **Open item — MIDI-learn is unverified.** It is *not verified* whether MIDI-learn exists anywhere
+  in the tree (only a targeted grep was ever run). D17b/§24 name it as part of the same param-space
+  vision; whether any of it is wired remains an open excavation, not an assertion.
+
 ## 1. The core idea
 
 **One POD language.** Every hookable fact in every component — Director, Arranger, sequencers,
@@ -226,7 +252,8 @@ uses to enforce it is the pattern `FollowedContext` already proves out (§0):
    sequential commit point in `Engine::advance_ticks` (`engine.hpp:199-206`) — never mid-tick, by
    construction, because there is exactly one place ticks advance. This collapses today's two
    overloaded ad hoc bits (`kChordPlay`'s `idx`, `kStyleSwitch`'s `c`) into one envelope field
-   used identically by every family (closes proposal D from `hooks-design-notes.md` for real).
+   used identically by every family (closes proposal D — the quantization-bit consolidation
+   excavated in §0.1's evidence base — for real).
 
 **Where the Director lives, architecturally: nowhere inside this core.** The core does not know
 what a Director *is* — it only ever sees `Origin::kDirector` on an inbound `HookCommand`, arriving

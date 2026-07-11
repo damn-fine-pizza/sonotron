@@ -1,8 +1,14 @@
 # GUI Fase 2 — piano d'esecuzione dello strand *mechanical*
 
-Status: **piano, non ancora eseguito.** Deriva da `ux-workstation.md` §13 (salvage/rebuild map) e
-ne implementa la sola parte **senza dipendenze dal core** (lo strand GUI mechanical). Lo strand core
-(§11: `kChordFollowed`, `kBeat`, primitiva clip) è **fuori da questo piano** e verrà sequenziato dopo.
+Status: **in corso — G0 e G1 FATTI (2026-07-11), G2→G3 pendenti.** Deriva da `ux-workstation.md` §13
+(salvage/rebuild map) e ne implementa la sola parte **senza dipendenze dal core** (lo strand GUI
+mechanical). Lo strand core (§11: `kChordFollowed`, `kBeat`, primitiva clip) è **fuori da questo
+piano** e verrà sequenziato dopo.
+
+> **Avanzamento:** G0 (demolizione concept) e G1 (layout workstation + split verticale annidato +
+> `visible` + font 13) sono implementati, testati (4 test GUI verdi, incl. `test_layout_nested_split`)
+> e committati. Lo screenshot conferma il wireframe §3. Prossimo: **G2 (brain session)**. Nota: lo
+> spike sorgente `spikes/gui-skeleton` vive su un branch separato non-merged, non nel working tree.
 
 ## Context
 
@@ -41,7 +47,7 @@ pannelli. `send()` mantiene la blacklist `quit`/`exit`.
 
 ## Sequenza (slice piccoli, ciascuno compila + test verdi + screenshot)
 
-### G0 — Demolizione concept
+### G0 — Demolizione concept ✅ FATTO (commit 38b5826)
 - DELETE: `arrangement.{hpp,cpp}`, `arrangement_panel.{hpp,cpp}`, `intention.{hpp,cpp}`,
   `intention_panel.{hpp,cpp}`, `tests/test_arrangement.cpp`, `tests/test_intention.cpp`, i generatori
   `mock_*`.
@@ -49,7 +55,7 @@ pannelli. `send()` mantiene la blacklist `quit`/`exit`.
 - Aggiorna `apps/gui-sonotron/CMakeLists.txt` e `tests/CMakeLists.txt` (liste sorgenti/test).
 - DoD: build verde, suite verde (con le zone renderizzate come frame titolati vuoti).
 
-### G1 — Layout engine: split verticale annidato + `visible` + font 13
+### G1 — Layout engine: split verticale annidato + `visible` + font 13 ✅ FATTO (commit c49f8c6)
 - `layout_model.{hpp,cpp}`: aggiungi `bool visible = true` a `Zone`; estendi `compute_rows` (oggi
   raggruppa solo per `Zone::row`, righe di livello singolo — vedi `layout_model.cpp:89`) con un
   concetto di **sotto-colonna che impila zone in verticale dentro una cella** (la right-rail:
