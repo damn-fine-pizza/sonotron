@@ -1,9 +1,11 @@
 {"ev":"chord","in":"A4","out":"Am7","deg":"i","@":0}
+{"ev":"chord-followed","cur":"Am7","cur_pcs":657,"next":"-","next_pcs":0,"src":"manual","@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":69,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":72,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":76,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":79,"vel":100,"@":0}
 {"ev":"chord","in":"E4","out":"E7","deg":"V","@":96}
+{"ev":"chord-followed","cur":"E7","cur_pcs":2324,"next":"-","next_pcs":0,"src":"manual","@":96}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":69,"vel":64,"@":96}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":72,"vel":64,"@":96}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":76,"vel":64,"@":96}

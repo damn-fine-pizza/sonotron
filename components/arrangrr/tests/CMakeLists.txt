@@ -40,6 +40,11 @@ arrangrr_test(test_chord unit)
 arrangrr_test(test_chord_seq unit)
 arrangrr_test(test_chord_detect unit)
 arrangrr_test(test_chord_follow functional)
+# test_chord_followed_event: the additive kChordFollowed OutEvent (node 0700).
+# Drives all four emit sites (manual/sequencer/detect/bar-promote) through the
+# ABI and asserts the decoded cur/next chord, the honest producer src, and the
+# delta policy (one event per genuine change, none on unchanged ticks) -> functional.
+arrangrr_test(test_chord_followed_event functional)
 # test_followed_context: the FollowedContext owner (explicit latch, D47 gate,
 # stage/commit_now/commit_bar, establish_default no-op-if-explicit) plus the
 # release-phantom regression and the immediate-default/shift-quantize input

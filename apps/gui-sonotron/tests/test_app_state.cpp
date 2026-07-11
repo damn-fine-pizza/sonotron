@@ -50,6 +50,40 @@ void test_chord_reduction() {
   CHECK(app.chord_degree() == "I");
 }
 
+void test_chord_followed_reduction() {
+  AppState app;
+  CHECK(app.chord_followed_current() == "-");
+  CHECK(!app.chord_followed_current_valid());
+  CHECK(app.chord_followed_next() == "-");
+  CHECK(!app.chord_followed_next_valid());
+
+  // Manual immediate commit: current lands, no pending, src manual. Receiving
+  // the event is itself authoritative confirmation of a steer -- it opens the
+  // harmony_active() gate even with the transport stopped.
+  CHECK(!app.harmony_active());
+  app.apply_line(R"({"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,)"
+                 R"("src":"manual","@":0})");
+  CHECK(app.chord_followed_current() == "Cmaj7");
+  CHECK(app.chord_followed_current_valid());
+  CHECK(!app.chord_followed_next_valid());
+  CHECK(app.chord_followed_source() == "manual");
+  CHECK(app.harmony_active());
+
+  // A shift-staged chord: current unchanged, next becomes valid.
+  app.apply_line(
+      R"({"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"G7","next_pcs":2212,)"
+      R"("src":"detect","@":10})");
+  CHECK(app.chord_followed_next() == "G7");
+  CHECK(app.chord_followed_next_valid());
+  CHECK(app.chord_followed_source() == "detect");
+
+  // Transport stopping closes the activity gate but does not itself clear
+  // the last-known followed chord (only a fresh event does).
+  app.apply_line(R"({"ev":"transport","state":"stopped","@":11})");
+  CHECK(!app.harmony_active());
+  CHECK(app.chord_followed_current() == "Cmaj7");
+}
+
 void test_harmony_activity_gate() {
   AppState app;
   CHECK(!app.harmony_active());  // at rest: nothing lit
@@ -120,6 +154,7 @@ int main() {
   test_connected_flag();
   test_transport_and_section_reduction();
   test_chord_reduction();
+  test_chord_followed_reduction();
   test_harmony_activity_gate();
   test_note_transport_sent_hint();
   test_malformed_line_logged_not_applied();

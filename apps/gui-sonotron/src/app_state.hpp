@@ -15,15 +15,14 @@
 // "panels never see raw text" design, the scrolling log holds a formatted
 // summary of each event, not the verbatim JSONL.
 //
-// The harmony-visualiser gate (green = followed chord, amber = pending) from
-// the spike is intentionally NOT ported as pitch-class masks here: that data
-// comes only from the additive `chord-followed` event (gap P0-1,
-// ux-workstation.md §11), which the core does not emit yet and whose wire
-// field shape brain_event.hpp deliberately does not invent. What IS real
-// today and ported here is the ACTIVITY gate itself -- whether the harmony
-// surface should be considered "live" right now (transport playing, or the
-// user just steered a chord) -- so a future harmony panel only has to plug a
-// real pitch-class source into harmony_active(), not rebuild the gate.
+// The harmony-visualiser gate (green = followed chord, amber = pending,
+// ux-workstation.md §10) is now fed by the additive `chord-followed` event
+// (gap P0-1, pipeline-p0-mechanical-plan.md), decoded in brain_event.*. The
+// ACTIVITY gate (harmony_active(): transport playing, or a chord was just
+// steered) still governs whether the GREEN read is considered "live" --
+// receiving a kChordFollowed event with a valid current chord is itself
+// authoritative confirmation of a steer, so it opens the gate the same way
+// note_manual_steer()'s optimistic hint does.
 namespace sonotron {
 
 class AppState {
@@ -68,9 +67,18 @@ class AppState {
 
   // Whether the harmony surface should read as "live" right now: transport
   // playing, or a chord was explicitly steered this run (mirrors the
-  // spike's green-at-rest gate mechanism -- see the file comment for why no
-  // pitch-class data exists to light with yet).
+  // spike's green-at-rest gate mechanism).
   bool harmony_active() const { return m_transport == Transport::kPlaying || m_manual_steer; }
+
+  // The followed harmonic context (gap P0-1): the chord the arranger commits
+  // to THIS bar ("current", lights GREEN when harmony_active()) and the
+  // shift-staged chord pending for the NEXT bar ("next", lights AMBER).
+  // Labels are "-" (and *_valid() false) when the core reports no chord.
+  const std::string& chord_followed_current() const { return m_chord_followed_current; }
+  bool chord_followed_current_valid() const { return m_chord_followed_current_valid; }
+  const std::string& chord_followed_next() const { return m_chord_followed_next; }
+  bool chord_followed_next_valid() const { return m_chord_followed_next_valid; }
+  const std::string& chord_followed_source() const { return m_chord_followed_source; }
 
  private:
   bool m_connected = false;
@@ -80,6 +88,11 @@ class AppState {
   std::string m_chord_out = "-";
   std::string m_chord_deg = "-";
   bool m_manual_steer = false;
+  std::string m_chord_followed_current = "-";
+  bool m_chord_followed_current_valid = false;
+  std::string m_chord_followed_next = "-";
+  bool m_chord_followed_next_valid = false;
+  std::string m_chord_followed_source = "-";
   std::deque<std::string> m_log;
 };
 

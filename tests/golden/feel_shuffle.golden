@@ -1,4 +1,5 @@
 {"ev":"chord","in":"C4","out":"Cmaj7","deg":"I","@":0}
+{"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,"src":"manual","@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":60,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":64,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":67,"vel":100,"@":0}

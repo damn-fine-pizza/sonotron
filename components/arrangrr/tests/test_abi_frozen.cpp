@@ -73,12 +73,13 @@ static_assert(static_cast<std::uint16_t>(Param::kChordFollow) == 41);
 static_assert(static_cast<std::uint16_t>(Param::kInputZone) == 42);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
-// kMidi(0) .. kSection(4). Next free id is 5 (additive-only).
+// kMidi(0) .. kChordFollowed(5). Next free id is 6 (additive-only).
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kMidi) == 0);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTransport) == 1);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kWarn) == 2);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kChord) == 3);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kSection) == 4);
+static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kChordFollowed) == 5);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
 // kNone(0) .. kUnsupported(9), kWarnCodeCount == 10 (next free id).

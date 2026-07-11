@@ -76,6 +76,7 @@ class FollowedContext {
       return;
     }
     m_pending = chord;
+    m_pending_source = who;  // remembered so a bar-promote can name the producer
     m_explicit = true;
   }
 
@@ -127,6 +128,9 @@ class FollowedContext {
   constexpr const ChordState& state() const noexcept { return m_state; }
   constexpr const ChordState& pending() const noexcept { return m_pending; }
   constexpr bool explicit_set() const noexcept { return m_explicit; }
+  // The producer that staged the current pending chord (meaningful only while a
+  // pending chord is live). Lets a bar-promote report an honest `src`.
+  constexpr Producer pending_source() const noexcept { return m_pending_source; }
 
  private:
   constexpr bool may_follow(Producer who) const noexcept {
@@ -157,6 +161,7 @@ class FollowedContext {
   ChordState m_state{};     // `current`: the chord the band follows this bar
   ChordState m_pending{};   // `next`: the shift-staged chord, committed at the bar
   bool m_explicit = false;  // a real producer has set a context since the reset
+  Producer m_pending_source = Producer::kManual;      // who staged m_pending (bar-promote src)
   ChordFollow m_follow = ChordFollow::kLivePriority;  // D47 gate; live-priority default
 };
 

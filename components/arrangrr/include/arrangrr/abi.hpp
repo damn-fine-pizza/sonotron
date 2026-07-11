@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "arrangrr/chord/followed_context.hpp"  // ChordState, Producer (freestanding)
 #include "arrangrr/common/time.hpp"
 #include "arrangrr/midi/message.hpp"
 
@@ -19,7 +20,7 @@
 //     remove, or re-semanticize an id that already ships. A shipped id keeps its
 //     number and its meaning for the entire life of protocol v1.
 //   * Growth is ONLY by APPENDING new enumerators at the end. Next free ids:
-//     Param = 43, OutEvent::Kind = 5, WarnCode = 10 (== kWarnCodeCount).
+//     Param = 43, OutEvent::Kind = 6, WarnCode = 10 (== kWarnCodeCount).
 //   * Command/OutEvent field order, types, and size are stable. New data must
 //     ride existing reserved bits/fields or an APPENDED field, guarded by the
 //     size static_asserts below. Never reorder or resize an existing field.
@@ -196,6 +197,11 @@ struct OutEvent {
     kChord = 3,      // code = degree | (ChordQuality << 8);
                      // msg = {input root note, chord tone count, velocity}
     kSection = 4,    // code = SectionType (arranger section change)
+    // The followed harmonic context changed (from ANY producer):
+    //   msg.status = cur  (root_pc | quality << 4)
+    //   msg.d1     = next (root_pc | quality << 4)
+    //   msg.d2     = cur.valid | next.valid << 1 | Producer << 2
+    kChordFollowed = 5,
   };
 
   Kind kind = Kind::kMidi;
@@ -228,6 +234,25 @@ struct OutEvent {
     e.msg = MidiMessage{.status=root_note, .d1=count, .d2=vel};
     e.tick = t;
     e.code = static_cast<std::uint16_t>(degree | (quality << 8));
+    return e;
+  }
+  // Packs the followed-context change (D24/D53): the current followed chord and
+  // the staged/pending next chord, plus the producer that caused the change.
+  // Each ChordState rides one byte (root_pc in the low nibble, quality in the
+  // high nibble); the valid latches and the 2-bit Producer share msg.d2. code
+  // stays 0. Purely numeric — labels/pitch-class masks are a HOST concern.
+  static constexpr OutEvent chord_followed(ChordState cur, ChordState next, Producer src,
+                                           Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kChordFollowed;
+    e.msg =
+        MidiMessage{.status = static_cast<std::uint8_t>(
+                        (cur.root_pc & 0x0F) | (static_cast<std::uint8_t>(cur.quality) << 4)),
+                    .d1 = static_cast<std::uint8_t>((next.root_pc & 0x0F) |
+                                                    (static_cast<std::uint8_t>(next.quality) << 4)),
+                    .d2 = static_cast<std::uint8_t>((cur.valid ? 0x1 : 0) | (next.valid ? 0x2 : 0) |
+                                                    (static_cast<std::uint8_t>(src) << 2))};
+    e.tick = t;
     return e;
   }
   static constexpr OutEvent section(std::uint16_t type, Tick t) noexcept {

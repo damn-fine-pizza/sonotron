@@ -11,14 +11,15 @@
 namespace sonotron {
 
 // Renders the Intention rail inside the CURRENT ImGui window/child: a
-// minimal, READ-ONLY view. The live green/amber harmonic visualizer and the
-// energy/tension/valence bars await the Director (node 10000) and
-// `kChordFollowed` (gap P0-1, ux-workstation.md §11) — neither is built, so
-// this renders an honest placeholder (bars pinned at zero) rather than
-// inferring fake values. The one REAL signal available today is
-// `AppState::harmony_active()` (transport playing, or a chord was just
-// steered) — used only to brighten the header text, never to fake
-// pitch-class data.
+// minimal, READ-ONLY view. The live green/amber harmonic visualizer is now
+// REAL, fed by the additive `kChordFollowed` event (gap P0-1,
+// pipeline-p0-mechanical-plan.md): GREEN = the chord followed this bar
+// (`AppState::chord_followed_current()`, lit only while `harmony_active()`),
+// AMBER = the shift-staged chord pending for next bar
+// (`chord_followed_next()`), colour semantics per ux-workstation.md §10. The
+// energy/tension/valence bars still await the Director (node 10000) — no
+// signal exists for those yet, so they stay an honest placeholder (pinned at
+// zero) rather than inferring fake values.
 void render_intention_panel(const AppState& app_state);
 
 }  // namespace sonotron

@@ -1,4 +1,5 @@
 {"ev":"chord","in":"D4","out":"Dm7","deg":"ii","@":0}
+{"ev":"chord-followed","cur":"Dm7","cur_pcs":549,"next":"-","next_pcs":0,"src":"manual","@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":62,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":65,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":69,"vel":100,"@":0}

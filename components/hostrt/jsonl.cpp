@@ -138,6 +138,55 @@ std::string format(const char* fmt, auto... args) {
   return std::string(buf);
 }
 
+// --- kChordFollowed decode (HOST-side; the core carries only numeric fields) --
+// Unpacks one ChordState byte (root_pc low nibble, quality high nibble) into the
+// pure-theory ChordState, tagged with its valid latch.
+ChordState followed_state(std::uint8_t packed, bool valid) {
+  ChordState s;
+  s.root_pc = static_cast<std::uint8_t>(packed & 0x0F);
+  s.quality = static_cast<ChordQuality>(packed >> 4);
+  s.valid = valid;
+  return s;
+}
+
+// The 12-bit pitch-class set (bit0=C .. bit11=B), stacking theory::shape_of on
+// the root — the same derivation piano_view.cpp::chord_pitch_class_set uses, kept
+// HOST-side. 0 when the chord is not valid.
+std::uint16_t followed_pcs(const ChordState& s) {
+  if (!s.valid) {
+    return 0;
+  }
+  const ChordShape shape = theory::shape_of(s.quality);
+  std::uint16_t pcs = 0;
+  for (std::uint8_t i = 0; i < shape.count; ++i) {
+    const unsigned pc = (s.root_pc + shape.offsets[i]) % 12;
+    pcs = static_cast<std::uint16_t>(pcs | (1U << pc));
+  }
+  return pcs;
+}
+
+// The same chord label the kChord `out` field renders (pitch class + quality
+// suffix, e.g. "Cmaj7", "Am7", "G"); "-" when the chord is not valid.
+std::string followed_label(const ChordState& s, bool prefer_flats) {
+  if (!s.valid) {
+    return "-";
+  }
+  return pitch_class_name(s.root_pc, {NoteNaming::kCde, prefer_flats, false}) +
+         quality_suffix(s.quality);
+}
+
+const char* producer_name(std::uint8_t src) {
+  switch (static_cast<Producer>(src)) {
+    case Producer::kDetect:
+      return "detect";
+    case Producer::kSequencer:
+      return "sequencer";
+    case Producer::kManual:
+    default:
+      return "manual";
+  }
+}
+
 }  // namespace
 
 std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
@@ -185,6 +234,16 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
               ev.port, m.status, m.d1, m.d2, ev.tick);
       }
     }
+    case OutEvent::Kind::kChordFollowed: {
+      const ChordState cur = followed_state(ev.msg.status, (ev.msg.d2 & 0x1) != 0);
+      const ChordState next = followed_state(ev.msg.d1, (ev.msg.d2 & 0x2) != 0);
+      const auto src = static_cast<std::uint8_t>((ev.msg.d2 >> 2) & 0x3);
+      return format(
+          R"({"ev":"chord-followed","cur":"%s","cur_pcs":%u,"next":"%s","next_pcs":%u,"src":"%s","@":%u})",
+          followed_label(cur, prefer_flats).c_str(), followed_pcs(cur),
+          followed_label(next, prefer_flats).c_str(), followed_pcs(next), producer_name(src),
+          ev.tick);
+    }
     case OutEvent::Kind::kTransport:
       return format(R"({"ev":"transport","state":"%s","@":%u})", transport_name(ev.code), ev.tick);
     case OutEvent::Kind::kWarn:
@@ -225,6 +284,14 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
         default:
           return format("@%-8u p%u status %02X %u %u", ev.tick, ev.port, m.status, m.d1, m.d2);
       }
+    }
+    case OutEvent::Kind::kChordFollowed: {
+      const ChordState cur = followed_state(ev.msg.status, (ev.msg.d2 & 0x1) != 0);
+      const ChordState next = followed_state(ev.msg.d1, (ev.msg.d2 & 0x2) != 0);
+      const auto src = static_cast<std::uint8_t>((ev.msg.d2 >> 2) & 0x3);
+      return format("@%-8u follow %s -> %s (%s)", ev.tick,
+                    followed_label(cur, prefer_flats).c_str(),
+                    followed_label(next, prefer_flats).c_str(), producer_name(src));
     }
     case OutEvent::Kind::kTransport:
       return format("@%-8u transport %s", ev.tick, transport_name(ev.code));

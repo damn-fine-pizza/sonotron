@@ -198,6 +198,8 @@ class ChordEngine {
   // The staged next chord (invalid when nothing is pending), for the host
   // `next key:` readout.
   constexpr const ChordState& pending() const noexcept { return m_followed.pending(); }
+  // The producer that staged the pending chord (for an honest bar-promote src).
+  constexpr Producer pending_source() const noexcept { return m_followed.pending_source(); }
   // Has any producer explicitly steered the followed chord since the last
   // reset? Distinguishes a real, steered chord from the passive home-tonic
   // default `establish_default` seeds at rest (host piano visualizer, D53).

@@ -23,7 +23,8 @@ std::string format_log_line(const BrainEvent& ev) {
     case BrainEvent::Kind::kError:
       return "error: " + ev.error + " (cmd: " + ev.cmd + ")";
     case BrainEvent::Kind::kChordFollowed:
-      return "chord-followed (not decoded yet)";
+      return "chord-followed " + ev.followed_current + " / next " + ev.followed_next + " (" +
+             ev.followed_source + ")";
     case BrainEvent::Kind::kBeat:
       return "beat (not decoded yet)";
     case BrainEvent::Kind::kUnknown:
@@ -62,11 +63,22 @@ void AppState::apply(const BrainEvent& ev) {
         m_manual_steer = false;  // back to rest: let the activity gate close
       }
       break;
+    case BrainEvent::Kind::kChordFollowed:
+      m_chord_followed_current = ev.followed_current;
+      m_chord_followed_current_valid = ev.followed_current != "-";
+      m_chord_followed_next = ev.followed_next;
+      m_chord_followed_next_valid = ev.followed_next != "-";
+      m_chord_followed_source = ev.followed_source;
+      if (m_chord_followed_current_valid) {
+        // Authoritative confirmation that a chord was steered -- opens the
+        // same activity gate note_manual_steer()'s optimistic hint does.
+        m_manual_steer = true;
+      }
+      break;
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:
     case BrainEvent::Kind::kError:
     case BrainEvent::Kind::kUnknown:
-    case BrainEvent::Kind::kChordFollowed:
     case BrainEvent::Kind::kBeat:
       break;  // logged above, but no other view-state change (yet)
   }

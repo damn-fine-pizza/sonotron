@@ -337,6 +337,10 @@ void Engine::chord_play(const Command& cmd, EventSink sink) {
   sink(OutEvent::chord(m_chords.out_port(), static_cast<std::uint8_t>(r.degree),
                        static_cast<std::uint8_t>(r.quality), r.root_note, r.shape.count, vel,
                        m_now));
+  // Announce the followed-context change (immediate commit or a shift-staged
+  // next). The D47 gate may have made the steer a no-op; the delta check inside
+  // keeps this silent then.
+  emit_chord_followed(Producer::kManual, sink);
   flush(sink);
 }
 

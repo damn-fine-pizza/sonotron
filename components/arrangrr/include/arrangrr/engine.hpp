@@ -96,7 +96,7 @@ class Engine {
           });
         }
         if (m_chord_detect && port == m_chord_detect_port) {
-          observe_chord_input(msg);
+          observe_chord_input(msg, sink);
         }
       });
     }
@@ -201,7 +201,16 @@ class Engine {
         // bar-boundary point at which the arranger applies pending style/section
         // switches, ordered so the arranger reads the freshly-committed chord.
         if (m_transport.tick() % kTicksPerBar == 0) {
+          const bool had_pending = m_chords.pending().valid;
+          const Producer promoted_by = m_chords.pending_source();
           m_chords.commit_bar();
+          // Announce ONLY a genuine promotion (a staged chord landing in
+          // `current`), attributed to the producer that staged it. With nothing
+          // staged there is no change to report — and pending_source would be
+          // stale — so the emit is gated on had_pending, not just the delta.
+          if (had_pending) {
+            emit_chord_followed(promoted_by, sink);
+          }
         }
         fire_arranger(m_transport.tick(), sink);
         fire_arp(m_transport.tick(), sink);
@@ -268,6 +277,28 @@ class Engine {
     if (!m_scheduler.schedule(port, tick, msg)) {
       sink(OutEvent::warn(WarnCode::kSchedulerFull, m_now));
     }
+  }
+
+  static constexpr bool same_chord_state(const ChordState& a, const ChordState& b) noexcept {
+    return a.valid == b.valid && a.root_pc == b.root_pc && a.quality == b.quality;
+  }
+
+  // The SINGLE emit point for the followed-context change event (kChordFollowed):
+  // all four producers (manual play, sequencer, live detect, bar-promote) funnel
+  // through here so their wire shape and delta policy cannot diverge. Emits ONLY
+  // when the current OR pending followed chord actually changed since the last
+  // emit — never one event per tick. `src` names the producer responsible.
+  void emit_chord_followed(Producer src, EventSink sink) {
+    const ChordState& cur = m_chords.state();
+    const ChordState& next = m_chords.pending();
+    if (m_followed_emitted && same_chord_state(cur, m_last_followed_cur) &&
+        same_chord_state(next, m_last_followed_next)) {
+      return;  // no delta: do not spam an event every tick
+    }
+    m_last_followed_cur = cur;
+    m_last_followed_next = next;
+    m_followed_emitted = true;
+    sink(OutEvent::chord_followed(cur, next, src, m_now));
   }
 
   // Transport realtime bytes (FA/FB/FC) go out immediately on clock ports.
@@ -345,6 +376,10 @@ class Engine {
           sink(OutEvent::chord(m_chords.out_port(), degree,
                                static_cast<std::uint8_t>(sound_quality), sound_root,
                                theory::shape_of(sound_quality).count, vel, m_now));
+          // The sequencer just steered (unless comping on a held live chord, where
+          // steer==false left the context untouched — the delta check keeps this
+          // silent). Announce on the delta.
+          emit_chord_followed(Producer::kSequencer, sink);
         },
         [&] {
           m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
@@ -395,7 +430,7 @@ class Engine {
   // chord and committed at the next bar with no fresh press. The held set still
   // holds the delivered chord (chord memory); a truly new chord is formed only
   // by pressing more keys.
-  void observe_chord_input(const MidiMessage& msg) {
+  void observe_chord_input(const MidiMessage& msg, EventSink sink) {
     bool grew = false;
     if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
       const std::uint8_t before = m_detector.held_count();
@@ -416,6 +451,10 @@ class Engine {
       // Input model: immediate by default (commit_now), quantized to the next
       // bar when the host flags SHIFT (stage).
       m_chords.steer_detect(detected.root_pc, detected.quality, m_detect_quantize);
+      // Announce the followed-context change on the delta (immediate commit or a
+      // staged next); the gate may have made the steer a no-op, in which case the
+      // delta check keeps this silent.
+      emit_chord_followed(Producer::kDetect, sink);
     }
   }
 
@@ -469,6 +508,10 @@ class Engine {
   NoteTracker m_tracker;
   OutScheduler<kSchedulerCapacity> m_scheduler;
   std::uint8_t m_clock_out_mask = 0;  // off by default; enabled via kClockOutMask
+  // Last-emitted followed context, so kChordFollowed fires only on a real delta.
+  ChordState m_last_followed_cur{};
+  ChordState m_last_followed_next{};
+  bool m_followed_emitted = false;
 };
 
 }  // namespace arrangrr

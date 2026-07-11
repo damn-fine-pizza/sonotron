@@ -322,10 +322,18 @@ BrainEvent parse_brain_event(const std::string& line) {
     ev.kind = BrainEvent::Kind::kWarn;
     ev.valid = true;
     ev.warn_code = obj.get_string("code");
+  } else if (kind == "chord-followed") {
+    ev.kind = BrainEvent::Kind::kChordFollowed;
+    ev.valid = true;
+    ev.followed_current = obj.get_string("cur", "-");
+    ev.followed_current_pcs = static_cast<int>(obj.get_int("cur_pcs", 0));
+    ev.followed_next = obj.get_string("next", "-");
+    ev.followed_next_pcs = static_cast<int>(obj.get_int("next_pcs", 0));
+    ev.followed_source = obj.get_string("src", "manual");
   }
-  // "chord-followed" / "beat" / "clip" (ux-workstation.md §11) and any other
-  // unrecognized "ev" value fall through to kind == kUnknown, valid == false
-  // -- see the file header: those shapes are not decoded yet, on purpose.
+  // "beat" / "clip" (ux-workstation.md §11) and any other unrecognized "ev"
+  // value fall through to kind == kUnknown, valid == false -- see the file
+  // header: those shapes are not decoded yet, on purpose.
   return ev;
 }
 

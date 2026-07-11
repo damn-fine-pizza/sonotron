@@ -1,0 +1,17 @@
+# Golden (node 0700 additive ABI): the kChordFollowed announce event.
+# Proves the GUI harmony-visualizer contract: a manual `chord play` publishes
+# EXACTLY ONE {"ev":"chord-followed",...,"src":"manual"} line on the genuine
+# change, and NO chord-followed line is emitted on the many ticks where the
+# followed chord does not change (a whole style plays for two bars here without
+# a single extra chord-followed line), nor on a repeated identical chord.
+key C major
+port open out virt as synth
+chord out synth:4
+style load pop
+style route drums synth:10
+play C
+transport start
+advance 960
+play C
+advance 960
+quit

@@ -1,9 +1,11 @@
 {"ev":"chord","in":"C4","out":"Cmaj7","deg":"I","@":0}
+{"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,"src":"manual","@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":60,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":64,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":67,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":71,"vel":100,"@":0}
 {"ev":"chord","in":"F4","out":"Fmaj7","deg":"IV","@":96}
+{"ev":"chord-followed","cur":"Fmaj7","cur_pcs":561,"next":"-","next_pcs":0,"src":"manual","@":96}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":60,"vel":64,"@":96}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":64,"vel":64,"@":96}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":67,"vel":64,"@":96}
@@ -13,6 +15,7 @@
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":72,"vel":100,"@":96}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":76,"vel":100,"@":96}
 {"ev":"chord","in":"G4","out":"G7","deg":"V","@":192}
+{"ev":"chord-followed","cur":"G7","cur_pcs":2212,"next":"-","next_pcs":0,"src":"manual","@":192}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":65,"vel":64,"@":192}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":69,"vel":64,"@":192}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":72,"vel":64,"@":192}
@@ -22,6 +25,7 @@
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":74,"vel":100,"@":192}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":1,"note":77,"vel":100,"@":192}
 {"ev":"chord","in":"B4","out":"Bm7b5","deg":"viim7b5","@":288}
+{"ev":"chord-followed","cur":"Bm7b5","cur_pcs":2596,"next":"-","next_pcs":0,"src":"manual","@":288}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":67,"vel":64,"@":288}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":71,"vel":64,"@":288}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":1,"note":74,"vel":64,"@":288}

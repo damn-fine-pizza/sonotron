@@ -1,7 +1,8 @@
 // Unit tests for the GUI wire seam (ux-workstation.md §9): LineBuffer
-// framing, the flat JSON-line parser, and BrainEvent decoding scoped to
-// exactly the 5 shapes gui-contract-map.md §3 documents as shipped, plus the
-// per-client error line. No GPU, no display, no core.
+// framing, the flat JSON-line parser, and BrainEvent decoding scoped to the 5
+// shapes gui-contract-map.md §3 documents as originally shipped, plus the
+// additive "chord-followed" shape (gap P0-1, pipeline-p0-mechanical-plan.md)
+// and the per-client error line. No GPU, no display, no core.
 
 #include "src/brain_event.hpp"
 
@@ -122,6 +123,32 @@ void test_parse_warn() {
   CHECK(ev.warn_code == "unsupported");
 }
 
+// The additive "chord-followed" shape (gap P0-1) -- exact wire shape ported
+// from spikes/kchordfollowed and rendered by components/hostrt/jsonl.cpp.
+void test_parse_chord_followed() {
+  const BrainEvent ev = parse_brain_event(
+      R"({"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,)"
+      R"("src":"manual","@":0})");
+  CHECK(ev.valid);
+  CHECK(ev.kind == BrainEvent::Kind::kChordFollowed);
+  CHECK(ev.followed_current == "Cmaj7");
+  CHECK(ev.followed_current_pcs == 2193);
+  CHECK(ev.followed_next == "-");
+  CHECK(ev.followed_next_pcs == 0);
+  CHECK(ev.followed_source == "manual");
+  CHECK(ev.tick == 0);
+
+  // A staged (pending) chord: both cur and next carry a real label. (G7 =
+  // root pc 7, dom7 offsets {0,4,7,10} -> pcs {7,11,2,5} -> mask 2212.)
+  const BrainEvent staged = parse_brain_event(
+      R"({"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"G7","next_pcs":2212,)"
+      R"("src":"detect","@":42})");
+  CHECK(staged.valid);
+  CHECK(staged.followed_next == "G7");
+  CHECK(staged.followed_next_pcs == 2212);
+  CHECK(staged.followed_source == "detect");
+}
+
 void test_parse_error() {
   const BrainEvent ev = parse_brain_event(R"({"error":"unknown command: x","cmd":"x"})");
   CHECK(ev.valid);
@@ -141,16 +168,11 @@ void test_parse_malformed_and_unrecognized() {
   CHECK(ev2.kind == BrainEvent::Kind::kUnknown);
 }
 
-// The additive shapes (ux-workstation.md §11: chord-followed/beat/clip) are
-// NOT decoded yet -- pinned explicitly so a future slice adding them is a
+// The remaining additive shapes (ux-workstation.md §11: beat/clip) are NOT
+// decoded yet -- pinned explicitly so a future slice adding them is a
 // deliberate, reviewed change to this test, not a silent behaviour drift.
+// "chord-followed" graduated out of this list -- see test_parse_chord_followed.
 void test_additive_shapes_stay_undecoded() {
-  const BrainEvent chord_followed = parse_brain_event(
-      R"({"ev":"chord-followed","cur":"Cmaj","cur_pcs":145,"next":"-","next_pcs":0,)"
-      R"("src":"manual","@":0})");
-  CHECK(!chord_followed.valid);
-  CHECK(chord_followed.kind == BrainEvent::Kind::kUnknown);
-
   const BrainEvent beat = parse_brain_event(R"({"ev":"beat","bar":3,"beat":2,"@":5})");
   CHECK(!beat.valid);
   CHECK(beat.kind == BrainEvent::Kind::kUnknown);
@@ -170,6 +192,7 @@ int main() {
   test_parse_section();
   test_parse_transport();
   test_parse_warn();
+  test_parse_chord_followed();
   test_parse_error();
   test_parse_malformed_and_unrecognized();
   test_additive_shapes_stay_undecoded();

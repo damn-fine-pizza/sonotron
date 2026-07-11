@@ -1,5 +1,6 @@
 {"ev":"section","name":"varD","@":0}
 {"ev":"chord","in":"C4","out":"Cmaj7","deg":"I","@":0}
+{"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,"src":"sequencer","@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":60,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":64,"vel":100,"@":0}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":67,"vel":100,"@":0}
@@ -104,6 +105,7 @@
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":42,"vel":64,"@":3650}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":7,"note":72,"vel":64,"@":3720}
 {"ev":"chord","in":"F4","out":"Fmaj7","deg":"IV","@":3840}
+{"ev":"chord-followed","cur":"Fmaj7","cur_pcs":561,"next":"-","next_pcs":0,"src":"sequencer","@":3840}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":4,"note":60,"vel":64,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":4,"note":64,"vel":64,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":4,"note":67,"vel":64,"@":3840}
@@ -211,6 +213,7 @@
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":42,"vel":64,"@":7490}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":7,"note":72,"vel":64,"@":7560}
 {"ev":"chord","in":"C4","out":"Cmaj7","deg":"I","@":7680}
+{"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,"src":"sequencer","@":7680}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":4,"note":65,"vel":64,"@":7680}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":4,"note":69,"vel":64,"@":7680}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":4,"note":72,"vel":64,"@":7680}
