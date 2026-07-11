@@ -29,15 +29,21 @@ The v1 ABI that is *frozen and pinned by tests* is the **binary** `Op`/`Param`/`
 
 ### Transport facts
 - `AF_UNIX` / `SOCK_STREAM`, newline-delimited framing, `kMaxLineLength = 4096` per line.
-- Path is **explicit**: launch the core with `arrangrr --control /path/to.sock` (no default; no
+- Path is **explicit**: launch the core with `cli-arrangrr --control /path/to.sock` (no default; no
   `--control` ⇒ no socket). Headless/non-tty launch skips TUI/panels — the mode the GUI wants.
 - Multi-client, no handshake, no per-client subscription. Connect = raw `connect()`.
 - **Trap:** sending `quit`/`exit` over the socket **terminates the whole host process for every
   client**. Never wire window-close to a bare `quit`.
 - Best client template to imitate: `components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
 
+---
+
+## 1. The GUI as a pure client — read loop, boundary rules, toolkit
+
+*(The material in this section was extracted from `gui-toolkit-decision.md`, retired
+2026-07-11 when the ImGui + GLFW toolkit choice was approved and vendored.)*
+
 ### Integration shape — how the client drains this framing
-*(extracted from gui-toolkit-decision.md, retired 2026-07-11 — the ImGui+GLFW choice was approved and vendored)*
 
 - **Single binary, single thread, poll-in-frame.** The ImGui render loop (~60 fps, ~16 ms budget)
   drains the non-blocking UDS socket fd (`recv`/`poll`, `MSG_DONTBLOCK`, to `EAGAIN`) once per
@@ -46,19 +52,15 @@ The v1 ABI that is *frozen and pinned by tests* is the **binary** `Op`/`Param`/`
   is already best-effort/lossy). Max added latency = one frame; zero risk of the GUI entering the
   timing path. This mirrors the server's own poll pattern in `main.cpp`.
 
----
-
-## Pure-client boundary rules
-
-*(extracted from gui-toolkit-decision.md, retired 2026-07-11 — the ImGui+GLFW choice was approved and vendored)*
+### Pure-client boundary rules
 
 Confirmed sound **on the wire** (only text L1 out / JSONL in cross the socket). The real trap is
 **host-side code reuse**, and the graph confirms it:
 - `jsonl.cpp` (which renders the JSONL) **is coupled to the core** — it includes `chord_engine.hpp`
-  / `theory.hpp` / `transport.hpp` and lives in `arrangrr_host`, which links `arrangrr_core` PUBLIC.
-- **Rule 1:** the GUI target links **neither `arrangrr_core` nor `arrangrr_host`**, and `#include`s
+  / `theory.hpp` / `transport.hpp` and lives in `hostrt`, which links `arrangrr` PUBLIC.
+- **Rule 1:** the GUI target links **neither `arrangrr` nor `hostrt`**, and `#include`s
   **zero** core headers. Model its `CMakeLists.txt` on `apps/tools/arrstyle-converter` ("does not link
-  arrangrr_core"), NOT on `arrangrr_host`.
+  arrangrr"), NOT on `hostrt`.
 - **Rule 2:** the GUI carries its **own** wire layer — a `LineBuffer`-style newline reassembly reader
   + a minimal JSON-line parser + its **own** name tables (section↔string, chord-quality↔suffix,
   warn↔string) written as plain strings. **Never** `static_cast<ChordQuality>` / `static_cast<
@@ -79,7 +81,7 @@ concerns — they are pure window/render libs, isolated from the boundary rules 
 
 ---
 
-## 1. Commands the GUI SENDS (text line → resulting internal Op/Param)
+## 2. Commands the GUI SENDS (text line → resulting internal Op/Param)
 
 Grouped by surface. Left column is the *text* the GUI writes; right is the frozen `Param` it
 resolves to (for traceability against the freeze). Exact verb spellings live in
@@ -145,14 +147,14 @@ live ids** in v1; sending it yields `unsupported`. Reserve UI space, wire nothin
 
 ---
 
-## 2. Events the GUI RECEIVES (JSONL)
+## 3. Events the GUI RECEIVES (JSONL)
 
 Exactly five `OutEvent::Kind`s cross the wire; nothing else outbound.
 
 | JSONL shape | Kind | Fires when |
 |---|---|---|
 | `{"ev":"midi-out","port":N,"msg":"noteon\|noteoff\|cc\|program\|pitchbend\|raw\|<realtime>",…,"@":tick}` | `kMidi` | **every** sounded byte — arranger, tracks, chord, arp all sound through raw MIDI; there is no separate "note" event |
-| `{"ev":"chord","in":"<note>","out":"<PCquality>","deg":"<roman\|->","@":tick}` | `kChord` | **only** from the recorded-sequencer path — **NOT** from `chord play` nor from live detection (see Gaps §3) |
+| `{"ev":"chord","in":"<note>","out":"<PCquality>","deg":"<roman\|->","@":tick}` | `kChord` | **only** from the recorded-sequencer path — **NOT** from `chord play` nor from live detection (see Gaps §4) |
 | `{"ev":"section","name":"<varA\|fillB\|…>","@":tick}` | `kSection` | arranger section **change** only |
 | `{"ev":"transport","state":"playing\|paused\|stopped","@":tick}` | `kTransport` | emitted from the arranger-ending stop path; **start/explicit-stop may not emit it** (see Gaps) |
 | `{"ev":"warn","code":"<name>","@":tick}` | `kWarn` | failure/nack only: scheduler_full, route_table_full, unknown_command, bad_argument, track_table_full, not_in_key, seq_table_full, seq_empty, unsupported |
@@ -162,7 +164,7 @@ Error to the offending client only (not an event): `{"error":"<msg>","cmd":"<lin
 
 ---
 
-## 3. GAPS — what a live GUI needs that v1 lacks (ADDITIVE-ABI proposals, never breaks)
+## 4. GAPS — what a live GUI needs that v1 lacks (ADDITIVE-ABI proposals, never breaks)
 
 These are flagged, not invented. Each is an **additive** OutEvent/field — the freeze is
 additive-only, so none touches an existing id. **P0 = blocks the central live surface.**
@@ -192,7 +194,7 @@ is a workaround; the proper fix is proposals 1–2.
 
 ---
 
-## 4. What the GUI should MIRROR vs. what it should NOT duplicate
+## 5. What the GUI should MIRROR vs. what it should NOT duplicate
 
 Per `docs/reflections/hybrid-arranger-gap-analysis.md`: the GUI is "a mirror that reflects and a
 keyboard that commands, never a truth and never a note in the timing path." The TUI already

@@ -123,23 +123,23 @@ never the linear-timeline free-for-all — that is sonotron's identity. Two cons
   + the host runtime; extracting it into `components/orchestrator/` is later refactor. For the move
   we create the **slot**.
 
-## What moved (executed 2026-07-11) vs. what is a slot
+## The executed restructure (2026-07-11) — what moved, what is a slot
+
+The restructure was planned by Palladio (a concrete `git mv` / CMake move-plan derived from this
+document), seam-validated by Corelli, reviewed with the owner, and executed and committed on
+2026-07-11. The one substantive CMake change was `project(arrangrr)` → `project(sonotron)`;
+everything else was mechanical relocation of the `app/` tree into `apps/` · `components/` · `tests/`.
+The former move-plan document has been retired; its forward-looking placement rules are absorbed in
+the next section.
 
 - **Moved** (existing code, relocated cleanly): `app/core` → `components/arrangrr`;
-  `app/platform/host` lib → `components/hostrt` + its CLI exe → `apps/tools/cli-arrangrr` (binary
-  keeps `OUTPUT_NAME arrangrr`); `app/tools/*` → `apps/tools/*`; `app/tests` → `tests/`;
-  `demo/` → `apps/demo/`; `app/firmware/stub` → `tests/arm-smoke/` (freestanding link gate — not an
-  app, not inside arrangrr).
+  `app/platform/host` lib → `components/hostrt` + its CLI exe → `apps/tools/cli-arrangrr` (target
+  `cli_arrangrr`, `OUTPUT_NAME cli-arrangrr`); `app/tools/*` → `apps/tools/*`; `app/tests` →
+  `tests/`; `demo/` → `apps/demo/`; `app/firmware/stub` → `tests/arm-smoke/` (freestanding link
+  gate — not an app, not inside arrangrr).
 - **Slots** (empty, no code yet): `components/orchestrator`, `components/melodd`, `components/samplrr`.
 - **NOT touched:** the core lib was not shattered. No new internal port was introduced in the move
   (that is `sequencrr`'s future milestone).
-
-## Execution (done)
-The restructure was planned by Palladio (concrete `git mv` / CMake move-plan from this document),
-seam-validated by Corelli, reviewed with the owner, and executed and committed on 2026-07-11. The
-one substantive CMake change was `project(arrangrr)` → `project(sonotron)`; everything else was
-mechanical relocation of the `app/` tree into `apps/` · `components/` · `tests/`. The former
-move-plan document has been retired; its forward-looking placement rules live in the next section.
 
 ## Placement rules — where new things go
 
@@ -174,9 +174,9 @@ stays flat, `apps/` holds deliverables, cross-component tests live at the repo r
 
 - **Target names:** `arrangrr` (freestanding lib, was `arrangrr_core`), `hostrt` (host lib, was
   `arrangrr_host`), `cli_arrangrr` (CLI exe target, dir `apps/tools/cli-arrangrr`).
-- **Binary name unchanged:** the CLI exe keeps `set_target_properties(cli_arrangrr PROPERTIES
-  OUTPUT_NAME arrangrr)` — the produced binary is still `arrangrr` (demo scripts and muscle memory
-  depend on it); renaming the binary is a separate, larger-blast-radius decision.
+- **Binary name:** the CLI exe carries `set_target_properties(cli_arrangrr PROPERTIES OUTPUT_NAME
+  cli-arrangrr)`, so the produced binary is `cli-arrangrr` — the demo launch scripts
+  (`apps/demo/lib/launch.sh`) invoke and `pgrep` it by that name.
 - **CORE coverage gate scope:** the enforced unit-coverage gate measures only `components/arrangrr/`
   (with `components/arrangrr/tests/` and `tests/` excluded); `components/hostrt/tests/` is excluded
   from the CORE gate, preserving the pre-split boundary.

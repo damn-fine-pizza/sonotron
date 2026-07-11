@@ -5,13 +5,25 @@ and "what it does"). Experience-level, not wire/ABI detail. #3 and #10 owner-val
 #4–#9 **reviewed (Prospero + Puccini, 2026-07-08)** and corrected — flagged forks/futures noted
 in-flow.
 
+> **Realization altitude (read this first).** This doc stays at experience/product altitude. The
+> concrete GUI screen that realizes several of these flows (notably #1, #2, #4, #5, #10) is specified
+> authoritatively in `ux-workstation.md` (the sonotron workstation screen, node `11600`, decided
+> 2026-07-10 — *later* than the 2026-07-08 review above); where this doc and that one disagree about
+> the *screen*, `ux-workstation.md` wins and this doc is deliberately silent on screen detail. The
+> most consequential drift since the review: the **intention/conductor idea of flow #3 is demoted**
+> on that screen to an **optional, read-only side rail** (`ux-workstation.md` §4.7), pending the
+> Director (node `10000`, planned CAPSTONE — not built). This doc keeps flow #3 as the product-vision
+> spine; its *screen* status today is the demoted rail.
+
 ## The flow set
 
 1. **Start / set the base** — style, key, BPM → the band plays. **✓ reviewed — see below.**
 2. **Steer harmony live** — chords (even one-finger) → the band follows and holds; queue the next
    (amber→green); opt-in "no wrong notes" for your hand too. **✓ reviewed — see below.**
-3. **Conduct intention** — set/gesture a target (energy/tension/valence + rate) → the arrangement
-   moves toward it on musical boundaries. **✓ detailed & validated (2026-07-07) — see below.**
+3. **Conduct intention** — set/gesture a target (energy/tension/valence; motion/rate deferred, see
+   `director-vocabulary.md`) → the arrangement moves toward it on musical boundaries. **✓ detailed &
+   validated (2026-07-07); on the current screen demoted to an optional read-only rail
+   (`ux-workstation.md` §4.7), pending the Director (node `10000`) — see below.**
 4. **Build structure** — move through sections (Intro→A→B→Fill→Break→Ending), trigger
    fills/transitions → capture the path as a **Song**. **✓ reviewed — see below.**
 5. **Shape the feel** — shape by hand and what you touch stays *yours*; mute/solo, swing/humanize,
@@ -89,7 +101,8 @@ can't play a wrong note either, without losing the freedom to play a "wrong" one
 
 *Still to detail:* the split/zone config (chord hand vs solo hand — core-portable); how queued
 chords are edited/cancelled. Note: "instant" is literal for single-finger (direct key→chord); a
-fingered/full chord carries a small hold/hysteresis window (`chord.window_ms`) to avoid flicker.
+fingered/full chord carries a small hold/hysteresis window to avoid flicker (the exact debounce
+control is still to detail — no such config field exists yet).
 
 ---
 
@@ -121,6 +134,13 @@ instant.
 
 *Still to detail:* the precise widget to express the axes (kept loose per the owner) — this captures
 the EXPERIENCE, not the widget.
+
+*Honest status:* the **motion/rate axis is deferred** — the proposed axis set is `energy · tension ·
+valence` only (`director-vocabulary.md`); "over 8 bars"/"rising" above is the intended experience,
+not a shipped trajectory control. And on today's GUI screen this flow is **not** the center: it is a
+demoted, read-only intention rail (`ux-workstation.md` §4.7) until the **Director** (node `10000`,
+planned CAPSTONE) exists. This flow remains the product-vision spine; it is simply not yet realized
+as such on the screen.
 
 ---
 
@@ -189,7 +209,7 @@ today (only register, `kRoleAnchor`/`3230`, is shipped as a manual lever).
 **Principle:** arrangrr **DECIDES** audio symbolically (opaque clip references — "deploy clip N at
 bar X, loop to clock"); **melodd/sampler REALIZE** it. No waveform editing, no linear timeline.
 **Regime:** HOST-ONLY, and melodd **does not exist yet** — this flow is **NEEDS-DECISION, deferred**
-(owner-call on the audio-host library, see `melodd-audio-companion.md`).
+(owner-call on the audio-host library, see `docs/reflections/melodd-audio-companion.md`).
 
 1. **Bring in a clip** — record your voice/gear, or import a sample/loop; it becomes an **opaque,
    content-addressed asset**.

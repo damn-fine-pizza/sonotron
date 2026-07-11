@@ -1,112 +1,110 @@
-# GUI Fase 2 — piano d'esecuzione dello strand *mechanical*
+# GUI Phase 2 — execution plan for the *mechanical* strand
 
-Status: **in corso — G0 e G1 FATTI (2026-07-11), G2→G3 pendenti.** Deriva da `ux-workstation.md` §13
-(salvage/rebuild map) e ne implementa la sola parte **senza dipendenze dal core** (lo strand GUI
-mechanical). Lo strand core (§11: `kChordFollowed`, `kBeat`, primitiva clip) è **fuori da questo
-piano** e verrà sequenziato dopo.
-
-> **Avanzamento:** G0 (demolizione concept) e G1 (layout workstation + split verticale annidato +
-> `visible` + font 13) sono implementati, testati (4 test GUI verdi, incl. `test_layout_nested_split`)
-> e committati. Lo screenshot conferma il wireframe §3. Prossimo: **G2 (brain session)**. Nota: lo
-> spike sorgente `spikes/gui-skeleton` vive su un branch separato non-merged, non nel working tree.
+Status: **in progress — G0 and G1 DONE (2026-07-11), G2→G3 pending.** Derived from `ux-workstation.md` §13
+(salvage/rebuild map); this plan implements only the part **with no dependency on the core** (the GUI
+mechanical strand). The core strand (§11: `kChordFollowed`, `kBeat`, the clip primitive) is **out of scope
+for this plan** and will be sequenced afterwards. G0 (concept demolition, commit `38b5826`) and G1
+(workstation layout + nested vertical split + `visible` + font 13, commit `c49f8c6`) are implemented,
+tested (4 green GUI tests, including `test_layout_nested_split`) and committed; the headless screenshot
+confirms the §3 wireframe. Next up: **G2 (brain session)**. Note: the source spike `spikes/gui-skeleton`
+lives on a separate, unmerged branch — it is not in the working tree.
 
 ## Context
 
-Il pivot del 2026-07-10 (`ux-workstation.md`, node 11600) rende autoritativa la *workstation screen*
-e supera la shell "conductor dashboard" attuale. La GUI oggi (`apps/gui-sonotron/`) è una shell mock:
-layout engine a righe singole + due zone concept (`arrangement*`, `intention*`) con dati finti,
-nessuna connessione al brain, 3 zone su 5 vuote. Questo piano riusa il guscio meccanico e **butta il
-contenuto concept**, ricentrando lo schermo sulle 6 zone della workstation — restando entro il
-contratto *già shippato* (`gui-contract-map.md`: L1 testo in / JSONL out), senza toccare la ABI
-congelata e senza attendere lavoro core.
+The 2026-07-10 pivot (`ux-workstation.md`, node 11600) makes the *workstation screen* authoritative and
+supersedes the current "conductor dashboard" shell. Today the GUI (`apps/gui-sonotron/`) is a mock shell:
+a single-row layout engine plus two concept zones (`arrangement*`, `intention*`) fed by fake data, with no
+connection to the brain and 3 of its 5 zones empty. This plan reuses the mechanical shell and **discards the
+concept content**, re-centering the screen on the 6 workstation zones — staying inside the *already-shipped*
+contract (`gui-contract-map.md`: L1 text in / JSONL out), without touching the frozen ABI and without
+waiting on core work.
 
-Decisione d'ingresso (owner, 2026-07-10): **GUI mechanical prima**, poi core P0, poi clip primitive.
+Entry decision (owner, 2026-07-10): **GUI mechanical first**, then core P0, then the clip primitive.
 
-## Vincoli invarianti
+## Invariants
 
-- Solo `*_panel.cpp` e `layout_renderer.cpp` includono ImGui; i *model* sono dati puri e testabili
-  host-only (harness `tests/test.hpp`, macro `CHECK`).
-- `test_abi_frozen` non è toccato (nessuna modifica ABI in questo strand).
-- Nessuna nuova dipendenza host/core (lo spike non ne introduce: solo POSIX + STL).
+- Only `*_panel.cpp` and `layout_renderer.cpp` include ImGui; the *models* are pure, host-only testable
+  data (harness `tests/test.hpp`, macro `CHECK`).
+- `test_abi_frozen` is untouched (no ABI change in this strand).
+- No new host/core dependency (the spike introduces none: POSIX + STL only).
 
-## Salvataggio dallo spike `spikes/gui-skeleton`
+## Salvage from the `spikes/gui-skeleton` spike
 
-Lo spike contiene codice già scritto e testato, da **portare** (namespace `arrangrr::gui` →
+The spike holds code that is already written and tested, to be **ported** (namespace `arrangrr::gui` →
 `sonotron`, path `app/gui/` → `apps/gui-sonotron/src/`):
 
-| File spike | Destinazione | Ruolo |
+| Spike file | Destination | Role |
 |---|---|---|
-| `wire.{hpp,cpp}` | `brain_event.{hpp,cpp}` | `LineBuffer` (framing) + parser JSON flat + decoder `Event` (POD) |
-| `uds_client.{hpp,cpp}` | transport dentro `uds_brain_session.{hpp,cpp}` | client AF_UNIX non-bloccante, `send_line`/`poll_lines`, mai `quit` |
-| `app_state.{hpp,cpp}` | `app_state.{hpp,cpp}` | riduzione eventi, gating green-a-riposo/amber |
-| `tests/test_wire.cpp`, `tests/test_uds_client.cpp` | `tests/test_brain_event.cpp`, ... | test host-only già pronti |
+| `wire.{hpp,cpp}` | `brain_event.{hpp,cpp}` | `LineBuffer` (framing) + flat-JSON parser + `Event` decoder (POD) |
+| `uds_client.{hpp,cpp}` | transport inside `uds_brain_session.{hpp,cpp}` | non-blocking AF_UNIX client, `send_line`/`poll_lines`, never `quit` |
+| `app_state.{hpp,cpp}` | `app_state.{hpp,cpp}` | event reduction, green-at-rest/amber gating |
+| `tests/test_wire.cpp`, `tests/test_uds_client.cpp` | `tests/test_brain_event.cpp`, ... | host-only tests, already written |
 
-Delta rispetto allo spike: avvolgere transport+decoder+state dietro l'interfaccia astratta
-`BrainSession` (§9 dello spec) così che `InProcessBrainSession` sia sostituibile senza toccare i
-pannelli. `send()` mantiene la blacklist `quit`/`exit`.
+Delta versus the spike: wrap transport + decoder + state behind the abstract `BrainSession` interface
+(spec §9) so that `InProcessBrainSession` is substitutable without touching the panels. `send()` keeps the
+`quit`/`exit` blacklist.
 
-## Sequenza (slice piccoli, ciascuno compila + test verdi + screenshot)
+## Sequence (small slices, each one compiles + green tests + screenshot)
 
-### G0 — Demolizione concept ✅ FATTO (commit 38b5826)
+### G0 — Concept demolition ✅ DONE (commit `38b5826`)
 - DELETE: `arrangement.{hpp,cpp}`, `arrangement_panel.{hpp,cpp}`, `intention.{hpp,cpp}`,
-  `intention_panel.{hpp,cpp}`, `tests/test_arrangement.cpp`, `tests/test_intention.cpp`, i generatori
-  `mock_*`.
-- `layout_renderer.cpp`: rimuovi i due `case` mock e i relativi include.
-- Aggiorna `apps/gui-sonotron/CMakeLists.txt` e `tests/CMakeLists.txt` (liste sorgenti/test).
-- DoD: build verde, suite verde (con le zone renderizzate come frame titolati vuoti).
+  `intention_panel.{hpp,cpp}`, `tests/test_arrangement.cpp`, `tests/test_intention.cpp`, and the
+  `mock_*` generators.
+- `layout_renderer.cpp`: remove the two mock `case`s and their includes.
+- Update `apps/gui-sonotron/CMakeLists.txt` and `tests/CMakeLists.txt` (source/test lists).
+- DoD: green build, green suite (with the zones rendered as titled empty frames).
 
-### G1 — Layout engine: split verticale annidato + `visible` + font 13 ✅ FATTO (commit c49f8c6)
-- `layout_model.{hpp,cpp}`: aggiungi `bool visible = true` a `Zone`; estendi `compute_rows` (oggi
-  raggruppa solo per `Zone::row`, righe di livello singolo — vedi `layout_model.cpp:89`) con un
-  concetto di **sotto-colonna che impila zone in verticale dentro una cella** (la right-rail:
-  `intention` sopra `parts` in col 2). Porta `kDefaultFontSizePx` a **13** (solo il default).
-- `layout_json.{hpp,cpp}`: leggi/scrivi `"visible"` e la forma dello split annidato.
-- `layout_renderer.cpp`: rendi lo split annidato; salta le zone `!visible`.
-- `layout_model.cpp::default_layout()`: riscrivi le 6 zone workstation
-  (`transport` full-span row 0; `browser`/`grid`/right-rail su row 1; `seqedit` full-span row 2).
-- Test: aggiorna `test_layout_model`, `test_layout_json`, `test_layout_roundtrip`; aggiungi
+### G1 — Layout engine: nested vertical split + `visible` + font 13 ✅ DONE (commit `c49f8c6`)
+- `layout_model.{hpp,cpp}`: add `bool visible = true` to `Zone`; extend `compute_rows` — which before G1
+  grouped only by `Zone::row` (single-level rows) — with a notion of a **sub-column that stacks zones
+  vertically inside a cell** (the right rail: `intention` above `parts` in col 2). Set `kDefaultFontSizePx`
+  to **13** (the default only).
+- `layout_json.{hpp,cpp}`: read/write `"visible"` and the nested-split shape.
+- `layout_renderer.cpp`: render the nested split; skip `!visible` zones.
+- `layout_model.cpp::default_layout()`: rewrite the 6 workstation zones
+  (`transport` full-span row 0; `browser`/`grid`/right-rail on row 1; `seqedit` full-span row 2).
+- Tests: update `test_layout_model`, `test_layout_json`, `test_layout_roundtrip`; add
   `test_layout_nested_split.cpp`.
-- DoD: build+suite verdi; screenshot mostra le 6 zone nel layout del wireframe (§3).
+- DoD: green build + suite; screenshot shows the 6 zones in the wireframe layout (§3).
 
-### G2 — Brain session (contratto già shippato, nessun lavoro core)
-- ADD: `brain_session.hpp` (interfaccia astratta §9), `brain_event.{hpp,cpp}` (porta da `wire.*`),
-  `uds_brain_session.{hpp,cpp}` (porta da `uds_client.*` + decoder), `app_state.{hpp,cpp}` (porta).
-- Decoder scoped alle **5 shape già shippate** (`midi-out`, `chord`, `section`, `transport`, `warn`);
-  i campi additivi (`chord-followed`, `beat`, `clip`) restano stub finché lo strand core li emette.
-- `main.cpp`: istanzia `UdsBrainSession` (path da `--control`/preferenze), `poll()` una volta per
-  frame, riduci in `AppState`; mostra lo stato connessione nel transport.
-- Test: `test_brain_event.cpp`, `test_app_state.cpp` (portati/estesi dallo spike).
-- DoD: con un brain in ascolto su UDS, il transport mostra ● Connected e il log eventi scorre.
+### G2 — Brain session (already-shipped contract, no core work)
+- ADD: `brain_session.hpp` (abstract interface, §9), `brain_event.{hpp,cpp}` (ported from `wire.*`),
+  `uds_brain_session.{hpp,cpp}` (ported from `uds_client.*` + decoder), `app_state.{hpp,cpp}` (ported).
+- Decoder scoped to the **5 already-shipped shapes** (`midi-out`, `chord`, `section`, `transport`, `warn`);
+  the additive fields (`chord-followed`, `beat`, `clip`) stay stubbed until the core strand emits them.
+- `main.cpp`: instantiate `UdsBrainSession` (path from `--control`/preferences), `poll()` once per frame,
+  reduce into `AppState`; show connection state in the transport.
+- Tests: `test_brain_event.cpp`, `test_app_state.cpp` (ported/extended from the spike).
+- DoD: with a brain listening on UDS, the transport shows ● Connected and the event log scrolls.
 
-### G3 — Zone panel (mock/parziali, i campi core-dipendenti restano placeholder)
-- ADD coppie model+panel: `transport_panel.*`, `browser_panel.*`+`browser_model.*` (i 16 builtin
-  styles come drag-source), `grid_panel.*`+`grid_model.*` (matrice/scene; il *launch* reale aspetta
-  la clip primitive del core), `seqedit_panel.*`+`seqedit_model.*`, `parts_panel.*`+`parts_model.*`,
-  `intention_panel.*` (nuovo, minimale, read-only).
-- `main.cpp`: menu bar (`BeginMainMenuBar` — File/Edit/View/Transport/Help), toggle View→Intention/
-  Parts.
-- Test: `test_grid_model.cpp` (+ eventuali model test).
-- DoD: schermo navigabile end-to-end; playhead/visualizer armonico/launch mostrano placeholder
-  onesti in attesa dello strand core.
+### G3 — Zone panels (mock/partial; the core-dependent fields stay placeholders)
+- ADD model+panel pairs: `transport_panel.*`, `browser_panel.*`+`browser_model.*` (the 16 builtin styles
+  as a drag-source), `grid_panel.*`+`grid_model.*` (matrix/scenes; the real *launch* awaits the core clip
+  primitive), `seqedit_panel.*`+`seqedit_model.*`, `parts_panel.*`+`parts_model.*`, `intention_panel.*`
+  (new, minimal, read-only).
+- `main.cpp`: menu bar (`BeginMainMenuBar` — File/Edit/View/Transport/Help), View→Intention/Parts toggles.
+- Tests: `test_grid_model.cpp` (plus any additional model tests).
+- DoD: screen navigable end-to-end; playhead / harmonic visualizer / launch show honest placeholders while
+  the core strand is pending.
 
-## Confini con lo strand core (fuori da questo piano)
+## Boundary with the core strand (out of scope for this plan)
 
-Restano placeholder finché §11 non atterra: playhead reale (dipende da `kBeat`), visualizer armonico
-green/amber vivo (dipende da `kChordFollowed`), launch reale delle celle (dipende dalla primitiva
-`clip` + verbi `launch/stop/scene quantize`). I pannelli sono progettati per accendersi quando
-l'evento arriva, senza riscrittura.
+These stay placeholders until §11 lands: the real playhead (depends on `kBeat`), the live green/amber
+harmonic visualizer (depends on `kChordFollowed`), and real cell launch (depends on the `clip` primitive
+plus the `launch/stop/scene quantize` verbs). The panels are designed to light up when the event arrives,
+with no rewrite.
 
-## Verifica end-to-end
+## End-to-end verification
 
-1. `cmake --build` del preset host → verde.
-2. `ctest` label `unit` per `apps/gui-sonotron` → verde (model puri + brain_event + app_state).
-3. Screenshot headless (`screenshot.*`) dopo G1 e G3 → confronto col wireframe §3.
-4. Avvio `arrangrr --control /tmp/son.sock`, poi la GUI: transport ● Connected, log eventi scorre,
-   invio `transport start` dal menu → eventi `midi-out` visibili.
+1. `cmake --build` of the host preset → green.
+2. `ctest` label `unit` for `apps/gui-sonotron` → green (pure models + brain_event + app_state).
+3. Headless screenshot (`screenshot.*`) after G1 and G3 → compared against the §3 wireframe.
+4. Start `cli-arrangrr --control /tmp/son.sock`, then the GUI: transport ● Connected, event log scrolls,
+   send `transport start` from the menu → `midi-out` events become visible.
 
-## Note
+## Notes
 
-- Lo spec cita `product-identity.md` in `docs/design/`; il file reale è `docs/product-identity.md`
-  (riferimento da correggere in un doc-sweep, non bloccante).
-- Routing suggerito quando si esegue: `nazzareno` implementa gli slice, `torquato` possiede i test/
-  golden e la disciplina red-before-green, `corelli`/`fabrizio` per review architettura/riga.
+- The spec cites `product-identity.md` under `docs/design/`; the real file is `docs/product-identity.md`
+  (reference to correct in a doc sweep, non-blocking).
+- Suggested routing when executing: `nazzareno` implements the slices, `torquato` owns the tests/goldens
+  and the red-before-green discipline, `corelli`/`fabrizio` for architecture/line review.

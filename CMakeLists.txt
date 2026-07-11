@@ -36,7 +36,7 @@ else()
   # Host-only importer/compiler tooling (never in the ARM/firmware build).
   add_subdirectory(apps/tools/arrstyle-converter)
   # Host-only GUI pure client (D38) + its vendored toolkit. Never in the
-  # ARM/firmware build; the GUI never links arrangrr_core or hostrt.
+  # ARM/firmware build; the GUI never links arrangrr or hostrt.
   add_subdirectory(third_party)
   add_subdirectory(apps/gui-sonotron)
 endif()

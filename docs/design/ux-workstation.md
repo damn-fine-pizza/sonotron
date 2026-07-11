@@ -2,8 +2,8 @@
 
 Status: **authoritative for the GUI screen (node 11600), decided 2026-07-10.** This document
 governs the *center of the screen* and the two working flows. It **supersedes the
-conductor-dashboard-as-the-whole-screen framing** of `ux-concept.md` (whose three laws and harmony
-colour semantics still hold — see §10). It stays **bound** by:
+conductor-dashboard-as-the-whole-screen framing** of `ux-concept.md` (retired 2026-07-11; its three
+laws and harmony colour semantics still hold and are now inlined in §10). It stays **bound** by:
 
 - `gui-contract-map.md` — the shipped GUI↔brain wire (text L1 in / JSONL out). Non-negotiable.
 - `components/arrangrr/include/arrangrr/abi.hpp` — the frozen v1 command/event vocabulary.
@@ -215,7 +215,7 @@ gm_program, muted, soloed, present}`. Sends `part mute <role> <0|1>`, `part solo
 **Right-rail stack (decided):** Parts sits **under Intention in the right column** (col 2), matching
 the wireframe literally. The salvaged layout engine renders single-level rows (`compute_rows`), so
 this requires a **nested vertical split within a column** — the restart adds that capability to the
-engine now rather than flattening the rail into full-width rows (§13, decision §14.3).
+engine now rather than flattening the rail into full-width rows (§13, §14 decision 3).
 
 ### 4.7 Intention (optional, demoted)
 A minimal, **read-only** rail: energy/tension/valence as coarse bars, plus current groove/style
@@ -289,7 +289,7 @@ Each step: the L1 command(s) sent, the JSONL event(s) reacted to, and any gap.
 |---|---|---|---|---|
 | A1 | Pick a style | `style load <0..15>` | infer from later `midi-out` | no ack/snapshot (§11.4–5) |
 | A2 | Set key / BPM | `key <root> <mode>`, `bpm <n>` | — | no ack (§11.5) |
-| A3 | Audition the band | `transport start` … `transport stop` | `transport` (unreliable on start), `midi-out` | transport-on-start (§11-2) |
+| A3 | Audition the band | `transport start` … `transport stop` | `transport` (unreliable on start), `midi-out` | transport-on-start (§11.2) |
 | A4 | Drop a style section into a cell | `style section <type>` | `section` | — |
 | A5 | Drop a chord sequence into a cell | `seq new`/`seq use <i>`/`seq add …`, `seq play` | `chord` (this path only) | — |
 | A6 | Drop a step track into a cell | `track new <role> <port:ch>`, `track length`, `track step …`, wrapped as a `clip` | `clip`, `midi-out` | clip primitive **built** (§11) |
@@ -341,7 +341,7 @@ struct BrainEvent {                    // one decoded inbound event (JSONL parse
 };
 
 struct BrainSnapshot { /* style/section/key/bpm, per-part mute/solo/program, groove/arp,
-                          follow mode — every field optional/"unknown" until gap §11-3 lands */ };
+                          follow mode — every field optional/"unknown" until gap §11.4 lands */ };
 
 class BrainSession {
  public:
@@ -359,7 +359,7 @@ class BrainSession {
 - **Abstraction boundary = text-command in / decoded-event out** — mirrors the *shipped* contract,
   not §24. Command ack/correlation (§11.5) is not modelled yet; addable without breaking callers.
 - **First concrete impl — `UdsBrainSession`** (build this now): `AF_UNIX`/`SOCK_STREAM`, newline
-  framing, `kMaxLineLength = 4096`, connects to the path passed as `arrangrr --control /path.sock`.
+  framing, `kMaxLineLength = 4096`, connects to the path passed as `cli-arrangrr --control /path.sock`.
   Non-blocking drain in `poll()`; a slow GUI drops events rather than stalling (matches best-effort
   broadcast). Template: `components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
   `send()` blacklists `quit`/`exit`.
@@ -395,7 +395,7 @@ Carried forward from `gui-contract-map.md §4` (live) and folded in from `ux-con
 
 The restart's key decision (2026-07-10): **build the foundation at the root, not the GUI shortcut.**
 The Repeat Zone, the harmony visualiser, and the playhead all depend on core work the GUI must NOT
-fake. So Fase 2 is **not GUI-only** — it opens with an additive-core batch in `arrangrr`/`hostrt`.
+fake. So Phase 2 is **not GUI-only** — it opens with an additive-core batch in `arrangrr`/`hostrt`.
 All additive to the frozen v1 ABI: none touches an existing id, none breaks the freeze.
 
 **Front-of-line batch (built before/with the GUI zones that depend on them):**
@@ -409,7 +409,7 @@ All additive to the frozen v1 ABI: none touches an existing id, none breaks the 
    object, `launch/stop clip <id> quantize <n>` and `launch scene <n> quantize <q>` verbs, and a
    `clip` state event, with launch-quantize honoured by the core clock. The Repeat Zone binds to
    this real primitive — we **do not** ship the throwaway GUI-side launcher. This is the concrete
-   meaning of "aspettiamo il clip vero nel core, ma anticipiamolo".
+   meaning of "wait for the real clip in the core, but bring it forward" (§14 decision 1).
 
 **Follow-on (after the front batch, do not block the first GUI slice's *shape*):**
 4. **State-on-connect snapshot.** All Params are write-only, `Op::kGet` is unwired; a GUI attaching
@@ -458,7 +458,7 @@ Reachable via **Edit ▸ Preferences**. v1 contents:
 
 ## 13. Salvage / rebuild map (the code milestone, gated on this doc)
 
-Fase 2 runs in two strands: a **core strand** (the §11 front batch — the additive-ABI work) and a
+Phase 2 runs in two strands: a **core strand** (the §11 front batch — the additive-ABI work) and a
 **GUI strand** (below). The GUI zones that depend on the core strand (grid, harmony visualiser,
 playhead) land as their core piece lands. Convention preserved: only `*_panel.cpp` and
 `layout_renderer.cpp` include ImGui; models are pure data.

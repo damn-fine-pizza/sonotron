@@ -199,7 +199,7 @@ kSection, ...}` and `FieldEvent{kTransport, kState, ...}` the same way.
   stream a hardware synth or the MIDI monitor consumes; folding it into "component state" would be
   a category error (a note-on is an occurrence, not a value at rest).
 - `WarnCode`/`kWarn` stays its own lightweight kind for the same reason: a warning is an event
-  that *happened*, not a field with a resting value. (Flagged as an open question in §6 — a
+  that *happened*, not a field with a resting value. (Flagged as an open question in §7 — a
   "diagnostics" pseudo-family is possible but not obviously cleaner.)
 
 So the wire/in-process envelope shrinks from 5 `Kind`s to **3**: `kMidi` (unchanged), `kField`
@@ -253,7 +253,7 @@ uses to enforce it is the pattern `FollowedContext` already proves out (§0):
    construction, because there is exactly one place ticks advance. This collapses today's two
    overloaded ad hoc bits (`kChordPlay`'s `idx`, `kStyleSwitch`'s `c`) into one envelope field
    used identically by every family (closes proposal D — the quantization-bit consolidation
-   excavated in §0.1's evidence base — for real).
+   excavated in §0's grounding, the "Quantization-to-boundary already exists" bullet — for real).
 
 **Where the Director lives, architecturally: nowhere inside this core.** The core does not know
 what a Director *is* — it only ever sees `Origin::kDirector` on an inbound `HookCommand`, arriving
@@ -318,7 +318,7 @@ marked HOST-ONLY.
     `refresh_parts_content`, `refresh_groove_content`, `refresh_arp_content`, `refresh_chords_
     content`) — genuinely disjoint code once 5a's API is frozen, good parallel-agent split.
   **HOST-ONLY. Depends on Slices 0, 2, 3, 5a. No new dependency — `hostrt` already uses
-  `std::unordered_map`/`std::vector` (`uds_server.hpp`), so the mirror needs nothing new; §6.3
+  `std::unordered_map`/`std::vector` (`uds_server.hpp`), so the mirror needs nothing new; §7 item 5
   flags the storage-shape choice.**
 - **Slice 6 — `Origin` at the input edges + L1 parser rewrite.** Tag every human-keystroke
   `push_command` call site (`shell_input.cpp`) with `Origin::kHuman`; rewrite `shell_parse.cpp`'s
@@ -372,3 +372,7 @@ Nothing in this list requires a new dependency, host or core; every slice stays 
    table). Host-only, no doctrine violation either way — a style/consistency call, not a structural
    one, but worth pinning once so the five panel-refresh slices (5b..5f) don't disagree on the
    read API's shape.
+6. **`kWarn`/diagnostics: distinct kind, or a `(family, field)` pseudo-family?** §3 keeps `kWarn`
+   as its own lightweight kind — a warning is an event that *happened*, not a field at rest. Folding
+   diagnostics into a `kDiagnostics` pseudo-family is possible but not obviously cleaner. Left as an
+   owner call, not decided here.

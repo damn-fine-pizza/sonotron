@@ -3,8 +3,9 @@
 Status: **axis set proposed 2026-07-07** — `energy · tension · valence` (motion deferred).
 Design altitude: the Director's *perceptual* vocabulary, not ABI/param detail. Companions:
 `workstation-vision.md` (the three tiers), `flows.md` (#3 conduct intention), `ux-workstation.md`
-(the demoted read-only intention rail, §4.7). Supersedes the loose "working set: energy / tension /
-mood" mentioned there.
+(the demoted read-only intention rail, §4.7). Supersedes the earlier loose working set "energy /
+tension / mood" — valence replaces mood (see the *valence* axis below); the companion docs have
+since been updated to match.
 
 ## The law this obeys
 
@@ -67,7 +68,7 @@ control construct with no clean mapping onto a band. A conscious deviation, not 
 - **Poles:** dark / heavy / melancholic  ↔  bright / open / uplifting.
 - **Is:** the pleasant↔unpleasant, negative↔positive axis of the circumplex — the *character* of
   the moment, independent of how hard it pushes.
-- **Is NOT:** timbre/tone-color (a realization/Arranger concern — the "colore timbrico" split out
+- **Is NOT:** timbre/tone-color (a realization/Arranger concern — the timbral color split out
   of the old `mood`), and NOT mode alone (major≠happy is a cliché the Arranger may honor or subvert).
 - **Replaces the old `mood`.** `mood` bundled valence + timbral color + more; we keep the clean
   perceptual half (valence) and hand the rest to the Arranger. The podium mockup already draws this
