@@ -1,13 +1,17 @@
 # GUI Phase 2 — execution plan for the *mechanical* strand
 
-Status: **in progress — G0 and G1 DONE (2026-07-10), G2→G3 pending.** Derived from `ux-workstation.md` §13
+Status: **mechanical strand COMPLETE — G0, G1, G2 and G3 all DONE.** Derived from `ux-workstation.md` §13
 (salvage/rebuild map); this plan implements only the part **with no dependency on the core** (the GUI
 mechanical strand). The core strand (§11: `kChordFollowed`, `kBeat`, the clip primitive) is **out of scope
-for this plan** and will be sequenced afterwards. G0 (concept demolition, commit `38b5826`) and G1
-(workstation layout + nested vertical split + `visible` + font 13, commit `c49f8c6`) are implemented,
-tested (4 green GUI tests, including `test_layout_nested_split`) and committed; the headless screenshot
-confirms the §3 wireframe. Next up: **G2 (brain session)**. Note: the source spike `spikes/gui-skeleton`
-lives on a separate, unmerged branch — it is not in the working tree.
+for this plan** and is the next work now that this plan is closed. G0 (concept demolition, commit
+`38b5826`) and G1 (workstation layout + nested vertical split + `visible` + font 13, commit `c49f8c6`) are
+implemented, tested (4 green GUI tests, including `test_layout_nested_split`) and committed; the headless
+screenshot confirms the §3 wireframe. G2 (brain session) and G3 (zone panels) landed together in commit
+`473ab60` ("feat(gui): G2+G3 — brain session + workstation zone panels"), 66/66 host tests green (34 unit
+tests across `apps/gui-sonotron/tests/`, including `test_brain_event`, `test_app_state`,
+`test_uds_brain_session`, `test_browser_model`, `test_grid_model`, `test_seqedit_model`,
+`test_parts_model`). Note: the source spike `spikes/gui-skeleton` lives on a separate, unmerged branch — it
+is not in the working tree.
 
 ## Context
 
@@ -67,7 +71,7 @@ Delta versus the spike: wrap transport + decoder + state behind the abstract `Br
   `test_layout_nested_split.cpp`.
 - DoD: green build + suite; screenshot shows the 6 zones in the wireframe layout (§3).
 
-### G2 — Brain session (already-shipped contract, no core work)
+### G2 — Brain session (already-shipped contract, no core work) ✅ DONE (commit `473ab60`)
 - ADD: `brain_session.hpp` (abstract interface, §9), `brain_event.{hpp,cpp}` (ported from `wire.*`),
   `uds_brain_session.{hpp,cpp}` (ported from `uds_client.*` + decoder), `app_state.{hpp,cpp}` (ported).
 - Decoder scoped to the **5 already-shipped shapes** (`midi-out`, `chord`, `section`, `transport`, `warn`);
@@ -76,8 +80,11 @@ Delta versus the spike: wrap transport + decoder + state behind the abstract `Br
   reduce into `AppState`; show connection state in the transport.
 - Tests: `test_brain_event.cpp`, `test_app_state.cpp` (ported/extended from the spike).
 - DoD: with a brain listening on UDS, the transport shows ● Connected and the event log scrolls.
+- Shipped: `apps/gui-sonotron/src/brain_session.hpp`, `brain_event.{hpp,cpp}`, `uds_brain_session.{hpp,cpp}`,
+  `app_state.{hpp,cpp}`; green tests `apps/gui-sonotron/tests/test_brain_event.cpp`,
+  `test_app_state.cpp`, `test_uds_brain_session.cpp`.
 
-### G3 — Zone panels (mock/partial; the core-dependent fields stay placeholders)
+### G3 — Zone panels (mock/partial; the core-dependent fields stay placeholders) ✅ DONE (commit `473ab60`)
 - ADD model+panel pairs: `transport_panel.*`, `browser_panel.*`+`browser_model.*` (the 16 builtin styles
   as a drag-source), `grid_panel.*`+`grid_model.*` (matrix/scenes; the real *launch* awaits the core clip
   primitive), `seqedit_panel.*`+`seqedit_model.*`, `parts_panel.*`+`parts_model.*`, `intention_panel.*`
@@ -86,6 +93,11 @@ Delta versus the spike: wrap transport + decoder + state behind the abstract `Br
 - Tests: `test_grid_model.cpp` (plus any additional model tests).
 - DoD: screen navigable end-to-end; playhead / harmonic visualizer / launch show honest placeholders while
   the core strand is pending.
+- Shipped: `apps/gui-sonotron/src/{transport,browser,grid,seqedit,parts,intention}_panel.{hpp,cpp}` +
+  matching `*_model.*`, menu bar wired in `main.cpp`; green tests
+  `apps/gui-sonotron/tests/test_browser_model.cpp`, `test_grid_model.cpp`, `test_seqedit_model.cpp`,
+  `test_parts_model.cpp`. Suite: 66/66 host tests green (34 unit tests), no ABI change
+  (`test_abi_frozen` untouched).
 
 ## Boundary with the core strand (out of scope for this plan)
 

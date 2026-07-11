@@ -511,6 +511,13 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
 1. **Style-load semantics** (`2530`) — **DECIDED: keep the chord.** A style-load means
    "change the band under the same chord", not "new song" — the followed chord survives
    a style change. Shipped in the consolidation.
+1b. **Live-vs-sequencer arbitration** (`2340`) — **DECIDED: live-priority.** When a
+   ChordSequencer is running and the player also plays live, the live chord WINS while
+   held: the band follows it and the sequencer's comp follows it too (no clash); on
+   release the sequencer resumes its own progression. With no sequencer a live chord
+   latches. `kAuto` (last-writer race) is retained only as an explicit legacy mode.
+   **Shipped** (`ChordFollow::kLivePriority`, ABI-additive, engine default); supersedes
+   the former "deferred / `kAuto`-race" note.
 2. **MIDI-FX chain scope & ABI** (`5100`) — **RESOLVED by the GUI freeze line
    (`11720`):** `kMaxInserts=8`, UI-limited 4, per-track first, ABI-none for the
    data-model increment. Locked; no longer open.
