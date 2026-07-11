@@ -260,12 +260,25 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
 
 ### 9000 — Style content & tooling — ◑ partial / decided
 
-- **9100 Per-style feel — ○ planned (next musical lever, owner-approved ASAP)**
-  - `9110` Style owns its default GrooveParams — ○ SHIPPABLE (**ABI/struct change, approved**)
-  - `9120` Style owns its tempo — ○ SHIPPABLE
-  - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE
+- **9100 Per-style feel — ✅ done (model + tempo + feel-genre swing; only 9130 refinement left)**
+  - `9110` Style owns its default GrooveParams — ✅ done (`Style::groove`, ABI/struct-additive,
+    seeded into the arranger on every style load/switch)
+  - `9120` Style owns its tempo — ✅ done (`Style::tempo`, wired through `Engine::apply_style_tempo`
+    → `Transport::set_bpm` on load/switch, no new ABI; Ottorino's per-style tempos applied to all
+    16 builtins; `latin` held at 120 BPM behind an owner TODO)
+  - **Feel-genre swing (swing/shuffle/blues)** — ✅ done. Each of the three now seeds its `.groove`
+    (swing 62/12, shuffle 72/10, blues 75/10, `swing_grid=8`) and its note table was re-authored
+    (Rule R: swung eighths moved from steps 3/7/11/15 onto the even off-8ths 2/6/10/14 that
+    `groove::apply` actually swings; fills/pickups/chromatic-approach exceptions preserved). The
+    other 13 styles stay byte-identical. Three regression goldens (`feel_swing/shuffle/blues`) lock
+    the swung ticks. Spec in `docs/proposals/per-style-feel-values.md` §5 (Swing re-authoring spec).
+  - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE, deferred
+    *(analysis: only `blues` needs a true 3-equal-subdivision grid to refine its 12/8 beyond the
+    shipped 2-note shuffle; swing/shuffle are complete as 2-note swing — this is a blues-only
+    quality upgrade, not a blocker)*
   *ranked the single biggest lever against style sameness (corpus measurement,
-  `docs/reflections/style-differentiation-and-generation.md`)*
+  `docs/backlog/style-differentiation-and-generation.md`); feel values in
+  `docs/proposals/per-style-feel-values.md`*
 - **9200 Generative style — ○ planned**
   - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE
   - `9220` Offline-trained Markov/grammar on scale degrees, baked constexpr — ○ runtime SHIPPABLE / training HOST-ONLY
@@ -293,8 +306,11 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
 - `11100` TUI foundation — ✅
 - `11200` Piano/monitor MVP — ✅
 - `11300` Presentation layer (colors/themes/unicode, richer views) — ○ HOST-ONLY (deferred)
-- **11400 Piano source-coloured visualizer**
-  - `11410` GREEN (current bar) + ORANGE (next/pending chord) — ○ HOST-ONLY
+- **11400 Piano source-coloured visualizer — ◑ partial (11410 done, 11420 deferred)**
+  - `11410` GREEN (current bar) + AMBER (next/pending chord) — ✅ done (green note-on now bold;
+    new `kMidiNotePending` amber role; `PianoChordOverlay` from existing host chord state, no core
+    ABI; committed-green gated OFF at rest — lit only when transport plays or the chord is
+    explicitly steered)
   - `11420` WHITE (direct play) — ○ HOST-ONLY *(deferred: needs a sounding melody surface)*
 - `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅
 - `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`): separate
@@ -311,9 +327,10 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   dependency flag: RESOLVED / vendored**)
 
 - **11700 GUI freeze line — pivot from core-feature work to the host GUI**
-  (owner-decided). STATUS: DECIDED (gate, not a schedulable work item — see the `0000`
-  numbering note on invariants vs. work; this node governs sequencing of everything
-  below it, the way `0000` governs everything in the tree).
+  (owner-decided). STATUS: ✅ CROSSED (2026-07-06). The pre-GUI batch `11710` is all ✅
+  and `11720` (freeze) has executed — the ABI is frozen v1 and the `5100` shape is
+  reserved. Core-feature work is now BEHIND the line; the next action is `11600` (build
+  the host GUI). This node still governs sequencing of everything below it.
   *Through-line: **validate feel in the hands, then grow on a living instrument.** The
   product is a MIDI arranger — a live instrument whose value is in the hands. The TUI
   structurally cannot validate FEEL (timing, the chord-steer sensation, the piano
@@ -323,29 +340,39 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   `8000`, `10000`, and the rest of `9000`) is grown AFTER, on an instrument that
   already exists and already sounds — reprioritized by real feel-in-the-hands testing,
   not by this document's current ranked order.*
-  - `11710` Pre-GUI gating batch — ALL FOUR must be ✅ before the line is crossed
+  - `11710` Pre-GUI gating batch — must be ✅ before the line is crossed
     (invariant `0500`, vertical-first: the GUI is built on solid, verified ground, not
-    raced onto half-built cells):
-    1. `2530` Single-owner FollowedContext consolidation — ▶ SHIPPABLE, **in flight
-       now** (band `2500`). The GUI's central interaction — steer/follow — must be
-       correct and un-raced before a visual surface is built on top of it.
-    2. `11410` Piano source-coloured visualizer, GREEN (current bar) / ORANGE
-       (pending) — ○ HOST-ONLY, small. The GUI's central *readable* surface; must
-       exist and be verified standalone before the GUI is built around it, not
-       invented inside the GUI build itself.
-    3. `9100` family (`9110`/`9120`/`9130`) Per-style feel / anti-sameness — ○
-       SHIPPABLE, **owner-approved**. Gates the GUI's style picker: it must present
-       genuinely different styles, not 16 clones of one feel.
-    4. `1270` Realtime hardening — sustained-play crackle defect — ▶ under
-       investigation. **Non-negotiable precondition, not a nice-to-have**: a
-       crackling instrument is not shippable as a GUI you actually play.
-  - `11720` At-the-freeze-line actions (executed once `11710` is all ✅):
-    - Freeze the CURRENT ABI command/event surface (`0700`) as of this point. Corelli's
-      architecture verdict: the ABI is additive/healthy, so freezing now is safe —
-      later features (`5000`, `6000`, `8000`, `10000`) extend it, they do not break it.
-    - Pre-fix the SHAPE of the MIDI-FX ABI verbs (`5100`, updated above) even though
-      unimplemented, so the GUI is born aware of that surface and is never rebuilt
-      when `5000` lands.
+    raced onto half-built cells). **ALL FOUR cleared: `2530` ✅, `1270` ✅, `11410` ✅,
+    `9100` ✅ — batch complete; the line has been CROSSED (`11720` freeze done). The next
+    action is `11600` (build the GUI). (Owner-directed: freeze this code, then GUI.)**
+    1. `2530` Single-owner FollowedContext consolidation — ✅ done (merged, band
+       `2500`). The GUI's central interaction — steer/follow — is now correct and
+       un-raced, so a visual surface can be built on top of it. **Batch item cleared.**
+    2. `11410` Piano source-coloured visualizer, GREEN (current bar) / AMBER
+       (pending) — ✅ done. The GUI's central *readable* surface now exists and is
+       verified standalone (bold green committed, amber pending, off at rest), so the
+       GUI can be built around it rather than inventing it inside the GUI build.
+       **Batch item cleared.**
+    3. `9100` family Per-style feel / anti-sameness — ✅ done. `9110`/`9120` (per-style
+       default groove + tempo) and the feel-genre swing (swing/shuffle/blues re-authored
+       for engine-driven swing, regression goldens locked) all landed; the GUI's style
+       picker now presents genuinely different styles, not 16 clones. Only `9130` (a
+       blues-only true-triplet refinement) remains, and it is a post-freeze nicety.
+       **Batch item cleared.**
+    4. `1270` Realtime hardening — sustained-play crackle — ✅ resolved (downstream
+       PipeWire buffer, not a core defect; core path proven clean). **Batch item
+       cleared** — no longer gates the line.
+  - `11720` At-the-freeze-line actions — ✅ DONE (merged):
+    - ✅ Froze the current ABI command/event surface (`0700`): `abi.hpp` carries a
+      FROZEN-v1 banner with the additive-only invariant, and `test_abi_frozen.cpp`
+      compile-time-pins every id value, `kWarnCodeCount`, `sizeof(Command)==20`,
+      `sizeof(OutEvent)==16` and `kProtocolVersion==1` — a breaking change now fails the
+      build (fix = append, or bump to v2). Corelli's verdict held: the ABI is
+      additive/healthy, so later features (`5000`/`6000`/`8000`/`10000`) extend it.
+    - ✅ Reserved the `5100` MIDI-FX shape as ABI-none: `constexpr kMaxInserts=8` +
+      a RESERVED block documenting the future per-track `kFx…` verbs and their
+      `(idx,a,b,c)` packing, no live enum values — the GUI is born aware, appended when
+      `5000` lands.
   - `11730` Behind the line — reprioritized on a living instrument, no longer ordered
     by this document alone:
     - `11600` itself (the GUI build) is the FIRST thing behind the line — it is what
@@ -385,24 +412,26 @@ mutual order is advisory only — `11700`/`11730` is the binding word on what's 
 this list is kept for continuity and for ordering WITHIN the behind-the-line set.
 
 ### NEXT — the pre-GUI gating batch, in order (invariant `0500`: don't open a front over a half-built one; all four gate `11700`)
-1. **`2530` — Single-owner FollowedContext consolidation.** ▶ SHIPPABLE, no ABI, no
-   dep. FINISHES `2510` correctly and removes the three reported bugs by construction.
-   The GUI's central interaction (`11410`, and everything downstream: `9320`, `10000`)
-   reads through this cell; landing it half-built is compounding debt. Fold in `2540`
-   (delete dead seam). **Do this first — it is already in flight.**
-2. **`11410` — Piano visualizer GREEN+ORANGE.** HOST-ONLY, small, rides the pending
-   state that `2530` stabilizes. Cheap, high perceived value: it makes the harmony
-   visible, not just correct — and it is the GUI's central readable surface, so it
-   must be verified standalone before `11600` is built around it.
-3. **`1270` — Realtime hardening: close the sustained-play crackle defect.** ▶ under
-   investigation. **Non-negotiable precondition of `11700`**, not a nice-to-have — run
-   this in parallel with or immediately after 1–2; a crackling instrument is not
-   shippable as a GUI you actually play.
-4. **`9110`/`9120`/`9130` — Per-style feel.** SHIPPABLE, ABI/struct change **already
-   owner-approved**, ranked the single biggest lever against style sameness. Gates the
-   GUI's style picker (`11700`/`11710`.3): it must present genuinely different styles,
-   not 16 clones. GrooveParams+tempo per style, flash-resident, dual-target clean;
-   `9130` triplet grid follows as a second pass.
+1. **`2530` — Single-owner FollowedContext consolidation.** ✅ DONE (merged, no ABI, no
+   dep). Finished `2510` (immediate-commit + SHIFT-quantize) and removed the three
+   reported bugs by construction. The GUI's central interaction (`11410`, and everything
+   downstream: `9320`, `10000`) reads through this cell. `2540` (delete dead seam) folded
+   in. **Cleared — the next open batch item is step 2.**
+2. **`11410` — Piano visualizer GREEN+AMBER.** ✅ DONE (merged, HOST-ONLY, no core ABI).
+   Bold green committed chord + amber pending, gated off at rest; sourced from existing
+   host chord state. It makes the harmony visible, not just correct — the GUI's central
+   readable surface, now verified standalone before `11600` is built around it.
+   **Cleared.**
+3. **`1270` — Realtime hardening: sustained-play crackle.** ✅ RESOLVED — it was a
+   downstream integrated-audio (PipeWire) buffer underrun, not a core defect (the core
+   output path is proven clean); fixed by sizing FluidSynth's period in the demo
+   launcher. **Cleared as a `11700` precondition.**
+4. **`9110`/`9120` + feel-genre swing — Per-style feel.** ✅ DONE (merged). Per-style default
+   `GrooveParams` + tempo (flash-resident, dual-target, ABI-additive) and the feel-genre swing:
+   swing/shuffle/blues re-authored for engine-driven swing (Rule R) with their `.groove` seeded,
+   three regression goldens locking the swung ticks, the other 13 styles byte-identical. The GUI's
+   style picker (`11700`/`11710`.3) now presents genuinely different styles. Only `9130` (a
+   blues-only true-triplet refinement) remains, deferred as a post-freeze nicety.
 
 ### AT THE FREEZE LINE — `11700`
 5. **Freeze `0700` (current ABI) + lock the `5100` shape** (`kMaxInserts=8`, UI-limited
@@ -468,17 +497,20 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
   is HOST-ONLY, only the baked table ships. `11700`/`11600` are HOST-ONLY by
   construction — the STM32 target (`12000`) has its own separate physical UI (`12400`)
   and is never this front-end. No open leaf assumes device capacity that isn't there.
-- **In-flight-first (`0500`):** `2530` and `1270` must both close before the freeze
-  line is crossed. Opening `11600` (or `5000`/`6000`) over a racing followed-context
-  cell or an open crackle defect is exactly the failure `0500` names.
+- **In-flight-first (`0500`):** the whole pre-GUI batch is closed — `2530`, `1270`,
+  `11410` and `9100` (model + tempo + feel-genre swing) all landed and verified. The
+  readable surface exists and the styles genuinely differ (tempo + swing). Nothing that
+  `0500` guards against (opening `11600`/`5000`/`6000` over a racing followed-context
+  cell, an open crackle defect, an un-readable harmony surface, or 16 same-feel styles)
+  remains — the freeze line `11700` is ready to cross.
 
 ---
 
 ## Owner decisions this proposal surfaces
 
-1. **Style-load semantics** (`2530`): does a style-load mean "new song" (drop the
-   chord) or "change the band under the same chord" (keep it)? The consolidation
-   defaults to *keep*; confirm — one line either way.
+1. **Style-load semantics** (`2530`) — **DECIDED: keep the chord.** A style-load means
+   "change the band under the same chord", not "new song" — the followed chord survives
+   a style change. Shipped in the consolidation.
 2. **MIDI-FX chain scope & ABI** (`5100`) — **RESOLVED by the GUI freeze line
    (`11720`):** `kMaxInserts=8`, UI-limited 4, per-track first, ABI-none for the
    data-model increment. Locked; no longer open.
