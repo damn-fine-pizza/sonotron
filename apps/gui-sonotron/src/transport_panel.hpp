@@ -15,10 +15,10 @@ namespace sonotron {
 // BeginChild/EndChild): connection status (replaces the G2 stopgap
 // wholesale, now owning the whole row), Play/Stop/Panic (real L1 verbs:
 // `transport start|stop`, `panic`), the current section readout, and an
-// HONEST PLACEHOLDER bar·beat readout — ux-workstation.md §11 P0-2's
-// `kBeat`/`kPosition` heartbeat is not on the wire yet (brain_event.hpp
-// reserves BrainEvent::Kind::kBeat but never decodes it), so this shows a
-// fixed "bar -- · beat --" text instead of inferring a fake position.
+// live bar·beat readout — ux-workstation.md §11 P0-2's `kBeat` heartbeat
+// is now on the wire (brain_event.hpp decodes BrainEvent::Kind::kBeat and
+// app_state reduces it into bar/beat/pulse), so this shows the real moving
+// position while the transport runs, parked at rest instead of a fake one.
 void render_transport_panel(AppState& app_state, BrainSession& brain_session);
 
 }  // namespace sonotron

@@ -1,6 +1,7 @@
 # Pipeline P0 — execution plan: make the GUI *live* (two additive engine events)
 
-Status: **planned — not started.** Follows the GUI mechanical strand (`gui-fase2-mechanical-plan.md`,
+Status: **done.** Both P0 events shipped — P0-1 `kChordFollowed` (`52008e4`) and P0-2 `kBeat`
+(`ba568ca`/`f4c6188`); the GUI is now live (moving playhead + live harmonic readout). Follows the GUI mechanical strand (`gui-fase2-mechanical-plan.md`,
 G0–G3, all DONE, commit `473ab60`). Derived from `ux-workstation.md` §11 (the core strand). This plan
 turns the already-built, already-connected GUI from **honest placeholders** into a **live, playable**
 surface by teaching the engine to broadcast two pieces of state it already holds internally. The **clip /
