@@ -1348,3 +1348,294 @@ Moves: the Accompany pipeline-construction function becomes `components/orchestr
 6. **The `cancel_note_off` port/channel collision risk (§16.2) is a documented configuration constraint, not a defect to fix** — moot for Phase 4c's simple SMF-replay stage, worth a code comment so a LATER stage that does retrigger its own notes does not silently inherit the risk unexamined.
 
 No new dependency anywhere in this plan; every SHIPPABLE item reuses an already-existing, already-tested primitive (`ChordDetector`, `FollowedContext`, `smf.{hpp,cpp}`, `OutScheduler`'s existing tie-break). Items 5(a)/5(b) are the only genuine NEEDS-DECISION placement calls; everything else above is a technical correction I recommend making directly during Phase 4b/4c, not a fork.
+
+---
+
+## 17. Phase-3 execution design — `cli-arrangrr` becomes a pure client; `hostrt::Shell` splits (Corelli, 2026-07-12)
+
+Triggered by: the coordinator's Phase-3 authoring request, Accompany (Phase 4a-4d) landed at
+`17f8f43`. Read-only on product code; the only write is this section. Grounded against the
+REAL current `Shell` (`components/hostrt/shell.hpp:1-509`, `shell.cpp`, `shell_input.cpp`,
+`shell_view.cpp`, `shell_music_commands.cpp`, `shell_io_commands.cpp`), not the §4 sketch —
+`Shell` has moved since that sketch was written (it now drives a 3-stage
+`orchestrator::AccompanyPipeline`, owns `FollowedContext`, and has a `midi-source load` verb).
+
+### 17.0 Ground-truth check that changes the sizing before any cut is drawn
+
+**`apps/sonotron-server` (Phase 2a) already exists and is feature-complete** —
+`apps/sonotron-server/main.cpp:94-237` (`run_server`) already owns `AlsaMidi`, `UdsServer`,
+the tick-timer clock drive, and the `poll()` fan-in, driven by the identical `Shell`/pipeline
+code `cli-arrangrr` uses. **This means Phase 3's server side needs NO new code at all** — the
+binary the original §4/§5 sketch treated as Phase-3 critical path was actually built two
+milestones ago, for a different reason (Phase 2b's in-process mode needed the same headless
+shape). Phase 3 is therefore narrower than originally scoped: it is *only* "turn `cli-arrangrr`
+into a client of the ALREADY-EXISTING `sonotron-server`," not "stand up a server AND split the
+client." **`apps/tools/cli-arrangrr/main.cpp` is confirmed untouched** (`main.cpp:168-822` still
+constructs `AlsaMidi`/`Console`/`UdsServer control`/`Shell shell` together, exactly as the
+original doc found) — Phase 3 has not started in code.
+
+### 17.1 The exact cut line — traced against the real `Shell`, not the sketch
+
+**Server-side (stays with `sonotron-server`, unchanged in spirit):**
+- State: `m_runtime` (the 3-stage `Pipeline`), `m_engine`, `m_followed`, `m_sink`, `m_port_hook`,
+  `m_ports`/`m_tracks`/`m_seqs` (+ `find_port`/`find_track`/`find_seq`), `m_next_in`/`m_next_out`,
+  `m_prefer_flats`, `m_pending`/`m_pending_order` (the `@tick` queue — D29-adjacent, belongs with
+  the clock driver), `m_quit`.
+- Dispatch: `dispatch_midi` (`shell.cpp:541-565` — `cmd_port`, `cmd_route`, `cmd_thru`,
+  `cmd_clock`, `cmd_midi_send`, `cmd_midi_source`, `cmd_panic`), `dispatch_music`
+  (`shell.cpp:567-601` — `cmd_key`, `cmd_play`, `cmd_chord`, `cmd_style`, `cmd_seq` (+
+  `seq_add`/`seq_transpose`/`seq_del`), `cmd_track` (+ `track_new`/`track_step`), `cmd_program`,
+  `cmd_part`, `cmd_groove`, `cmd_arp`), `dispatch_transport` (`shell.cpp:604-616` — `cmd_transport`,
+  `cmd_bpm`, `cmd_advance`). **`exec_line`/`exec_now` themselves stay server-side wholesale** — a
+  pure client never re-implements L1 parsing, it forwards the raw line text, exactly as
+  `sonotron-server`'s own `control.set_line_handler` already does today
+  (`sonotron-server/main.cpp:130-135`) for every OTHER control-plane client.
+- **A finding that shrinks the split's cost, traced directly, not assumed**: `m_ports`/
+  `m_tracks`/`m_seqs`/`find_port`/`find_track`/`find_seq` do **not** need to be duplicated or
+  shadowed client-side at all. Name resolution (`"in0"` → a numeric port index) happens
+  entirely inside the server-side `cmd_*` handler bodies; the client only ever needs to
+  forward the exact text a user typed (`"route in0 -> out0"`) over the socket verbatim — the
+  identical mechanism `gui-sonotron`'s `uds_brain_session` already uses for every L1 line it
+  sends. This is real, not hopeful: it is the SAME pattern already proven end-to-end today.
+
+**Client-side (moves to `cli-arrangrr`'s presentation object — call it `TuiClient`, name not
+mine to fix):**
+- State: `m_panels` (`PanelManager`), `m_piano` (`PianoViewState`), `m_style` (`UiStyle`),
+  `m_ui_mode`, `m_help_pinned`, `m_chooser` (`StyleChooser`) + `m_styles_was_focused`/
+  `m_await_panel_digit`, the style-step debounce (`m_step_style_index`/`m_step_section`/
+  `m_style_step_gen`/`m_style_step_pending`), `m_monitor` (`MidiMonitor`), `m_filter`
+  (`MidiEventFilter`), `m_view_options`, `m_piano_held`/`m_harmony_held`
+  (`ActiveNoteTracker`), `m_piano_key_mode`, `m_momentary_available`, `m_pending_source_key`,
+  the toggle-autorepeat debounce (`m_input_time_us`/`m_toggle_last_us`), `m_parts_selected`/
+  `m_groove_selected`/`m_arp_selected`.
+- Dispatch: `dispatch_ui` wholesale (`shell.cpp:508-539` — `quit`/`exit`, `cmd_help`,
+  `cmd_panel`/`panel_layout`/`panel_target`, `cmd_piano`/`piano_octave`/`piano_view`,
+  `cmd_notes`, `cmd_filter`, `cmd_view`, `cmd_theme`, `cmd_colors` — verified by direct read,
+  `shell_view.cpp:1-259`, that every one of these mutates ONLY `m_piano`/`m_filter`/
+  `m_view_options`/`m_style`/`m_monitor` and never reaches the engine). Plus every `*_focused`/
+  `*_key`/`*_select`/`*_adjust`/`chooser_nav_*`/`refresh_*_content`/`handle_ui_key`/
+  `piano_key_event`/`try_global_steer`/`configure_terminal`/`configure_default_surfaces`
+  (this last one, however, needs re-homing — see §17.3(a)).
+- **`quit`/`exit` needs special handling, not a straight move**: today `dispatch_ui` sets
+  `m_quit` locally. Post-split this must become a purely LOCAL client action (close the TUI,
+  disconnect, exit the `cli-arrangrr` PROCESS) — it must NEVER be forwarded as an L1 line to
+  the server, exactly the precedent `gui-sonotron`'s own `uds_brain_session.cpp:35-45`
+  (`is_blocked_command`) already established and enforces today. Reuse that guard verbatim,
+  do not reinvent it.
+
+### 17.2 Seam D (new) — the panel-rendering layer is core-signature-coupled, not just Shell
+
+**This is the finding that changes the honest sizing of Phase 3 the most.** Five files that
+are unambiguously CLIENT-destined by concern already `#include` `arrangrr` headers, verified
+by direct grep, not assumed:
+- `components/hostrt/parts_view.hpp:6` → `arrangrr/arranger/arranger.hpp`; its
+  `render_parts_panel(const Arranger& arranger, const MidiMonitor&, int selected, int cols,
+  const UiStyle&)` (`parts_view.hpp:25`) takes the **live `Arranger&`** and calls its query
+  methods (`.muted(role)`/`.soloed(role)`, per `shell.cpp:239-240`'s call site) — not just a
+  data read, a genuine live-object dependency.
+- `components/hostrt/groove_view.hpp:6` → `arrangrr/arranger/groove.hpp`;
+  `render_groove_panel(const GrooveParams&, ...)` — a plain POD struct by reference, lighter,
+  but still an `arrangrr`-namespaced type requiring the header.
+- `components/hostrt/arp_view.hpp:6` → `arrangrr/arp/arpeggiator.hpp`;
+  `render_arp_panel(const ArpeggiatorParams&, bool enabled, ...)` — same shape as groove.
+- `components/hostrt/style_chooser.hpp:6` → `arrangrr/arranger/style.hpp` (style/section
+  vocabulary for the chooser's builtin list).
+- `components/hostrt/midi_monitor.hpp:10` → `arrangrr/abi.hpp` (`MidiMonitor` logs raw
+  `OutEvent`s directly).
+
+(`panel_manager.hpp` and `piano_view.hpp`, by contrast, are confirmed ALREADY core-free —
+genuinely client-safe as-is, no work needed there.)
+
+**Why this matters for the split, concretely**: once the split happens, `sonotron-server` is
+headless (confirmed — it never renders a panel, `sonotron-server/main.cpp` has no TUI code
+at all) — so **every one of these five files' sole remaining caller, after Phase 3, is the
+CLIENT**. Leaving them signature-coupled to `Arranger&`/arrangrr-namespaced structs means
+`cli-arrangrr`'s client half would `#include` real arrangrr headers, which is a genuine,
+not-cosmetic collision with the SAME D38 "pure client, links neither `arrangrr` nor `hostrt`
+[core headers]" intent the original doc's decision #3 already named for `cli-arrangrr`
+specifically (not just `gui-sonotron`) — the exact wording `gui-contract-map.md:61-63`
+already enforces for the GUI. **Resolution**: reshape `render_parts_panel`/`render_groove_panel`/
+`render_arp_panel` (and `style_chooser`'s internal vocabulary) to accept plain, client-owned
+mirror structs (e.g. a `PartsViewState{role, muted, soloed}[]`, reusing `GrooveParams`/
+`ArpeggiatorParams`' own field shapes but redeclared arrangrr-free) fed by the wire echoes
+§17.3(b) proposes — migrating these five files wholesale to the client side AS PART OF the
+reshape, not before it. This is a genuine code change, not a `git mv`, and must be sized as
+such — it is the single most-underestimated line item if this milestone is scoped as "just
+split Shell."
+
+**One deliberate exception, flagged as a precedent question for the owner, not decided here**:
+`midi_monitor.hpp`'s dependency on `abi.hpp` (the frozen `Command`/`OutEvent` structs
+themselves, not engine machinery) is architecturally different in kind from the other four —
+`abi.hpp` is the wire vocabulary itself, which `gui-sonotron` deliberately avoided even so
+(Rule 2, "own name tables … never `static_cast` a core enum") in favor of a self-maintained
+string mirror. `cli-arrangrr`'s TUI rendering is richer and closer to a reference
+implementation than `gui-sonotron`'s dashboard; I flag rather than silently resolve whether
+`cli-arrangrr`'s client half may include `abi.hpp` directly (less duplication, reuses the
+frozen enums) or must, like `gui-sonotron`, maintain its own mirror (more consistent with the
+stricter precedent, more code). Either is structurally sound; they are not equivalent in
+spirit, and the owner should pick one rather than have it default silently per-file.
+
+### 17.3 The client↔server contract — two distinct wire gaps, both additive, waiver stays unspent
+
+**(a) Inbound gap — several interactive gestures bypass L1 text entirely today.** Traced
+directly, not assumed: `shell_input.cpp:41-55` (`surface_send_note`, backing every piano/chords
+key) constructs raw MIDI bytes and calls `feed_midi(port, bytes)` — i.e.
+`push_midi_in`/`Pipeline` fan-out — never `exec_line`. `shell_input.cpp:301-323` (`parts_key`),
+`:336-369` (`groove_adjust`), `:371-382` (`groove_key`), `:394-432` (`arp_adjust`) each
+construct a raw ABI `Command` and call `m_engine.push_command(c, m_sink)` directly, also never
+through L1 text. **None of these has a wire-safe equivalent today** — the UDS-JSONL protocol
+(`gui-contract-map.md:7-24`) carries L1 TEXT lines inbound, never a binary `Command` and never
+raw MIDI bytes. A pure client cannot reproduce these gestures as-is. **Resolution recommended**:
+extend the L1 grammar with narrow new verbs mirroring the shape these already have as Commands
+— e.g. a note-level verb for piano/chords key-driven note-on/off (`play <note> on|off` variants
+already exist in spirit via `cmd_play`; confirm/extend rather than invent), and existing
+`groove`/`arp`/`part` L1 verbs (`cmd_groove`/`cmd_arp`/`cmd_part` already exist server-side,
+`shell.cpp:592-599`) already accept absolute values — so the arrow-adjust gestures need the
+client to compute the delta **client-side against a locally-shadowed current value** (§17.3(b))
+and then send the already-existing L1 verb with the new absolute value, not a new wire concept.
+This keeps the wire's own discipline (`gui-contract-map.md:15-21`: text in, JSONL out, no binary
+on the socket) intact — it is additive grammar reuse, not a protocol reshape.
+
+**(b) Outbound gap — no event reports several panels' CURRENT values, needed for both display
+and arrow-adjust deltas.** Traced directly against `abi.hpp`'s seven `OutEvent::Kind` values
+(`kMidi`/`kTransport`/`kWarn`/`kChord`/`kSection`/`kChordFollowed`/`kBeat`) and against what
+`refresh_groove_content`/`refresh_arp_content`/`refresh_parts_content`/`refresh_styles_content`/
+`refresh_chords_content` (`shell.cpp:209-284`) actually read: `m_engine.arranger().groove_params()`
+(6 fields), `m_engine.arp().params()` + `.arp_enabled()` + `.arp().held_count()`,
+`m_engine.arranger()`'s per-role mute/solo, the current loaded style index (no event reports
+this — `kSection` only ever carries the SECTION, confirmed by `engine.cpp:533,582` — never the
+style), `m_engine.chord_detect()`/`chord_follow()`/`chords().mode()`/`chords().key()`. **None of
+these has a corresponding `OutEvent` today.** This is the real, substantial wire-contract gap
+the coordinator's question 2 was right to suspect — bigger than a nitpick, smaller than a
+reshape. **Recommendation, sized to be minimal**: append exactly ONE new `OutEvent::Kind`
+(next free id, per `abi.hpp`'s own frozen-baseline comment: `Kind = 7`) — call it
+`kParamState` — that reuses the ALREADY-STABLE `Param` enum as its field tag (`code` field,
+reinterpreted as `Param`, exactly the same enum `Command::param` already carries for every one
+of these domains: `kGroove`/`kArp`/`kPartMute`/`kPartSolo`/`kStyleLoad`/`kChordDetect`/
+`kChordFollow`/`kChordMode`/`kKeySet`) plus `msg.d1`/`d2` for the value(s) and `port` where a
+role/index is needed — ONE new Kind covers every missing echo instead of seven-to-nine bespoke
+ones. Emitted server-side whenever the corresponding `cmd_*` mutates state (mirroring
+`kChordFollowed`/`kBeat`'s own precedent — both were themselves additive `OutEvent::Kind`
+growth for the identical reason, GUI needing live state it could not otherwise see, per this
+repo's own P0-1/P0-2 commits) plus once per field on a client's initial connect (a `state dump`
+— reusing the `state.dump` precedent already cited in this document, §3.6, for file I/O; here
+it is just "replay every current value once"). **This is additive-only growth, not a reshape**:
+`test_abi_frozen.cpp` gains new pinned values, it does not change any existing one — the
+waiver stays unspent, `kProtocolVersion` stays 1.
+
+### 17.4 What breaks — the test inventory, counted, not guessed
+
+Direct census (not a sample) of `components/hostrt/tests/`, by whether a test function calls
+an engine/dispatch operation (`exec_line`/`push_command`/`.engine()`/`advance_by`) AND a
+panel/UI operation (`*_focused`/`*_key`/`panels()`/`chooser()`/`refresh_*_content`/
+`handle_ui_key`/`piano_key_event`) in the same body:
+
+| File | engine-only | **MIXED** | UI-only | neither |
+|---|---|---|---|---|
+| `test_host.cpp` (73 fns) | 11 | **15** | 20 | 27 |
+| `test_panel_nav.cpp` (4 fns) | 0 | **1** | 1 | 2 |
+| `test_panels.cpp` (21 fns) | 0 | 0 | 1 | 20 |
+| `test_style_chooser.cpp` (9 fns) | 0 | 0 | 0 | 9 |
+
+**16 test functions across the suite genuinely straddle the cut line** and must split, not
+move wholesale — e.g. `test_shell_chord_detect_panel`, `test_note_letters_steer_from_every_
+panel_but_repl`, `test_permanent_transpose_persists_across_bars`,
+`test_pressing_a_then_s_yields_different_roots_when_properly_released`,
+`test_single_finger_new_key_replaces_previous_root`, `test_parts_solo_migrated_to_i_key`,
+`test_ctrl_p_play_stop`, `test_styles_panel_chooser`, `test_style_section_stepping`,
+`test_step_mirrors_chooser`, `test_tab_enters_piano_from_repl` (full list traceable by the same
+grep pattern used here). **Split strategy**: each such test currently proves "a physical key
+press produces the right engine effect" in one in-process assertion (press a key → check
+`m_engine`'s resulting state). Post-split this single assertion becomes TWO, in two different
+test binaries: (1) a server-side integration test driving the now-established L1/`Command`
+equivalent (§17.3(a)) and asserting the resulting `OutEvent`/state-echo, and (2) a client-side
+unit test asserting the key press produces the RIGHT outbound line/Command (mocked transport,
+no real engine) — the same "assert the translation, not the effect" pattern
+`in_process_brain_session.cpp`'s own `command_line_to_command` unit tests already use today
+for the Phase-2b integrated mode. This is mechanical PER test once the pattern is set, but 16
+tests is a real, non-trivial line item, not a footnote.
+
+### 17.5 Sub-phased plan, gates, and a revision of §5's original sequencing advice
+
+**§5's original Phase-3 recommendation — "parse-event-into-panel-state behind a flag BEFORE
+deleting the in-process path" — is RECONFIRMED, not just repeated, now that Seam D (§17.2) and
+the wire gaps (§17.3) are known.** It is more clearly correct now than when written: the panel
+reshape (§17.2) and the new `kParamState` echo (§17.3b) can each be built and unit-tested
+**against the EXISTING in-process `Shell`** (feed it synthetic `OutEvent`s, assert the reshaped
+render functions produce the same panel text they do today) before `cli-arrangrr` ever opens a
+real socket — derisking the two hardest, least-mechanical pieces first, independent of the
+socket plumbing itself (which is the EASY, already-proven part, `uds_brain_session.cpp` is a
+working template).
+
+**Phase 3a — Additive ABI growth + the panel-rendering reshape (Seam D), entirely IN-PROCESS,
+zero client/server split yet.**
+Moves: append `OutEvent::Kind::kParamState` (§17.3b) and wire it into every relevant `cmd_*`;
+reshape `render_parts_panel`/`render_groove_panel`/`render_arp_panel`/`style_chooser`'s
+vocabulary to plain mirror structs, called from the EXISTING single-process `Shell` (which
+now populates the mirror struct from its own live `Arranger&`/`GrooveParams`/`ArpeggiatorParams`
+— behavior-preserving, since the live values and the mirror are populated from the same source
+in the same process). Breaks: nothing behaviorally — TUI output must be byte-identical to
+today's (a snapshot/golden-text comparison of `cli-arrangrr`'s panel rendering is the concrete
+gate). Green gate: `test_abi_frozen.cpp` passes with the new `kParamState` pinned; existing
+`test_panels.cpp`/`test_style_chooser.cpp` pass unedited (they test rendering shape, not the
+data source); 18 goldens + Accompany goldens unaffected (no `cmd_*` behavior changed, only an
+extra emitted event + a data-plumbing reshape).
+
+**Phase 3b — `cli-arrangrr` grows a UDS client session, BEHIND A FLAG, alongside the untouched
+in-process path.**
+Moves: a `UdsBrainSession`-equivalent (architecturally identical to
+`apps/gui-sonotron/src/uds_brain_session.cpp`) added to `cli-arrangrr`; a parsed-event → the
+Phase-3a mirror-struct decode (the SAME shape `gui-sonotron`'s `brain_event_from_outevent`
+proves for the in-process ring, reused here for the JSONL-over-socket path — one canonical
+decode target, two wire sources, consistent with the §15.3 principle already established).
+Both paths (in-process `Shell`, socket `UdsBrainSession`) coexist selectable by a launch flag
+(`--control PATH` already exists on `cli-arrangrr` today for the CONTROL socket it *serves*;
+this is the mirror direction — connecting AS a client — needs its own flag,
+e.g. `--connect PATH`, distinct from the existing server-side `--control`). Breaks: nothing —
+purely additive, lowest-risk shape (mirrors Phase 2's own "additive, not yet cutting over"
+sequencing). Green gate: a manual smoke — `cli-arrangrr --connect PATH` against a running
+`sonotron-server`, TUI renders and responds to input, byte-comparable to the in-process mode's
+own rendering for the same script of actions.
+
+**Phase 3c — The 16 mixed tests split (§17.4); cut over the default; retire the embedded
+engine.**
+Moves: `hostrt::Shell` itself splits into the server-side dispatch object (unchanged shape,
+already named in §4) and the client-side presentation object; `cli-arrangrr/main.cpp` drops
+`AlsaMidi`/`UdsServer`(-serving)/the engine-half `Shell` ownership, keeping only the client
+presentation object + the new session. Breaks: the 16 mixed tests (§17.4), split per the
+strategy given; every call site assuming `cli-arrangrr` is self-contained (any doc/script
+launching it without a running `sonotron-server`) needs updating. Green gate: goldens
+unaffected (they exercise `sonotron-server --script`, already true since Phase 2a); a full
+manual TUI session against a live `sonotron-server` reproduces every interactive surface
+(piano/chords/styles/parts/groove/arp) — the ORIGINAL Phase-3 green gate from §5, still the
+right bar.
+
+### 17.6 Owner forks, explicit
+
+1. **`abi.hpp` inclusion precedent (§17.2)** — may `cli-arrangrr`'s client half include the
+   frozen ABI structs directly (less duplication) or must it, like `gui-sonotron`, maintain its
+   own string/enum mirror (stricter, more consistent, more code)? Not resolved here.
+2. **New CLI flag naming** (`--connect` or otherwise) for the client-connecting mode, distinct
+   from the existing server-serving `--control` — Palladio's naming lane, flagged not decided.
+3. **`kParamState`'s exact field layout** (which values fit in `msg.d1`/`d2` vs need a second
+   event for wider fields, e.g. `GrooveField::kSeed`'s value range) is an implementation detail
+   for Nazzareno to finalize against real field ranges, not a design fork — noted so it is not
+   silently treated as fully specified by this section.
+
+### 17.7 Synthesis
+
+**Verdict: APPROVED WITH REQUIRED CORRECTIONS, sized honestly as the highest-cost remaining
+piece of this whole milestone — confirmed, not just asserted.** Three cost centers compound,
+not one: (1) the mechanical `Shell` split itself (real, but the smallest of the three — the
+cut line is clean and traced in §17.1, and `m_ports`/`m_tracks`/`m_seqs` turn out NOT to need
+duplication at all, a genuine cost REDUCTION versus the original sketch); (2) Seam D's panel-
+rendering reshape (§17.2), previously unnamed anywhere in this document, now the single most
+underestimated line item; (3) the additive ABI growth for state-echo (§17.3b), small in ABI
+terms (one new `Kind`) but wide in surface (touches every `cmd_*` that mutates displayed
+state). Working against this, one genuine, evidenced cost REDUCTION: `apps/sonotron-server`
+already exists (§17.0) — Phase 3 is "make `cli-arrangrr` a client of it," not "build a server
+and split a client" as the original sketch assumed. Required corrections before Nazzareno is
+dispatched: land Phase 3a (ABI growth + Seam D reshape) fully in-process and green FIRST,
+proven byte-identical, before any socket code is written (§17.5, reconfirming and sharpening
+§5's original sequencing) — this is not optional given how much of the real cost lives in the
+reshape, not the transport.
