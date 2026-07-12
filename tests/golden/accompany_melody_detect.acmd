@@ -1,0 +1,30 @@
+# Golden (Accompany, roadmap 9310, Phase 4e, docs/design/orchestrator-
+# pipeline-extraction.md §3.6/§16.3-16.5, phase4-execution-plan.md 4e): the
+# node-9310 feature itself -- the band under chords DETECTED FROM the
+# imported melody, no scripted `chord`/`seq` steer anywhere in this script.
+# `chord mode single` + `chord detect on` arm live piano->chord recognition
+# (single-finger, scale-aware) on the SAME numeric port (1) `midi-source
+# load` replays the melody thru on (Pipeline's new forward-flow, runtime/
+# pipeline.hpp); as each melody note lands, chorddet recognizes it and steers
+# FollowedContext (`"src":"detect"` in the `chord-followed` events below),
+# and `style load basic`'s bass/drums/chord1 parts (arrangrr's OWN Arranger +
+# ChordEngine, unchanged) resolve against whatever FollowedContext currently
+# holds -- same-tick visible (D53). C4 (tick 0) recognizes as C major (the
+# same chord the C-major key's own home chord happens to be, so bar 1's
+# opening voicing does not visibly change); D4 (tick 1920) recognizes as Dm,
+# and chord1's voicing audibly SWITCHES to D-F-A-C at that bar -- the
+# concrete, undeniable proof the band followed a melody-derived chord, not a
+# scripted one.
+key C major
+port open out virt as synth
+chord out synth:4
+style load basic
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+chord mode single
+chord detect on
+midi-source load components/midisrc/tests/fixtures/tiny.mid
+transport start
+advance 3000
+quit

@@ -63,3 +63,10 @@ function(accompany_golden name)
 endfunction()
 
 accompany_golden(accompany_basic)
+
+# Phase 4e (docs/design/orchestrator-pipeline-extraction.md §3.6's "emits raw
+# MIDI thru events AND feeds notes into" chorddet, runtime/pipeline.hpp's
+# forward-flow): the node-9310 feature proof itself -- the band under chords
+# DETECTED FROM the imported melody, no scripted `chord`/`seq` steer anywhere
+# in the script (see accompany_melody_detect.acmd's own header comment).
+accompany_golden(accompany_melody_detect)

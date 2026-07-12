@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <tuple>
 #include <utility>
 
@@ -63,6 +64,31 @@
 // terminal stage's OWN `emit_chord_followed` -- the dedup-latched emit point
 // stays unique there, never duplicated here (Corelli's §16.9 points 2/3).
 //
+// forward-flow (NEW, 4e, orchestrator-pipeline-extraction.md §3.6's "emits
+// raw MIDI thru events AND feeds notes into" chorddet): the OUTBOUND mirror
+// of Seam C's inbound fan-out above -- a stage that PRODUCES notes via its
+// OWN on_tick (today only midisrc::MidiSourceStage, replaying a loaded file)
+// needs those SAME notes to also reach every interested LATER stage's
+// chorddet-shaped push_midi_in, same tick (D53), so a detector peer
+// downstream can recognize a chord from them exactly as it would from live
+// input. Mechanism: `fire_on_tick` probes (SFINAE, `if constexpr`) whether
+// THIS level's stage accepts a third "forward" callable argument
+// (`on_tick(ctx, sink, forward)`); a stage without one (every stage except
+// MidiSourceStage today) is called with the plain 2-arg form, unchanged. When
+// offered, `forward(port, bytes, count)` fans those raw bytes into the
+// REMAINDER of the chain via the new `fire_forward` (mirroring
+// `fire_push_midi_in`'s per-stage SFINAE probe byte-for-byte) -- with ONE
+// deliberate difference: `fire_forward` stops ONE level short of the
+// terminal (arrangrr) stage (see the terminal specialization below). The
+// terminal already receives this exact note through the shared
+// `OutScheduler` (the "thru" path, §16.2a); routing it a SECOND time through
+// arrangrr's OWN `push_midi_in` would apply routing/arp-capture/harmony-
+// suppress semantics a melody replay must never trigger. `Pipeline::on_tick`
+// resolves the terminal reference once (the same accessor `push_midi_in`
+// already uses) and threads it down so any level's forward callable can
+// reach the terminal's `emit_chord_followed` the same way Seam C's
+// `on_steer` does.
+
 // push_command delegates SOLELY to the terminal (arrangrr) stage -- the
 // same "terminal owns it" convention flush() uses: Command/Param are
 // arrangrr's own ABI vocabulary, never understood by a chorddet or
@@ -97,10 +123,29 @@ class PipelineChain {
         m_rest(std::tuple_cat(prior, std::tie(m_stage)),
                std::forward<RestFactories>(rest_factories)...) {}
 
-  template <typename SinkT>
-  void fire_on_tick(const StageContext& ctx, SinkT sink) {
-    m_stage.on_tick(ctx, sink);
-    m_rest.fire_on_tick(ctx, sink);
+  // `terminal` is threaded through unchanged so a LATER level's forward
+  // callable (below) can reach it too -- only the level whose stage actually
+  // offers a 3-arg `on_tick` ever constructs and passes one, see the header
+  // comment ("forward-flow").
+  template <typename SinkT, typename TerminalT>
+  void fire_on_tick(const StageContext& ctx, SinkT sink, TerminalT& terminal) {
+    // Probed with a throwaway, minimally-shaped callable (NOT the real
+    // `forward` below) purely to answer "does this stage's on_tick accept a
+    // forward-shaped 3rd argument" via SFINAE -- keeps the `forward` closure
+    // itself (which captures `m_rest`/`terminal`) undeclared, and therefore
+    // never instantiated, on the branch where it would never be called.
+    if constexpr (requires {
+                    m_stage.on_tick(ctx, sink,
+                                    [](std::uint8_t, const std::uint8_t*, std::size_t) {});
+                  }) {
+      auto forward = [&](std::uint8_t port, const std::uint8_t* bytes, std::size_t count) {
+        m_rest.fire_forward(port, bytes, count, sink, terminal);
+      };
+      m_stage.on_tick(ctx, sink, forward);
+    } else {
+      m_stage.on_tick(ctx, sink);
+    }
+    m_rest.fire_on_tick(ctx, sink, terminal);
   }
 
   // Non-terminal levels never flush their own stage -- only the chain's
@@ -127,6 +172,21 @@ class PipelineChain {
       m_stage.push_midi_in(port, bytes.data(), bytes.size(), on_steer);
     }
     m_rest.fire_push_midi_in(port, bytes, sink, terminal);
+  }
+
+  // forward-flow fan-out (4e, see the header comment): offer THIS stage the
+  // raw bytes an EARLIER stage produced this tick, same SFINAE probe as
+  // `fire_push_midi_in` above, then recurse into the rest of the chain.
+  // Deliberately never called for the level whose `m_stage` IS the terminal
+  // -- see the terminal specialization's override below.
+  template <typename SinkT, typename TerminalT>
+  void fire_forward(std::uint8_t port, const std::uint8_t* bytes, std::size_t count, SinkT sink,
+                    TerminalT& terminal) {
+    auto on_steer = [&](auto producer) { terminal.emit_chord_followed(producer, sink); };
+    if constexpr (requires { m_stage.push_midi_in(port, bytes, count, on_steer); }) {
+      m_stage.push_midi_in(port, bytes, count, on_steer);
+    }
+    m_rest.fire_forward(port, bytes, count, sink, terminal);
   }
 
   template <std::size_t Index>
@@ -162,8 +222,12 @@ class PipelineChain<StageT> {
   explicit PipelineChain(PriorTuple prior, FactoryT&& factory)
       : m_stage(std::apply(std::forward<FactoryT>(factory), prior)) {}
 
-  template <typename SinkT>
-  void fire_on_tick(const StageContext& ctx, SinkT sink) {
+  // `terminal` is accepted (matching the non-terminal overload's signature)
+  // but unused here: this level's OWN `m_stage` IS the terminal, and the
+  // terminal never both produces (§16.5's on_tick) AND receives its own
+  // forward-flow.
+  template <typename SinkT, typename TerminalT>
+  void fire_on_tick(const StageContext& ctx, SinkT sink, TerminalT&) {
     m_stage.on_tick(ctx, sink);
   }
 
@@ -176,6 +240,14 @@ class PipelineChain<StageT> {
   void fire_push_midi_in(std::uint8_t port, BytesT bytes, SinkT sink, TerminalT&) {
     m_stage.push_midi_in(port, bytes, sink);
   }
+
+  // Forward-flow stops HERE, one level short of the terminal stage -- see
+  // the header comment ("forward-flow") for why: the terminal already sees
+  // this same note through the shared `OutScheduler`, and must never see it
+  // a second time through its OWN `push_midi_in` (routing/arp-capture/
+  // harmony-suppress semantics a melody replay must not trigger).
+  template <typename SinkT, typename TerminalT>
+  void fire_forward(std::uint8_t, const std::uint8_t*, std::size_t, SinkT, TerminalT&) noexcept {}
 
   template <std::size_t Index>
   decltype(auto) stage_at() noexcept {
@@ -210,9 +282,13 @@ class Pipeline {
   explicit Pipeline(SchedulerT& scheduler, TransportT& transport, Factories&&... factories)
       : m_chain(std::tie(scheduler, transport), std::forward<Factories>(factories)...) {}
 
+  // Resolves the terminal reference once, same accessor `push_midi_in`
+  // below already uses, and threads it down so forward-flow (4e, see the
+  // header comment) can reach `emit_chord_followed` from any level.
   template <typename SinkT>
   void on_tick(const StageContext& ctx, SinkT sink) {
-    m_chain.fire_on_tick(ctx, sink);
+    auto& terminal = stage<sizeof...(StageTs) - 1>();
+    m_chain.fire_on_tick(ctx, sink, terminal);
   }
 
   template <typename SinkT>

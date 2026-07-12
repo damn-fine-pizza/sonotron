@@ -32,6 +32,16 @@
 // nothing of its own to drain — the shared scheduler is drained exactly once,
 // by the arrangrr stage's own `flush()`, per Pipeline's flush design (§16.3).
 //
+// Forward-flow (Phase 4e, §3.6's "emits raw MIDI thru events AND feeds notes
+// into" chorddet, runtime/pipeline.hpp's "forward-flow" header comment): the
+// 3-arg `on_tick(ctx, sink, forward)` overload below additionally calls
+// `forward(port, bytes, count)` for every due event, encoding the SAME
+// `MidiMessage` already handed to the scheduler as its raw wire bytes
+// (`status, d1, d2`) — `Pipeline` is the ONLY caller of this overload (this
+// stage stays name-blind to chorddet, D43); the plain 2-arg overload
+// (unchanged, still used directly by this component's own unit tests) simply
+// supplies a no-op forward.
+//
 // cancel_note_off risk (§16.2(b), documented not fixed): this stage never
 // calls `cancel_note_off` — a straight SMF replay has no ratchet/retrigger
 // concept of its own, so the (port,channel,note)-blind tombstone risk
@@ -96,13 +106,28 @@ class MidiSourceStage {
   bool ok() const noexcept { return m_ok; }
   std::size_t event_count() const noexcept { return m_events.size(); }
 
+  // Plain 2-arg overload: forwards to the 3-arg one below with a no-op
+  // `forward` — kept so this component's OWN unit tests (and anyone driving
+  // this stage outside a Pipeline) never need to know forward-flow exists.
   template <typename SinkT>
   void on_tick(const runtime::StageContext& ctx, SinkT sink) {
+    on_tick(ctx, sink, [](std::uint8_t, const std::uint8_t*, std::size_t) {});
+  }
+
+  // Forward-flow overload (Phase 4e, see the header comment): `Pipeline`
+  // calls THIS one (SFINAE-detected, runtime/pipeline.hpp) so every due
+  // event's raw wire bytes also reach a later chorddet-shaped stage, same
+  // tick (D53) the thru note lands in the shared `OutScheduler`.
+  template <typename SinkT, typename ForwardT>
+  void on_tick(const runtime::StageContext& ctx, SinkT sink, ForwardT&& forward) {
     (void)sink;  // every note goes through the shared scheduler, not the sink
                  // directly (§16.2a) — mirrors every other stage's own
                  // reference-injection idiom.
     while (m_cursor < m_events.size() && m_events[m_cursor].tick <= ctx.now) {
-      (void)m_scheduler.schedule(m_port, m_events[m_cursor].tick, m_events[m_cursor].msg);
+      const arrangrr::MidiMessage& msg = m_events[m_cursor].msg;
+      (void)m_scheduler.schedule(m_port, m_events[m_cursor].tick, msg);
+      const std::uint8_t wire[3] = {msg.status, msg.d1, msg.d2};
+      forward(m_port, wire, static_cast<std::size_t>(msg.wire_length()));
       ++m_cursor;
     }
   }
