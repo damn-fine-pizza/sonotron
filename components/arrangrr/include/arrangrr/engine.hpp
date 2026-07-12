@@ -5,17 +5,18 @@
 #include "arrangrr/abi.hpp"
 #include "arrangrr/arp/arpeggiator.hpp"
 #include "arrangrr/arranger/arranger.hpp"
-#include "arrangrr/chord/chord_detector.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/config.hpp"
-#include "arrangrr/midi/parser.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
 #include "arrangrr/timeline/timeline.hpp"
+#include "chorddet/followed_context.hpp"
+#include "chorddet/stage.hpp"
 #include "common/time.hpp"
+#include "runtime/midi_parser.hpp"
 #include "runtime/out_scheduler.hpp"
 #include "runtime/stage.hpp"
 #include "runtime/transport.hpp"
@@ -32,9 +33,10 @@
 namespace arrangrr {
 
 // ChordFollow (the D47 harmony-source selector) and Producer now live with
-// their single owner in arrangrr/chord/followed_context.hpp (included via
-// chord_engine.hpp): the gate they drive is enforced inside FollowedContext,
-// not threaded as bools through the engine.
+// their single owner in chorddet/followed_context.hpp (included via
+// chord_engine.hpp, and directly above for m_followed itself): the gate they
+// drive is enforced inside FollowedContext, not threaded as bools through
+// the engine.
 
 // Dxx (un-defers D34(b) / §11 split): per-input-port harmony zone. This is the
 // "observe-without-route" split as DATA — the zone of a whole port decides
@@ -60,6 +62,15 @@ enum class InputZone : std::uint8_t {
 // runtime/stage.hpp's header comment). Every method that used to read/mutate
 // `m_transport`/`m_scheduler` keeps its BODY unchanged; only the declaration
 // site of the two members changed from value to reference.
+//
+// Phase-4b promotion (§16.1/§16.2c/§16.4, Seam C): live piano->chord
+// recognition (`ChordDetector`) and its owner (`FollowedContext`) moved to
+// the peer `components/chorddet` component. `m_followed` is now the shared
+// owner, injected by reference into BOTH `m_chords` (writer for
+// kSequencer/kManual) and `m_chorddet` (writer for kDetect) -- same idiom as
+// Transport/OutScheduler above. `push_midi_in` fans the SAME inbound byte
+// stream out to `m_chorddet`'s own `push_midi_in`, which uses its OWN
+// MidiParser rather than sharing the routing parser below.
 class Engine {
  public:
   // Monomorphic sink at the ABI boundary (D26): one instantiation, no
@@ -67,7 +78,10 @@ class Engine {
   using EventSink = FunctionRef<void(const OutEvent&)>;
 
   Engine(OutScheduler<kSchedulerCapacity>& scheduler, Transport& transport) noexcept
-      : m_transport(transport), m_scheduler(scheduler) {}
+      : m_transport(transport),
+        m_chords(m_followed),
+        m_chorddet(m_followed),
+        m_scheduler(scheduler) {}
 
   constexpr Tick now() const noexcept { return m_now; }
   constexpr const Transport& transport() const noexcept { return m_transport; }
@@ -79,6 +93,17 @@ class Engine {
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
   // end of the batch.
+  //
+  // Seam C (docs/design/orchestrator-pipeline-extraction.md §16.4, Phase 4b):
+  // routing (below) and chord recognition used to happen in ONE method
+  // sharing ONE parsed message. They are split now: the byte loop below
+  // covers ONLY arrangrr's own concern (routing/arp-capture/harmony-suppress)
+  // through arrangrr's OWN `m_parsers`; `m_chorddet.push_midi_in` (after the
+  // loop) is fed the SAME raw bytes independently, through chorddet's OWN
+  // MidiParser -- never a shared parser or a shared parsed MidiMessage. Only
+  // a genuine new chord invokes the callback, which announces it exactly
+  // where `observe_chord_input` used to (same emit_chord_followed, same
+  // shared dedup latch below, so the delta policy is untouched).
   void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
     if (port >= kMaxPorts) {
       return;
@@ -87,7 +112,7 @@ class Engine {
       m_parsers[port].feed(byte, [&](const MidiMessage& msg) {
         // The arpeggiator CAPTURES notes on its input port (they feed the arp
         // instead of routing straight through); non-note messages and other
-        // ports route normally. Chord detection still OBSERVES either way.
+        // ports route normally.
         // Capture ONLY while the transport is playing: the arp only sounds from
         // fire_arp (which runs when playing), so if it swallowed the keyboard
         // with the transport stopped the held keys would light up but never
@@ -95,9 +120,10 @@ class Engine {
         const bool arp_captures =
             m_arp_enabled && m_transport.playing() && port == m_arp_in_port && is_note_message(msg);
         // A note on a kHarmony port is a silent chord-recognition gesture: it is
-        // OBSERVED (below) but SUPPRESSED from output — it never reaches the
-        // router. Non-note traffic (CC, sustain, program) still passes; only the
-        // sounding notes are silenced. kMelody ports route exactly as before.
+        // OBSERVED (by chorddet, below) but SUPPRESSED from output — it never
+        // reaches the router. Non-note traffic (CC, sustain, program) still
+        // passes; only the sounding notes are silenced. kMelody ports route
+        // exactly as before.
         const bool harmony_suppress =
             is_note_message(msg) && m_input_zone[port] == InputZone::kHarmony;
         if (arp_captures) {
@@ -107,11 +133,10 @@ class Engine {
             schedule_or_warn(out_port, m_now, routed, sink);
           });
         }
-        if (m_chord_detect && port == m_chord_detect_port) {
-          observe_chord_input(msg, sink);
-        }
       });
     }
+    m_chorddet.push_midi_in(port, bytes.data(), bytes.size(),
+                            [&](Producer who) { emit_chord_followed(who, sink); });
     flush(sink);
   }
 
@@ -138,17 +163,12 @@ class Engine {
   // Live piano->chord (kChordDetect): whether held notes on the detect port
   // re-harmonize the arranger. `port` selects which input keyboard is the
   // chord source. Toggling on resets the held-note set but never the latched
-  // chord (chord memory persists).
+  // chord (chord memory persists). Phase-4b: thin forward to the chorddet
+  // peer, which now owns this config (§16.4).
   void set_chord_detect(bool enabled, std::uint8_t port) noexcept {
-    if (port < kMaxPorts) {
-      m_chord_detect_port = port;
-    }
-    if (enabled && !m_chord_detect) {
-      m_detector.clear();
-    }
-    m_chord_detect = enabled;
+    m_chorddet.set_enabled(enabled, port);
   }
-  constexpr bool chord_detect() const noexcept { return m_chord_detect; }
+  constexpr bool chord_detect() const noexcept { return m_chorddet.enabled(); }
 
   // Dxx: the harmony zone of a whole input port. kHarmony suppresses the port's
   // note output (silent chord recognition); kMelody routes/sounds. Independent
@@ -174,12 +194,12 @@ class Engine {
   // changes now); a SHIFT-staged one is quantized to the next bar (`next`).
   // The host sets this per keypress (shift held -> quantize). Immediate is the
   // default, so raw MIDI in without a host steers `current` at once.
-  constexpr void set_detect_quantize(bool quantize) noexcept { m_detect_quantize = quantize; }
-  constexpr bool detect_quantize() const noexcept { return m_detect_quantize; }
+  constexpr void set_detect_quantize(bool quantize) noexcept { m_chorddet.set_quantize(quantize); }
+  constexpr bool detect_quantize() const noexcept { return m_chorddet.quantize(); }
   // Live piano->chord detector state, for host display (how many keys are held
   // and how many are needed before a chord is named — fingered 3 vs single 1).
-  constexpr std::uint8_t chord_held_count() const noexcept { return m_detector.held_count(); }
-  constexpr std::uint8_t chord_min_notes() const noexcept { return m_detector.min_notes(); }
+  constexpr std::uint8_t chord_held_count() const noexcept { return m_chorddet.held_count(); }
+  constexpr std::uint8_t chord_min_notes() const noexcept { return m_chorddet.min_notes(); }
 
   // Applies one binary command (D26). Sink receives any resulting events.
   // Implemented in engine.cpp as per-domain handlers: the dispatch stays a
@@ -400,7 +420,7 @@ class Engine {
     // kDetect/kSequencer/kManual explicit) the sequencer behaves exactly as before:
     // it sounds its own chord and its publish is arbitrated by the D47 gate.
     const bool live_priority = m_chords.follow() == ChordFollow::kLivePriority;
-    const bool live_held = m_chord_detect && m_detector.held_count() > 0;
+    const bool live_held = m_chorddet.enabled() && m_chorddet.held_count() > 0;
     const bool comp_on_live = live_priority && live_held && m_chords.state().valid;
     m_seq.on_tick(
         transport_tick,
@@ -462,45 +482,6 @@ class Engine {
     }
   }
 
-  // Feeds one parsed message from the chord-detect port into the detector and,
-  // on a GENUINELY NEW chord, steers the arranger's chord context. A NoteOn with
-  // velocity 0 is a running-status release.
-  //
-  // Phantom-release fix (part 2): only a NoteOn that actually GREW the held set
-  // may re-recognize and publish. A NoteOff — or a duplicate NoteOn — never
-  // re-recognizes, so lifting fingers off an already-delivered chord one note at
-  // a time can no longer pass through a 3-note subset that gets named a new
-  // chord and committed at the next bar with no fresh press. The held set still
-  // holds the delivered chord (chord memory); a truly new chord is formed only
-  // by pressing more keys.
-  void observe_chord_input(const MidiMessage& msg, EventSink sink) {
-    bool grew = false;
-    if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
-      const std::uint8_t before = m_detector.held_count();
-      m_detector.note_on(msg.d1);
-      grew = m_detector.held_count() > before;
-    } else if (msg.type() == midi::kNoteOff || (msg.type() == midi::kNoteOn && msg.d2 == 0)) {
-      m_detector.note_off(msg.d1);
-    } else {
-      return;  // non-note messages leave the held set (and the chord) untouched
-    }
-    if (!grew) {
-      return;  // a release or a redundant press never re-harmonizes
-    }
-    ChordState detected;
-    if (m_detector.recognize(detected)) {
-      // The detector always tracks its held set (so the panel can display it);
-      // the owner's D47 gate decides whether Producer::kDetect actually steers.
-      // Input model: immediate by default (commit_now), quantized to the next
-      // bar when the host flags SHIFT (stage).
-      m_chords.steer_detect(detected.root_pc, detected.quality, m_detect_quantize);
-      // Announce the followed-context change on the delta (immediate commit or a
-      // staged next); the gate may have made the steer a no-op, in which case the
-      // delta check keeps this silent.
-      emit_chord_followed(Producer::kDetect, sink);
-    }
-  }
-
   static bool is_note_message(const MidiMessage& msg) {
     return msg.type() == midi::kNoteOn || msg.type() == midi::kNoteOff;
   }
@@ -535,13 +516,24 @@ class Engine {
   MidiParser m_parsers[kMaxPorts];
   Router m_router;
   Timeline m_timeline;
+  // Phase-4b promotion (§16.2c): the followed-context owner, shared BY
+  // REFERENCE between m_chords (writer for kSequencer/kManual) and
+  // m_chorddet (writer for kDetect, below) -- the SAME shared-reference
+  // idiom already used for Transport/OutScheduler (§14.3). Declared BEFORE
+  // both so member initialization (always DECLARATION order, never the ctor
+  // init-list order) constructs it first. A future Pipeline (4a/4d) can
+  // hoist this member out of Engine without touching either collaborator's
+  // constructor signature.
+  FollowedContext m_followed{};
   ChordEngine m_chords;
   ChordSequencer m_seq;
   Arranger m_arranger;
-  ChordDetector m_detector;                 // live piano->chord held-note set
-  bool m_chord_detect = false;              // kChordDetect: detection enabled
-  bool m_detect_quantize = false;           // SHIFT staging: immediate by default
-  std::uint8_t m_chord_detect_port = 0;     // input port feeding the detector
+  // Phase-4b promotion (§16.1/§16.4, Seam C): the chorddet peer -- its own
+  // ChordDetector and its own per-port MidiParser array. Config
+  // (enabled/port/quantize) now lives here; set_chord_detect/chord_detect/
+  // set_detect_quantize/detect_quantize/chord_held_count/chord_min_notes
+  // above are thin forwards.
+  ChorddetStage<kMaxPorts> m_chorddet;
   InputZone m_input_zone[kMaxPorts] = {};   // Dxx: per-port harmony zone (kMelody default)
   ArpeggiatorEngine m_arp;                  // live keyboard arpeggiator
   bool m_arp_enabled = false;               // kArp: capture + play the input port

@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "arrangrr/chord/followed_context.hpp"
-#include "arrangrr/chord/theory.hpp"
 #include "arrangrr/common/function_ref.hpp"
+#include "chorddet/followed_context.hpp"
+#include "chorddet/theory.hpp"
 #include "common/midi/message.hpp"
 
 // Chord intelligence, mode B (D12): a single input note becomes the diatonic
@@ -43,6 +43,13 @@ struct ChordResult {
 class ChordEngine {
  public:
   using ScheduleFn = FunctionRef<void(std::uint8_t port, const MidiMessage& msg)>;
+
+  // Phase-4b promotion (§16.2c): FollowedContext is no longer OWNED here --
+  // it is injected BY REFERENCE (the shared owner also reaches the peer
+  // chorddet stage, §14.3's Transport/OutScheduler idiom). Every method
+  // below that touches `m_followed` keeps its exact pre-4b body; only the
+  // member's declaration (value -> reference) and this constructor changed.
+  explicit constexpr ChordEngine(FollowedContext& followed) noexcept : m_followed(followed) {}
 
   constexpr void set_key(const Key& key) noexcept { m_key = key; }
   constexpr const Key& key() const noexcept { return m_key; }
@@ -212,7 +219,7 @@ class ChordEngine {
   std::uint8_t m_out_channel = 0;
   std::uint8_t m_sounding[4] = {0, 0, 0, 0};
   std::uint8_t m_sounding_count = 0;
-  FollowedContext m_followed{};  // the single owner of `current` + `next`
+  FollowedContext& m_followed;  // shared owner of `current` + `next`, ctor-injected
 };
 
 }  // namespace arrangrr

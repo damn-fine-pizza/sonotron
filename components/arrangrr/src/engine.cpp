@@ -127,7 +127,7 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
       m_tracker.panic([&](std::uint8_t port, const MidiMessage& msg) {
         schedule_or_warn(port, m_now, msg, sink);
       });
-      m_detector.clear();  // every key is up now; the latched chord stays (memory)
+      m_chorddet.clear();  // every key is up now; the latched chord stays (memory)
       m_arp.panic();       // drop any held/latched arp notes
       flush(sink);
       break;
@@ -201,7 +201,7 @@ void Engine::chord_key_set(const Command& cmd, EventSink sink) {
   }
   const Key key{.root_pc = static_cast<std::uint8_t>(cmd.a), .mode = static_cast<Mode>(cmd.b)};
   m_chords.set_key(key);
-  m_detector.set_key(key);  // scale-aware single-finger reads the same key
+  m_chorddet.set_key(key);  // scale-aware single-finger reads the same key
 }
 
 void Engine::chord_out(const Command& cmd, EventSink sink) {
@@ -235,8 +235,8 @@ void Engine::chord_mode(const Command& cmd, EventSink sink) {
   // scale-aware single-finger so a lone key resolves the diatonic maj/min
   // triad of its root (Dxx), matching the typed play_single path.
   const bool single = mode == ChordMode::kSingle;
-  m_detector.set_min_notes(single ? 1 : kMinChordNotes);
-  m_detector.set_single_finger(single);
+  m_chorddet.set_min_notes(single ? 1 : kMinChordNotes);
+  m_chorddet.set_single_finger(single);
 }
 
 void Engine::chord_detect_cmd(const Command& cmd, EventSink sink) {

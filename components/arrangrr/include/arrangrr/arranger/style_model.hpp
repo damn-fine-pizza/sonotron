@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/arranger/groove.hpp"  // GrooveParams (per-style default feel, 9110)
-#include "arrangrr/chord/theory.hpp"
+#include "chorddet/theory.hpp"
 #include "arrangrr/common/span.hpp"
 #include "common/time.hpp"  // BpmX100, kDefaultBpm (per-style default tempo, 9120)
 #include "arrangrr/timeline/timeline.hpp"

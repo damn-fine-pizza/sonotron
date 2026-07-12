@@ -2,7 +2,7 @@
 
 #include "arrangrr/abi.hpp"
 #include "arrangrr/arranger/style.hpp"
-#include "arrangrr/chord/theory.hpp"
+#include "chorddet/theory.hpp"
 #include "common/midi/message.hpp"
 #include "note_names.hpp"
 #include "runtime/transport.hpp"

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "arrangrr/chord/theory.hpp"
+#include "chorddet/theory.hpp"
 
 // The followed harmonic context — the single owner of the arranger-followed
 // chord (`current`, read every tick by the arranger's NTT resolution, D24) and
@@ -24,6 +24,17 @@
 //
 // Core-portable and freestanding: two ChordState + one bool latch + two enums,
 // no heap, no dependency, identical on host and arm-none-eabi.
+//
+// Phase-4b promotion (docs/design/orchestrator-pipeline-extraction.md
+// §16.2c/§16.8): this is the REAL cost of the Phase-4b move (not the
+// detector) -- ownership moves out of ChordEngine into a shared instance
+// injected BY REFERENCE into both arrangrr's ChordEngine (writer for
+// kSequencer/kManual, reader via state()/pending()) and chorddet's own
+// ChorddetStage (writer for kDetect), the SAME shared-reference idiom §14.3
+// already sanctioned for Transport/OutScheduler. Same-tick visibility (D53)
+// falls out of it being the SAME object, not a message a tick late.
+// Namespace stays `arrangrr` (minimal churn); physical component is
+// `chorddet`, which never depends on arrangrr (D43).
 
 namespace arrangrr {
 

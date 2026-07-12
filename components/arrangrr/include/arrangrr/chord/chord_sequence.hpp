@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "arrangrr/chord/theory.hpp"
+#include "chorddet/theory.hpp"
 #include "arrangrr/common/static_vector.hpp"
 #include "common/time.hpp"
 #include "arrangrr/config.hpp"

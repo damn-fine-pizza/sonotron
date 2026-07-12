@@ -9,6 +9,15 @@
 // mode the V degree is raised to a dominant 7th (harmonic-minor practice,
 // resolving the DESIGN §24.6 open point). Overrides are always possible
 // (D19/D20) via explicit qualities.
+//
+// Phase-4b promotion (docs/design/orchestrator-pipeline-extraction.md
+// §16.1/§16.8): moved byte-for-byte out of components/arrangrr alongside
+// ChordDetector/FollowedContext, which both need Key/ChordQuality/ChordState
+// and the theory:: functions -- chorddet must not depend on arrangrr (D43),
+// so this pure-theory vocabulary travels with them. arrangrr's own chord/
+// arranger modules now depend on chorddet for these types (one direction
+// only: arrangrr -> chorddet, never the reverse). Namespace stays `arrangrr`
+// (minimal churn, same precedent as the Phase-1 runtime extraction).
 
 namespace arrangrr {
 

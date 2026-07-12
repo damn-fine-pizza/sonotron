@@ -27,6 +27,11 @@ endif()
 # unconditional — BOTH the arm-none-eabi branch and the host branch need them.
 add_subdirectory(components/common)
 add_subdirectory(components/runtime)
+# Phase-4b promotion (§16.1/§16.8): components/chorddet (ChordDetector +
+# FollowedContext + the chorddet Seam-C stage) is ALSO unconditional and
+# dual-target -- arrangrr now depends on it for these types (D43: the
+# dependency runs arrangrr -> chorddet, chorddet never depends on arrangrr).
+add_subdirectory(components/chorddet)
 add_subdirectory(components/arrangrr)
 
 if(ARRANGRR_FIRMWARE)

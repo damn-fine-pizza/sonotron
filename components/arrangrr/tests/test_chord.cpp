@@ -1,7 +1,7 @@
 #include <initializer_list>
 
 #include "arrangrr/chord/chord_engine.hpp"
-#include "arrangrr/chord/theory.hpp"
+#include "chorddet/theory.hpp"
 
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"

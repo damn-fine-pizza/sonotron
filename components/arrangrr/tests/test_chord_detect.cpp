@@ -1,4 +1,4 @@
-#include "arrangrr/chord/chord_detector.hpp"
+#include "chorddet/chord_detector.hpp"
 
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"

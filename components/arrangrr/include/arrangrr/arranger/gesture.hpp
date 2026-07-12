@@ -1,7 +1,7 @@
 #pragma once
 
 #include "arrangrr/arranger/style_model.hpp"  // StyleEvent, StylePattern, ChordGesture
-#include "arrangrr/chord/theory.hpp"          // ChordState
+#include "chorddet/theory.hpp"          // ChordState
 #include "common/time.hpp"           // TickOffset
 
 // Gesture-expansion stage of the arranger's resolution pipeline (D40): turns a

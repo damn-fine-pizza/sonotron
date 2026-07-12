@@ -1,7 +1,7 @@
 #include <initializer_list>
 
 #include "arrangrr/common/static_vector.hpp"
-#include "arrangrr/midi/parser.hpp"
+#include "runtime/midi_parser.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
 #include "test.hpp"

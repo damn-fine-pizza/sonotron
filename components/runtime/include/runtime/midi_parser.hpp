@@ -14,6 +14,14 @@
 //    downstream always emits genuine NoteOff (§9.A output policy default);
 //  - SysEx is skipped safely (F0..F7), robust to interruption;
 //  - orphan data bytes (no status in effect) are dropped without error.
+//
+// Phase-4b promotion (docs/design/orchestrator-pipeline-extraction.md
+// §16.4, Seam C): moved byte-for-byte out of components/arrangrr into
+// components/runtime so BOTH the arrangrr stage and the new chorddet peer
+// can each hold their OWN independent MidiParser instance for the same
+// inbound byte stream, instead of sharing one parser/parsed-message path.
+// Namespace stays `arrangrr` (minimal churn, same precedent as the Phase-1
+// runtime extraction of Transport/OutScheduler).
 
 namespace arrangrr {
 

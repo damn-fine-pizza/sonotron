@@ -9,7 +9,7 @@
 #include "src/brain_event_from_outevent.hpp"
 
 #include "arrangrr/abi.hpp"
-#include "arrangrr/chord/followed_context.hpp"
+#include "chorddet/followed_context.hpp"
 #include "runtime/transport.hpp"
 #include "test.hpp"
 

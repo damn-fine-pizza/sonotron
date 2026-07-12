@@ -13,7 +13,7 @@
 // (1) drives the pure owner; (2)-(4) drive the real Engine ABI (binary commands
 // + raw MIDI in), asserting on the observable followed/pending chord.
 
-#include "arrangrr/chord/followed_context.hpp"
+#include "chorddet/followed_context.hpp"
 
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"

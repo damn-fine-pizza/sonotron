@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "arrangrr/chord/theory.hpp"
+#include "chorddet/theory.hpp"
 #include "midi_monitor.hpp"
 #include "note_names.hpp"
 #include "ui_style.hpp"

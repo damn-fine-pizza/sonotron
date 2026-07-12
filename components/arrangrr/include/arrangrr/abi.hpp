@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "arrangrr/chord/followed_context.hpp"  // ChordState, Producer (freestanding)
+#include "chorddet/followed_context.hpp"  // ChordState, Producer (freestanding)
 #include "common/time.hpp"
 #include "common/midi/message.hpp"
 

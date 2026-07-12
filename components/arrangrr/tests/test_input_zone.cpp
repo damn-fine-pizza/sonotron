@@ -242,7 +242,8 @@ void test_single_finger_minor_key_aug_degree_is_major() {
 void test_single_finger_distinct_from_diatonic() {
   const auto noop = [](std::uint8_t, const MidiMessage&) {};
 
-  ChordEngine ce;
+  FollowedContext followed;  // ChordEngine's followed-context is ctor-injected (§16.2c)
+  ChordEngine ce(followed);
   ce.set_key(Key{.root_pc = 0, .mode = Mode::kMajor});  // C major
 
   // (a) chromatic root F# (66): single-finger accepts and majors it; diatonic

@@ -6,7 +6,7 @@
 #include "arrangrr/arranger/groove.hpp"
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
-#include "arrangrr/chord/theory.hpp"      // ChordState, ChordShape, theory::shape_of
+#include "chorddet/theory.hpp"      // ChordState, ChordShape, theory::shape_of
 #include "common/assert.hpp"     // ARR_ASSERT (voice-group cap net)
 #include "arrangrr/common/function_ref.hpp"
 #include "common/time.hpp"

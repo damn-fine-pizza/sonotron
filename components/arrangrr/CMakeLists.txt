@@ -15,7 +15,12 @@ target_include_directories(arrangrr PUBLIC include)
 # stays sanctioned (arrangrr -> runtime for the Stage port only; runtime never
 # links back to arrangrr — that reverse edge is exactly the cycle Decision A
 # exists to kill).
-target_link_libraries(arrangrr PUBLIC common runtime)
+#
+# Phase-4b promotion (§16.1/§16.2c/§16.8): ChordDetector/FollowedContext (and
+# the theory vocabulary they need) moved to components/chorddet -- arrangrr's
+# chord/arranger headers now depend on it too. The direction runs ONE way
+# (arrangrr -> chorddet, PUBLIC); chorddet never links back to arrangrr (D43).
+target_link_libraries(arrangrr PUBLIC common runtime chorddet)
 
 # The whole core (and everything linking it) runs without exceptions/RTTI —
 # same subset on host and firmware (D3, D32).
