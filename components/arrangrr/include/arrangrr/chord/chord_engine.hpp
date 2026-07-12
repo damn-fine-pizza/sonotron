@@ -5,7 +5,7 @@
 #include "arrangrr/chord/followed_context.hpp"
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/common/function_ref.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 
 // Chord intelligence, mode B (D12): a single input note becomes the diatonic
 // chord of its degree in the current key, with D19 smart richness or an

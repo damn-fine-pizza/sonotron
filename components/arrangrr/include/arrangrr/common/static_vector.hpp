@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <type_traits>
 
-#include "arrangrr/common/assert.hpp"
+#include "common/assert.hpp"
 #include "arrangrr/common/span.hpp"
 
 namespace arrangrr {

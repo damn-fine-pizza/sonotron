@@ -23,8 +23,8 @@
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
-#include "arrangrr/transport/transport.hpp"
 #include "test.hpp"
+#include "test_harness.hpp"
 
 namespace {
 
@@ -45,7 +45,7 @@ Command route_add(std::uint8_t in_port, std::int8_t in_ch, std::uint8_t out_port
 }
 
 struct Band {
-  Engine e;
+  test::TestEngine e;
   Events ev;
 
   void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {

@@ -14,7 +14,7 @@
 #include "alsa_midi.hpp"
 #include "arrangrr/arranger/arranger.hpp"
 #include "gm_program.hpp"
-#include "arrangrr/transport/transport.hpp"
+#include "runtime/transport.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
 #include "kitty_keys.hpp"

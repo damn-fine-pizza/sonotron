@@ -4,7 +4,6 @@
 #include "arrangrr/midi/parser.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
-#include "arrangrr/scheduler/out_scheduler.hpp"
 #include "test.hpp"
 
 namespace {
@@ -126,39 +125,6 @@ void test_parser_all_branches() {
   CHECK(out.empty());
 }
 
-void test_scheduler_total_order() {
-  OutScheduler<16> s;
-  // Insert same-tick events in adversarial order; expect
-  // realtime < NoteOff < CC < NoteOn, then seq within class (D29).
-  CHECK(s.schedule(0, 10, MidiMessage::note_on(0, 60, 100)));
-  CHECK(s.schedule(0, 10, MidiMessage::cc(0, 7, 100)));
-  CHECK(s.schedule(0, 10, MidiMessage::note_off(0, 55)));
-  CHECK(s.schedule(0, 10, MidiMessage::realtime(midi::kClock)));
-  CHECK(s.schedule(0, 5, MidiMessage::note_on(0, 40, 1)));     // earlier tick wins overall
-  CHECK(s.schedule(0, 10, MidiMessage::note_on(0, 61, 100)));  // same class: seq order
-
-  StaticVector<MidiMessage, 8> out;
-  s.pop_due(10, [&](const ScheduledEvent& ev) { CHECK(out.push_back(ev.msg)); });
-  CHECK(out.size() == 6);
-  CHECK(out[0].d1 == 40);                        // tick 5 first
-  CHECK(out[1].status == midi::kClock);          // realtime
-  CHECK(out[2].type() == midi::kNoteOff);        // NoteOff before NoteOn
-  CHECK(out[3].type() == midi::kControlChange);  // CC before NoteOn
-  CHECK(out[4].d1 == 60);                        // NoteOns in emission order
-  CHECK(out[5].d1 == 61);
-  CHECK(s.empty());
-}
-
-void test_scheduler_due_only() {
-  OutScheduler<4> s;
-  CHECK(s.schedule(0, 100, MidiMessage::note_on(0, 60, 1)));
-  int fired = 0;
-  s.pop_due(99, [&](const ScheduledEvent&) { ++fired; });
-  CHECK(fired == 0);
-  s.pop_due(100, [&](const ScheduledEvent&) { ++fired; });
-  CHECK(fired == 1);
-}
-
 void test_router_filters_and_remap() {
   Router r;
   CHECK(r.add(Route{
@@ -272,28 +238,6 @@ void test_parser_reset() {
   CHECK(out.size() == 1 && out[0].type() == midi::kNoteOn && out[0].d1 == 65);
 }
 
-void test_scheduler_clear_and_refill() {
-  OutScheduler<8> s;
-  CHECK(s.schedule(0, 1, MidiMessage::note_on(0, 60, 1)));
-  CHECK(s.schedule(0, 2, MidiMessage::note_on(0, 61, 1)));
-  s.clear();
-  CHECK(s.empty());
-  int fired = 0;
-  s.pop_due(100, [&](const ScheduledEvent&) { ++fired; });
-  CHECK(fired == 0);
-  // Refill in reverse tick order to exercise deeper sift paths.
-  for (std::uint32_t t = 8; t > 0; --t) {
-    CHECK(s.schedule(0, t, MidiMessage::note_on(0, static_cast<std::uint8_t>(t), 1)));
-  }
-  CHECK(!s.schedule(0, 9, MidiMessage::note_on(0, 9, 1)));  // full
-  Tick last = 0;
-  s.pop_due(100, [&](const ScheduledEvent& ev) {
-    CHECK(ev.tick >= last);
-    last = ev.tick;
-  });
-  CHECK(last == 8);
-}
-
 void test_note_tracker_high_notes_and_bounds() {
   NoteTracker t;
   t.observe(0, MidiMessage::note_on(0, 100, 90));  // second bitmap word
@@ -353,92 +297,7 @@ void test_message_wire_lengths() {
   CHECK(midi::data_length(midi::kSysExStart) == -1);
 }
 
-void test_scheduler_heap_permutations() {
-  // Pseudo-random inserts (seeded LCG — deterministic) must always pop in
-  // total order; exercises every sift path in the binary heap.
-  OutScheduler<64> s;
-  std::uint32_t rng = 0xDECAFBAD;
-  auto next = [&rng]() {
-    rng = rng * 1664525u + 1013904223u;
-    return rng;
-  };
-  for (int round = 0; round < 4; ++round) {
-    for (int i = 0; i < 48; ++i) {
-      const Tick tick = next() % 16;
-      const std::uint8_t kind = static_cast<std::uint8_t>(next() % 4);
-      MidiMessage msg;
-      switch (kind) {
-        case 0:
-          msg = MidiMessage::realtime(midi::kClock);
-          break;
-        case 1:
-          msg = MidiMessage::note_off(0, 60);
-          break;
-        case 2:
-          msg = MidiMessage::cc(0, 7, 1);
-          break;
-        default:
-          msg = MidiMessage::note_on(0, 60, 1);
-          break;
-      }
-      CHECK(s.schedule(0, tick, msg));
-    }
-    // Pop half at a mid deadline, then the rest: partial pops + refill next
-    // round stress sift_down with both children on each side.
-    Tick last_tick = 0;
-    std::uint8_t last_cls = 0;
-    std::uint32_t last_seq = 0;
-    bool first = true;
-    auto check_order = [&](const ScheduledEvent& ev) {
-      if (!first) {
-        const bool ordered = ev.tick > last_tick ||
-                             (ev.tick == last_tick &&
-                              (ev.cls > last_cls || (ev.cls == last_cls && ev.seq > last_seq)));
-        CHECK(ordered);
-      }
-      first = false;
-      last_tick = ev.tick;
-      last_cls = ev.cls;
-      last_seq = ev.seq;
-    };
-    s.pop_due(7, check_order);
-    s.pop_due(1000, check_order);
-    CHECK(s.empty());
-  }
-}
 
-void test_scheduler_interleaved_stress() {
-  // Small heap, tight interleaving of schedule/pop with heavy same-tick
-  // same-class ties: hammers sift_up/sift_down child-selection branches.
-  OutScheduler<8> s;
-  std::uint32_t rng = 0xC0FFEE42;
-  auto next = [&rng]() {
-    rng = rng * 1664525u + 1013904223u;
-    return rng;
-  };
-  Tick now = 0;
-  for (int step = 0; step < 200; ++step) {
-    const int burst = static_cast<int>(next() % 3) + 1;
-    for (int i = 0; i < burst; ++i) {
-      const Tick tick = now + next() % 4;
-      (void)s.schedule(0, tick, MidiMessage::note_on(0, static_cast<std::uint8_t>(next() % 4), 1));
-    }
-    now += next() % 3;
-    Tick last = 0;
-    std::uint32_t last_seq = 0;
-    bool first = true;
-    s.pop_due(now, [&](const ScheduledEvent& ev) {
-      if (!first) {
-        CHECK(ev.tick > last || (ev.tick == last && ev.seq > last_seq));
-      }
-      first = false;
-      last = ev.tick;
-      last_seq = ev.seq;
-    });
-  }
-  s.pop_due(now + 10, [](const ScheduledEvent&) {});
-  CHECK(s.empty());
-}
 
 void test_router_realtime_and_system() {
   Router r;
@@ -496,11 +355,6 @@ int main() {
   test_parser_eox_terminates_and_kills_running_status();
   test_parser_all_branches();
   test_message_wire_lengths();
-  test_scheduler_total_order();
-  test_scheduler_due_only();
-  test_scheduler_clear_and_refill();
-  test_scheduler_heap_permutations();
-  test_scheduler_interleaved_stress();
   test_router_filters_and_remap();
   test_router_realtime_and_system();
   test_note_tracker_panic_with_sustain();

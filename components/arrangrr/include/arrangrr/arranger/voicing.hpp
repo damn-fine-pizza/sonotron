@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/arranger/style_model.hpp"  // VoicingPolicy
-#include "arrangrr/common/time.hpp"           // TickOffset
+#include "common/time.hpp"           // TickOffset
 #include "arrangrr/timeline/timeline.hpp"     // TrackRole
 
 // Voicing stage of the arranger's resolution pipeline (D40). One StyleEvent no

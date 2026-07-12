@@ -2,12 +2,16 @@
 
 #include <cstdint>
 
-#include "arrangrr/common/assert.hpp"
-#include "arrangrr/common/time.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/assert.hpp"
+#include "common/midi/message.hpp"
+#include "common/time.hpp"
 
 // Timestamped MIDI output queue with the D29 total order:
 //   (tick, class_priority, seq_no)
+//
+// Phase-1 runtime extraction: moved out of components/arrangrr into
+// components/runtime byte-for-byte. Namespace stays `arrangrr` for Phase 1
+// (minimal churn); see runtime/transport.hpp's header comment.
 // class_priority: realtime/clock < NoteOff < CC/other < NoteOn, so a NoteOff
 // always precedes a NoteOn scheduled on the same tick and clock always leads.
 // seq_no is a monotonic emission counter — the final tie-break that makes the

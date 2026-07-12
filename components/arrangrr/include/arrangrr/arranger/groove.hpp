@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "arrangrr/common/time.hpp"       // Tick, TickOffset
+#include "common/time.hpp"       // Tick, TickOffset
 #include "arrangrr/timeline/timeline.hpp"  // kTicksPerStep
 
 // Groove engine (host UI: the `groove` panel): turns FEEL into parameters

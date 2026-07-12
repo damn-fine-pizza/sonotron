@@ -19,6 +19,15 @@ inline constexpr std::uint32_t kGridPpqn = 96;
 static_assert(kPpqn % kGridPpqn == 0);
 inline constexpr std::uint32_t kTicksPerGridStep = kPpqn / kGridPpqn;  // 10
 
+// Minimal 4/4 metric for M0 (a real TimeSignature engine lands with M5/M6;
+// pinned here so bar:beat:tick exists from day one — review nit M5). Hoisted
+// out of runtime/transport.hpp during the Phase-1 runtime extraction: arrangrr
+// -side modules (arranger, chord_sequence) need these constants without
+// depending on the runtime component that now owns Transport itself.
+inline constexpr std::uint32_t kBeatsPerBar = 4;
+inline constexpr std::uint32_t kTicksPerBeat = kPpqn;
+inline constexpr std::uint32_t kTicksPerBar = kBeatsPerBar * kTicksPerBeat;
+
 // Absolute musical time in internal ticks. u32 spans ~4 days @120 BPM (D33).
 using Tick = std::uint32_t;
 // Signed tick arithmetic (offsets, swing, humanize).

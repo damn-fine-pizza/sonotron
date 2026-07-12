@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/config.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 
 // Tracks which notes are sounding on each (out port, channel), including
 // notes held only by the sustain pedal, so Panic can silence everything with

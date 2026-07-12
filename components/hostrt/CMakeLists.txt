@@ -27,5 +27,5 @@ add_library(hostrt STATIC
   uds_server.cpp
 )
 target_include_directories(hostrt PUBLIC .)
-target_link_libraries(hostrt PUBLIC arrangrr ALSA::ALSA)
+target_link_libraries(hostrt PUBLIC arrangrr runtime ALSA::ALSA)
 target_compile_options(hostrt PRIVATE -Wall -Wextra -Werror)

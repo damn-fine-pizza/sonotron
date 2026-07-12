@@ -11,6 +11,7 @@
 #include "midi_monitor.hpp"
 #include "panel_manager.hpp"
 #include "piano_view.hpp"
+#include "runtime/runtime.hpp"
 #include "style_chooser.hpp"
 
 // Host shell: resolves L2/L1 text lines into binary core commands (D26) and
@@ -377,7 +378,16 @@ class Shell {
   void surface_send_note(std::uint8_t port, ActiveNoteTracker& held, char key,
                          std::uint8_t midi_note, bool note_on);
 
-  Engine m_engine;
+  // Phase-1 runtime extraction: Transport/OutScheduler moved out of Engine
+  // into runtime::Runtime, which owns the ONE instance of each and injects
+  // them by reference into the Engine (Stage-adapter) it constructs. m_engine
+  // stays a reference bound to m_runtime.stage() so every OTHER existing
+  // `m_engine.foo()` call site in this class (chords()/arranger()/arp()/
+  // set_input_zone()/... — the Stage's own domain surface) keeps compiling
+  // unchanged; only advance_ticks() moved to m_runtime (Engine no longer
+  // exposes it — see runtime/stage.hpp's on_tick()/flush() split).
+  runtime::Runtime<Engine, kSchedulerCapacity> m_runtime;
+  Engine& m_engine = m_runtime.stage();
   EventSink m_sink;
   PortHook m_port_hook;
   PanelHook m_panel_hook;

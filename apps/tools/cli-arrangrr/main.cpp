@@ -20,7 +20,7 @@
 #include <string>
 
 #include "alsa_midi.hpp"
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
 #include "kitty_keys.hpp"

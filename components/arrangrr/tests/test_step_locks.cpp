@@ -3,6 +3,7 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
 #include "test.hpp"
+#include "test_harness.hpp"
 
 // Step-sequencer parameter-locks (roadmap item 5): probability, ratchet, micro,
 // tie. The hard invariant is that a fully-neutral step reproduces the original
@@ -213,7 +214,7 @@ void test_tie_suppresses_same_note_next_step() {
 using Events = StaticVector<OutEvent, 256>;
 
 struct Player {
-  Engine e;
+  test::TestEngine e;
   Events ev;
   void cmd(const Command& c) {
     e.push_command(c, [&](const OutEvent& o) { CHECK(ev.push_back(o)); });

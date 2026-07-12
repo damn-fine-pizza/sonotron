@@ -3,8 +3,13 @@
 # host build, then per-CTest-label subsets measured separately:
 #
 #   metric 1  unit        production code hit by UNIT tests (`-L unit`).
-#                         ENFORCED GATE: core (components/arrangrr/) >= 80% on
-#                         lines/functions/branches. This is THE gate.
+#                         ENFORCED GATE: core (components/arrangrr/ +
+#                         components/runtime/) >= 80% on lines/functions/
+#                         branches. This is THE gate. components/common/ is a
+#                         pure data/constant/macro layer with no branches to
+#                         cover and is excluded (same reasoning that already
+#                         excludes tests/ from the numerator, not a narrowing
+#                         of the gate).
 #   metric 2  functional  production code hit by FUNCTIONAL / interaction /
 #                         engine-level / golden / integration tests
 #                         (`-L functional`). REPORT-ONLY for now.
@@ -49,11 +54,17 @@ cmake --build --preset coverage
 REPORT_DIR=build/coverage/report
 mkdir -p "${REPORT_DIR}"
 
-# Common gcovr scope for the CORE gate metric.
+# Common gcovr scope for the CORE gate metric. Phase-1 runtime extraction:
+# components/runtime/ (Transport/OutScheduler/Stage/Runtime, moved out of
+# components/arrangrr/) joins the gated core scope; components/common/
+# (header-only, no branches) is deliberately NOT filtered in — nothing to
+# gate there.
 CORE_ARGS=(
   --root .
   --filter 'components/arrangrr/'
+  --filter 'components/runtime/'
   --exclude 'components/arrangrr/tests/'
+  --exclude 'components/runtime/tests/'
   --exclude 'tests/'
   --object-directory build/coverage
   --exclude-branches-by-pattern '.*ARR_ASSERT.*'
@@ -92,8 +103,10 @@ UNIT_RC=$(run_category unit)
   >"${REPORT_DIR}/summary_unit.txt" 2>&1 || true
 # Also give the host layer visibility (report-only, not gated).
 "${GCOVR[@]}" \
-  --root . --filter 'components/arrangrr/' --filter 'components/hostrt/' \
-  --exclude 'components/arrangrr/tests/' --exclude 'components/hostrt/tests/' --exclude 'tests/' \
+  --root . --filter 'components/arrangrr/' --filter 'components/runtime/' \
+  --filter 'components/hostrt/' \
+  --exclude 'components/arrangrr/tests/' --exclude 'components/runtime/tests/' \
+  --exclude 'components/hostrt/tests/' --exclude 'tests/' \
   --object-directory build/coverage \
   --exclude-branches-by-pattern '.*ARR_ASSERT.*' --exclude-throw-branches \
   --html-details "${REPORT_DIR}/coverage_full.html" >/dev/null 2>&1 || true
@@ -130,7 +143,7 @@ fi
 # --- 3-number summary -----------------------------------------------------
 echo
 echo "============================================================"
-echo " THREE-METRIC COVERAGE SUMMARY (core scope: components/arrangrr/)"
+echo " THREE-METRIC COVERAGE SUMMARY (core scope: components/arrangrr/ + components/runtime/)"
 echo "------------------------------------------------------------"
 printf ' metric 1  unit        lines %-7s functions %-7s branches %-7s\n' \
   "$(pct "${REPORT_DIR}/summary_unit.txt" lines)" \
@@ -160,7 +173,7 @@ fi
 # --- ENFORCED GATE: metric 1 (unit), core only ----------------------------
 # Re-measure unit coverage in isolation and fail under 80% on any of
 # lines/functions/branches. This is the ONLY metric that fails the build.
-echo "=== ENFORCED GATE: metric 1 (unit) core (components/arrangrr/) >= 80% l/f/b ==="
+echo "=== ENFORCED GATE: metric 1 (unit) core (components/arrangrr/ + components/runtime/) >= 80% l/f/b ==="
 reset_gcda
 UNIT_RC2=$(run_category unit)
 if [ "${UNIT_RC2}" -ne 0 ]; then

@@ -3,8 +3,8 @@
 #include <cstdint>
 
 #include "arrangrr/chord/followed_context.hpp"  // ChordState, Producer (freestanding)
-#include "arrangrr/common/time.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/time.hpp"
+#include "common/midi/message.hpp"
 
 // Core binary ABI (D26): the core never parses JSON or strings. The host
 // resolves L1 string paths to these POD commands; the core emits POD events.

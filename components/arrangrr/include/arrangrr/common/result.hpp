@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-#include "arrangrr/common/assert.hpp"
+#include "common/assert.hpp"
 
 // Own Result<T, E> instead of std::expected: <expected> is not guaranteed on
 // freestanding arm libstdc++ (DESIGN.md §20, Francesco M9). Restricted to

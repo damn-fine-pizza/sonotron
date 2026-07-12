@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 
 // Byte-stream MIDI parser, one instance per input port. Compliance rules it
 // implements (DESIGN.md §9.A):

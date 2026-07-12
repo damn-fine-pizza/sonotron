@@ -1,7 +1,7 @@
 // Bare firmware stub: the M0 gate is that the core cross-compiles and links
 // freestanding for the STM32 anchor (D31/D33). Real board bring-up is M13.
 
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 #include "arrangrr/version.hpp"
 
 namespace arrangrr {

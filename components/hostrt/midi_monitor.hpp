@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "arrangrr/abi.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 
 // Host-only MIDI monitor model (H2, docs/TUI_SPEC.md): normalized visible
 // events, active-note tracking, the piano's visual event ring and duration

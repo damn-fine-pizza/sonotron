@@ -5,7 +5,7 @@
 #include "arrangrr/arranger/groove.hpp"  // GrooveParams (per-style default feel, 9110)
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/common/span.hpp"
-#include "arrangrr/common/time.hpp"  // BpmX100, kDefaultBpm (per-style default tempo, 9120)
+#include "common/time.hpp"  // BpmX100, kDefaultBpm (per-style default tempo, 9120)
 #include "arrangrr/timeline/timeline.hpp"
 
 // Style model (D24 groundwork): sections hold DEGREE-RELATIVE patterns per

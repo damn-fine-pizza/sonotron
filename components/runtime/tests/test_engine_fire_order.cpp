@@ -1,7 +1,7 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
-#include "arrangrr/transport/transport.hpp"  // kTicksPerBar
 #include "test.hpp"
+#include "test_harness.hpp"
 
 // Locks the per-tick producer FIRE ORDER of Engine::advance_ticks
 // (engine.hpp): each playing tick fires
@@ -29,7 +29,7 @@ using Events = StaticVector<OutEvent, 4096>;
 // test_chord_detect Band harness: key C major, style "basic", bass on synth
 // port 0 / channel 1 (0-based), comp (chord1) on channel 2.
 struct Band {
-  Engine e;
+  test::TestEngine e;
   Events ev;
 
   void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {

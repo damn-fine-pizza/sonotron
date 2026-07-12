@@ -11,6 +11,7 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
 #include "test.hpp"
+#include "test_harness.hpp"
 
 namespace {
 
@@ -207,7 +208,7 @@ int count_ons(const Events& ev, std::uint8_t ch) {
 // scheduled (against stream time m_now, not the transport tick) still flush as
 // stream time advances past their gate, so every arp note-on is balanced.
 void test_arp_engine_stop_no_stuck_notes() {
-  Engine e;
+  test::TestEngine e;
   Events ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Param p, std::int32_t a, std::int32_t b) {
@@ -242,7 +243,7 @@ void test_arp_engine_stop_no_stuck_notes() {
 // BEFORE the next on so the note is not doubled nor stranded. A single held
 // note replays every step; after stop everything must be balanced.
 void test_arp_engine_retrigger_no_stuck_notes() {
-  Engine e;
+  test::TestEngine e;
   Events ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Param p, std::int32_t a, std::int32_t b) {
@@ -270,7 +271,7 @@ void test_arp_engine_retrigger_no_stuck_notes() {
 // Note-off placement: for a given arp note the off lands exactly `gate` ticks
 // after its on. Pins fire_arp's (on now, off now+gate) scheduling at the wire.
 void test_arp_engine_gate_offset_on_wire() {
-  Engine e;
+  test::TestEngine e;
   Events ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Param p, std::int32_t a, std::int32_t b) {
@@ -309,7 +310,7 @@ void test_arp_engine_gate_offset_on_wire() {
 // raw input note must not reach the routed output, and the arp must hold it.
 // This is the playing-side counterpart to test_arp_stopped_passes_through.
 void test_arp_engine_swallows_while_playing() {
-  Engine e;
+  test::TestEngine e;
   Events ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Op op, Param p, std::int32_t a, std::int32_t b, std::int32_t c) {

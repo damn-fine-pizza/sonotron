@@ -7,11 +7,10 @@
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
 #include "arrangrr/chord/theory.hpp"      // ChordState, ChordShape, theory::shape_of
-#include "arrangrr/common/assert.hpp"     // ARR_ASSERT (voice-group cap net)
+#include "common/assert.hpp"     // ARR_ASSERT (voice-group cap net)
 #include "arrangrr/common/function_ref.hpp"
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 #include "arrangrr/config.hpp"
-#include "arrangrr/transport/transport.hpp"  // kTicksPerBar
 
 // The arranger (second WOW): plays the loaded style's current section on
 // transport ticks, resolving chord-tone patterns against the live chord

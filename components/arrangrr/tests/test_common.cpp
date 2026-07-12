@@ -3,7 +3,7 @@
 #include "arrangrr/common/ring_buffer.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/common/static_vector.hpp"
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 #include "arrangrr/version.hpp"
 #include "test.hpp"
 

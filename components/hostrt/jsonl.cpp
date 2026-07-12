@@ -5,7 +5,7 @@
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/theory.hpp"
-#include "arrangrr/transport/transport.hpp"
+#include "runtime/transport.hpp"
 #include "note_names.hpp"
 
 namespace arrangrr::host {

@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <type_traits>
 
-#include "arrangrr/common/assert.hpp"
+#include "common/assert.hpp"
 
 // Own non-owning view type instead of std::span: guaranteed available and
 // identical on host and freestanding arm builds (DESIGN.md §20, D32).

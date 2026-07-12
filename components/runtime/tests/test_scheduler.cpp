@@ -1,9 +1,9 @@
-#include "arrangrr/scheduler/out_scheduler.hpp"
+#include "runtime/out_scheduler.hpp"
 
 #include <cstdint>
 
 #include "arrangrr/common/static_vector.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 #include "test.hpp"
 
 namespace {
@@ -360,6 +360,99 @@ void test_cancel_guards_n8() {
   CHECK(matching_offs == 0);  // every (0,0,60) NoteOff was cancelled
 }
 
+// Merged from components/arrangrr/tests/test_midi.cpp (Phase-1 runtime
+// extraction, Palladio §4 dedup flag): these two randomized stress cases add
+// distinct coverage over the existing suite above (seeded-LCG heap-permutation
+// and tight schedule/pop interleaving), unlike test_midi.cpp's other three
+// scheduler functions, which were near-duplicates of tests already present
+// here and were dropped rather than concatenated.
+void test_scheduler_heap_permutations() {
+  // Pseudo-random inserts (seeded LCG — deterministic) must always pop in
+  // total order; exercises every sift path in the binary heap.
+  OutScheduler<64> s;
+  std::uint32_t rng = 0xDECAFBAD;
+  auto next = [&rng]() {
+    rng = rng * 1664525u + 1013904223u;
+    return rng;
+  };
+  for (int round = 0; round < 4; ++round) {
+    for (int i = 0; i < 48; ++i) {
+      const Tick tick = next() % 16;
+      const std::uint8_t kind = static_cast<std::uint8_t>(next() % 4);
+      MidiMessage msg;
+      switch (kind) {
+        case 0:
+          msg = MidiMessage::realtime(midi::kClock);
+          break;
+        case 1:
+          msg = MidiMessage::note_off(0, 60);
+          break;
+        case 2:
+          msg = MidiMessage::cc(0, 7, 1);
+          break;
+        default:
+          msg = MidiMessage::note_on(0, 60, 1);
+          break;
+      }
+      CHECK(s.schedule(0, tick, msg));
+    }
+    // Pop half at a mid deadline, then the rest: partial pops + refill next
+    // round stress sift_down with both children on each side.
+    Tick last_tick = 0;
+    std::uint8_t last_cls = 0;
+    std::uint32_t last_seq = 0;
+    bool first = true;
+    auto check_order = [&](const ScheduledEvent& ev) {
+      if (!first) {
+        const bool ordered = ev.tick > last_tick ||
+                             (ev.tick == last_tick &&
+                              (ev.cls > last_cls || (ev.cls == last_cls && ev.seq > last_seq)));
+        CHECK(ordered);
+      }
+      first = false;
+      last_tick = ev.tick;
+      last_cls = ev.cls;
+      last_seq = ev.seq;
+    };
+    s.pop_due(7, check_order);
+    s.pop_due(1000, check_order);
+    CHECK(s.empty());
+  }
+}
+
+void test_scheduler_interleaved_stress() {
+  // Small heap, tight interleaving of schedule/pop with heavy same-tick
+  // same-class ties: hammers sift_up/sift_down child-selection branches.
+  OutScheduler<8> s;
+  std::uint32_t rng = 0xC0FFEE42;
+  auto next = [&rng]() {
+    rng = rng * 1664525u + 1013904223u;
+    return rng;
+  };
+  Tick now = 0;
+  for (int step = 0; step < 200; ++step) {
+    const int burst = static_cast<int>(next() % 3) + 1;
+    for (int i = 0; i < burst; ++i) {
+      const Tick tick = now + next() % 4;
+      (void)s.schedule(0, tick, MidiMessage::note_on(0, static_cast<std::uint8_t>(next() % 4), 1));
+    }
+    now += next() % 3;
+    Tick last = 0;
+    std::uint32_t last_seq = 0;
+    bool first = true;
+    s.pop_due(now, [&](const ScheduledEvent& ev) {
+      if (!first) {
+        CHECK(ev.tick > last || (ev.tick == last && ev.seq > last_seq));
+      }
+      first = false;
+      last = ev.tick;
+      last_seq = ev.seq;
+    });
+  }
+  s.pop_due(now + 10, [](const ScheduledEvent&) {});
+  CHECK(s.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -377,6 +470,8 @@ int main() {
   test_fill_and_before_n16();
   test_pop_due_recorder_all_paths();
   test_cancel_guards_n8();
+  test_scheduler_heap_permutations();
+  test_scheduler_interleaved_stress();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_scheduler: all OK\n");
   }

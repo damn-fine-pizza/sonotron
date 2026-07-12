@@ -4,9 +4,8 @@
 
 #include "arrangrr/chord/theory.hpp"
 #include "arrangrr/common/static_vector.hpp"
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 #include "arrangrr/config.hpp"
-#include "arrangrr/transport/transport.hpp"
 
 // ChordSequence: the recorded half of D13 and the heart of the first WOW.
 // Steps have FREE durations (D14) and are stored FUNCTIONALLY (D28): a

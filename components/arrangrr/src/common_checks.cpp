@@ -2,13 +2,13 @@
 // static_asserts) on BOTH toolchains. This TU is part of the core library, so
 // the arm cross-build exercises the full freestanding subset (D3).
 
-#include "arrangrr/common/assert.hpp"
+#include "common/assert.hpp"
 #include "arrangrr/common/crc.hpp"
 #include "arrangrr/common/result.hpp"
 #include "arrangrr/common/ring_buffer.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/common/static_vector.hpp"
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 
 namespace arrangrr {
 namespace {

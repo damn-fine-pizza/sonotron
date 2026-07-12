@@ -453,7 +453,7 @@ bool Shell::advance_to(std::uint64_t target, std::string& error) {
     }
     const std::uint64_t at = next->tick;
     if (at > m_engine.now()) {
-      m_engine.advance_ticks(static_cast<std::uint32_t>(at - m_engine.now()), m_sink);
+      m_runtime.advance_ticks(static_cast<std::uint32_t>(at - m_engine.now()), m_sink);
     }
     std::vector<std::string> tokens = std::move(next->tokens);
     m_pending.erase(next);
@@ -462,7 +462,7 @@ bool Shell::advance_to(std::uint64_t target, std::string& error) {
     }
   }
   if (target > m_engine.now()) {
-    m_engine.advance_ticks(static_cast<std::uint32_t>(target - m_engine.now()), m_sink);
+    m_runtime.advance_ticks(static_cast<std::uint32_t>(target - m_engine.now()), m_sink);
   }
   return true;
 }

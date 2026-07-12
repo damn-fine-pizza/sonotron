@@ -3,6 +3,7 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
 #include "test.hpp"
+#include "test_harness.hpp"
 
 namespace {
 
@@ -66,7 +67,7 @@ void test_timeline_pool_bounded() {
 }
 
 struct Player {
-  Engine e;
+  test::TestEngine e;
   Events ev;
   void sink(const OutEvent& o) { CHECK(ev.push_back(o)); }
   Engine::EventSink s = [](const OutEvent&) {};  // placeholder; use lambda below

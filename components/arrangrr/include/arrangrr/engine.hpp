@@ -10,14 +10,15 @@
 #include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
-#include "arrangrr/common/time.hpp"
 #include "arrangrr/config.hpp"
 #include "arrangrr/midi/parser.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
-#include "arrangrr/scheduler/out_scheduler.hpp"
 #include "arrangrr/timeline/timeline.hpp"
-#include "arrangrr/transport/transport.hpp"
+#include "common/time.hpp"
+#include "runtime/out_scheduler.hpp"
+#include "runtime/stage.hpp"
+#include "runtime/transport.hpp"
 
 // The engine: wires parser → router → scheduler → tracker behind the binary
 // ABI. Time is injected (advance_ticks); the same code runs under the host
@@ -51,11 +52,22 @@ enum class InputZone : std::uint8_t {
   kHarmony = 1,  // observed + suppressed from output (silent chord zone)
 };
 
+// The arrangrr Stage-adapter: the arranger stage that `runtime::Runtime<Engine,
+// N>` drives (docs/design/orchestrator-pipeline-extraction.md §3.5/§14). Phase
+// 1 runtime extraction: `Transport`/`OutScheduler` no longer live here as VALUE
+// members — Runtime owns the one instance of each and injects them BY
+// REFERENCE at construction (§14.3's precedent, extended to Transport per
+// runtime/stage.hpp's header comment). Every method that used to read/mutate
+// `m_transport`/`m_scheduler` keeps its BODY unchanged; only the declaration
+// site of the two members changed from value to reference.
 class Engine {
  public:
   // Monomorphic sink at the ABI boundary (D26): one instantiation, no
   // template bloat in flash; the callable is owned by the caller.
   using EventSink = FunctionRef<void(const OutEvent&)>;
+
+  Engine(OutScheduler<kSchedulerCapacity>& scheduler, Transport& transport) noexcept
+      : m_transport(transport), m_scheduler(scheduler) {}
 
   constexpr Tick now() const noexcept { return m_now; }
   constexpr const Transport& transport() const noexcept { return m_transport; }
@@ -181,38 +193,52 @@ class Engine {
     flush(sink);  // fire immediately if already due
   }
 
-  // Advances stream time by `n` ticks, firing due events in D29 total order.
-  void advance_ticks(std::uint32_t n, EventSink sink) {
-    for (std::uint32_t i = 0; i < n; ++i) {
-      ++m_now;
-      if (m_transport.playing()) {
-        m_transport.advance_one();
-        if (Transport::is_midi_clock_tick(m_transport.tick())) {
-          fire_clock_pulse(sink);
-        }
-        fire_timeline(m_transport.tick(), sink);
-        fire_chord_seq(m_transport.tick(), sink);
-        // D53: at the bar downbeat, promote any SHIFT-staged chord into the
-        // followed context BEFORE the arranger fires the bar — the same
-        // bar-boundary point at which the arranger applies pending style/section
-        // switches, ordered so the arranger reads the freshly-committed chord.
-        if (m_transport.tick() % kTicksPerBar == 0) {
-          const bool had_pending = m_chords.pending().valid;
-          const Producer promoted_by = m_chords.pending_source();
-          m_chords.commit_bar();
-          // Announce ONLY a genuine promotion (a staged chord landing in
-          // `current`), attributed to the producer that staged it. With nothing
-          // staged there is no change to report — and pending_source would be
-          // stale — so the emit is gated on had_pending, not just the delta.
-          if (had_pending) {
-            emit_chord_followed(promoted_by, sink);
-          }
-        }
-        fire_arranger(m_transport.tick(), sink);
-        fire_arp(m_transport.tick(), sink);
-      }
-      flush(sink);
+  // The STAGE port (runtime/stage.hpp's StageLike concept): reacts to ONE
+  // stream tick. `runtime::Runtime<Engine, N>` calls this once per tick
+  // (after advancing its own m_now / the shared Transport's tick if playing),
+  // then calls `flush()` unconditionally — mirroring EXACTLY the body that
+  // used to live inline in `Engine::advance_ticks` (engine.hpp pre-Phase-1):
+  // the transport-gated fire loop is unchanged, only split at the boundary
+  // Runtime now owns (the raw tick-counting loop itself).
+  void on_tick(const runtime::StageContext& ctx, EventSink sink) {
+    m_now = ctx.now;
+    if (!m_transport.playing()) {
+      return;
     }
+    if (Transport::is_midi_clock_tick(m_transport.tick())) {
+      fire_clock_pulse(sink);
+    }
+    fire_timeline(m_transport.tick(), sink);
+    fire_chord_seq(m_transport.tick(), sink);
+    // D53: at the bar downbeat, promote any SHIFT-staged chord into the
+    // followed context BEFORE the arranger fires the bar — the same
+    // bar-boundary point at which the arranger applies pending style/section
+    // switches, ordered so the arranger reads the freshly-committed chord.
+    if (m_transport.tick() % kTicksPerBar == 0) {
+      const bool had_pending = m_chords.pending().valid;
+      const Producer promoted_by = m_chords.pending_source();
+      m_chords.commit_bar();
+      // Announce ONLY a genuine promotion (a staged chord landing in
+      // `current`), attributed to the producer that staged it. With nothing
+      // staged there is no change to report — and pending_source would be
+      // stale — so the emit is gated on had_pending, not just the delta.
+      if (had_pending) {
+        emit_chord_followed(promoted_by, sink);
+      }
+    }
+    fire_arranger(m_transport.tick(), sink);
+    fire_arp(m_transport.tick(), sink);
+  }
+
+  // Drains every event due at `m_now` in D29 total order. Public: it is the
+  // other half of the StageLike concept `runtime::Runtime` calls every tick
+  // (was private, called only from the old inline advance_ticks). Body
+  // UNCHANGED.
+  void flush(EventSink sink) {
+    m_scheduler.pop_due(m_now, [&](const ScheduledEvent& ev) {
+      m_tracker.observe(ev.port, ev.msg);
+      sink(OutEvent::midi(ev.port, ev.msg, ev.tick));
+    });
   }
 
  private:
@@ -436,13 +462,6 @@ class Engine {
     }
   }
 
-  void flush(EventSink sink) {
-    m_scheduler.pop_due(m_now, [&](const ScheduledEvent& ev) {
-      m_tracker.observe(ev.port, ev.msg);
-      sink(OutEvent::midi(ev.port, ev.msg, ev.tick));
-    });
-  }
-
   // Feeds one parsed message from the chord-detect port into the detector and,
   // on a GENUINELY NEW chord, steers the arranger's chord context. A NoteOn with
   // velocity 0 is a running-status release.
@@ -512,7 +531,7 @@ class Engine {
   }
 
   Tick m_now = 0;
-  Transport m_transport;
+  Transport& m_transport;  // Runtime-owned, injected by reference (§14.3/B3)
   MidiParser m_parsers[kMaxPorts];
   Router m_router;
   Timeline m_timeline;
@@ -530,7 +549,7 @@ class Engine {
   std::uint8_t m_arp_out_port = 0;          // where the arp plays
   std::uint8_t m_arp_out_channel = 0;       // 0-based
   NoteTracker m_tracker;
-  OutScheduler<kSchedulerCapacity> m_scheduler;
+  OutScheduler<kSchedulerCapacity>& m_scheduler;  // Runtime-owned, injected by reference (§14.3)
   std::uint8_t m_clock_out_mask = 0;  // off by default; enabled via kClockOutMask
   // Last-emitted followed context, so kChordFollowed fires only on a real delta.
   ChordState m_last_followed_cur{};

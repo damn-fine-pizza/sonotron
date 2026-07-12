@@ -3,6 +3,7 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
 #include "test.hpp"
+#include "test_harness.hpp"
 
 namespace {
 
@@ -164,7 +165,7 @@ void test_arp_random_deterministic() {
 // Live keyboard arp through the full engine: held input notes are captured and
 // replayed rhythmically on the arp's output route while the transport runs.
 void test_arp_engine_live() {
-  Engine e;
+  test::TestEngine e;
   StaticVector<OutEvent, 256> ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Param p, std::int32_t a, std::int32_t b) {
@@ -205,7 +206,7 @@ void test_arp_engine_live() {
 // so it must not swallow the keyboard when it is idle — otherwise held keys
 // light up but never sound). See the "keys light up but don't sound" bug.
 void test_arp_stopped_passes_through() {
-  Engine e;
+  test::TestEngine e;
   StaticVector<OutEvent, 64> ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Op op, Param p, std::int32_t a, std::int32_t b, std::int32_t c) {
@@ -277,7 +278,7 @@ void test_arp_autorepeat_latch_reset() {
 // `arp off` (set_arp_enabled false -> panic) must immediately stop output even
 // while the transport keeps running.
 void test_arp_disable_stops_output() {
-  Engine e;
+  test::TestEngine e;
   StaticVector<OutEvent, 256> ev;
   auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
   auto cmd = [&](Param p, std::int32_t a, std::int32_t b) {

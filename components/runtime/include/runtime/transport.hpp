@@ -2,12 +2,18 @@
 
 #include <cstdint>
 
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 
 // Transport: musical position + run state at 960 internal PPQN (D27).
 // It owns no I/O and never reads a clock — ticks are injected (§2 principle 1):
 // the host real-clock thread or the virtual-clock driver calls the engine,
 // which advances the transport. Start/stop/continue are timeline events (D29).
+//
+// Phase-1 runtime extraction: moved out of components/arrangrr into
+// components/runtime byte-for-byte, minus the 3 bar/beat constants (now in
+// common/time.hpp, needed by arrangrr-side modules that must not depend on
+// runtime). Namespace stays `arrangrr` for Phase 1 (minimal churn); a later
+// pass may rename to `namespace runtime` once the Stage port stabilizes.
 
 namespace arrangrr {
 
@@ -16,12 +22,6 @@ enum class TransportState : std::uint8_t {
   kPlaying = 1,
   kPaused = 2,
 };
-
-// Minimal 4/4 metric for M0 (a real TimeSignature engine lands with M5/M6;
-// pinned here so bar:beat:tick exists from day one — review nit M5).
-inline constexpr std::uint32_t kBeatsPerBar = 4;
-inline constexpr std::uint32_t kTicksPerBeat = kPpqn;
-inline constexpr std::uint32_t kTicksPerBar = kBeatsPerBar * kTicksPerBeat;
 
 struct Position {
   std::uint32_t bar;   // 1-based

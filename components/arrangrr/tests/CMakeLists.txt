@@ -29,7 +29,6 @@ arrangrr_test(test_midi unit)
 # additive-only v1 freeze fails the BUILD. Subject is the ABI surface itself -> unit.
 arrangrr_test(test_abi_frozen unit)
 arrangrr_test(test_engine functional)
-arrangrr_test(test_engine_fire_order functional)
 arrangrr_test(test_timeline unit)
 # test_step_locks pins the fixed sustain-chain lone-tie bug (a lone tie was
 # extended by exactly one step): red-before / green-after — hence `regression`.
@@ -80,6 +79,5 @@ arrangrr_test(test_arp unit)
 # is the arp's integration with transport/scheduler, so `functional`.
 arrangrr_test(test_arp_functional functional)
 arrangrr_test(test_arranger unit)
-arrangrr_test(test_scheduler unit)
 arrangrr_test(test_gesture unit)
 arrangrr_test(test_voicing unit)

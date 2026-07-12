@@ -6,7 +6,7 @@
 
 #include <alsa/asoundlib.h>
 
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 #include "shell.hpp"
 
 // ALSA sequencer backend: creates virtual MIDI ports (visible to aconnect /

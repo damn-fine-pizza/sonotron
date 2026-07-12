@@ -21,6 +21,12 @@ else()
   set(ARRANGRR_FIRMWARE OFF)
 endif()
 
+# Phase-1 runtime extraction (docs/design/orchestrator-pipeline-extraction.md):
+# components/common (the base, dependency-free layer) and components/runtime
+# (the dual-target kernel: Transport + OutScheduler + the Stage port) are
+# unconditional — BOTH the arm-none-eabi branch and the host branch need them.
+add_subdirectory(components/common)
+add_subdirectory(components/runtime)
 add_subdirectory(components/arrangrr)
 
 if(ARRANGRR_FIRMWARE)
@@ -30,6 +36,7 @@ else()
   add_subdirectory(components/hostrt)
   add_subdirectory(apps/tools/cli-arrangrr)
   add_subdirectory(components/arrangrr/tests)
+  add_subdirectory(components/runtime/tests)
   add_subdirectory(components/hostrt/tests)
   add_subdirectory(tests/golden)
   add_subdirectory(tests/integration)

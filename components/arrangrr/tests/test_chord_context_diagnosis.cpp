@@ -31,8 +31,8 @@
 
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
-#include "arrangrr/transport/transport.hpp"  // kTicksPerBar
 #include "test.hpp"
+#include "test_harness.hpp"
 
 namespace {
 
@@ -44,7 +44,7 @@ constexpr std::uint8_t kBasicStyleIndex = 0;  // styles::kBuiltins[0] == "basic"
 constexpr std::uint8_t kPopStyleIndex = 1;    // a second builtin, for kStyleSwitch
 
 struct Band {
-  Engine e;
+  test::TestEngine e;
   Events ev;
 
   void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {

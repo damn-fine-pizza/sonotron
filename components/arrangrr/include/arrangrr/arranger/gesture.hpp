@@ -2,7 +2,7 @@
 
 #include "arrangrr/arranger/style_model.hpp"  // StyleEvent, StylePattern, ChordGesture
 #include "arrangrr/chord/theory.hpp"          // ChordState
-#include "arrangrr/common/time.hpp"           // TickOffset
+#include "common/time.hpp"           // TickOffset
 
 // Gesture-expansion stage of the arranger's resolution pipeline (D40): turns a
 // single StyleEvent into ONE or MORE timed note-specs according to its

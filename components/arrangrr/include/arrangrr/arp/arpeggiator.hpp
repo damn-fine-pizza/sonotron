@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/common/function_ref.hpp"
-#include "arrangrr/common/time.hpp"  // Tick, TickOffset, kPpqn
+#include "common/time.hpp"  // Tick, TickOffset, kPpqn
 
 // Arpeggiator engine: turns a set of held notes into a rhythmic sequence on the
 // transport clock. Pure and freestanding (no heap, bounded state, no I/O), so

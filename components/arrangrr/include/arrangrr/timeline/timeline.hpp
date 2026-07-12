@@ -4,9 +4,9 @@
 
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/static_vector.hpp"
-#include "arrangrr/common/time.hpp"
+#include "common/time.hpp"
 #include "arrangrr/config.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 
 // The Living Timeline primitive (D10): Track = role + MIDI destination +
 // per-track length (polymeter) + mute/solo, filled by gestures. M1 ships the

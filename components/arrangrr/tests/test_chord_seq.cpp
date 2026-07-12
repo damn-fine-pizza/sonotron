@@ -4,6 +4,7 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/engine.hpp"
 #include "test.hpp"
+#include "test_harness.hpp"
 
 namespace {
 
@@ -97,7 +98,7 @@ void test_transpose_re_derives() {
 using Events = StaticVector<OutEvent, 1024>;
 
 struct SeqFixture {
-  Engine e;
+  test::TestEngine e;
   Events ev;
 
   void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo,

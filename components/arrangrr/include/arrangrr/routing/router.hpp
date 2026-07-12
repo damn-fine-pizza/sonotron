@@ -4,7 +4,7 @@
 
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/config.hpp"
-#include "arrangrr/midi/message.hpp"
+#include "common/midi/message.hpp"
 
 // Routing matrix in→out per port/channel with message-class filters and
 // channel remap (soft-thru is just a route; §9.E).
