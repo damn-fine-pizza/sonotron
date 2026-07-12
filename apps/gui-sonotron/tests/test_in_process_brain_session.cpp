@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <functional>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -191,6 +192,50 @@ void test_part_invalid_role_surfaces_clean_error() {
   session.stop();
 }
 
+// GUI refinement (Accompany, Phase 4d): `midi-source load <path>` now
+// round-trips through a dedicated path-carrying ring straight to
+// Shell::load_midi_source() on the engine thread (Command's own POD has no
+// room for a variable-length path, abi.hpp) -- mirroring --control's own
+// text-command entry point (shell_io_commands.cpp's cmd_midi_source). A
+// VALID path loads silently (no kError), the same success shape `style
+// load`/`part ...` already have; a live transport round trip straight after
+// proves the engine thread stayed alive (not wedged on the file load).
+void test_midi_source_load_valid_path_is_accepted_without_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send(std::string("midi-source load ") + GUI_SONOTRON_TEST_MIDI_FIXTURE);
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; }));
+
+  session.send("transport start");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kTransport && ev.transport_state == "playing";
+  }));
+
+  session.stop();
+}
+
+// A nonexistent path must surface a clean kError round-tripped from the
+// engine thread through the path-result ring -- Shell::load_midi_source's
+// own "midi-source load failed: <path>" message (shell_io_commands.cpp),
+// forwarded verbatim, not swallowed.
+void test_midi_source_load_invalid_path_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("midi-source load /no/such/file/does-not-exist.mid");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("midi-source load failed") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 void test_stop_is_idempotent_and_safe_before_start() {
   InProcessBrainSession session;
   session.stop();  // never started: must be a safe no-op
@@ -209,6 +254,8 @@ int main() {
   test_style_load_invalid_name_surfaces_clean_error();
   test_part_mute_and_solo_valid_role_is_accepted_without_error();
   test_part_invalid_role_surfaces_clean_error();
+  test_midi_source_load_valid_path_is_accepted_without_error();
+  test_midi_source_load_invalid_path_surfaces_clean_error();
   test_stop_is_idempotent_and_safe_before_start();
   return sonotron::test::failures();
 }

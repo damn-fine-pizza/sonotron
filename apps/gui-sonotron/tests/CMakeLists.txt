@@ -64,6 +64,14 @@ endfunction()
 gui_sonotron_engine_test(test_brain_event_from_outevent unit)
 gui_sonotron_engine_test(test_in_process_brain_session functional)
 
+# `midi-source load <path>` round trip (GUI integrated-mode refinement):
+# reuses the already-committed shared fixture `components/midisrc/tests/
+# fixtures/tiny.mid` (also used by midisrc's/arrstyle-converter's own tests
+# and tests/golden's accompany_basic golden) rather than adding a new binary
+# asset under this tree.
+target_compile_definitions(test_in_process_brain_session PRIVATE
+  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
+
 # Zone-model tests (G3, docs/design/gui-fase2-mechanical-plan.md): link only
 # gui_sonotron_models (no ImGui, no GLFW) -- pure model tests, host-only.
 function(gui_sonotron_model_test name category)

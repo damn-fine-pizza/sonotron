@@ -1,7 +1,10 @@
 #include "in_process_brain_session.hpp"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <thread>
 #include <utility>
@@ -44,6 +47,37 @@ using arrangrr::host::Shell;
 // headroom, not a tight bound.
 constexpr std::size_t kCommandRingCapacity = 1024;
 constexpr std::size_t kOutEventRingCapacity = 1024;
+
+// `midi-source load <path>` (Accompany, Phase 4d) carries a variable-length
+// filesystem path that the fixed-size ABI `Command` POD (abi.hpp, <=20 B, no
+// string field) has no room for -- so it rides its own pair of rings instead
+// of command_line_to_command()'s Command translation, mirroring --control's
+// own Shell::load_midi_source() entry point (shell_io_commands.cpp) without
+// duplicating any file-I/O or SMF-parsing logic here. This is a rare,
+// user-initiated action (not a per-tick hot path), so a modest capacity is
+// ample headroom, not a tight bound.
+constexpr std::size_t kMaxPathBytes = 256;
+constexpr std::size_t kPathCommandRingCapacity = 16;
+constexpr std::size_t kMaxPathErrorBytes = 200;
+constexpr std::size_t kPathResultRingCapacity = 16;
+
+// GUI -> engine: a raw path, fixed-size and trivially copyable so it fits
+// SpscRing's contract. `length` lets the trailing bytes stay unspecified
+// (no need to zero-pad every push).
+struct PathCommand {
+  std::array<char, kMaxPathBytes> bytes{};
+  std::uint16_t length = 0;
+};
+
+// Engine -> GUI: the outcome of one PathCommand. Only ever pushed on
+// FAILURE (Shell::load_midi_source's own error string, truncated to fit) --
+// success is silent, the same observable shape `style load`/`part ...`
+// already have on the GUI side (command_line_to_command's own name/role
+// resolution never emits an event on success either).
+struct PathResult {
+  std::array<char, kMaxPathErrorBytes> error_bytes{};
+  std::uint16_t error_length = 0;
+};
 
 // Splits on ASCII space (single delimiter, no quoting) -- sufficient for the
 // fixed-shape command lines translated below; Shell's own tokenizer (private
@@ -148,6 +182,8 @@ struct InProcessBrainSession::Impl {
 
   SpscRing<Command, kCommandRingCapacity> command_ring;
   SpscRing<OutEvent, kOutEventRingCapacity> out_event_ring;
+  SpscRing<PathCommand, kPathCommandRingCapacity> path_command_ring;
+  SpscRing<PathResult, kPathResultRingCapacity> path_result_ring;
   std::atomic<bool> running{false};
   std::atomic<bool> prefer_flats{false};
   std::atomic<Status> status{Status::kDisconnected};
@@ -222,6 +258,26 @@ void InProcessBrainSession::Impl::run_engine() {
       shell.push_command(cmd);
     }
 
+    // Drain the path-command ring the same way: apply every queued
+    // `midi-source load <path>` straight to the engine-owned Shell (through
+    // the exact same load_midi_source() --control's cmd_midi_source calls),
+    // and on failure hand the error string back through path_result_ring --
+    // best-effort, matching the OutEvent ring's own "a slow client drops
+    // events rather than stalling MIDI" policy (this is a rare user action,
+    // not a hot path, so dropping should never actually happen in practice).
+    PathCommand path_cmd;
+    while (path_command_ring.try_pop(path_cmd)) {
+      const std::string path(path_cmd.bytes.data(), path_cmd.length);
+      std::string error;
+      if (!shell.load_midi_source(path, error)) {
+        PathResult result;
+        const std::size_t n = std::min(error.size(), kMaxPathErrorBytes - 1);
+        std::copy_n(error.begin(), n, result.error_bytes.begin());
+        result.error_length = static_cast<std::uint16_t>(n);
+        (void)path_result_ring.try_push(result);
+      }
+    }
+
     const std::uint64_t now_us = monotonic_us();
     acc.set_bpm(shell.engine().transport().bpm());
     const std::uint32_t ticks = acc.advance_us(now_us - last_us);
@@ -267,6 +323,44 @@ void InProcessBrainSession::send(std::string_view command_line) {
   if (command_line == "quit" || command_line == "exit") {
     return;  // never tear down the shared engine thread from a stray Enter
   }
+
+  // `midi-source load <path>` does not translate to a Command POD (see the
+  // path-carrying rings' comment above) -- handled here, before
+  // command_line_to_command(), which stays Command-only. Mirrors
+  // --control's own "usage: midi-source load <path>" text
+  // (shell_io_commands.cpp's cmd_midi_source) for any other shape.
+  const std::vector<std::string_view> ms_tokens = split_ws(command_line);
+  if (!ms_tokens.empty() && ms_tokens[0] == "midi-source") {
+    BrainEvent note;
+    note.kind = BrainEvent::Kind::kError;
+    note.valid = true;
+    note.cmd = std::string(command_line);
+    if (ms_tokens.size() != 3 || ms_tokens[1] != "load") {
+      note.error = "usage: midi-source load <path>";
+      m_impl->local_warnings.push_back(std::move(note));
+      return;
+    }
+    const std::string_view path = ms_tokens[2];
+    if (path.size() >= kMaxPathBytes) {
+      note.error = "path too long (max " + std::to_string(kMaxPathBytes - 1) + " bytes)";
+      m_impl->local_warnings.push_back(std::move(note));
+      return;
+    }
+    PathCommand path_cmd;
+    std::copy(path.begin(), path.end(), path_cmd.bytes.begin());
+    path_cmd.length = static_cast<std::uint16_t>(path.size());
+    if (!m_impl->path_command_ring.try_push(path_cmd)) {
+      // Never-drop policy for GUI -> engine (same as the Command ring): warn
+      // rather than silently swallow the user's load request.
+      BrainEvent warn;
+      warn.kind = BrainEvent::Kind::kWarn;
+      warn.valid = true;
+      warn.warn_code = "command_ring_full";
+      m_impl->local_warnings.push_back(std::move(warn));
+    }
+    return;
+  }
+
   Command cmd;
   std::string detail;
   switch (command_line_to_command(command_line, cmd, detail)) {
@@ -309,6 +403,16 @@ void InProcessBrainSession::poll(std::vector<BrainEvent>& out) {
     out.push_back(std::move(warn));
   }
   m_impl->local_warnings.clear();
+
+  PathResult path_result;
+  while (m_impl->path_result_ring.try_pop(path_result)) {
+    BrainEvent note;
+    note.kind = BrainEvent::Kind::kError;
+    note.valid = true;
+    note.error = std::string(path_result.error_bytes.data(), path_result.error_length);
+    note.cmd = "midi-source load";
+    out.push_back(std::move(note));
+  }
 
   const bool prefer_flats = m_impl->prefer_flats.load(std::memory_order_relaxed);
   OutEvent ev;
