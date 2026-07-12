@@ -10,6 +10,8 @@ add_library(hostrt STATIC
   shell_view.cpp
   shell_chooser.cpp
   jsonl.cpp
+  param_state_wire.cpp
+  param_state_mirror.cpp
   event_labels.cpp
   alsa_midi.cpp
   console.cpp

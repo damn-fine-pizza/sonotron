@@ -37,6 +37,7 @@
 #include "alsa_midi.hpp"
 #include "common/time.hpp"
 #include "jsonl.hpp"
+#include "param_state_wire.hpp"
 #include "shell.hpp"
 #include "uds_server.hpp"
 
@@ -92,6 +93,26 @@ std::uint64_t monotonic_us() {
          static_cast<std::uint64_t>(ts.tv_nsec) / 1000u;
 }
 
+// Broadcasts one event's wire text to every connected control-plane client.
+// kParamState has no shape on the shared to_jsonl() channel (jsonl.cpp's own
+// permanent stub, kept empty so run_script()'s golden stdout never sees it,
+// docs/design/orchestrator-pipeline-extraction.md §17.3b) -- this is the ONE
+// place its real, control-plane-only wire text comes from
+// (param_state_wire.hpp's param_state_to_jsonl()).
+void broadcast_control_event(UdsServer& control, const OutEvent& ev,
+                             const std::string& jsonl_line) {
+  if (!jsonl_line.empty()) {
+    control.broadcast(jsonl_line);
+    return;
+  }
+  if (ev.kind == OutEvent::Kind::kParamState) {
+    const std::string param_line = param_state_to_jsonl(ev);
+    if (!param_line.empty()) {
+      control.broadcast(param_line);
+    }
+  }
+}
+
 // The live/headless loop: owns exactly what the Phase 2 brief keeps out of
 // the server library — AlsaMidi, the UdsServer control socket + wiring, the
 // tick-timer clock drive, and the poll() fan-in across ALSA + control fds.
@@ -121,9 +142,10 @@ int run_server(bool human, const char* control_path) {
     }
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
     const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
-    // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b):
-    // kParamState has no text shape yet -- to_human/to_jsonl render it as an
-    // empty string; skip stdout/broadcast for it entirely.
+    // kParamState has no text shape on this channel, ever (jsonl.cpp's own
+    // kParamState case): to_human/to_jsonl render it as an empty string, so
+    // it never reaches stdout/the golden harness regardless of what cmd_*
+    // handlers emit it.
     if (!line.empty()) {
       std::puts(line.c_str());
     }
@@ -131,10 +153,7 @@ int run_server(bool human, const char* control_path) {
     // of --events human/jsonl (a control-plane client parses JSON, never the
     // human one-liner) — same discipline as cli-arrangrr's GUI transport.
     if (control.enabled()) {
-      const std::string jsonl_line = to_jsonl(ev, flats);
-      if (!jsonl_line.empty()) {
-        control.broadcast(jsonl_line);
-      }
+      broadcast_control_event(control, ev, to_jsonl(ev, flats));
     }
   });
   shell_ref = &shell;

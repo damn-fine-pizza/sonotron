@@ -81,10 +81,13 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
     case OutEvent::Kind::kTransport:
       return format(R"({"ev":"transport","state":"%s","@":%u})", transport_name(ev.code), ev.tick);
     case OutEvent::Kind::kParamState:
-      // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): no
-      // wire text shape yet -- an empty string renders no line at all, so
-      // this new echo is invisible to the JSONL/human text channel (and the
-      // golden harness that diffs it) until Phase 3b gives it one.
+      // Deliberately PERMANENT, not a Phase-3a placeholder (docs/design/
+      // orchestrator-pipeline-extraction.md §17.3b, Phase 3b): kParamState
+      // stays invisible on THIS channel forever -- an empty string renders no
+      // line at all, keeping the golden harness's byte-identical stdout
+      // stream untouched no matter which cmd_* handlers start emitting the
+      // echo. param_state_wire.hpp's param_state_to_jsonl() is the real wire
+      // encoding, wired ONLY into a control-plane broadcast, never stdout.
       return {};
     case OutEvent::Kind::kWarn:
     default:
@@ -138,7 +141,8 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
     case OutEvent::Kind::kTransport:
       return format("@%-8u transport %s", ev.tick, transport_name(ev.code));
     case OutEvent::Kind::kParamState:
-      // Phase 3a: see to_jsonl's kParamState case above -- no text shape yet.
+      // Permanent (see to_jsonl's kParamState case above): no text shape on
+      // this channel, ever.
       return {};
     case OutEvent::Kind::kWarn:
     default:
