@@ -1,10 +1,14 @@
-# Golden tests: deterministic .acmd scripts through the CLI's virtual clock,
-# canonical JSONL output compared byte-for-byte with the .golden file.
+# Golden tests: deterministic .acmd scripts through the headless server's
+# virtual clock, canonical JSONL output compared byte-for-byte with the
+# .golden file. Phase 2a re-points this at `sonotron_server` (the thin
+# headless binary, docs/design/orchestrator-pipeline-extraction.md §15): same
+# Shell/Runtime/arrangrr code as `cli_arrangrr`'s own --script, different
+# binary -- byte output is unchanged.
 
 function(arrangrr_golden name)
   add_test(NAME golden_${name}
     COMMAND ${CMAKE_COMMAND}
-      -DCLI=$<TARGET_FILE:cli_arrangrr>
+      -DCLI=$<TARGET_FILE:sonotron_server>
       -DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/${name}.acmd
       -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/${name}.golden
       -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.out

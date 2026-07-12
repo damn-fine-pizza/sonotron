@@ -35,6 +35,11 @@ else()
   enable_testing()
   add_subdirectory(components/hostrt)
   add_subdirectory(apps/tools/cli-arrangrr)
+  # Phase 2a (docs/design/orchestrator-pipeline-extraction.md §15 /
+  # docs/design/sonotron-server-phase2-brief.md): the headless server binary,
+  # a thin main() around the SAME hostrt Shell/Runtime/arrangrr composition
+  # cli-arrangrr already links -- additive, cli-arrangrr is untouched.
+  add_subdirectory(apps/sonotron-server)
   add_subdirectory(components/arrangrr/tests)
   add_subdirectory(components/runtime/tests)
   add_subdirectory(components/hostrt/tests)

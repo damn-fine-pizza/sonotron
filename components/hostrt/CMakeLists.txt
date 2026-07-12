@@ -10,6 +10,7 @@ add_library(hostrt STATIC
   shell_view.cpp
   shell_chooser.cpp
   jsonl.cpp
+  event_labels.cpp
   alsa_midi.cpp
   console.cpp
   kitty_keys.cpp

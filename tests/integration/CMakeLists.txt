@@ -12,3 +12,9 @@ set_tests_properties(live_tracks PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30 LABEL
 add_test(NAME tui_console
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tui_console.sh $<TARGET_FILE:cli_arrangrr>)
 set_tests_properties(tui_console PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30 LABELS functional)
+
+# Phase 2a (docs/design/orchestrator-pipeline-extraction.md §15 gate 2): a
+# client round-trips one L1 line over sonotron-server's --control UDS socket.
+add_test(NAME server_socket
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/server_socket.sh $<TARGET_FILE:sonotron_server>)
+set_tests_properties(server_socket PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30 LABELS functional)
