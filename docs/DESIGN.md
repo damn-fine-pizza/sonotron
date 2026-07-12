@@ -897,8 +897,17 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
 - **9200 Generative style — ○ planned**
   - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE
   - `9220` Offline-trained Markov/grammar on scale degrees, baked constexpr — ○ runtime SHIPPABLE / training HOST-ONLY
-- **9300 MIDI stylizer — ○ planned (host-only)**
-  - `9310` Accompany (keep the melody, play the genre band under detected chords) — ○ HOST-ONLY *(zero new core, ships first)*
+- **9300 MIDI stylizer — ◑ partial (host-only)**
+  - `9310` Accompany (keep the melody, play the genre band under detected chords) — ✅ done
+    HOST-ONLY. End-to-end: `components/orchestrator`'s `AccompanyPipeline` (MIDI-source →
+    chorddet → arrangrr, `components/orchestrator/include/orchestrator/accompany.hpp`)
+    drives the band from chords detected FROM the imported melody, not a scripted steer
+    — Phase 4d stands up the 3-stage pipeline (`17f8f43`), Phase 4e wires melody-driven
+    detection (`2e55d9b`). Proven by `tests/golden/accompany_basic.golden` +
+    `tests/golden/accompany_melody_detect.golden` (both green, `ctest -R accompany`).
+    No ABI break: `test_abi_frozen` untouched, `sizeof(OutEvent)==16` unchanged — the
+    ABI waiver this pipeline could have spent (a stage/source tag) stays UNSPENT, per
+    the ABI-fork analysis in `docs/design/orchestrator-pipeline-extraction.md` §16.2.
   - `9320` Restyle (transform the input's own parts into the genre idiom) — ○ HOST-ONLY *(depends on 9100)*
 - **9400 Style data format + generator — ○ direction**
   - `9410` Style inspector + serialize/deserialize (offset/index-based) — ○ HOST-ONLY
@@ -928,18 +937,35 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
     explicitly steered)
   - `11420` WHITE (direct play) — ○ HOST-ONLY *(deferred: needs a sounding melody surface)*
 - `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅
-- `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`): separate
-  process, pure client, never links core. Tech stack — **DECIDED & vendored: Dear ImGui
-  (upstream `ocornut/imgui`, pinned v1.92.8) + GLFW3, backends `imgui_impl_glfw` /
-  `imgui_impl_opengl3`, under `third_party/imgui` + `third_party/glfw` (each with an
-  `ARRGRR_VENDOR.md` pin), built and linked by `apps/gui-sonotron/`** (dependency fork
-  resolved under `0800` and executed in code; rationale as-built in
-  `docs/design/gui-contract-map.md` §1). — ◑ partial HOST-ONLY (**mechanical GUI strand
-  begun: G0 concept demolition `38b5826` + G1 workstation layout / nested split `c49f8c6`,
-  both 2026-07-10, committed & tested; screen spec `docs/design/ux-workstation.md`,
-  execution plan `docs/design/gui-fase2-mechanical-plan.md`. Core-dependent strand
-  (kChordFollowed, beat/position, clip primitive) still ahead — NOT complete. Toolkit
-  dependency flag: RESOLVED / vendored**)
+- `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`). Tech stack —
+  **DECIDED & vendored: Dear ImGui (upstream `ocornut/imgui`, pinned v1.92.8) + GLFW3,
+  backends `imgui_impl_glfw` / `imgui_impl_opengl3`, under `third_party/imgui` +
+  `third_party/glfw` (each with an `ARRGRR_VENDOR.md` pin), built and linked by
+  `apps/gui-sonotron/`** (dependency fork resolved under `0800` and executed in code;
+  rationale as-built in `docs/design/gui-contract-map.md` §1). — ◑ partial HOST-ONLY
+  (**mechanical GUI strand COMPLETE — G0 concept demolition `38b5826`, G1 workstation
+  layout `c49f8c6`, G2 brain session + G3 zone panels `473ab60` (66/66 host tests
+  green); `docs/design/gui-fase2-mechanical-plan.md` records "mechanical strand
+  COMPLETE — G0, G1, G2 and G3 all DONE". Core-dependent strand (§11): `kChordFollowed`
+  (P0-1, `52008e4`) and `kBeat`/position (P0-2, `ba568ca` + `f4c6188`) are now DONE and
+  wired end-to-end (`apps/gui-sonotron/src/brain_event.cpp`, `app_state.cpp`,
+  `transport_panel.cpp`; `test_chord_followed_event`, `test_brain_event`,
+  `test_app_state`, `golden_chord_followed` all green) — the harmony visualizer and the
+  live playhead are real, not placeholders. Still open: the clip/scene launch
+  primitive (`apps/gui-sonotron/src/grid_panel.cpp`'s "awaits the core clip primitive"
+  tooltip — unimplemented; also the still-open Phase-5 candidate in
+  `docs/strategy/phase5-proposals.md` #2) — this is the one remaining §11 gap, so the
+  node stays ◑, not ✅. Toolkit dependency flag: RESOLVED / vendored. **Architecture
+  fact (Phase 2a/2b, owner-decided):** the GUI now hosts the engine IN-PROCESS by
+  default — a dedicated thread driven by lock-free SPSC Command/OutEvent rings;
+  `apps/gui-sonotron/CMakeLists.txt`'s `gui_sonotron_engine` library links
+  `hostrt`/`runtime`/`arrangrr` directly (commits `bf2c4b2` Phase 2a `sonotron-server`,
+  `8c9e54d` Phase 2b in-process integration), with `--control <path>` kept as an
+  alternative pure-client mode against an external `sonotron-server`. D38 is retired
+  for that one library only — every other GUI library (`gui_sonotron_models`/`brain`/
+  `layout`/`screenshot`) stays core-free — see the D38 record below. The core ABI
+  itself is UNCHANGED by this: `abi.hpp` stays FROZEN v1, `sizeof(OutEvent)==16`,
+  `test_abi_frozen` intact.**)
 
 - **11700 GUI freeze line — pivot from core-feature work to the host GUI**
   (owner-decided). STATUS: ✅ CROSSED (2026-07-06). The pre-GUI batch `11710` is all ✅
@@ -1146,6 +1172,18 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
    is resolved and EXECUTED in code: vendored under `third_party/imgui` + `third_party/glfw`
    (each with an `ARRGRR_VENDOR.md` pin) and built/linked by `apps/gui-sonotron/`
    (`target_link_libraries(... imgui)`). Rationale as-built: `docs/design/gui-contract-map.md` §1.
+5. **D38 ("the GUI never links/#includes the core")** (`11600`, surfaced by Phase 2) —
+   **RELAXED / RETIRED, scoped to one library (owner-decided).**
+   `docs/design/sonotron-server-phase2-brief.md`'s Corelli §15 review resolves the collision:
+   the GUI binary now hosts the engine in-process by default, so `gui_sonotron_engine`
+   (`apps/gui-sonotron/CMakeLists.txt`) links `hostrt`/`runtime`/`arrangrr` directly
+   and names `OutEvent` — EXECUTED in commits `bf2c4b2` (Phase 2a, `sonotron-server`)
+   and `8c9e54d` (Phase 2b, in-process integration). The relaxation is scoped: every
+   other GUI library (`gui_sonotron_models`/`brain`/`layout`/`screenshot`) still never
+   includes the core, and `--control <path>` still runs as a pure client of an external
+   `sonotron-server`. Not a reshape of the ABI itself — `abi.hpp` stays FROZEN v1
+   (`sizeof(OutEvent)==16`, `test_abi_frozen` intact); the ABI waiver this could have
+   spent stays UNSPENT.
 
 ---
 
