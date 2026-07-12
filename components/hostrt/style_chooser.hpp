@@ -1,9 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "arrangrr/arranger/style.hpp"
 #include "note_names.hpp"
 #include "ui_style.hpp"
 
@@ -12,14 +12,41 @@
 // renders render() into the contextual panel, then, on ENTER/CTRL+\, issues the
 // resolved (style index, section, immediate) as a kStyleSwitch command. Keeping
 // this a pure value object makes it trivially unit-testable and portable.
+//
+// Seam D (docs/design/orchestrator-pipeline-extraction.md §17.2), Phase 3b:
+// decoupled from the core `arrangrr::SectionType` -- `SectionKind` below
+// mirrors its stable, additive-only ABI-numbered vocabulary (arrangrr/
+// arranger/style_model.hpp), arrangrr-free. Today (Phase 3b) the caller
+// (`Shell`, already core-linking) casts to/from the core `SectionType` at the
+// boundary (both are std::uint8_t-valued 1:1, same numbering); a future pure
+// client (Phase 3c) would build the same values straight off the parsed
+// kSection/kParamState wire codes. No behavior change either way.
 
 namespace arrangrr::host {
+
+// Mirrors arrangrr::SectionType's raw values one-to-one (arrangrr/arranger/
+// style_model.hpp) -- pure data, no core type.
+enum class SectionKind : std::uint8_t {
+  kIntro1 = 0,
+  kIntro2 = 1,
+  kVarA = 2,
+  kVarB = 3,
+  kVarC = 4,
+  kVarD = 5,
+  kFillA = 6,
+  kFillB = 7,
+  kFillC = 8,
+  kFillD = 9,
+  kBreak = 10,
+  kEnding1 = 11,
+  kEnding2 = 12,
+};
 
 // One selectable built-in style, built by the caller from styles::kBuiltins.
 struct StyleInfo {
   int index = 0;                      // builtin index (matched by the core)
   std::string name;                   // display only, e.g. "basic"
-  std::vector<SectionType> sections;  // the sections this style actually defines
+  std::vector<SectionKind> sections;  // the sections this style actually defines
 };
 
 // How ENTER vs CTRL+\ apply the switch. The chooser only reports intent; the
@@ -45,7 +72,7 @@ class StyleChooser {
   // Absolute placement: highlight the (filtered) style whose StyleInfo.index is
   // `style_index` and the section of that type, clamping when either is absent.
   // Used to seed the chooser from the arranger's live style/section.
-  void select(int style_index, SectionType section);
+  void select(int style_index, SectionKind section);
 
   const std::string& filter() const { return m_filter; }
 
@@ -58,7 +85,7 @@ class StyleChooser {
   const StyleInfo* selected_style() const;
 
   // The highlighted section of the selected style (kVarA when none).
-  SectionType selected_section() const;
+  SectionKind selected_section() const;
 
   // Compact block for the contextual panel: a "style:" line, a "section:" line,
   // and a hint line. The currently highlighted style/section are styled bold+

@@ -12,33 +12,33 @@ constexpr char kUnselectedMarker = ' ';
 constexpr char kDigitLow = '0';
 constexpr char kDigitHigh = '9';
 
-const char* section_short_name(SectionType t) {
+const char* section_short_name(SectionKind t) {
   switch (t) {
-    case SectionType::kIntro1:
+    case SectionKind::kIntro1:
       return "Intro1";
-    case SectionType::kIntro2:
+    case SectionKind::kIntro2:
       return "Intro2";
-    case SectionType::kVarA:
+    case SectionKind::kVarA:
       return "VarA";
-    case SectionType::kVarB:
+    case SectionKind::kVarB:
       return "VarB";
-    case SectionType::kVarC:
+    case SectionKind::kVarC:
       return "VarC";
-    case SectionType::kVarD:
+    case SectionKind::kVarD:
       return "VarD";
-    case SectionType::kFillA:
+    case SectionKind::kFillA:
       return "FillA";
-    case SectionType::kFillB:
+    case SectionKind::kFillB:
       return "FillB";
-    case SectionType::kFillC:
+    case SectionKind::kFillC:
       return "FillC";
-    case SectionType::kFillD:
+    case SectionKind::kFillD:
       return "FillD";
-    case SectionType::kBreak:
+    case SectionKind::kBreak:
       return "Break";
-    case SectionType::kEnding1:
+    case SectionKind::kEnding1:
       return "Ending1";
-    case SectionType::kEnding2:
+    case SectionKind::kEnding2:
       return "Ending2";
   }
   return "?";
@@ -101,7 +101,7 @@ void StyleChooser::nav_style(int delta) {
   // Preserve the highlighted variation across the style change: remember its
   // TYPE, move, then re-find that type in the new style (all builtins share the
   // same section vocabulary, so this normally succeeds; clamp if it does not).
-  const SectionType keep = selected_section();
+  const SectionKind keep = selected_section();
   m_style_pos = next;
   const StyleInfo* style = selected_style();
   if (style == nullptr || style->sections.empty()) {
@@ -123,7 +123,7 @@ void StyleChooser::nav_section(int delta) {
   m_section_pos = clamp_index(m_section_pos + delta, count);
 }
 
-void StyleChooser::select(int style_index, SectionType section) {
+void StyleChooser::select(int style_index, SectionKind section) {
   const std::vector<std::size_t> indices = filtered_indices();
   for (std::size_t pos = 0; pos < indices.size(); ++pos) {
     if (m_styles[indices[pos]].index == style_index) {
@@ -161,10 +161,10 @@ const StyleInfo* StyleChooser::selected_style() const {
   return &m_styles[indices[static_cast<std::size_t>(pos)]];
 }
 
-SectionType StyleChooser::selected_section() const {
+SectionKind StyleChooser::selected_section() const {
   const StyleInfo* style = selected_style();
   if (style == nullptr || style->sections.empty()) {
-    return SectionType::kVarA;
+    return SectionKind::kVarA;
   }
   const int pos = clamp_index(m_section_pos, static_cast<int>(style->sections.size()));
   return style->sections[static_cast<std::size_t>(pos)];

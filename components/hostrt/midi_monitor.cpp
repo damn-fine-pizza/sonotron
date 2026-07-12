@@ -199,11 +199,9 @@ std::vector<PianoVisualEvent> PianoVisualEventBuffer::recent_events() const {
   return out;
 }
 
-void MidiMonitor::observe(const OutEvent& event, char source_key) {
-  // Only real MIDI output ever enters the log or the note models.
-  if (event.kind != OutEvent::Kind::kMidi) {
-    return;
-  }
+void MidiMonitor::observe(const MidiOutEvent& event, char source_key) {
+  // Only real MIDI output ever reaches here -- the caller (Shell) already
+  // selected OutEvent::Kind::kMidi before building this mirror (Seam D, §17.2).
 
   // Consecutive events on the same tick get 0,1,2...; a new tick resets. The
   // very first event of all lands on index 0.

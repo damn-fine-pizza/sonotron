@@ -1318,7 +1318,7 @@ void test_styles_panel_chooser() {
   // Move the section highlight, then CTRL+\ applies immediately (transport
   // stopped) and KEEPS focus on the styles panel.
   f.shell.chooser_nav_section(+1);
-  const SectionType want = f.shell.chooser().selected_section();
+  const SectionType want = static_cast<SectionType>(f.shell.chooser().selected_section());
   f.events.clear();
   CHECK(f.shell.handle_ui_key(kCtrlApplyNow));
   CHECK(f.shell.styles_focused());  // applying keeps focus
@@ -1331,7 +1331,7 @@ void test_styles_panel_chooser() {
 
   // ENTER also applies and stays focused.
   f.shell.chooser_nav_section(+1);
-  const SectionType want2 = f.shell.chooser().selected_section();
+  const SectionType want2 = static_cast<SectionType>(f.shell.chooser().selected_section());
   CHECK(f.shell.handle_ui_key(kEnter));
   CHECK(f.shell.styles_focused());
   CHECK(f.shell.engine().arranger().current() == want2);
@@ -1476,7 +1476,7 @@ void test_style_stepping_and_reclamp() {
   // Step the style back one: whatever section the chooser shows is exactly what
   // gets applied, and the style lands one before the last.
   CHECK(f.shell.handle_ui_key(kStepStylePrev));
-  const SectionType shown = f.shell.chooser().selected_section();
+  const SectionType shown = static_cast<SectionType>(f.shell.chooser().selected_section());
   f.shell.apply_style_step();
   CHECK(f.shell.engine().arranger().current() == shown);
   CHECK(f.shell.engine().arranger().current_style() ==
@@ -1500,7 +1500,7 @@ void test_step_mirrors_chooser() {
   CHECK(f.shell.style_step_gen() == gen0 + 1);
   CHECK(f.shell.engine().arranger().current() == before);  // debounced, not yet applied
 
-  const SectionType want = f.shell.chooser().selected_section();
+  const SectionType want = static_cast<SectionType>(f.shell.chooser().selected_section());
   f.shell.apply_style_step();
   CHECK(!f.shell.style_step_pending());
   CHECK(f.shell.engine().arranger().current() == want);

@@ -7,17 +7,16 @@
 
 namespace {
 
-using namespace arrangrr;
 using namespace arrangrr::host;
 
 std::vector<StyleInfo> make_styles() {
   // Indices chosen to exercise substring matching: "13" hits 13, 113, 130, 213;
   // "130" hits only 130.
   return {
-      {.index = 13, .name = "alpha", .sections = {SectionType::kVarA, SectionType::kVarB}},
-      {.index = 113, .name = "bravo", .sections = {SectionType::kVarA}},
-      {.index = 130, .name = "charlie", .sections = {SectionType::kVarA, SectionType::kFillA}},
-      {.index = 213, .name = "delta", .sections = {SectionType::kIntro1, SectionType::kVarA}},
+      {.index = 13, .name = "alpha", .sections = {SectionKind::kVarA, SectionKind::kVarB}},
+      {.index = 113, .name = "bravo", .sections = {SectionKind::kVarA}},
+      {.index = 130, .name = "charlie", .sections = {SectionKind::kVarA, SectionKind::kFillA}},
+      {.index = 213, .name = "delta", .sections = {SectionKind::kIntro1, SectionKind::kVarA}},
   };
 }
 
@@ -56,7 +55,7 @@ void test_selected_null_when_no_match() {
   c.feed_digit('9');  // matches nothing
   CHECK(c.filtered().empty());
   CHECK(c.selected_style() == nullptr);
-  CHECK(c.selected_section() == SectionType::kVarA);  // safe default
+  CHECK(c.selected_section() == SectionKind::kVarA);  // safe default
 }
 
 void test_filter_resets_style_highlight() {
@@ -70,20 +69,20 @@ void test_filter_resets_style_highlight() {
 void test_nav_style_preserves_section_by_type() {
   StyleChooser c{make_styles()};  // 13{VarA,VarB} 113{VarA} 130{VarA,FillA} 213{Intro1,VarA}
   // On 13, VarA sits at position 0.
-  CHECK(c.selected_section() == SectionType::kVarA);
+  CHECK(c.selected_section() == SectionKind::kVarA);
   // Jump to 213, where VarA sits at position 1: the section TYPE is preserved
   // (not the numeric index) — the same variation stays highlighted.
   c.nav_style(3);
   CHECK(c.selected_style()->index == 213);
-  CHECK(c.selected_section() == SectionType::kVarA);
+  CHECK(c.selected_section() == SectionKind::kVarA);
 
   // Select VarB on 13, then move to 113 which lacks VarB -> clamps into its list.
   StyleChooser d{make_styles()};
   d.nav_section(1);
-  CHECK(d.selected_section() == SectionType::kVarB);
+  CHECK(d.selected_section() == SectionKind::kVarB);
   d.nav_style(1);  // 113 has only VarA
   CHECK(d.selected_style()->index == 113);
-  CHECK(d.selected_section() == SectionType::kVarA);
+  CHECK(d.selected_section() == SectionKind::kVarA);
 
   // Clamp at the ends: repeated up/down rest on the first/last style.
   d.nav_style(-10);
@@ -95,21 +94,21 @@ void test_nav_style_preserves_section_by_type() {
 void test_select_absolute() {
   StyleChooser c{make_styles()};
   // Absolute placement by (style index, section type).
-  c.select(130, SectionType::kFillA);
+  c.select(130, SectionKind::kFillA);
   CHECK(c.selected_style()->index == 130);
-  CHECK(c.selected_section() == SectionType::kFillA);
+  CHECK(c.selected_section() == SectionKind::kFillA);
   // A section absent from the target style clamps to that style's first.
-  c.select(113, SectionType::kFillA);
+  c.select(113, SectionKind::kFillA);
   CHECK(c.selected_style()->index == 113);
-  CHECK(c.selected_section() == SectionType::kVarA);
+  CHECK(c.selected_section() == SectionKind::kVarA);
 }
 
 void test_nav_section_clamps() {
   StyleChooser c{make_styles()};  // index 13 has {VarA, VarB}
   c.nav_section(-5);
-  CHECK(c.selected_section() == SectionType::kVarA);  // clamp low
+  CHECK(c.selected_section() == SectionKind::kVarA);  // clamp low
   c.nav_section(9);
-  CHECK(c.selected_section() == SectionType::kVarB);  // clamp high (2 sections)
+  CHECK(c.selected_section() == SectionKind::kVarB);  // clamp high (2 sections)
 }
 
 void test_render_contents() {

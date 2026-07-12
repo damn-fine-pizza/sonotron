@@ -43,7 +43,8 @@ void Shell::seed_chooser_selection() {
     }
   }
   const SectionType current = m_engine.arranger().current();
-  m_chooser.select(idx, current);
+  // Seam D (§17.2): the chooser only sees the SectionKind mirror.
+  m_chooser.select(idx, static_cast<SectionKind>(current));
   // Mirror into the debounced pending so a following step continues from here.
   m_step_style_index = idx;
   m_step_section = current;
@@ -129,7 +130,9 @@ void Shell::style_step(StyleStepAxis axis, int delta) {
   if (const StyleInfo* style = m_chooser.selected_style(); style != nullptr) {
     m_step_style_index = style->index;
   }
-  m_step_section = m_chooser.selected_section();
+  // Seam D (§17.2): cast the chooser's SectionKind mirror back to the core
+  // SectionType this debounced pending is expressed in.
+  m_step_section = static_cast<SectionType>(m_chooser.selected_section());
   ++m_style_step_gen;
   m_style_step_pending = true;
   (void)push_panels();

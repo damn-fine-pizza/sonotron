@@ -32,14 +32,16 @@ constexpr std::uint8_t kMidiSourcePort = 1;
 
 // Builds the selectable style list from the built-ins the core matches by
 // index; each style advertises exactly the sections it defines. Used to seed
-// the always-present chooser.
+// the always-present chooser. Seam D (§17.2): the core SectionType is cast to
+// the panel's arrangrr-free SectionKind mirror at this boundary (both are
+// std::uint8_t-valued 1:1, same numbering).
 std::vector<StyleInfo> build_style_infos() {
   std::vector<StyleInfo> infos;
   for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
     const Style* style = styles::kBuiltins[i];
     StyleInfo info{.index = static_cast<int>(i), .name = style->name, .sections = {}};
     for (const StyleSection& section : style->sections) {
-      info.sections.push_back(section.type);
+      info.sections.push_back(static_cast<SectionKind>(section.type));
     }
     infos.push_back(std::move(info));
   }
@@ -112,8 +114,16 @@ Shell::Shell(EventSink sink)
           }),
       // Every host-visible OutEvent flows through the monitor before the user
       // sink: the MIDI monitor observes exactly what the host emits (H2).
+      // Seam D (§17.2): midi_monitor.hpp no longer sees the core OutEvent /
+      // abi.hpp -- Shell (already core-linking) is the boundary that selects
+      // the kMidi events and converts them into the panel's MidiOutEvent
+      // mirror; every other kind is filtered out here exactly as
+      // MidiMonitor::observe used to filter it internally.
       m_sink([this, user = std::move(sink)](const OutEvent& ev) {
-        m_monitor.observe(ev, m_pending_source_key);
+        if (ev.kind == OutEvent::Kind::kMidi) {
+          m_monitor.observe(MidiOutEvent{.port = ev.port, .msg = ev.msg, .tick = ev.tick},
+                            m_pending_source_key);
+        }
         user(ev);
       }),
       m_chooser(build_style_infos()) {

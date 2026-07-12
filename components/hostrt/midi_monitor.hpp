@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "arrangrr/abi.hpp"
 #include "common/midi/message.hpp"
 
 // Host-only MIDI monitor model (H2, docs/TUI_SPEC.md): normalized visible
@@ -15,6 +14,15 @@
 // formatting. Observes the host-visible OUTPUT event stream (every OutEvent
 // the shell sink sees) — it does not see raw inputs that produce no output.
 // All storage is bounded; no core involvement.
+//
+// Seam D (docs/design/orchestrator-pipeline-extraction.md §17.2), Phase 3b:
+// decoupled from the core `arrangrr::OutEvent` / `arrangrr/abi.hpp` (resolves
+// the §17.2 midi_monitor fork) -- `MidiOutEvent` below carries only the
+// `kMidi`-kind fields, arrangrr-free. Today (Phase 3b) the caller (`Shell`,
+// already core-linking) selects the kMidi OutEvents off its live in-process
+// sink and converts them here (every other Kind never reaches the monitor,
+// exactly as observe() used to filter internally); a future pure client
+// (Phase 3c) would build the same shape from parsed kMidi wire events.
 
 namespace arrangrr::host {
 
@@ -67,6 +75,15 @@ struct MidiEventFilter {
 };
 
 bool filter_passes(const MidiEventFilter& filter, const MidiLogEvent& event);
+
+// Pure mirror of the core OutEvent's kMidi-kind shape -- no core type. The
+// caller (Shell) has already decided this is a MIDI output event before
+// building one of these.
+struct MidiOutEvent {
+  std::uint8_t port = 0;
+  MidiMessage msg{};
+  std::uint32_t tick = 0;
+};
 
 struct MidiViewOptions {
   bool show_note_names = true;
@@ -134,7 +151,7 @@ class MidiMonitor {
  public:
   // `source_key` annotates the piano key that caused the next matching
   // note-on (0 for everything else).
-  void observe(const OutEvent& event, char source_key = 0);
+  void observe(const MidiOutEvent& event, char source_key = 0);
   void clear();
 
   const ActiveNoteTracker& active_notes() const { return m_active; }

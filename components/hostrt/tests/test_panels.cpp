@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-#include "arrangrr/abi.hpp"
 #include "midi_monitor.hpp"
 #include "note_names.hpp"
 #include "panel_manager.hpp"
@@ -16,6 +15,14 @@ namespace {
 
 using namespace arrangrr;
 using namespace arrangrr::host;
+
+// Builds the MidiMonitor's pure MidiOutEvent mirror (Seam D, §17.2): the
+// monitor no longer sees the core OutEvent / abi.hpp, so these tests build
+// the shape a MIDI-kind OutEvent would carry directly, exactly as Shell's
+// sink does at the boundary.
+MidiOutEvent midi_event(std::uint8_t port, const MidiMessage& msg, std::uint32_t tick) {
+  return MidiOutEvent{.port = port, .msg = msg, .tick = tick};
+}
 
 bool any_line_contains(const std::vector<std::string>& lines, const char* needle) {
   for (const std::string& line : lines) {
@@ -484,21 +491,21 @@ void test_visual_event_buffer() {
 
 void test_midi_monitor_observe() {
   MidiMonitor monitor;
-  monitor.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 10));
+  monitor.observe(midi_event(0, MidiMessage::note_on(0, 60, 100), 10));
   CHECK(monitor.active_notes().size() == 1);
   CHECK(monitor.log_events(MidiEventFilter{}).size() == 1);
   CHECK(monitor.log_events(MidiEventFilter{})[0].same_tick_index == 0);
 
-  monitor.observe(OutEvent::midi(0, MidiMessage::note_off(0, 60), 20));
+  monitor.observe(midi_event(0, MidiMessage::note_off(0, 60), 20));
   CHECK(monitor.active_notes().size() == 0);
   CHECK(monitor.log_events(MidiEventFilter{}).size() == 2);
 
   // same_tick_index increments among equal ticks and resets on a new tick.
   MidiMonitor ticks;
-  ticks.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 100));
-  ticks.observe(OutEvent::midi(0, MidiMessage::note_on(0, 62, 100), 100));
-  ticks.observe(OutEvent::midi(0, MidiMessage::note_on(0, 64, 100), 100));
-  ticks.observe(OutEvent::midi(0, MidiMessage::note_on(0, 65, 100), 200));
+  ticks.observe(midi_event(0, MidiMessage::note_on(0, 60, 100), 100));
+  ticks.observe(midi_event(0, MidiMessage::note_on(0, 62, 100), 100));
+  ticks.observe(midi_event(0, MidiMessage::note_on(0, 64, 100), 100));
+  ticks.observe(midi_event(0, MidiMessage::note_on(0, 65, 100), 200));
   const std::vector<MidiLogEvent> log = ticks.log_events(MidiEventFilter{});
   CHECK(log.size() == 4);
   CHECK(log[0].same_tick_index == 0);
@@ -509,33 +516,31 @@ void test_midi_monitor_observe() {
   // Log is bounded and keeps the newest entries.
   MidiMonitor capped;
   for (int i = 0; i < 300; ++i) {
-    capped.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), static_cast<Tick>(i)));
+    capped.observe(midi_event(0, MidiMessage::note_on(0, 60, 100), static_cast<std::uint32_t>(i)));
   }
   CHECK(capped.log_events(MidiEventFilter{}).size() == monitor_limits::kLogCapacity);
   CHECK(capped.log_events(MidiEventFilter{}).front().tick == 44);
 
   // log_events applies the filter.
   MidiMonitor filtered;
-  filtered.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 100), 10));
-  filtered.observe(OutEvent::midi(0, MidiMessage::note_on(1, 62, 100), 10));
+  filtered.observe(midi_event(0, MidiMessage::note_on(0, 60, 100), 10));
+  filtered.observe(midi_event(0, MidiMessage::note_on(1, 62, 100), 10));
   MidiEventFilter only_ch1{};
   only_ch1.channel = std::uint8_t{1};
   CHECK(filtered.log_events(only_ch1).size() == 1);
 
-  // Non-MIDI events are ignored entirely.
-  MidiMonitor non_midi;
-  non_midi.observe(OutEvent::warn(WarnCode::kSchedulerFull, 5));
-  CHECK(non_midi.log_events(MidiEventFilter{}).empty());
-  CHECK(non_midi.active_notes().size() == 0);
+  // Non-MIDI OutEvents are now excluded structurally (Seam D, §17.2): the
+  // monitor's observe() only accepts the MidiOutEvent mirror, which cannot
+  // represent any other OutEvent::Kind -- the caller (Shell) selects kMidi
+  // before one is ever built (see shell.cpp's sink lambda).
 
   // Overflow flag trips once the 129th distinct held note is rejected.
   MidiMonitor overflow;
   for (int i = 0; i < 128; ++i) {
-    overflow.observe(
-        OutEvent::midi(0, MidiMessage::note_on(0, static_cast<std::uint8_t>(i), 100), 0));
+    overflow.observe(midi_event(0, MidiMessage::note_on(0, static_cast<std::uint8_t>(i), 100), 0));
   }
   CHECK(!overflow.tracker_overflowed());
-  overflow.observe(OutEvent::midi(1, MidiMessage::note_on(0, 0, 100), 0));  // distinct via port
+  overflow.observe(midi_event(1, MidiMessage::note_on(0, 0, 100), 0));  // distinct via port
   CHECK(overflow.tracker_overflowed());
 
   overflow.clear();
@@ -545,7 +550,7 @@ void test_midi_monitor_observe() {
 
 void test_monitor_renderers() {
   MidiMonitor monitor;
-  monitor.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
+  monitor.observe(midi_event(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
 
   const MidiEventFilter filter{};
   const MidiViewOptions options{};
@@ -608,7 +613,7 @@ bool has_escape(const std::string& s) { return s.find(ansi::kEscape) != std::str
 
 void test_piano_styling() {
   MidiMonitor monitor;
-  monitor.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
+  monitor.observe(midi_event(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
 
   const MidiEventFilter filter{};
   const MidiViewOptions options{};
@@ -729,7 +734,7 @@ void test_piano_harmony_overlay() {
   // A key already sounding keeps its own colour: a live piano C4 stays the piano
   // key, not committed-green.
   MidiMonitor live;
-  live.observe(OutEvent::midi(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
+  live.observe(midi_event(0, MidiMessage::note_on(0, 60, 96), 100), 'A');
   const std::vector<std::string> on_live =
       render_piano_panel(keyboard, 100, live, filter, options, on, overlay);
   CHECK(any_line_contains(on_live, on.apply(UiRole::kPianoActiveKey, "A").c_str()));
