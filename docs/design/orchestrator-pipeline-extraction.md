@@ -953,3 +953,267 @@ three-component shape:
       branch coverage of a header with no branches").
 
 **Verdict**: Phase-1 green gate holds, PROVIDED the corrections in §14.5 land first.
+
+---
+
+## 15. Phase-2 in-process review (Corelli, 2026-07-12)
+
+Triggered by: `docs/design/sonotron-server-phase2-brief.md`, the owner's mid-milestone
+reshape of Phase 2 (library-in-one-binary/two-threads/in-process rings, superseding the
+separate-binary-over-UDS reading of §4/§5 above for Phase 2 only). This section reviews
+that brief against the stable `Command`/`OutEvent` ABI (`abi.hpp:167-296`), against
+`apps/gui-sonotron/src/app_state.cpp`'s `BrainEvent` decode, and against the Phase-1
+tree as it exists right now (`components/common`, `components/runtime/{runtime,stage}.hpp`
+already landed, per §14). Read-only on product code; the only write is this section. The
+topology fork itself (library not binary; POD-on-ring, JSONL inter-process only; naming)
+is **owner-closed and not reopened below** — every verdict here either holds it or flags a
+collision with a DIFFERENT, separately-locked decision.
+
+### 15.1 Topology: lib-not-binary + Option A — HOLDS, with one load-bearing collision to flag
+
+**Option A (compose `Runtime<StageT,N>` + the arrangrr stage directly, orchestrator
+deferred to Phase 4) does not need to be reopened by threading.** `runtime/runtime.hpp`
+as landed (`components/runtime/include/runtime/runtime.hpp:43-89`) is an ordinary
+synchronous template — `advance_ticks`/`push_command` are plain method calls with no
+internal synchronization, driven by whatever loop calls them. Today that loop is
+`cli-arrangrr`'s single-threaded tick timer; tomorrow it is Phase 2's dedicated engine
+thread. **Which thread calls `Runtime::advance_ticks` is a driving-loop concern, not a
+multi-stage-composition concern** — the orchestrator's job (per `project-structure.md`
+and this doc's own §3.5) is composing N *stage* instances into a pipeline, which is
+orthogonal to which OS thread owns the single `Runtime` instance. Threading in-process
+does **not** manufacture a need for the orchestrator abstraction ahead of schedule. Verdict:
+**HOLD.**
+
+**The collision to flag (not a reopening of the topology fork, but a genuine hit on a
+DIFFERENT locked decision):** the brief's "GUI binary links the server library and runs
+the engine on a dedicated thread" (brief lines 26-28) means the GUI **binary** now links
+`components/runtime` + `components/arrangrr` + the non-TUI `hostrt` files directly. This
+is a literal, unavoidable collision with the **currently locked, tested, and cited** D38
+GUI-purity rule:
+- `docs/design/gui-contract-map.md:7`: *"The GUI is a **separate process, pure client**. It
+  never links or `#include`s the core."*
+- `docs/design/gui-contract-map.md:61-63` (Rule 1): *"the GUI target links **neither
+  `arrangrr` nor `hostrt`**, and `#include`s **zero** core headers."*
+- `docs/design/gui-contract-map.md:64-70` (Rule 2): *"the GUI carries its own wire layer
+  … **own** name tables … **Never** `static_cast<ChordQuality>`/`static_cast<SectionType>`
+  a core enum."*
+- Enforced today, not aspirational: `apps/gui-sonotron/CMakeLists.txt:1-11` states and
+  builds against "links neither arrangrr_core nor hostrt … zero core headers", and
+  `apps/gui-sonotron/src/brain_event.hpp:7-13` restates the same invariant in the source
+  itself ("no arrangrr core headers … The GUI is a pure client … it never links the core
+  and never sees a core enum").
+
+The brief supersedes §4/§5's **process topology** ("separate binary over UDS" → "one
+binary, two threads"). It does **not**, anywhere in its text, say it also supersedes D38's
+**GUI-purity** invariant — and taken literally it cannot be honoured alongside it: you
+cannot construct/drive an `arrangrr` Stage on a thread inside a binary that also
+"never links `#include`s zero core headers." These are two different decisions
+(process-count vs. dependency-purity) that happen to have been co-located in the same
+GUI target until now; the brief silently collapses both when only the first was
+owner-directed. **This needs an explicit owner call, not a silent default** — see §15.7 for
+the concrete resolution that satisfies both without reopening either fork.
+
+### 15.2 The ring contract — the brief contradicts itself, and that is the actual defect to fix before Nazzareno touches it
+
+The brief states, in the same paragraph: *"the engine drain is **wait-free** — it never
+blocks and never allocates"* (line 42-43) and, three lines later, *"a simple
+`std::mutex`-guarded bounded queue is acceptable for the first cut"* (line 59-60). **These
+two sentences cannot both be true.** A mutex-guarded queue is not wait-free by
+construction: if the GUI-thread producer is preempted by the OS scheduler while inside the
+locked critical section (a real, not hypothetical, event under GPU/vsync-thread load —
+exactly the stall condition the brief is trying to protect the engine from), the
+engine-thread consumer's lock acquisition blocks for an OS-scheduling-defined, unbounded
+duration. That is priority inversion, and it is precisely the failure mode "wait-free"
+promises does not happen. **This is the load-bearing open decision the brief itself flags
+(line 91-94) — and it is not resolved by picking either horn silently; it must be picked
+before Nazzareno writes the ring.**
+
+Concretely worse than the brief's prose suggests: the engine's `EventSink` is called once
+**per produced `OutEvent`**, not once per tick (`arrangrr::Engine::EventSink =
+FunctionRef<void(const OutEvent&)>`, `engine.hpp:58`, called from `flush()`/`fire_*` for
+every scheduled note, chord, beat, transport, warn event due that tick). A single bar
+boundary can synchronously emit a burst of several `OutEvent`s from one `advance_ticks`
+call. Under a mutex-first design that is a lock/unlock pair **per event in the burst**, not
+once per pump — multiplying the inversion-exposure surface, not a single small window.
+
+**Traps to constrain, whichever the owner picks:**
+- **Full/empty disambiguation**: with only `head`/`tail` indices, `head == tail` is
+  ambiguous between empty and full unless the ring reserves one slot (capacity `N`, usable
+  `N-1`) or carries an explicit atomic count. Nazzareno's implementation must pick one
+  explicitly, not discover it works "by luck" for the current 4/8-slot test sizes.
+- **False sharing**: `head` (engine-owned) and `tail` (GUI-owned) must sit on separate
+  cache lines (padding to the platform's cache-line size) — otherwise every push/pop
+  ping-pongs the same cache line between cores, degrading exactly the "never stalls" claim
+  even in a correct lock-free implementation.
+- **Memory ordering**: producer publishes the slot's payload, *then* releases the updated
+  index (`memory_order_release`); consumer acquires the index before reading the payload
+  (`memory_order_acquire`). This is the standard SPSC pattern (no CAS loop needed — single
+  writer, single reader — genuinely the easiest lock-free shape to get right, not the
+  general lock-free-queue hard problem).
+- **Asymmetric overflow policy, not one rule for both rings**: the brief states "a full
+  ring drops / applies backpressure" as if symmetric. It should not be. The existing,
+  precedented policy (which the brief itself invokes — "same logical shape as today's D38
+  socket") is **asymmetric**: engine→GUI (`OutEvent`) is best-effort/lossy today (the UDS
+  broadcast already drops for a slow client — `gui-contract-map.md:23-24`, "best-effort; a
+  slow client drops events rather than stalling MIDI"), so dropping under backpressure on
+  that ring is a faithful continuation, not a new behavior. GUI→engine (`Command`) has **no
+  drop precedent today** — the existing UDS path is a reliable byte stream (the kernel
+  socket buffer absorbs backpressure; `Shell::exec_line` processes every line). Silently
+  dropping a user-authored command (a keypress, a chord-play) on a full ring would be a
+  **regression**, not parity. Recommendation: size the `Command` ring generously (human
+  input rate is orders of magnitude below tick rate; even 512-1024 slots of a 20 B struct
+  is ~10-20 KB, trivial) so overflow is a near-unreachable pathology, and treat an actual
+  overflow as a `WarnCode`-class event (mirroring `kSchedulerFull`'s own precedent,
+  `abi.hpp:179`), not a silent drop.
+
+**My recommendation on mutex-vs-lock-free**: skip the mutex-first phase. SPSC lock-free (no
+mutex, atomic indices with acquire/release, one reserved empty slot) is a small,
+well-understood, independently-unit-testable primitive — not the general lock-free-anything
+problem the "harden later" framing implies. Starting mutex-guarded resolves the
+contradiction above only by *quietly downgrading* the "wait-free" claim to false for
+Phase 2's entire first landing, and "harden later" migrations of this exact kind routinely
+never happen once goldens are green. This is **SHIPPABLE, HOST-ONLY, no new dependency**
+(plain `<atomic>`), so it is not blocked on anything the owner needs to flag/cost — it is a
+straight technical call I recommend making now rather than deferring.
+
+### 15.3 Double decode — real drift risk, concretely located, not hypothetical
+
+**Yes, a real risk, and it is already visible in the shape of the existing code, not a
+speculative future problem.** `to_jsonl(const OutEvent&, bool prefer_flats)`
+(`components/hostrt/jsonl.cpp:192-256`) is the **only** current OutEvent→label renderer,
+and it is backed by a set of `namespace {}`-private helpers in that same file:
+`quality_suffix` (86-112), `roman_degree` (114-133), `note_label`/`followed_label`
+(68-76, 170-176), `section_name` (78-84), `warn_name` (15-26, with a `static_assert` tying
+its table size to `kWarnCodeCount` — a real safety net), `transport_name` (28-37),
+`producer_name` (178-188). Today the GUI's `parse_brain_event`
+(`apps/gui-sonotron/src/brain_event.cpp:284-343`) never re-derives any of these — it only
+**extracts already-rendered strings** the host computed (`ev.chord_out =
+obj.get_string("out")`), which is exactly what `gui-contract-map.md`'s Rule 2 mandates
+("own name tables … never `static_cast` a core enum") and why there is no drift today.
+
+The brief's `brain_event_from_outevent(OutEvent) → BrainEvent` (line 65-68) breaks this
+invariant by construction: to populate `BrainEvent`'s string fields directly from a raw
+`OutEvent`, it must **recompute** the same label set `to_jsonl`'s private helpers already
+compute — degree Roman numerals, chord-quality suffixes, note/pitch names, section/warn/
+transport/producer names. Written as a second, independent implementation (which is what
+"in-process, more fundamental decode" implies if nothing is refactored), this is precisely
+a drift risk: two enum→string tables that must be kept in lockstep by hand, one of which
+(`warn_name`) currently enjoys a compile-time `static_assert` guarding it against a missed
+append and the other of which would not, unless duplicated too.
+
+**One more concrete, currently-invisible gap in the brief's one-argument signature**:
+`to_jsonl`/`to_human` take a **second** parameter, `prefer_flats`, which is not part of the
+ABI at all — it is derived host-side state (`Shell::m_prefer_flats`, set by
+`key_prefers_flats(root, mode)` in `components/hostrt/shell_music_commands.cpp:106,599`
+whenever the key changes) threaded in from whichever `Shell`/dispatch object is rendering.
+`brain_event_from_outevent(OutEvent) → BrainEvent`, as literally specified with one
+argument, has nowhere to get this from. Whatever holds the engine-thread's dispatch state
+post-split must also carry (and pass) this per-connection-equivalent rendering preference,
+exactly as `to_jsonl` does today — an implicit second input the brief's contract text
+omits.
+
+**Recommendation (answers the owner's own question 3 directly, but corrects the proposed
+mechanism):** the fix is not "JSONL confluisces into the OutEvent→BrainEvent path" (that
+direction is strictly harder and lossy — `to_jsonl` already destroys the raw enum values
+into rendered text like `"Cmaj7"`; parsing that back into `(root_pc, quality)` would need a
+new note-name parser that does not exist and is not needed). The fix is the **other**
+direction: extract the *currently-private* label-computation helpers out of
+`jsonl.cpp`'s anonymous namespace into a small, exported, host-only module (a
+`components/hostrt/event_format.hpp` or similar — Palladio's placement call, not mine),
+and have **both** `to_jsonl` (unchanged, still serving the socket/goldens path) **and** a
+new `to_brain_event(const OutEvent&, bool prefer_flats)` call the **same** shared helpers —
+one emitting JSONL text, the other populating `BrainEvent`'s fields directly. This
+collapses "two decode paths" into "one label-computation core, two thin serializers,"
+closing the drift risk instead of accepting it as a cost of "more fundamental."
+
+### 15.4 "Ring and socket are interchangeable, same contract" — true for the POD, not (yet) for the full pipeline
+
+The raw-struct claim is true and cheap to keep true: `Command`/`OutEvent` are the same 20 B/
+16 B PODs on both paths, and nothing in Phase 2 reshapes `abi.hpp` (`test_abi_frozen.cpp`
+stays unedited, confirmed no ABI drift). But "interchangeable" oversells the **maintenance**
+picture unless §15.3's extraction lands: as specified, the brief creates a second labeling
+implementation living only in-process, alongside the first living only in `jsonl.cpp` —
+that is a hidden seam, not parity, exactly the "manutenzione nascosta" the owner's question
+4 suspected. With §15.3's shared-helper extraction, the claim becomes durably true: same
+POD, same label computation, two thin front ends (text serializer vs. struct populator).
+Without it, the claim is true only until the first `WarnCode`/`SectionType`/quality
+enumerator is appended and only one of the two tables is updated — a silent, hard-to-catch
+divergence (the golden tests would not catch it: they exercise the socket/JSONL path only,
+never the in-process decode).
+
+### 15.5 Mutex-first vs. lock-free — see §15.2 (folded there; not a separate independent question)
+
+Answered above: the two claims in the brief are mutually exclusive as written. My verdict:
+go lock-free SPSC from the first landing (SHIPPABLE, HOST-ONLY, no new dependency) rather
+than accept a mutex-guarded queue that quietly falsifies "wait-free" for however long
+"harden later" takes to actually happen.
+
+### 15.6 Conflicts with the Phase-1 topology in flight — none structural; one ownership-discipline note
+
+No collision found against the landed `components/common`/`components/runtime` shape
+(`runtime.hpp:43-89`, `stage.hpp:36-48`, both read directly, current tree state). `Runtime`
+is an ordinary synchronous template with no internal synchronization by design — correct,
+since synchronization is not its job. **The one thing to make explicit before Nazzareno
+implements the engine thread**: `Runtime<StageT,N>` exposes public mutable accessors
+(`transport()`, `stage()`, `runtime.hpp:51-55`) with no thread-tagging of any kind. The
+Phase 2 design's safety entirely depends on an unenforced convention — "only the engine
+thread ever touches the `Runtime` instance; the GUI thread only ever touches the two ring
+endpoints" — that nothing in the type system currently protects. A future maintainer
+"just reading `runtime.stage()` for a quick UI hint" from the GUI thread would be a silent
+data race the ring's own correctness does nothing to prevent. Recommend the Phase 2 code
+make this ownership explicit structurally (e.g., the `Runtime` instance constructed
+**inside** the engine-thread function's own stack/closure, never returning or storing a
+reference reachable from GUI-thread code) rather than leaving it as a comment-only
+discipline.
+
+### 15.7 Synthesis and required corrections
+
+**Verdict: APPROVED WITH REQUIRED CORRECTIONS.** The core reshape — library not binary, two
+threads, in-process POD rings replacing an inter-thread socket — is architecturally sound
+and the right call for a non-distributed single-process product; nothing here reopens that
+fork. The following must be resolved before Nazzareno is dispatched:
+
+1. **D38 GUI-purity collision (§15.1) — resolve explicitly, do not let it default silently.**
+   Recommended resolution that satisfies BOTH the owner's topology directive AND D38's
+   dependency-purity intent: split the merged GUI **binary** internally along the SAME
+   boundary the OS process boundary used to enforce. A new, core-linking "engine-host"
+   library (owns the `Runtime`/arrangrr Stage, the engine thread, the ring endpoints, and
+   §15.3's shared label helpers) is the ONLY thing in the binary that includes
+   `arrangrr`/`runtime`/`hostrt` headers or names `OutEvent`/`ChordQuality`/etc. Everything
+   that exists today as `gui_sonotron_brain`/`gui_sonotron_layout`/`gui_sonotron_models`
+   (`apps/gui-sonotron/CMakeLists.txt:20-65`) stays exactly as core-free as it is now,
+   consuming only the finished `BrainEvent` POD handed across the ring — i.e., "the GUI"
+   in the D38 sense becomes an internal library boundary rather than an OS process
+   boundary, preserving the dependency direction and the "never sees a core enum"
+   discipline at the granularity that actually matters (compilation units and
+   `target_link_libraries` edges), even though the OS-level executable is now singular.
+   This needs an explicit owner sign-off (it is a real amendment to a locked D38 reading,
+   not a mechanical consequence of the already-approved topology change) — flagged as
+   NEEDS-DECISION, not decided unilaterally here.
+2. **Ring contract (§15.2) — pick lock-free SPSC now, not mutex-first.** The brief's own
+   "wait-free" claim and its "mutex-guarded acceptable for the first cut" concession
+   contradict each other; resolve by committing to atomic head/tail SPSC (padded, one
+   reserved slot or explicit count, acquire/release ordering) from the first landing.
+   SHIPPABLE, HOST-ONLY, no new dependency.
+3. **Asymmetric overflow policy (§15.2) — specify per-direction, not one rule for both
+   rings.** `OutEvent` (engine→GUI): drop under backpressure, matching the existing D38
+   broadcast precedent. `Command` (GUI→engine): size generously and treat overflow as a
+   `WarnCode`-class event, never a silent drop — there is no existing precedent for
+   dropping a user-authored command and today's reliable socket path does not either.
+4. **Shared label-helper extraction (§15.3/§15.4) — do this BEFORE writing
+   `brain_event_from_outevent`, not after.** Export `jsonl.cpp`'s currently-private
+   `quality_suffix`/`roman_degree`/`note_label`/`followed_label`/`section_name`/
+   `warn_name`/`transport_name`/`producer_name` into a shared, testable module both
+   `to_jsonl` and the new in-process decode call, closing the two-independent-tables
+   drift risk instead of accepting it. Thread `prefer_flats` (or its Phase-2-split
+   equivalent) through the new decode's signature explicitly — it is not optional context,
+   `to_jsonl` already needs it for the identical labels.
+5. **Ownership discipline for the `Runtime` instance (§15.6)** — construct it so it is
+   structurally unreachable from GUI-thread code (closure-local to the engine-thread
+   function), not merely documented as engine-thread-only.
+
+No new dependency is implied by any of the above; every correction is either a
+`std::atomic`-based ring (already core-doctrine vocabulary, `DESIGN.md:60,582`) or a
+code-organization move within already-owned files. Item 1 is the one genuine
+**NEEDS-DECISION** for the owner; items 2-5 are technical corrections I recommend making
+directly, not forks.
