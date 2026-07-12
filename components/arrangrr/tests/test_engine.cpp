@@ -142,6 +142,58 @@ void test_transport_position_and_bounds() {
   CHECK(t.playing());
 }
 
+// P0-2 determinism proof: kBeat fires exactly on the 24-PPQN pulses with a
+// deterministic bar/beat/pulse sequence, ONLY while playing, and -- unlike
+// the F8 clock byte -- regardless of the clock-out mask (default 0/disabled
+// here, proving it is not gated on clock-out routing).
+void test_beat_heartbeat_cadence() {
+  Engine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+
+  Command start;
+  start.param = Param::kTransportStart;
+  e.push_command(start, sink);
+  ev.clear();
+
+  // Cover one full bar plus one extra beat: 96 pulses/bar (24 * 4 beats) + 24.
+  e.advance_ticks(kTicksPerBar + kTicksPerBeat, sink);
+
+  StaticVector<OutEvent, 128> beats;
+  for (const OutEvent& o : ev) {
+    CHECK(o.kind == OutEvent::Kind::kBeat);  // nothing else fires in a bare engine
+    CHECK(beats.push_back(o));
+  }
+  CHECK(beats.size() == 96 + 24);
+
+  // n counts the 40-tick pulses elapsed since transport start (1-based): the
+  // VERY first pulse (bar 1 beat 1 pulse 0, tick 0) is consumed by Start's
+  // own immediate F8 emission (cmd_transport, mirroring the existing MIDI
+  // clock convention) and never re-fires through advance_ticks, so the
+  // periodic sequence observed here begins at n=1 (bar 1 beat 1 pulse 1);
+  // pulse 0 recurs at n=24, 48, ... marking the START of each later beat.
+  for (std::size_t i = 0; i < beats.size(); ++i) {
+    const std::size_t n = i + 1;
+    const auto expected_pulse = static_cast<std::uint8_t>(n % 24);
+    const auto expected_beat = static_cast<std::uint8_t>((n / 24) % kBeatsPerBar + 1);
+    const auto expected_bar = static_cast<std::uint32_t>(n / (24 * kBeatsPerBar)) + 1;
+    CHECK(beats[i].code == expected_bar);
+    CHECK(beats[i].msg.status == expected_beat);
+    CHECK(beats[i].msg.d1 == expected_pulse);
+  }
+
+  // Stopped: no kBeat at all, even across the same span of ticks.
+  ev.clear();
+  Command stop;
+  stop.param = Param::kTransportStop;
+  e.push_command(stop, sink);
+  ev.clear();
+  e.advance_ticks(kTicksPerBar + kTicksPerBeat, sink);
+  for (const OutEvent& o : ev) {
+    CHECK(o.kind != OutEvent::Kind::kBeat);
+  }
+}
+
 void test_warn_on_bad_tempo_and_route() {
   Engine e;
   Events ev;
@@ -324,6 +376,7 @@ int main() {
   test_scheduled_events_fire_on_advance();
   test_events_fire_with_stopped_transport();
   test_transport_clock_emission();
+  test_beat_heartbeat_cadence();
   test_panic_via_engine();
   test_transport_position_and_bounds();
   test_warn_on_bad_tempo_and_route();

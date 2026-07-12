@@ -1,8 +1,9 @@
 // Unit tests for the GUI wire seam (ux-workstation.md §9): LineBuffer
 // framing, the flat JSON-line parser, and BrainEvent decoding scoped to the 5
 // shapes gui-contract-map.md §3 documents as originally shipped, plus the
-// additive "chord-followed" shape (gap P0-1, pipeline-p0-mechanical-plan.md)
-// and the per-client error line. No GPU, no display, no core.
+// additive "chord-followed" shape (gap P0-1, pipeline-p0-mechanical-plan.md),
+// the additive "beat" shape (gap P0-2), and the per-client error line. No
+// GPU, no display, no core.
 
 #include "src/brain_event.hpp"
 
@@ -149,6 +150,18 @@ void test_parse_chord_followed() {
   CHECK(staged.followed_source == "detect");
 }
 
+// The additive "beat" shape (gap P0-2) -- the transport heartbeat rendered
+// by components/hostrt/jsonl.cpp, one line per 24-PPQN pulse while playing.
+void test_parse_beat() {
+  const BrainEvent ev = parse_brain_event(R"({"ev":"beat","bar":3,"beat":2,"pulse":5,"@":1200})");
+  CHECK(ev.valid);
+  CHECK(ev.kind == BrainEvent::Kind::kBeat);
+  CHECK(ev.beat_bar == 3);
+  CHECK(ev.beat_index == 2);
+  CHECK(ev.beat_pulse == 5);
+  CHECK(ev.tick == 1200);
+}
+
 void test_parse_error() {
   const BrainEvent ev = parse_brain_event(R"({"error":"unknown command: x","cmd":"x"})");
   CHECK(ev.valid);
@@ -168,15 +181,12 @@ void test_parse_malformed_and_unrecognized() {
   CHECK(ev2.kind == BrainEvent::Kind::kUnknown);
 }
 
-// The remaining additive shapes (ux-workstation.md §11: beat/clip) are NOT
-// decoded yet -- pinned explicitly so a future slice adding them is a
-// deliberate, reviewed change to this test, not a silent behaviour drift.
-// "chord-followed" graduated out of this list -- see test_parse_chord_followed.
+// The remaining additive shape (ux-workstation.md §11: clip) is NOT decoded
+// yet -- pinned explicitly so a future slice adding it is a deliberate,
+// reviewed change to this test, not a silent behaviour drift. "chord-followed"
+// and "beat" graduated out of this list -- see test_parse_chord_followed and
+// test_parse_beat.
 void test_additive_shapes_stay_undecoded() {
-  const BrainEvent beat = parse_brain_event(R"({"ev":"beat","bar":3,"beat":2,"@":5})");
-  CHECK(!beat.valid);
-  CHECK(beat.kind == BrainEvent::Kind::kUnknown);
-
   const BrainEvent clip = parse_brain_event(R"({"ev":"clip","id":1,"state":"playing","@":6})");
   CHECK(!clip.valid);
   CHECK(clip.kind == BrainEvent::Kind::kUnknown);
@@ -193,6 +203,7 @@ int main() {
   test_parse_transport();
   test_parse_warn();
   test_parse_chord_followed();
+  test_parse_beat();
   test_parse_error();
   test_parse_malformed_and_unrecognized();
   test_additive_shapes_stay_undecoded();

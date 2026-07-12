@@ -187,12 +187,8 @@ class Engine {
       ++m_now;
       if (m_transport.playing()) {
         m_transport.advance_one();
-        if (m_clock_out_mask != 0 && Transport::is_midi_clock_tick(m_transport.tick())) {
-          for (std::uint8_t p = 0; p < kMaxPorts; ++p) {
-            if (m_clock_out_mask & (1u << p)) {
-              schedule_or_warn(p, m_now, MidiMessage::realtime(midi::kClock), sink);
-            }
-          }
+        if (Transport::is_midi_clock_tick(m_transport.tick())) {
+          fire_clock_pulse(sink);
         }
         fire_timeline(m_transport.tick(), sink);
         fire_chord_seq(m_transport.tick(), sink);
@@ -299,6 +295,34 @@ class Engine {
     m_last_followed_next = next;
     m_followed_emitted = true;
     sink(OutEvent::chord_followed(cur, next, src, m_now));
+  }
+
+  // Everything gated on the 24-PPQN clock pulse (called from advance_ticks,
+  // split out to keep its cognitive complexity under the clang-tidy gate):
+  // the F8 clock byte, sent ONLY on ports enabled by the clock-out mask, and
+  // the kBeat heartbeat (P0-2), which fires UNCONDITIONALLY when playing
+  // regardless of clock-out routing -- it is a host/GUI event, not a
+  // scheduled MIDI byte.
+  void fire_clock_pulse(EventSink sink) {
+    if (m_clock_out_mask != 0) {
+      for (std::uint8_t p = 0; p < kMaxPorts; ++p) {
+        if (m_clock_out_mask & (1u << p)) {
+          schedule_or_warn(p, m_now, MidiMessage::realtime(midi::kClock), sink);
+        }
+      }
+    }
+    emit_beat(sink);
+  }
+
+  // Emits the transport heartbeat (P0-2, called once per 24-PPQN pulse from
+  // fire_clock_pulse while playing): derives bar/beat/pulse from the
+  // transport's OWN musical position, carrying m_now as the stream `@` tick
+  // like every other event. pulse is the tick-within-beat divided by the
+  // MIDI clock divider (0..23), the same cadence is_midi_clock_tick gates on.
+  void emit_beat(EventSink sink) {
+    const Position pos = m_transport.position();
+    const auto pulse = static_cast<std::uint8_t>(pos.tick / kMidiClockDivider);
+    sink(OutEvent::beat(pos.bar, pos.beat, pulse, m_now));
   }
 
   // Transport realtime bytes (FA/FB/FC) go out immediately on clock ports.

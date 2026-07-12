@@ -84,6 +84,26 @@ void test_chord_followed_reduction() {
   CHECK(app.chord_followed_current() == "Cmaj7");
 }
 
+// The live playhead (gap P0-2): reduced from the "beat" heartbeat event, and
+// parked back to 0/0/0 by a Stop so the transport panel never shows a stale
+// position while the transport is not moving.
+void test_beat_reduction() {
+  AppState app;
+  CHECK(app.bar() == 0);
+  CHECK(app.beat_num() == 0);
+  CHECK(app.pulse() == 0);
+
+  app.apply_line(R"({"ev":"beat","bar":3,"beat":2,"pulse":5,"@":1200})");
+  CHECK(app.bar() == 3);
+  CHECK(app.beat_num() == 2);
+  CHECK(app.pulse() == 5);
+
+  app.apply_line(R"({"ev":"transport","state":"stopped","@":1201})");
+  CHECK(app.bar() == 0);
+  CHECK(app.beat_num() == 0);
+  CHECK(app.pulse() == 0);
+}
+
 void test_harmony_activity_gate() {
   AppState app;
   CHECK(!app.harmony_active());  // at rest: nothing lit
@@ -155,6 +175,7 @@ int main() {
   test_transport_and_section_reduction();
   test_chord_reduction();
   test_chord_followed_reduction();
+  test_beat_reduction();
   test_harmony_activity_gate();
   test_note_transport_sent_hint();
   test_malformed_line_logged_not_applied();

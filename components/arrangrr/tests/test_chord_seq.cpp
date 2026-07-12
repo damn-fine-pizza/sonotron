@@ -91,7 +91,10 @@ void test_transpose_re_derives() {
   CHECK(s.key.root_pc == 9);
 }
 
-using Events = StaticVector<OutEvent, 256>;
+// P0-2: kBeat now fires once per 24-PPQN pulse while playing (96/bar), so a
+// multi-bar advance() accumulates far more raw events than before -- bumped
+// from 256 to give headroom (the longest single fixture here spans ~4 bars).
+using Events = StaticVector<OutEvent, 1024>;
 
 struct SeqFixture {
   Engine e;

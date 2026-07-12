@@ -20,7 +20,7 @@
 //     remove, or re-semanticize an id that already ships. A shipped id keeps its
 //     number and its meaning for the entire life of protocol v1.
 //   * Growth is ONLY by APPENDING new enumerators at the end. Next free ids:
-//     Param = 43, OutEvent::Kind = 6, WarnCode = 10 (== kWarnCodeCount).
+//     Param = 43, OutEvent::Kind = 7, WarnCode = 10 (== kWarnCodeCount).
 //   * Command/OutEvent field order, types, and size are stable. New data must
 //     ride existing reserved bits/fields or an APPENDED field, guarded by the
 //     size static_asserts below. Never reorder or resize an existing field.
@@ -202,6 +202,15 @@ struct OutEvent {
     //   msg.d1     = next (root_pc | quality << 4)
     //   msg.d2     = cur.valid | next.valid << 1 | Producer << 2
     kChordFollowed = 5,
+    // Transport heartbeat (P0-2): fires once per 24-PPQN clock pulse while the
+    // transport plays, regardless of MIDI clock-out routing -- a host/GUI
+    // event, not a scheduled MIDI byte. Lets a client draw a moving playhead.
+    //   code       = bar (1-based; low 16 bits -- caps at 65535 bars, fine
+    //                for M0)
+    //   msg.status = beat  (1-based, 1..kBeatsPerBar)
+    //   msg.d1     = pulse (0..23, the sub-beat 24-PPQN pulse index)
+    //   msg.d2     = reserved (0)
+    kBeat = 6,
   };
 
   Kind kind = Kind::kMidi;
@@ -252,6 +261,20 @@ struct OutEvent {
                                                     (static_cast<std::uint8_t>(next.quality) << 4)),
                     .d2 = static_cast<std::uint8_t>((cur.valid ? 0x1 : 0) | (next.valid ? 0x2 : 0) |
                                                     (static_cast<std::uint8_t>(src) << 2))};
+    e.tick = t;
+    return e;
+  }
+  // Packs the transport heartbeat (P0-2): bar rides `code` (low 16 bits,
+  // 1-based, caps at 65535 bars); beat (1-based, 1..kBeatsPerBar) and pulse
+  // (0..23, the 24-PPQN sub-beat index) ride msg.status/msg.d1. Purely
+  // numeric packing -- labels/layout are a HOST/GUI concern, mirroring
+  // chord_followed above.
+  static constexpr OutEvent beat(std::uint32_t bar, std::uint8_t beat, std::uint8_t pulse,
+                                 Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kBeat;
+    e.code = static_cast<std::uint16_t>(bar);
+    e.msg = MidiMessage{.status = beat, .d1 = pulse, .d2 = 0};
     e.tick = t;
     return e;
   }

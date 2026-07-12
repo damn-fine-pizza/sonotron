@@ -80,6 +80,16 @@ class AppState {
   bool chord_followed_next_valid() const { return m_chord_followed_next_valid; }
   const std::string& chord_followed_source() const { return m_chord_followed_source; }
 
+  // The live playhead (gap P0-2), reduced from the "beat" heartbeat event.
+  // 0 means "no position yet" (never played, or parked by a Stop): bar()/
+  // beat_num()/pulse() all read 0 in that state. beat_phase() is a
+  // convenience for smooth sub-beat motion (0.0 at the beat, approaching 1.0
+  // just before the next one).
+  int bar() const { return m_bar; }
+  int beat_num() const { return m_beat; }
+  int pulse() const { return m_pulse; }
+  float beat_phase() const { return static_cast<float>(m_pulse) / 24.0F; }
+
  private:
   bool m_connected = false;
   Transport m_transport = Transport::kStopped;
@@ -93,6 +103,9 @@ class AppState {
   std::string m_chord_followed_next = "-";
   bool m_chord_followed_next_valid = false;
   std::string m_chord_followed_source = "-";
+  int m_bar = 0;
+  int m_beat = 0;
+  int m_pulse = 0;
   std::deque<std::string> m_log;
 };
 

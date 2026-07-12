@@ -15,17 +15,14 @@
 // The framing logic mirrors components/hostrt/uds_server.hpp's LineBuffer (a
 // deliberate OWN copy, not an #include of the host header -- the pure-client
 // boundary rule forbids reusing host-side code) and the decoder understands
-// the 6 JSONL event shapes the host currently emits (see gui-contract-map.md
+// the 7 JSONL event shapes the host currently emits (see gui-contract-map.md
 // §3 for the original 5, plus the additive "chord-followed" shape landed by
-// pipeline-p0-mechanical-plan.md P0-1): midi-out, chord, section, transport,
-// warn, chord-followed, plus the per-client {"error":...} line. `kBeat`
-// (P0-2, the transport heartbeat) is still a genuinely NOT-YET-DECODED stub:
-// its wire field names are not settled by the core strand yet, so inventing a
-// shape now would just have to be redone. BrainEvent::Kind reserves the
-// enumerator the spec's §9 BrainEvent already names (kBeat) so callers/panels
-// can code against the final shape, but parse_brain_event() never produces
-// it -- it stays present but inert until a follow-on slice lands the core
-// work and a real wire shape to decode.
+// pipeline-p0-mechanical-plan.md P0-1, plus the additive "beat" shape landed
+// by P0-2): midi-out, chord, section, transport, warn, chord-followed, beat,
+// plus the per-client {"error":...} line. `kBeat` (P0-2, the transport
+// heartbeat) is now decoded: {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick}
+// -- bar/beat/pulse are purely numeric (core concern), a live playhead is a
+// HOST/GUI rendering choice built on top of them.
 
 namespace sonotron {
 
@@ -91,7 +88,7 @@ struct BrainEvent {
     kWarn,
     kError,          // per-client {"error":...,"cmd":...} line (not an OutEvent)
     kChordFollowed,  // additive, gap P0-1 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-1)
-    kBeat,           // additive, gap P0-2 (ux-workstation.md §11) -- stub, never decoded yet
+    kBeat,           // additive, gap P0-2 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-2)
   };
 
   Kind kind = Kind::kUnknown;
@@ -128,14 +125,23 @@ struct BrainEvent {
   int followed_next_pcs = 0;
   std::string followed_source;  // "manual" | "detect" | "sequencer"
 
+  // beat (additive, gap P0-2): {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":
+  // tick}. The transport heartbeat, one line per 24-PPQN pulse while playing
+  // -- lets a client draw a moving playhead. `beat_index` (not `beat`, to
+  // avoid clashing with the enclosing BrainEvent's own "kind of event" word)
+  // is 1-based within the bar; `beat_pulse` is the 0..23 sub-beat index.
+  int beat_bar = 0;
+  int beat_index = 0;
+  int beat_pulse = 0;
+
   // per-client error
   std::string error;
   std::string cmd;
 };
 
 // Parses one JSONL line into a BrainEvent. A line the GUI does not model (the
-// still-inert `beat`/`clip` additive shapes included), or a malformed line,
-// yields BrainEvent{kind = kUnknown, valid = false} -- never a crash.
+// still-inert `clip` additive shape included), or a malformed line, yields
+// BrainEvent{kind = kUnknown, valid = false} -- never a crash.
 BrainEvent parse_brain_event(const std::string& line);
 
 }  // namespace sonotron

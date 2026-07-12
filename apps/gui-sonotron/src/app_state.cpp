@@ -26,7 +26,8 @@ std::string format_log_line(const BrainEvent& ev) {
       return "chord-followed " + ev.followed_current + " / next " + ev.followed_next + " (" +
              ev.followed_source + ")";
     case BrainEvent::Kind::kBeat:
-      return "beat (not decoded yet)";
+      return "beat " + std::to_string(ev.beat_bar) + "." + std::to_string(ev.beat_index) + "." +
+             std::to_string(ev.beat_pulse);
     case BrainEvent::Kind::kUnknown:
     default:
       return "unknown/malformed event";
@@ -61,6 +62,11 @@ void AppState::apply(const BrainEvent& ev) {
       } else {
         m_transport = Transport::kStopped;
         m_manual_steer = false;  // back to rest: let the activity gate close
+        // Stop parks the playhead honestly: no position lingers on screen
+        // once the transport is no longer moving.
+        m_bar = 0;
+        m_beat = 0;
+        m_pulse = 0;
       }
       break;
     case BrainEvent::Kind::kChordFollowed:
@@ -75,11 +81,15 @@ void AppState::apply(const BrainEvent& ev) {
         m_manual_steer = true;
       }
       break;
+    case BrainEvent::Kind::kBeat:
+      m_bar = ev.beat_bar;
+      m_beat = ev.beat_index;
+      m_pulse = ev.beat_pulse;
+      break;
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:
     case BrainEvent::Kind::kError:
     case BrainEvent::Kind::kUnknown:
-    case BrainEvent::Kind::kBeat:
       break;  // logged above, but no other view-state change (yet)
   }
 }

@@ -330,10 +330,16 @@ BrainEvent parse_brain_event(const std::string& line) {
     ev.followed_next = obj.get_string("next", "-");
     ev.followed_next_pcs = static_cast<int>(obj.get_int("next_pcs", 0));
     ev.followed_source = obj.get_string("src", "manual");
+  } else if (kind == "beat") {
+    ev.kind = BrainEvent::Kind::kBeat;
+    ev.valid = true;
+    ev.beat_bar = static_cast<int>(obj.get_int("bar", 0));
+    ev.beat_index = static_cast<int>(obj.get_int("beat", 0));
+    ev.beat_pulse = static_cast<int>(obj.get_int("pulse", 0));
   }
-  // "beat" / "clip" (ux-workstation.md §11) and any other unrecognized "ev"
-  // value fall through to kind == kUnknown, valid == false -- see the file
-  // header: those shapes are not decoded yet, on purpose.
+  // "clip" (ux-workstation.md §11) and any other unrecognized "ev" value fall
+  // through to kind == kUnknown, valid == false -- see the file header: that
+  // shape is not decoded yet, on purpose.
   return ev;
 }
 

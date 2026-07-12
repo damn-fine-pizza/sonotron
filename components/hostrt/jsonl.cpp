@@ -244,6 +244,9 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
           followed_label(next, prefer_flats).c_str(), followed_pcs(next), producer_name(src),
           ev.tick);
     }
+    case OutEvent::Kind::kBeat:
+      return format(R"({"ev":"beat","bar":%u,"beat":%u,"pulse":%u,"@":%u})", ev.code, ev.msg.status,
+                    ev.msg.d1, ev.tick);
     case OutEvent::Kind::kTransport:
       return format(R"({"ev":"transport","state":"%s","@":%u})", transport_name(ev.code), ev.tick);
     case OutEvent::Kind::kWarn:
@@ -293,6 +296,8 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
                     followed_label(cur, prefer_flats).c_str(),
                     followed_label(next, prefer_flats).c_str(), producer_name(src));
     }
+    case OutEvent::Kind::kBeat:
+      return format("@%-8u beat %u.%u.%u", ev.tick, ev.code, ev.msg.status, ev.msg.d1);
     case OutEvent::Kind::kTransport:
       return format("@%-8u transport %s", ev.tick, transport_name(ev.code));
     case OutEvent::Kind::kWarn:

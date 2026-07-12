@@ -36,9 +36,17 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
   ImGui::Text("| %s | Section: %s", transport_label, app_state.section().c_str());
 
   ImGui::SameLine();
-  // Honest placeholder: no real position exists on the wire until the core
-  // strand's kBeat/kPosition heartbeat lands (ux-workstation.md §11 P0-2).
-  ImGui::TextDisabled("| bar -- . beat -- (playhead awaits core kBeat)");
+  if (app_state.bar() == 0) {
+    // No position yet: never played, or Stop parked the playhead (app_state
+    // resets bar/beat/pulse to 0 on a "stopped" transport event).
+    ImGui::TextDisabled("| bar -- . beat --");
+  } else {
+    // Live playhead (P0-2): bar/beat from the core's kBeat heartbeat, plus a
+    // sub-beat pulse count so movement is visible WITHIN a beat, not only on
+    // the beat boundary.
+    ImGui::Text("| bar %d . beat %d .%02d", app_state.bar(), app_state.beat_num(),
+                app_state.pulse());
+  }
 }
 
 }  // namespace sonotron

@@ -70,6 +70,10 @@ void test_jsonl_all_kinds() {
         R"({"ev":"warn","code":"unknown_command","@":1})");
   CHECK(to_jsonl(OutEvent::warn(WarnCode::kBadArgument, 1)) ==
         R"({"ev":"warn","code":"bad_argument","@":1})");
+
+  // P0-2: the transport heartbeat, bar/beat/pulse packed purely numerically.
+  CHECK(to_jsonl(OutEvent::beat(3, 2, 5, 1200)) ==
+        R"({"ev":"beat","bar":3,"beat":2,"pulse":5,"@":1200})");
 }
 
 void test_human_encoder() {
@@ -91,6 +95,7 @@ void test_human_encoder() {
   CHECK(has(to_human(OutEvent::midi(0, MidiMessage::realtime(midi::kClock), 0)), "clock"));
   CHECK(has(to_human(OutEvent::transport(1, 0)), "transport playing"));
   CHECK(has(to_human(OutEvent::warn(WarnCode::kBadArgument, 0)), "WARN bad_argument"));
+  CHECK(has(to_human(OutEvent::beat(3, 2, 5, 1200)), "beat 3.2.5"));
 }
 
 struct ShellFixture {
