@@ -92,6 +92,15 @@ const char* section_type_name(SectionType type) {
 
 }  // namespace
 
+// See shell.hpp's declaration comment: thin wrappers over the shell_detail
+// lookups both cmd_style()'s "load" verb and cmd_part() already call, exposed
+// so a caller without a Shell instance can build the identical Command POD.
+int Shell::resolve_style_index(const std::string& name) { return find_builtin_style(name); }
+
+bool Shell::resolve_track_role(const std::string& name, TrackRole& out) {
+  return parse_role(name, out);
+}
+
 bool Shell::cmd_key(const std::vector<std::string>& t, std::string& error) {
   std::uint8_t root = 0;
   Mode mode = Mode::kMajor;

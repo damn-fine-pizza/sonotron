@@ -256,6 +256,22 @@ class Shell {
   const Engine& engine() const { return m_engine; }
   const std::vector<PortDef>& ports() const { return m_ports; }
 
+  // Public, pure name-resolution seam (Phase 2b integrated-mode gap, docs/
+  // design/sonotron-server-phase2-brief.md): resolves a builtin style name /
+  // a track-role name to the same index/enum `style load <name>` and
+  // `part <role> ...` resolve to inside cmd_style()/cmd_part() via
+  // exec_line(). Both are pure lookups over static builtin tables (no Shell
+  // state involved), so they are exposed as static methods rather than
+  // widening the Shell instance surface -- a caller that builds its own
+  // Command POD without owning a Shell (in_process_brain_session's L1-text
+  // translator) can reach them without hostrt's private shell_internal.hpp
+  // becoming part of a public header. Style lookup is case-insensitive
+  // (matches cmd_style's D26 resolution); role lookup is exact, lower-case
+  // (matches parse_role). Returns -1 / false on an unknown name, exactly as
+  // the exec_line path does.
+  static int resolve_style_index(const std::string& name);
+  static bool resolve_track_role(const std::string& name, TrackRole& out);
+
   // Executes one line (L2 sugar). Returns false on parse error; the error
   // message is passed to `error`. `@tick` lines are queued, not executed.
   bool exec_line(const std::string& line, std::string& error);

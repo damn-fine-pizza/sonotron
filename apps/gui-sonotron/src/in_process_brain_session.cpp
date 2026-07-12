@@ -31,6 +31,7 @@ using arrangrr::Op;
 using arrangrr::OutEvent;
 using arrangrr::Param;
 using arrangrr::TickAccumulator;
+using arrangrr::TrackRole;
 using arrangrr::host::AlsaMidi;
 using arrangrr::host::PortDef;
 using arrangrr::host::Shell;
@@ -44,35 +45,94 @@ using arrangrr::host::Shell;
 constexpr std::size_t kCommandRingCapacity = 1024;
 constexpr std::size_t kOutEventRingCapacity = 1024;
 
-// Translates the small, closed set of L1 command lines gui-sonotron's panels
-// currently send (transport_panel.cpp, main.cpp's Transport menu: transport
-// start/stop/continue, panic) directly into the ABI Command -- none of these
-// need Shell-side name/index resolution, so no dispatch logic is duplicated.
-// Returns false for anything else (e.g. "style load <name>", "part <role>
-// mute|solo ..."), which resolve against Shell-internal lookup tables
-// (style-name -> index, track-role parsing) not reachable as a thin adapter
-// without reaching into hostrt's private shell_internal.hpp -- see this
-// milestone's report for the scoped gap this leaves in integrated mode.
-bool command_line_to_command(std::string_view line, Command& out) {
+// Splits on ASCII space (single delimiter, no quoting) -- sufficient for the
+// fixed-shape command lines translated below; Shell's own tokenizer (private
+// to hostrt) does the same for exec_line's richer grammar.
+std::vector<std::string_view> split_ws(std::string_view s) {
+  std::vector<std::string_view> tokens;
+  std::size_t i = 0;
+  while (i < s.size()) {
+    while (i < s.size() && s[i] == ' ') {
+      ++i;
+    }
+    const std::size_t start = i;
+    while (i < s.size() && s[i] != ' ') {
+      ++i;
+    }
+    if (i > start) {
+      tokens.push_back(s.substr(start, i - start));
+    }
+  }
+  return tokens;
+}
+
+// Outcome of translating one L1 text line into a Command POD.
+enum class TranslateOutcome {
+  kOk,               // `out` holds the translated Command.
+  kUnknownCommand,   // the line is not one this translator recognizes at all.
+  kInvalidArgument,  // recognized shape, but a name/role did not resolve --
+                     // `detail` holds a human-readable reason.
+};
+
+// Translates the L1 command lines gui-sonotron's panels currently send
+// (transport_panel.cpp, main.cpp's Transport menu, browser_panel.cpp's style
+// tree, parts_panel.cpp's mute/solo checkboxes) directly into the ABI
+// Command. `style load <name>` and `part <role> mute|solo on|off` need
+// Shell-side name resolution (builtin style name -> index, track-role name ->
+// enum) -- reached through Shell::resolve_style_index()/resolve_track_role(),
+// the two public pure lookups exposed for exactly this caller (see shell.hpp)
+// -- so no dispatch logic is duplicated and no Shell-internal header leaks
+// into this translation unit.
+TranslateOutcome command_line_to_command(std::string_view line, Command& out, std::string& detail) {
   out = Command{};
   out.op = Op::kDo;
   if (line == "transport start") {
     out.param = Param::kTransportStart;
-    return true;
+    return TranslateOutcome::kOk;
   }
   if (line == "transport stop") {
     out.param = Param::kTransportStop;
-    return true;
+    return TranslateOutcome::kOk;
   }
   if (line == "transport continue") {
     out.param = Param::kTransportContinue;
-    return true;
+    return TranslateOutcome::kOk;
   }
   if (line == "panic") {
     out.param = Param::kPanic;
-    return true;
+    return TranslateOutcome::kOk;
   }
-  return false;
+
+  const std::vector<std::string_view> t = split_ws(line);
+
+  if (t.size() == 3 && t[0] == "style" && t[1] == "load") {
+    const std::string name(t[2]);
+    const int index = Shell::resolve_style_index(name);
+    if (index < 0) {
+      detail = "unknown style: " + name;
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kStyleLoad;
+    out.a = index;
+    return TranslateOutcome::kOk;
+  }
+
+  if (t.size() == 4 && t[0] == "part" && (t[2] == "mute" || t[2] == "solo") &&
+      (t[3] == "on" || t[3] == "off")) {
+    const std::string role_name(t[1]);
+    TrackRole role{};
+    if (!Shell::resolve_track_role(role_name, role)) {
+      detail = "unknown role: " + role_name;
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = t[2] == "mute" ? Param::kPartMute : Param::kPartSolo;
+    out.a = static_cast<std::int32_t>(role);
+    out.b = t[3] == "on" ? 1 : 0;
+    return TranslateOutcome::kOk;
+  }
+
+  return TranslateOutcome::kUnknownCommand;
 }
 
 std::uint64_t monotonic_us() {
@@ -208,14 +268,28 @@ void InProcessBrainSession::send(std::string_view command_line) {
     return;  // never tear down the shared engine thread from a stray Enter
   }
   Command cmd;
-  if (!command_line_to_command(command_line, cmd)) {
-    BrainEvent note;
-    note.kind = BrainEvent::Kind::kError;
-    note.valid = true;
-    note.error = "integrated mode does not translate this command to a Command POD yet";
-    note.cmd = std::string(command_line);
-    m_impl->local_warnings.push_back(std::move(note));
-    return;
+  std::string detail;
+  switch (command_line_to_command(command_line, cmd, detail)) {
+    case TranslateOutcome::kOk:
+      break;
+    case TranslateOutcome::kUnknownCommand: {
+      BrainEvent note;
+      note.kind = BrainEvent::Kind::kError;
+      note.valid = true;
+      note.error = "integrated mode does not translate this command to a Command POD yet";
+      note.cmd = std::string(command_line);
+      m_impl->local_warnings.push_back(std::move(note));
+      return;
+    }
+    case TranslateOutcome::kInvalidArgument: {
+      BrainEvent note;
+      note.kind = BrainEvent::Kind::kError;
+      note.valid = true;
+      note.error = detail;
+      note.cmd = std::string(command_line);
+      m_impl->local_warnings.push_back(std::move(note));
+      return;
+    }
   }
   if (!m_impl->command_ring.try_push(cmd)) {
     // Asymmetric overflow policy (Corelli §15.2 correction #3): the Command

@@ -762,6 +762,26 @@ void test_shell_style_commands() {
   CHECK(!f.run("style load"));
 }
 
+// Phase 2b integrated-mode gap (docs report): Shell::resolve_style_index()/
+// resolve_track_role() are the two public pure name-resolution seams exposed
+// so a caller building its own Command POD (in_process_brain_session's L1-
+// text translator) resolves names EXACTLY as cmd_style()'s "load" verb and
+// cmd_part() do, without reaching into hostrt's private shell_internal.hpp.
+// No Shell instance is needed -- both are static, no-state lookups.
+void test_shell_style_and_role_name_resolution() {
+  CHECK(Shell::resolve_style_index("basic") == 0);
+  CHECK(Shell::resolve_style_index("BASIC") == 0);  // case-insensitive, matches cmd_style (D26)
+  CHECK(Shell::resolve_style_index("pop") == 1);
+  CHECK(Shell::resolve_style_index("funkytown") < 0);  // unknown name -> -1
+
+  TrackRole role = TrackRole::kDrums;
+  CHECK(Shell::resolve_track_role("lead", role));
+  CHECK(role == TrackRole::kLead);
+  CHECK(Shell::resolve_track_role("bass", role));
+  CHECK(role == TrackRole::kBass);
+  CHECK(!Shell::resolve_track_role("wizard", role));  // unknown role -> false
+}
+
 void test_jsonl_section_rendering() {
   CHECK(to_jsonl(OutEvent::section(static_cast<std::uint16_t>(SectionType::kVarB), 7)) ==
         R"({"ev":"section","name":"varB","@":7})");
@@ -2337,6 +2357,7 @@ int main() {
   test_shell_seq_commands();
   test_shell_chord_modes_cli();
   test_shell_style_commands();
+  test_shell_style_and_role_name_resolution();
   test_shell_style_listing();
   test_shell_view_external_keys();
   test_jsonl_section_rendering();

@@ -81,18 +81,112 @@ void test_transport_stop_after_start() {
 }
 
 // A command this milestone deliberately does not translate to a Command POD
-// (see in_process_brain_session.cpp's command_line_to_command -- it needs
-// Shell-internal name resolution) must still surface visibly rather than
-// vanish silently.
+// (see in_process_brain_session.cpp's command_line_to_command -- its closed
+// set of recognized shapes does not include this one) must still surface
+// visibly rather than vanish silently. "style load"/"part ... mute|solo ..."
+// are NOT this case anymore (see the tests below) -- this uses a command
+// nothing in this translator recognizes at all.
 void test_untranslated_command_surfaces_as_error_note() {
   InProcessBrainSession session;
   CHECK(session.start());
 
   std::vector<BrainEvent> collected;
-  session.send("style load basic");
+  session.send("arp on");
   CHECK(poll_until(
       session, collected, [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; },
       50));
+
+  session.stop();
+}
+
+// Waits a bounded, short number of iterations and reports whether `predicate`
+// EVER matched a drained event -- the negative-assertion counterpart of
+// poll_until, used below to prove a valid `style load`/`part ...` line does
+// NOT surface a kError note (unlike before this milestone's fix).
+bool never_seen(InProcessBrainSession& session, std::vector<BrainEvent>& collected,
+                const std::function<bool(const BrainEvent&)>& predicate, int max_iterations = 50) {
+  return !poll_until(session, collected, predicate, max_iterations);
+}
+
+// Closes the Phase 2b integrated-mode gap flagged in this milestone's own
+// report: `style load <name>` now resolves the builtin name through
+// Shell::resolve_style_index() (exposed for exactly this caller) and reaches
+// the engine as a real kStyleLoad Command -- exactly like `--control` mode --
+// instead of the generic "does not translate" kError every text command hit
+// before this fix. Style/part commands on SUCCESS emit no OutEvent (neither
+// does exec_line's own cmd_style/cmd_part on the unrouted default topology),
+// so the observable proof here is the ABSENCE of the error note that used to
+// fire on every single one of these lines, plus a live transport round trip
+// straight after to prove the engine thread kept processing normally (not
+// silently wedged).
+void test_style_load_valid_name_is_accepted_without_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("style load basic");
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; }));
+
+  session.send("transport start");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kTransport && ev.transport_state == "playing";
+  }));
+
+  session.stop();
+}
+
+// An unknown style name must still surface a clean kError (no crash, no
+// silence) -- the translator's own name resolution fails BEFORE a Command is
+// ever built, so nothing reaches the engine's push_command path.
+void test_style_load_invalid_name_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("style load not-a-real-style");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("unknown style") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
+// `part <role> mute|solo on|off` now resolves the role through
+// Shell::resolve_track_role() the same way, closing the second half of the
+// gap this milestone's report flagged.
+void test_part_mute_and_solo_valid_role_is_accepted_without_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("part lead mute on");
+  session.send("part bass solo off");
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; }));
+
+  session.send("transport start");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kTransport && ev.transport_state == "playing";
+  }));
+
+  session.stop();
+}
+
+// An unknown role name must still surface a clean kError.
+void test_part_invalid_role_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("part wizard mute on");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("unknown role") != std::string::npos;
+  }));
 
   session.stop();
 }
@@ -111,6 +205,10 @@ int main() {
   test_round_trip_transport_start();
   test_transport_stop_after_start();
   test_untranslated_command_surfaces_as_error_note();
+  test_style_load_valid_name_is_accepted_without_error();
+  test_style_load_invalid_name_surfaces_clean_error();
+  test_part_mute_and_solo_valid_role_is_accepted_without_error();
+  test_part_invalid_role_surfaces_clean_error();
   test_stop_is_idempotent_and_safe_before_start();
   return sonotron::test::failures();
 }
