@@ -1217,3 +1217,134 @@ No new dependency is implied by any of the above; every correction is either a
 code-organization move within already-owned files. Item 1 is the one genuine
 **NEEDS-DECISION** for the owner; items 2-5 are technical corrections I recommend making
 directly, not forks.
+
+---
+
+## 16. Phase-4 execution design — Accompany (`9310`) as the first real N-stage pipeline (Corelli, 2026-07-12)
+
+Triggered by: the coordinator's Phase-4 authoring request, following the owner's
+committed Phase 1 / Phase 2a / Phase 2b landings. Read-only on product code; the only
+write is this section. Grounded against `docs/strategy/roadmap-numbered.md:286,445-448`
+(Accompany's own stated scope), `docs/DESIGN.md` D43/D53/D29, the landed
+`components/runtime/include/runtime/{runtime,stage,out_scheduler}.hpp`, and the
+freestanding `ChordDetector`/`FollowedContext` headers still living inside
+`components/arrangrr` today.
+
+### 16.0 Ground-truth check before designing on top of it
+
+Verified directly, not assumed: the corrections `§15` required did land. `apps/gui-sonotron/src/spsc_ring.hpp:36-99` is genuinely lock-free (atomic `m_head`/`m_tail`, `alignas(kCacheLineSize)` padding, one reserved slot, acquire/release ordering) — no mutex, matching §15.5's recommendation, not the brief's original mutex-first concession. `components/hostrt/event_labels.hpp` exports exactly the helper set §15.3 asked for (`warn_name`, `roman_degree`, `note_label`, `followed_label`, …), and `apps/gui-sonotron/src/in_process_brain_session.cpp:1-45,294-304` shows the asymmetric overflow policy landed precisely as specified (Command ring never drops — a `command_ring_full` warn surfaces instead; OutEvent ring may drop, matching the D38 broadcast precedent) and the `Runtime`/`Shell` instance is constructed as a true engine-thread-local (`Impl::run_engine`'s header comment cites §15.6 by name). `apps/gui-sonotron/CMakeLists.txt:1-18,85-105` confirms D38 was formally relaxed by the owner and the internal-boundary device I proposed in §15.7 item 1 was built almost exactly as described: a single `gui_sonotron_engine` library is the ONLY thing in the binary linking `hostrt`/core headers; every other GUI library stays core-free. **This is a well-executed landing; §16 builds on real, verified ground, not the brief's aspiration.**
+
+### 16.1 Fork — `components/chorddet`: own component, not a promoted module
+
+**Recommendation: own component, dual-target-capable.** `components/arrangrr/include/arrangrr/chord/chord_detector.hpp:1-149` is already exactly what a dual-target component needs to be: `constexpr` throughout, a 128-bit held-note bitset (16 bytes), zero heap, zero host dependency — its own header comment already says "Core-portable and freestanding" (line 22-23). On the project's own component-vs-module test (absent/substituted/multiplied — cited already in §6 item 2 above): Accompany's own pipeline literally substitutes a file-fed detector for a live-keyboard one, and a future STM32 "detect a chord live, drive the band" deployment would want `[chorddet]→[arrangrr]` as a standalone two-stage chain with NO `arrangrr`-internal detector at all. That is the textbook "substituted" case. **Cost, honestly sized**: extracting `ChordDetector` out of `arrangrr` is small on its own (one self-contained header, already free of `arrangrr`-internal includes beyond `theory.hpp` — check whether `theory.hpp` itself needs to travel too, or stays shared via `components/common`/`arrangrr` the way `abi.hpp` stayed arrangrr's own vocabulary in §14.1's reasoning). The REAL cost is not the detector — it is `FollowedContext` (§16.3 below), which is the part that actually has to move ownership, not just address.
+
+### 16.2 The ABI fork (the heavy one) — verdict: **NO reshape needed for Accompany's stated scope**
+
+The coordinator's framing ("un solo OutScheduler che fa il total-order D29 su N stage con tag di priorità") conflates two genuinely different mechanisms that the current code keeps separate — tracing both settles the fork without touching `abi.hpp`.
+
+**(a) Scheduled MIDI (`OutEvent::Kind::kMidi`) — the D29 total order generalizes to N stages with ZERO ABI change, because the tie-break was never stage-aware to begin with.** `runtime/out_scheduler.hpp:60-74,132-140`: `schedule(port, tick, msg)` computes `EventClass` from the raw `MidiMessage` **content itself** (`classify(msg)`, realtime < NoteOff < Other < NoteOn — line 29-41), not from any caller-supplied priority argument; `seq_no` is the scheduler's own monotonic emission counter, assigned at `schedule()`-call time. There is no field in `ScheduledEvent` (line 43-49) or parameter in `schedule()`'s signature for a "which stage called this" tag, and none is needed: with N stages sharing the ONE `OutScheduler` instance by reference (exactly `§14.3`'s established Seam-B1 pattern — Transport and the scheduler are ALREADY injected by reference into the one stage that exists today; a second and third stage get the identical treatment, not a new mechanism), `seq_no` ordering falls out of the **fixed, declared pipeline order** the same way it already falls out of today's single `Engine`'s internal fixed fire order (`fire_timeline`→`fire_chord_seq`→…→`fire_arp`→`flush`). Deterministic and golden-safe by construction, no reshape required.
+
+**(b) Non-MIDI structural OutEvents (`kChordFollowed`/`kSection`/`kTransport`/`kBeat`/`kWarn`/`kChord`) never go through the scheduler at all — a fact the design doc's own §3.6 prose obscures.** Traced directly: `engine.hpp:226,323,351,432,448,461` all call `sink(OutEvent::…)` **synchronously and directly**, never `m_scheduler.schedule(...)`. Only `flush()` (`engine.hpp:237-240`) pops the scheduler and turns due `ScheduledEvent`s into `OutEvent::midi(...)`. So "the total order" is really two independent mechanisms today: a real priority-queue tie-break for scheduled MIDI, and a plain in-fixed-call-order synchronous emission for everything else. For N stages, (b) generalizes exactly like (a): the Pipeline composite (§16.4) calls each substage's `on_tick(ctx, sink)` in fixed declared order, passing through the SAME `sink` — non-MIDI events from different stages interleave in pipeline order, precisely mirroring what one `Engine`'s internal fire order already does. **No stage-tag is needed here either.**
+
+**(c) The actual same-tick cross-stage data flow (D53) is not event-based at all — it is the SAME shared-reference-injection idiom already used twice.** `components/arrangrr/include/arrangrr/chord/followed_context.hpp:63-166` — `FollowedContext` is the single owner of `current`/`pending` (`m_state`/`m_pending`), already brokering **three** producers (`Producer::kDetect`/`kSequencer`/`kManual`, line 57-61) through `stage()`/`commit_now()`/`commit_bar()`, gated by the D47 `ChordFollow` policy — all without any producer knowing about any other (a D43-clean seam already, confirmed by `chord_engine.hpp:184`'s `m_followed.commit_bar()` delegation). Today it lives inside `ChordEngine`, inside the one `Engine`. **The correct Phase-4 move is to promote `FollowedContext` ownership to the Pipeline composite, injected BY REFERENCE into both the `chorddet` stage (writer, via `stage()`/`commit_now()`, replacing today's `Engine::observe_chord_input`) and the `arrangrr` stage (reader, via `state()`/`pending()`, replacing today's internal `m_chords.m_followed` access)** — the exact same pattern §14.3 already sanctioned for `OutScheduler` and §14.2/B3 for `Transport`. `OutEvent::chord_followed(...)` stays exactly what it always was: a one-way, host/GUI-facing NOTIFICATION of a change that already happened via the shared object, not the mechanism that makes the change visible cross-stage. This is why no ABI reshape is needed for D53 either — the wire event and the actual state-sharing mechanism are, and remain, two different things.
+
+**(d) Roadmap scope confirms no tag is wanted, not just no tag is needed.** `roadmap-numbered.md:286,447-448`: "feed a plain MIDI, get the band under it"; the design doc's own §3.6 (line ~360): "the runtime's scheduler merges the melody thru-events and the band's MIDI in D29 total order → **one** JSONL/MIDI output stream." Accompany's entire point is a merged, undifferentiated output — like a real band, the melody and the accompaniment share one stream. A stage-id/source-tag would be solving a problem Accompany does not have. **Verdict: the ABI waiver stays unspent. `test_abi_frozen.cpp` requires no edit for Phase 4.** The waiver should be cashed only if/when a REAL future need surfaces (e.g., the GUI wanting to mute/solo/visualize the imported melody independently of the band) — flagged as a live future fork, not decided here, not needed now.
+
+**One real, smaller risk this analysis surfaces (flag, not a blocker): `cancel_note_off`'s dedup key is `(port, channel, note)`, stage-blind by construction** (`out_scheduler.hpp:109-127` — it tombstones the earliest matching pending NoteOff regardless of which stage scheduled it). If the MIDI-source stage's melody thru and the arrangrr band stage were ever configured onto the SAME `port:channel`, one stage's retrigger logic could incorrectly cancel a note-off belonging to the other. In practice this is a **configuration discipline requirement** (assign the melody thru and the band distinct ports/channels, exactly like any real multi-track arrangement would), not an ABI or scheduler defect — and moot in practice for Phase 4c specifically, since a straight SMF-file playback stage has no reason to call `cancel_note_off` at all (it has no ratchet/tie retrigger concept of its own; it just replays fixed note-on/off pairs at their recorded ticks). Document the constraint; do not build a stage-scoped `cancel_note_off` for a risk that is currently theoretical.
+
+### 16.3 The orchestrator / Pipeline design
+
+**API shape — concept-based, not virtual, exactly continuing the Phase-1 idiom.** `runtime::Runtime<StageT, N>` (`runtime.hpp:43-89`) is untouched by this design: it stays exactly as generic as it is today, because the thing it drives becomes a single composite type that itself satisfies `runtime::StageLike` (`stage.hpp:44-48`) — `Runtime<Pipeline<Stage1,Stage2,Stage3>, N>`. Concretely:
+
+```cpp
+// illustrative, NOT frozen — the exact template arity/argument-forwarding shape is
+// Nazzareno's to finalize, same caveat §3.6's original sketch carried.
+template <typename MidiSourceT, typename ChorddetT, typename ArrangrrT>
+class Pipeline {
+ public:
+  Pipeline(arrangrr::OutScheduler<N>& sched, arrangrr::Transport& transport,
+           arrangrr::FollowedContext& followed, /* per-stage ctor args */)
+      : m_midi_source(sched, transport, /*...*/),
+        m_chorddet(followed, /*...*/),
+        m_arrangrr(sched, transport, followed, /*...*/) {}
+
+  // Fixed declared order (D53): MIDI-source produces notes THIS tick, chorddet
+  // observes them THIS tick, arrangrr resolves against the now-current
+  // FollowedContext THIS tick — same-tick visibility by construction, no lag.
+  template <typename SinkT>
+  void on_tick(const StageContext& ctx, SinkT sink) {
+    m_midi_source.on_tick(ctx, sink);
+    m_chorddet.on_tick(ctx, sink);
+    m_arrangrr.on_tick(ctx, sink);
+  }
+
+  // ONE scheduler, ONE drain point — see §16.4's flush analysis: delegates to
+  // arrangrr's EXISTING flush() unchanged; the other two stages need no flush
+  // of their own (they have nothing private left to drain once the schedule
+  // moved out).
+  template <typename SinkT>
+  void flush(SinkT sink) { m_arrangrr.flush(sink); }
+
+ private:
+  MidiSourceT m_midi_source;
+  ChorddetT m_chorddet;
+  ArrangrrT m_arrangrr;
+};
+```
+
+This is deliberately the narrowest possible generalization: a **fixed, declared, 3-slot composite**, not a dynamic graph — continuing §3.6's own explicit refusal of DAW-style rewiring (`product-identity.md`/`workstation-vision.md`'s "power of a DAW, never its free-for-all graph," already the standing law this whole milestone works under).
+
+**Placement fork (flag, mild NEEDS-DECISION):** the generic `Pipeline<...>` composite TEMPLATE is, by construction, dual-target-safe (plain reference members, no heap, no host facility) — it is HOST-ONLY only insofar as ONE of its three member types (`MidiSourceT`) is host-only. `project-structure.md:119-120` already commits `components/orchestrator` to host-only for VST/audio-source adapters and *dynamic* pipeline construction; that commitment does not by itself require the fixed-composite MECHANISM to be host-only too. I recommend the generic `Pipeline<...>` template live in `components/runtime` (dual-target, alongside `Runtime`/`Stage`) so a future firmware entrypoint wanting a bare `[chorddet]→[arrangrr]` two-stage chain (no MIDI-source, no host-only orchestrator) can reuse the exact same composite mechanism `tests/arm-smoke`-style, rather than hand-rolling an equivalent. `components/orchestrator` then becomes the layer that specifically **instantiates and names** the Accompany 3-stage pipeline (the one host-only stage included) — this is squarely orchestrator's job per its own charter ("composes N stage instances into a named pipeline… does not reimplement time or total order," §3.5 above) without inventing new composition machinery. Flagged for Palladio/owner confirmation since it is a placement call, not purely mechanical.
+
+### 16.4 Seam C (new) — inbound MIDI fan-out, a gap the linear on_tick diagram does not cover
+
+**§3.6's pipeline diagram only ever draws the OUTPUT direction.** Tracing the INBOUND side surfaces a real, previously-unaddressed mechanical gap: `components/arrangrr/include/arrangrr/engine.hpp:82-116` (`push_midi_in`) today does **two unrelated things from one parsed MIDI byte, in one method**: routing/arp-capture/harmony-suppress (arrangrr's own concern, `m_router.route(...)`, line 106-108) **and** live chord-detect observation (`observe_chord_input`, gated by `m_chord_detect && port == m_chord_detect_port`, line 110-112) — both fed by the SAME `m_parsers[port].feed(byte, …)` callback. `runtime::Runtime` does not mediate this path at all today: `components/hostrt/shell.hpp:71` calls `m_engine.push_midi_in(port, bytes, m_sink)` directly against the single Stage instance, bypassing `Runtime` entirely (inbound MIDI is not tick-scheduled, so it was never routed through `advance_ticks`).
+
+Once `ChordDetector` promotes to its own peer stage, this single method must **split and fan out**: the SAME inbound byte stream needs to reach BOTH the arrangrr stage (routing) and the chorddet stage (recognition), and `Pipeline` — not either individual stage — is the natural place to own the fan-out, exactly mirroring how it already fans `on_tick` unconditionally to every member and lets each stage's own internal gate (arrangrr's routing table/arp port, chorddet's `m_chord_detect_port`) decide relevance. **Resolution recommended**: extend the `StageLike`-adjacent contract with an optional `push_midi_in(port, bytes, sink)` hook Pipeline calls on every member that has one; **each stage keeps its OWN `MidiParser` instance** rather than sharing a fourth cross-stage singleton — `MidiParser` is small, stateless-per-byte, per-port state, and duplicating it per interested stage is cheaper (in code and in reasoning) than promoting yet another shared object, and it keeps chorddet genuinely name-blind (no need to reach into arrangrr's parser state at all). This must be folded into Nazzareno's Phase-4 intake explicitly — it is compile-blocking the moment `ChordDetector` actually leaves `Engine`, the same way §14.4's B3 was compile-blocking the moment `Transport` left.
+
+### 16.5 The MIDI-source stage
+
+**Confirmed HOST-ONLY, zero new dependency**: `apps/tools/arrstyle-converter/src/smf.hpp:1-57` (`parse_smf`) already exists, hand-rolled, no dependency, but is unambiguously host-only by its own shape — `std::vector<std::uint8_t>` input, `std::string`/`std::vector<SmfTrack>` output, actual file bytes to parse. This is the same "core never touches the filesystem" precedent the original doc already cited for `state.dump` (`DESIGN.md:1696`). Design: parse the file ONCE, off the tick loop (at pipeline-construction time, host-only, heap freely used — this is exactly the allowed "laptop tool" regime `DESIGN.md:6`'s float caveat already carves out), building a flat, tick-sorted note-on/off event list merged across `SmfFile::tracks`. `on_tick(ctx, sink)` then just advances a plain index cursor comparing against `ctx.now` and calls the shared `OutScheduler&`'s `schedule(port, tick, msg)` for due events — reusing the SAME reference-injection pattern as every other stage, so its notes participate in the identical `(tick, class, seq_no)` total order as the band's (§16.2a), with zero bespoke merge logic. `flush()` is a no-op (nothing of its own to drain — see §16.3's Pipeline flush design). **Placement fork (flag for Palladio, not mine to resolve)**: does the new Stage adapter live under `apps/tools/arrstyle-converter` (which already owns `smf.{hpp,cpp}`) with `orchestrator`/`sonotron-server` linking it, or does `smf.{hpp,cpp}` itself get promoted to a shared host-only location? Either is structurally fine; I flag only that duplicating the SMF reader would be a real regression (an existing, tested, dependency-free parser must not get a second copy).
+
+### 16.6 Host-only vs. dual-target boundary, confirmed per-stage
+
+- **`chorddet`**: dual-target-capable, confirmed by direct read (`chord_detector.hpp`'s own `constexpr`/no-heap shape, §16.1).
+- **MIDI-source**: host-only, confirmed by direct read (`smf.hpp`'s `std::vector`/`std::string`/file-I/O shape, §16.5) — never cross-builds `arm-none-eabi`, and is not expected to.
+- **`Pipeline<...>` (the composite template)**: dual-target-safe AS A MECHANISM (plain references, no heap); host-only only through the specific `MidiSourceT` it is instantiated with for Accompany. A firmware entrypoint instantiating `Pipeline<NoOpSource, ChorddetStage, ArrangrrStage>` (or a 2-slot variant) stays freestanding.
+- **`components/orchestrator`**: stays host-only per the already-committed `project-structure.md:119-120`, unaffected by the above — it is the layer that NAMES and WIRES the Accompany-specific, host-inclusive pipeline, not the layer that invents the fixed-composition mechanism.
+
+### 16.7 Test strategy
+
+**A new golden category, driven the SAME way every other golden is driven — through the `.acmd` L1 script grammar, not a second CLI mechanism.** Recommend `Shell` gain one new L1 verb (e.g. `midi-source load <path>`) rather than a parallel `--midi-source PATH` CLI flag on `sonotron-server`/`cli-arrangrr` — this keeps exactly ONE way to drive a golden fixture (the existing `--script FILE` virtual-clock harness already used by all 18 goldens), avoiding a second, less-tested code path for exactly the same purpose. `tests/golden/accompany_*.acmd` scripts would then read: `midi-source load fixtures/accompany_basic.mid` / `style load N` / `advance <ticks>` / `quit`, diffed byte-identical against a checked-in `.golden`, same harness (`tests/golden/run_golden.cmake`), same determinism guarantee (virtual clock, no wall-clock dependency). **Flag (Palladio's lane)**: a binary `.mid` fixture is a new kind of golden-test asset (every existing fixture is plain text `.acmd`/`.golden`); its placement under `tests/golden/` needs a naming/layout call, not an architectural one.
+
+Additional test surfaces this milestone needs, sized honestly:
+- `components/runtime/tests/`: new unit tests for the `Pipeline<...>` composite itself — a **1-stage** instantiation first (proving Pipeline is a transparent wrapper, zero behavior change against today's `Runtime<Engine,N>`), then a **2-stage** fixed-order test asserting `on_tick` calls members in declared order and `flush` delegates correctly, independent of Accompany's real stages (pure mechanism tests, cheap, fast).
+- Whatever `test_engine*.cpp`/`components/arrangrr/tests/` exercised `ChordDetector`/`FollowedContext` in-Engine moves to `components/chorddet/tests/` (detector-only) and a new cross-stage integration test (two real stages, one shared `FollowedContext`, asserting same-tick visibility — the concrete regression guard for D53 in the N-stage world).
+- `tests/arm-smoke`: gains a `[chorddet]→[arrangrr]` two-stage freestanding link-gate proof (the dual-target claim §16.1/§16.6 makes must be enforced by CI, not asserted in prose) — additive to, not a replacement of, the existing single-stage smoke.
+
+### 16.8 Phased execution plan
+
+**Phase 4a — Stand up the generic `Pipeline<...>` composite, single real stage (arrangrr), zero behavior change.**
+Moves: `runtime::Runtime<Engine,N>`'s current direct single-stage instantiation is rewrapped as `Runtime<Pipeline<Engine>, N>` (a 1-tuple composite) — purely mechanical, `Pipeline::on_tick`/`flush` degenerate to a single forwarding call. Breaks: nothing behaviorally; every call site (`shell.hpp`'s `m_runtime.stage()` accessor) needs one indirection level added. Green gate: 18 goldens byte-identical (proves the composite is a transparent wrapper before any real N-stage composition is attempted) + the new Pipeline unit tests (§16.7) green.
+
+**Phase 4b — Promote `ChordDetector` + `FollowedContext` out of `Engine`/`ChordEngine`; two-stage pipeline `[chorddet, arrangrr]`.**
+Moves: `components/chorddet` stood up (§16.1); `FollowedContext` ownership moves to the Pipeline level, injected by reference into both stages (§16.2c); `Engine::push_midi_in` splits per Seam C (§16.4) — routing stays, `observe_chord_input` moves to chorddet's own `push_midi_in`, each stage keeping its own `MidiParser`. This is the highest-cost sub-phase in the plan (mirrors Phase 3's `Shell`-split cost precedent) — recommend its own sequenced sub-PRs (stand up `components/chorddet` + move `FollowedContext` behind a flag first, prove byte-identical goldens with the OLD single-stage wiring still active, THEN cut over the fan-out). Breaks: every test that constructed `Engine` and drove `push_command(kChordDetect,...)` + fed input on the detect port in one call needs to split, same shape as §5 Phase 3's `hostrt::Shell` test-split cost. Green gate: 18 goldens byte-identical (chord-detect behavior must be bit-identical, only its owning object changed) + `tests/arm-smoke`'s new 2-stage freestanding link-gate.
+
+**Phase 4c — MIDI-source stage; 3-stage Accompany pipeline end-to-end.**
+Moves: the SMF-reader wrap (§16.5) lands as the third pipeline member; `components/orchestrator` gains its first real named-pipeline wiring (§16.3's placement resolution). New: `midi-source load` L1 verb, the `accompany_*` golden category (§16.7). Breaks: nothing existing (purely additive — same "lowest-risk, purely additive" shape §5 Phase 2 already used for `sonotron-server`'s standup). Green gate: the new goldens byte-identical on first landing (no re-bless cycle, since nothing pre-existing changes) + a manual smoke feeding a real small MIDI file through the live `sonotron-server`/GUI path.
+
+**Phase 4d — Close the loop: `components/orchestrator` stops being a placeholder.**
+Moves: the Accompany pipeline-construction function becomes `components/orchestrator`'s first real, non-trivial content (today it is empty). Breaks: nothing. Green gate: `roadmap-numbered.md:445-448`'s own acceptance bar — "feed a plain MIDI, get the band under it" — demonstrated live in the GUI, the cheapest possible proof the roadmap itself names.
+
+### 16.9 Synthesis
+
+**Verdict: APPROVED WITH REQUIRED CORRECTIONS.** The pipeline shape (`[MIDI-source]→[chorddet]→[arrangrr]`, one shared `OutScheduler`, fixed sequential order, `components/orchestrator` composing, D43 held) is architecturally sound and matches the already-landed Phase-1 idiom closely enough that `Runtime<StageT,N>` needs **zero** code change — only a new composite `StageT`. Required corrections before Nazzareno is dispatched:
+
+1. **The ABI waiver stays unspent (§16.2)** — ground truth confirms no stage-tag is needed for Accompany's actual scope; do not cash it speculatively. `test_abi_frozen.cpp` needs no edit.
+2. **`FollowedContext` promotion (§16.2c) is the real cost center, not the ABI.** It must move from `ChordEngine`-owned to Pipeline-owned, reference-injected into two peer stages — size Phase 4b accordingly, not as a "just extract a header" move.
+3. **Seam C (§16.4, inbound MIDI fan-out) must be folded into the intake explicitly** — it is compile-blocking the moment `ChordDetector` leaves `Engine`, exactly like §14.4's B3 was for `Transport`. This is new information this section surfaces; it does not appear anywhere in the design doc's existing §3.6.
+4. **Pipeline's `flush()` delegates solely to arrangrr's own, unchanged `flush()` (§16.3)** — do not invent a multi-stage flush protocol; `NoteTracker`'s own header comment ("Observes the OUTPUT stream") confirms it is CORRECT, not merely convenient, for it to keep observing every scheduled event regardless of which stage produced it (Panic must silence the melody thru too).
+5. **Two placement forks flagged, not resolved here (Palladio/owner)**: (a) does the generic `Pipeline<...>` composite live in `components/runtime` (my recommendation, dual-target-safe) or `components/orchestrator`; (b) does the MIDI-source Stage adapter live beside `smf.{hpp,cpp}` in `arrstyle-converter` or does the reader promote to a shared location.
+6. **The `cancel_note_off` port/channel collision risk (§16.2) is a documented configuration constraint, not a defect to fix** — moot for Phase 4c's simple SMF-replay stage, worth a code comment so a LATER stage that does retrigger its own notes does not silently inherit the risk unexamined.
+
+No new dependency anywhere in this plan; every SHIPPABLE item reuses an already-existing, already-tested primitive (`ChordDetector`, `FollowedContext`, `smf.{hpp,cpp}`, `OutScheduler`'s existing tie-break). Items 5(a)/5(b) are the only genuine NEEDS-DECISION placement calls; everything else above is a technical correction I recommend making directly during Phase 4b/4c, not a fork.
