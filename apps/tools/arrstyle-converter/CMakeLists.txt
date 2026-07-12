@@ -2,13 +2,15 @@
 # top-level build only inside the non-firmware branch, so it never enters the
 # ARM preset and never touches the core/firmware builds. Dependency-free: it
 # links no third-party library and does not link arrangrr.
+#
+# smf.{hpp,cpp}/diagnostics.{hpp,cpp} moved to components/midisrc (Phase 4c,
+# docs/design/orchestrator-pipeline-extraction.md §16.5) — linked, not built
+# here anymore.
 
 add_library(arrstyle_lib STATIC
   src/model.cpp
-  src/diagnostics.cpp
   src/json.cpp
   src/serialize.cpp
-  src/smf.cpp
   src/genre.cpp
   src/canon.cpp
   src/midi_import.cpp
@@ -19,6 +21,7 @@ add_library(arrstyle_lib STATIC
   src/cli.cpp
 )
 target_include_directories(arrstyle_lib PUBLIC src)
+target_link_libraries(arrstyle_lib PUBLIC midisrc)
 target_compile_options(arrstyle_lib PRIVATE -Wall -Wextra -Werror)
 
 add_executable(arrstyle_converter src/main.cpp)

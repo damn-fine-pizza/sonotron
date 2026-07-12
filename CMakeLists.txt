@@ -45,6 +45,11 @@ else()
   add_subdirectory(components/hostrt/tests)
   add_subdirectory(tests/golden)
   add_subdirectory(tests/integration)
+  # Phase 4c (docs/design/orchestrator-pipeline-extraction.md §16.5,
+  # docs/design/phase4-execution-plan.md): the MIDI-source material (SMF
+  # reader + Diagnostics + Stage adapter) promoted out of arrstyle-converter.
+  # HOST-ONLY (file I/O); never on the arm-none-eabi branch above.
+  add_subdirectory(components/midisrc)
   # Host-only importer/compiler tooling (never in the ARM/firmware build).
   add_subdirectory(apps/tools/arrstyle-converter)
   # Host-only GUI pure client (D38) + its vendored toolkit. Never in the

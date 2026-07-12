@@ -1,4 +1,4 @@
-#include "smf.hpp"
+#include "midisrc/smf.hpp"
 
 #include <array>
 

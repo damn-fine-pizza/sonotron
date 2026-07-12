@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 
 // Canon-builder: the bridge from the host KB (rich, std-container JSON produced
 // by the extractor) to the DEVICE canon (a compact, freestanding constexpr

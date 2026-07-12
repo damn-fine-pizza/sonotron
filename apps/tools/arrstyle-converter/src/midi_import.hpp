@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 #include "model.hpp"
 
 // Standard MIDI File -> StyleModel (an import SUBSET). One Main/VarA section is

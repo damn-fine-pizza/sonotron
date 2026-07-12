@@ -4,7 +4,7 @@
 #include <array>
 #include <cctype>
 
-#include "smf.hpp"
+#include "midisrc/smf.hpp"
 
 namespace arrstyle {
 

@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 #include "model.hpp"
 
 // ChordPro -> SongModel (an import SUBSET). Recognizes a small set of

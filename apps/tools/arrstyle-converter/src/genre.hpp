@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "smf.hpp"
+#include "midisrc/smf.hpp"
 
 // Content-based genre inference for the ~546 corpus files whose filename carries
 // no genre token. This is a HOST-side heuristic classifier: it looks at what the

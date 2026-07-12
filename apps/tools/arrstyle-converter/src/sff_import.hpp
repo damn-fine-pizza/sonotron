@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 #include "model.hpp"
 
 // Yamaha SFF (Style File Format) importer. SFF is a REVERSE-ENGINEERED format: a

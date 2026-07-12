@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 
 // A minimal, bounds-checked Standard MIDI File reader (hand-rolled, no
 // dependency). It parses the header + track chunks, pairs Note On/Off into

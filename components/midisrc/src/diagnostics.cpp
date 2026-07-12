@@ -1,4 +1,4 @@
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 
 namespace arrstyle {
 

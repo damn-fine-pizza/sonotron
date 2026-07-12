@@ -7,7 +7,7 @@
 
 #include "casm.hpp"
 #include "midi_import.hpp"
-#include "smf.hpp"
+#include "midisrc/smf.hpp"
 
 namespace arrstyle {
 

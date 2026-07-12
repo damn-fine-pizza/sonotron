@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 #include "test.hpp"
 
 namespace {

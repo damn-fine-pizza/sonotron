@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "diagnostics.hpp"
+#include "midisrc/diagnostics.hpp"
 #include "model.hpp"
 
 // CASM decoder for Yamaha SFF (.sty) files. SFF is a REVERSE-ENGINEERED format:

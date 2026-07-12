@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "diagnostics.hpp"
-#include "smf.hpp"
+#include "midisrc/diagnostics.hpp"
+#include "midisrc/smf.hpp"
 #include "test.hpp"
 
 namespace {

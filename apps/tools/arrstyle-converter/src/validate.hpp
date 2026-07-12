@@ -2,8 +2,8 @@
 
 #include <string>
 
-#include "diagnostics.hpp"
 #include "json.hpp"
+#include "midisrc/diagnostics.hpp"
 
 // Structural + semantic validation of an .arrstyle.json / .arrsong.json
 // document, working off the same JSON model the writer produces. Errors are

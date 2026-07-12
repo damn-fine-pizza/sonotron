@@ -7,13 +7,13 @@
 
 #include "canon.hpp"
 #include "chordpro_import.hpp"
-#include "diagnostics.hpp"
 #include "genre.hpp"
 #include "json.hpp"
 #include "midi_import.hpp"
+#include "midisrc/diagnostics.hpp"
+#include "midisrc/smf.hpp"
 #include "serialize.hpp"
 #include "sff_import.hpp"
-#include "smf.hpp"
 #include "validate.hpp"
 
 namespace arrstyle {
