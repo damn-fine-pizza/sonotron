@@ -191,6 +191,136 @@ void test_engine_chord_detect_guard_and_nonnote() {
   CHECK(e.chord_detect());
 }
 
+// Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): every
+// Param this milestone wires a kParamState echo for emits exactly ONE such
+// event, tagging `code` with the Param itself and packing `port`/`msg` per
+// the abi.hpp Kind::kParamState comment table.
+void test_param_state_echo() {
+  test::TestEngine e;
+  Events ev;
+  auto sink = [&](const OutEvent& o) { CHECK(ev.push_back(o)); };
+  auto last = [&]() -> const OutEvent& { return ev[ev.size() - 1]; };
+
+  // kGroove: port=GrooveField, status|d1<<8 = value.
+  Command groove;
+  groove.op = Op::kSet;
+  groove.param = Param::kGroove;
+  groove.a = static_cast<std::int32_t>(GrooveField::kSwing);
+  groove.b = 42;
+  e.push_command(groove, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kGroove));
+  CHECK(last().port == static_cast<std::uint8_t>(GrooveField::kSwing));
+  CHECK(last().msg.status == 42 && last().msg.d1 == 0);
+  ev.clear();
+
+  // kArp: port=ArpField, status|d1<<8 = value.
+  Command arp;
+  arp.op = Op::kSet;
+  arp.param = Param::kArp;
+  arp.a = static_cast<std::int32_t>(ArpField::kGate);
+  arp.b = 60;
+  e.push_command(arp, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kArp));
+  CHECK(last().port == static_cast<std::uint8_t>(ArpField::kGate));
+  CHECK(last().msg.status == 60 && last().msg.d1 == 0);
+  ev.clear();
+
+  // kPartMute/kPartSolo: port=TrackRole, status=0/1.
+  Command mute;
+  mute.op = Op::kSet;
+  mute.param = Param::kPartMute;
+  mute.a = static_cast<std::int32_t>(TrackRole::kBass);
+  mute.b = 1;
+  e.push_command(mute, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kPartMute));
+  CHECK(last().port == static_cast<std::uint8_t>(TrackRole::kBass));
+  CHECK(last().msg.status == 1);
+  ev.clear();
+
+  Command solo;
+  solo.op = Op::kSet;
+  solo.param = Param::kPartSolo;
+  solo.a = static_cast<std::int32_t>(TrackRole::kPad);
+  solo.b = 1;
+  e.push_command(solo, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kPartSolo));
+  CHECK(last().port == static_cast<std::uint8_t>(TrackRole::kPad));
+  CHECK(last().msg.status == 1);
+  ev.clear();
+
+  // kChordDetect: port=input port, status=0/1 enabled.
+  Command detect;
+  detect.op = Op::kSet;
+  detect.param = Param::kChordDetect;
+  detect.a = 1;
+  detect.b = 2;  // input port 2
+  e.push_command(detect, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kChordDetect));
+  CHECK(last().port == 2);
+  CHECK(last().msg.status == 1);
+  ev.clear();
+
+  // kChordFollow: port=0, status=ChordFollow.
+  Command follow;
+  follow.op = Op::kSet;
+  follow.param = Param::kChordFollow;
+  follow.a = static_cast<std::int32_t>(ChordFollow::kManual);
+  e.push_command(follow, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kChordFollow));
+  CHECK(last().port == 0);
+  CHECK(last().msg.status == static_cast<std::uint8_t>(ChordFollow::kManual));
+  ev.clear();
+
+  // kChordMode: port=0, status=ChordMode.
+  Command mode;
+  mode.op = Op::kSet;
+  mode.param = Param::kChordMode;
+  mode.a = static_cast<std::int32_t>(ChordMode::kShell);
+  e.push_command(mode, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kChordMode));
+  CHECK(last().port == 0);
+  CHECK(last().msg.status == static_cast<std::uint8_t>(ChordMode::kShell));
+  ev.clear();
+
+  // kKeySet: port=0, status=root pc, d1=Mode.
+  Command key;
+  key.op = Op::kSet;
+  key.param = Param::kKeySet;
+  key.a = 7;  // G
+  key.b = static_cast<std::int32_t>(Mode::kMixolydian);
+  e.push_command(key, sink);
+  CHECK(last().kind == OutEvent::Kind::kParamState);
+  CHECK(last().code == static_cast<std::uint16_t>(Param::kKeySet));
+  CHECK(last().port == 0);
+  CHECK(last().msg.status == 7);
+  CHECK(last().msg.d1 == static_cast<std::uint8_t>(Mode::kMixolydian));
+  ev.clear();
+
+  // kStyleLoad: port=0, status|d1<<8 = builtin style index.
+  Command style;
+  style.op = Op::kDo;
+  style.param = Param::kStyleLoad;
+  style.a = 0;  // builtin 0 always exists
+  e.push_command(style, sink);
+  bool saw_param_state = false;
+  for (const OutEvent& o : ev) {
+    if (o.kind == OutEvent::Kind::kParamState) {
+      saw_param_state = true;
+      CHECK(o.code == static_cast<std::uint16_t>(Param::kStyleLoad));
+      CHECK(o.port == 0);
+      CHECK(o.msg.status == 0 && o.msg.d1 == 0);
+    }
+  }
+  CHECK(saw_param_state);
+}
+
 }  // namespace
 
 int main() {
@@ -202,6 +332,7 @@ int main() {
   test_route_table_full_warns();
   test_input_port_out_of_range_ignored();
   test_warn_on_unknown_command();
+  test_param_state_echo();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_engine: all OK\n");
   }

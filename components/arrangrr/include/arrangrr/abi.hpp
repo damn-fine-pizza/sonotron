@@ -20,7 +20,7 @@
 //     remove, or re-semanticize an id that already ships. A shipped id keeps its
 //     number and its meaning for the entire life of protocol v1.
 //   * Growth is ONLY by APPENDING new enumerators at the end. Next free ids:
-//     Param = 43, OutEvent::Kind = 7, WarnCode = 10 (== kWarnCodeCount).
+//     Param = 43, OutEvent::Kind = 8, WarnCode = 10 (== kWarnCodeCount).
 //   * Command/OutEvent field order, types, and size are stable. New data must
 //     ride existing reserved bits/fields or an APPENDED field, guarded by the
 //     size static_asserts below. Never reorder or resize an existing field.
@@ -29,6 +29,11 @@
 //     edit of v1.
 // The frozen values are pinned by test_abi_frozen.cpp; that test fails the build
 // the instant this invariant is violated. If it fails, APPEND — do not edit.
+// ----------------------------------------------------------------------------
+// Phase 3a growth (docs/design/orchestrator-pipeline-extraction.md §17.3b):
+// OutEvent::Kind::kParamState (id=7) is the first APPENDED Kind since the
+// freeze — it rides the SAME 16-byte layout unchanged (no new field, no
+// resize), additive-only exactly as the invariant above requires.
 // ============================================================================
 
 namespace arrangrr {
@@ -211,6 +216,37 @@ struct OutEvent {
     //   msg.d1     = pulse (0..23, the sub-beat 24-PPQN pulse index)
     //   msg.d2     = reserved (0)
     kBeat = 6,
+    // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): the
+    // CURRENT value of a state-bearing Param that no other OutEvent echoes --
+    // groove/arp fields, per-part mute/solo, the active style, chord-detect
+    // enable+port, chord-follow, chord-mode, and the current key. A pure
+    // client cannot reconstruct these panels without this echo (the "hole in
+    // the wire" §17.2 traces). Reuses the ALREADY-STABLE `Param` enum (the
+    // `code` field) as the domain tag instead of minting seven-to-nine new
+    // Kinds -- additive-only, no new field, no resize. Emitted server-side
+    // whenever the matching cmd_* mutates state, and once per field on a
+    // client's initial connect (a "state dump", mirroring the state.dump
+    // file-I/O precedent -- here it is just "replay every current value
+    // once"). Per-Param field meaning (`port` and `msg.status`/`msg.d1`;
+    // `msg.d2` stays RESERVED for future growth, mirroring kChordFollowed/
+    // kBeat's own precedent above):
+    //   kGroove       port=GrooveField   status,d1 = value (16-bit LE;
+    //                                    GrooveField::kSeed is TRUNCATED to
+    //                                    its low 16 bits -- a display/
+    //                                    reproduction aid, not the full
+    //                                    32-bit engine seed)
+    //   kArp          port=ArpField      status,d1 = value (16-bit LE, same
+    //                                    kSeed truncation as kGroove)
+    //   kPartMute     port=TrackRole     status    = 0/1 (muted)
+    //   kPartSolo     port=TrackRole     status    = 0/1 (soloed)
+    //   kStyleLoad    port=0 (unused)    status,d1 = builtin style index
+    //                                    (16-bit LE)
+    //   kChordDetect  port=input port    status    = 0/1 (enabled)
+    //   kChordFollow  port=0 (unused)    status    = ChordFollow
+    //   kChordMode    port=0 (unused)    status    = ChordMode
+    //   kKeySet       port=0 (unused)    status = root pitch class (0..11),
+    //                                    d1 = Mode
+    kParamState = 7,
   };
 
   Kind kind = Kind::kMidi;
@@ -289,6 +325,22 @@ struct OutEvent {
     OutEvent e;
     e.kind = Kind::kWarn;
     e.code = static_cast<std::uint16_t>(code);
+    e.tick = t;
+    return e;
+  }
+  // Packs a kParamState echo (Phase 3a, §17.3b): `param` rides `code` as the
+  // domain tag; `sub` is the per-Param role/field selector (0 when unused,
+  // see the Kind::kParamState comment above for the exact per-Param table);
+  // `v0`/`v1` are the value bytes (v1 is 0 for single-byte values; v0|v1<<8
+  // forms a 16-bit value for the wider fields). Purely numeric packing, like
+  // every other OutEvent factory here -- labels are a HOST concern.
+  static constexpr OutEvent param_state(Param param, std::uint8_t sub, std::uint8_t v0,
+                                        std::uint8_t v1, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kParamState;
+    e.code = static_cast<std::uint16_t>(param);
+    e.port = sub;
+    e.msg = MidiMessage{.status = v0, .d1 = v1, .d2 = 0};
     e.tick = t;
     return e;
   }

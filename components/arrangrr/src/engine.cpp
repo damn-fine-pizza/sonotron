@@ -202,6 +202,10 @@ void Engine::chord_key_set(const Command& cmd, EventSink sink) {
   const Key key{.root_pc = static_cast<std::uint8_t>(cmd.a), .mode = static_cast<Mode>(cmd.b)};
   m_chords.set_key(key);
   m_chorddet.set_key(key);  // scale-aware single-finger reads the same key
+  // Phase 3a (§17.3b): echo the current key so a client can reconstruct the
+  // chords panel's "scale:" line.
+  sink(OutEvent::param_state(Param::kKeySet, 0, static_cast<std::uint8_t>(cmd.a),
+                             static_cast<std::uint8_t>(cmd.b), m_now));
 }
 
 void Engine::chord_out(const Command& cmd, EventSink sink) {
@@ -237,6 +241,8 @@ void Engine::chord_mode(const Command& cmd, EventSink sink) {
   const bool single = mode == ChordMode::kSingle;
   m_chorddet.set_min_notes(single ? 1 : kMinChordNotes);
   m_chorddet.set_single_finger(single);
+  // Phase 3a (§17.3b): echo the current chord mode for the chords panel.
+  sink(OutEvent::param_state(Param::kChordMode, 0, static_cast<std::uint8_t>(cmd.a), 0, m_now));
 }
 
 void Engine::chord_detect_cmd(const Command& cmd, EventSink sink) {
@@ -248,6 +254,9 @@ void Engine::chord_detect_cmd(const Command& cmd, EventSink sink) {
     return;
   }
   set_chord_detect(cmd.a != 0, static_cast<std::uint8_t>(port));
+  // Phase 3a (§17.3b): echo detect on/off + which port, for the chords panel.
+  sink(OutEvent::param_state(Param::kChordDetect, static_cast<std::uint8_t>(port),
+                             cmd.a != 0 ? 1 : 0, 0, m_now));
 }
 
 void Engine::chord_follow_cmd(const Command& cmd, EventSink sink) {
@@ -256,6 +265,8 @@ void Engine::chord_follow_cmd(const Command& cmd, EventSink sink) {
     return;
   }
   set_chord_follow(static_cast<ChordFollow>(cmd.a));
+  // Phase 3a (§17.3b): echo which producer may steer, for the chords panel.
+  sink(OutEvent::param_state(Param::kChordFollow, 0, static_cast<std::uint8_t>(cmd.a), 0, m_now));
 }
 
 void Engine::chord_input_zone(const Command& cmd, EventSink sink) {
@@ -523,6 +534,11 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         // staged shift chord is dropped.
         m_chords.establish_default();
         m_chords.reset_pending();
+        // Phase 3a (§17.3b): echo the newly active style index -- no other
+        // OutEvent reports it (kSection only ever carries the SECTION).
+        sink(OutEvent::param_state(Param::kStyleLoad, 0,
+                                   static_cast<std::uint8_t>(cmd.a & 0xFF),
+                                   static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF), m_now));
       }
       break;
     case Param::kStyleSection:
@@ -548,6 +564,9 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       } else {
         m_arranger.set_solo(role, cmd.b != 0);
       }
+      // Phase 3a (§17.3b): echo the part's new mute/solo state.
+      sink(OutEvent::param_state(cmd.param, static_cast<std::uint8_t>(role), cmd.b != 0 ? 1 : 0, 0,
+                                 m_now));
       break;
     }
     case Param::kGroove:
@@ -555,6 +574,11 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
       } else {
         m_arranger.set_groove_field(static_cast<GrooveField>(cmd.a), cmd.b);
+        // Phase 3a (§17.3b): echo the field id + new value (16-bit LE; wide
+        // fields like GrooveField::kSeed are truncated to their low 16 bits).
+        sink(OutEvent::param_state(Param::kGroove, static_cast<std::uint8_t>(cmd.a),
+                                   static_cast<std::uint8_t>(cmd.b & 0xFF),
+                                   static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF), m_now));
       }
       break;
     case Param::kStyleRoute:
@@ -629,11 +653,18 @@ void Engine::cmd_arp(const Command& cmd, EventSink sink) {
   }
   if (cmd.a < 0 || cmd.a >= kArpFieldCount) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
-  } else if (static_cast<ArpField>(cmd.a) == ArpField::kEnabled) {
+    return;
+  }
+  if (static_cast<ArpField>(cmd.a) == ArpField::kEnabled) {
     set_arp_enabled(cmd.b != 0, m_arp_in_port);
   } else {
     m_arp.set_field(static_cast<ArpField>(cmd.a), cmd.b);
   }
+  // Phase 3a (§17.3b): echo the field id + new value (16-bit LE; ArpField::
+  // kSeed is truncated to its low 16 bits, same convention as kGroove).
+  sink(OutEvent::param_state(Param::kArp, static_cast<std::uint8_t>(cmd.a),
+                             static_cast<std::uint8_t>(cmd.b & 0xFF),
+                             static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF), m_now));
 }
 
 }  // namespace arrangrr

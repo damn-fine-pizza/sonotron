@@ -100,6 +100,18 @@ BrainEvent brain_event_from_outevent(const arrangrr::OutEvent& ev, bool prefer_f
       out.transport_state = host::transport_name(ev.code);
       break;
 
+    case OutEvent::Kind::kParamState:
+      // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): the
+      // GUI does not decode this echo yet (its own panel-mirror-struct wiring
+      // is future work, mirroring hostrt's Seam D) -- treat it exactly like a
+      // line the GUI does not model, matching parse_brain_event's own
+      // "unmodeled" convention (kind=kUnknown, invalid), NOT kWarn (ev.code
+      // here is a Param id, not a WarnCode -- falling through to the kWarn
+      // branch below would render a bogus "unknown" warning).
+      out.kind = BrainEvent::Kind::kUnknown;
+      out.valid = false;
+      break;
+
     case OutEvent::Kind::kWarn:
     default:
       out.kind = BrainEvent::Kind::kWarn;

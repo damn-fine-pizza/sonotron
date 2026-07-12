@@ -278,6 +278,7 @@ void test_armed_empty_sequence() {
   // then start the transport — the progression must sound from tick 0.
   SeqFixture f;
   f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.ev.clear();  // Phase 3a (§17.3b): drop kKeySet's own kParamState echo
   f.cmd(Param::kSeqNew);
   f.cmd(Param::kSeqLoop, 1, 0, 0, Op::kSet);
   f.cmd(Param::kSeqPlay);  // empty: legal, plays silence

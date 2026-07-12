@@ -48,7 +48,13 @@ int run_script(const char* path, bool human) {
   Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
-    std::puts((human ? to_human(ev, flats) : to_jsonl(ev, flats)).c_str());
+    const std::string rendered = human ? to_human(ev, flats) : to_jsonl(ev, flats);
+    // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b):
+    // kParamState has no text shape yet -- to_human/to_jsonl render it as an
+    // empty string; skip printing so the golden text stream stays untouched.
+    if (!rendered.empty()) {
+      std::puts(rendered.c_str());
+    }
   });
   shell_ref = &shell;
 
@@ -197,16 +203,24 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
     }
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
     const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
-    if (tui) {
-      shell_ref->log_event(line);  // append to the scrolling events panel
-    } else {
-      std::puts(line.c_str());
+    // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b):
+    // kParamState has no text shape yet -- to_human/to_jsonl render it as an
+    // empty string; skip the events panel/stdout/broadcast for it entirely.
+    if (!line.empty()) {
+      if (tui) {
+        shell_ref->log_event(line);  // append to the scrolling events panel
+      } else {
+        std::puts(line.c_str());
+      }
     }
     // GUI clients always get the canonical JSONL wire format (the same one
     // the golden harness diffs), independent of --events human/jsonl, since
     // a control-plane client parses JSON, never the human one-liner.
     if (control.enabled()) {
-      control.broadcast(to_jsonl(ev, flats));
+      const std::string jsonl_line = to_jsonl(ev, flats);
+      if (!jsonl_line.empty()) {
+        control.broadcast(jsonl_line);
+      }
     }
   });
   shell_ref = &shell;

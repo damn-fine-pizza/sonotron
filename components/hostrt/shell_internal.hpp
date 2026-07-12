@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -148,6 +149,36 @@ inline bool parse_chord_follow(const std::string& s, ChordFollow& out) {
     return false;
   }
   return true;
+}
+
+// The eight automatic style parts shown in the `parts` mixer (roles 0..7);
+// kLead/kCc are excluded — they are not arranger band parts. Seam D
+// (docs/design/orchestrator-pipeline-extraction.md §17.2): this table used to
+// live inside parts_view.cpp; it moved here (Shell-only) because it names the
+// core `TrackRole` — knowledge `parts_view.hpp` must NOT carry after the
+// reshape (its sole future caller is a pure client), while `Shell` (already
+// core-linking) still needs it both to build the render rows AND to resolve a
+// selected mixer row back into an ABI `Command` (parts_key).
+struct MixerPartRow {
+  TrackRole role;
+  const char* name;
+  bool is_percussion;
+};
+
+inline constexpr std::array<MixerPartRow, 8> kMixerParts = {{
+    {.role = TrackRole::kDrums, .name = "Drums", .is_percussion = true},
+    {.role = TrackRole::kPerc, .name = "Perc", .is_percussion = true},
+    {.role = TrackRole::kBass, .name = "Bass", .is_percussion = false},
+    {.role = TrackRole::kChord1, .name = "Chord1", .is_percussion = false},
+    {.role = TrackRole::kChord2, .name = "Chord2", .is_percussion = false},
+    {.role = TrackRole::kPad, .name = "Pad", .is_percussion = false},
+    {.role = TrackRole::kArp, .name = "Arp", .is_percussion = false},
+    {.role = TrackRole::kPhrase, .name = "Phrase", .is_percussion = false},
+}};
+
+// The TrackRole shown at mixer row `index` (0..kMixerParts.size()-1).
+inline TrackRole mixer_role(std::size_t index) {
+  return kMixerParts[index < kMixerParts.size() ? index : 0].role;
 }
 
 }  // namespace shell_detail

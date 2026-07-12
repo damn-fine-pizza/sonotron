@@ -236,23 +236,62 @@ void Shell::refresh_styles_content() {
 void Shell::refresh_parts_content() {
   const int cols = m_panels.cell_width(PanelId::kParts, panel_columns());
   m_parts_selected = std::clamp(m_parts_selected, 0, static_cast<int>(kMixerPartCount) - 1);
-  m_panels.set_content(PanelId::kParts, render_parts_panel(m_engine.arranger(), m_monitor,
-                                                           m_parts_selected, cols, m_style));
+  // Seam D (docs/design/orchestrator-pipeline-extraction.md §17.2): populate
+  // the render-side mirror rows from the live in-process Arranger& (Phase
+  // 3a) -- render_parts_panel itself no longer sees a core type.
+  std::vector<PartRowState> rows;
+  rows.reserve(kMixerParts.size());
+  for (const MixerPartRow& part : kMixerParts) {
+    const Arranger::PartInfo info = m_engine.arranger().part_info(part.role);
+    rows.push_back(PartRowState{
+        .name = part.name,
+        .is_percussion = part.is_percussion,
+        .routed = info.routed,
+        .port = info.port,
+        .channel = info.channel,
+        .gm_program = info.gm_program,
+        .muted = info.muted,
+        .soloed = info.soloed,
+    });
+  }
+  m_panels.set_content(PanelId::kParts,
+                       render_parts_panel(rows, m_engine.arranger().any_solo(), m_monitor,
+                                          m_parts_selected, cols, m_style));
 }
 
 void Shell::refresh_groove_content() {
   const int cols = m_panels.cell_width(PanelId::kGroove, panel_columns());
   m_groove_selected = std::clamp(m_groove_selected, 0, static_cast<int>(kGrooveRowCount) - 1);
-  m_panels.set_content(PanelId::kGroove, render_groove_panel(m_engine.arranger().groove_params(),
-                                                             m_groove_selected, cols, m_style));
+  // Seam D (§17.2): mirror the live GrooveParams into the core-free view struct.
+  const GrooveParams& p = m_engine.arranger().groove_params();
+  const GrooveViewParams view{
+      .swing = p.swing,
+      .humanize_timing = p.humanize_timing,
+      .humanize_velocity = p.humanize_velocity,
+      .accent = p.accent,
+      .swing_grid = p.swing_grid,
+      .quantize = p.quantize,
+  };
+  m_panels.set_content(PanelId::kGroove,
+                       render_groove_panel(view, m_groove_selected, cols, m_style));
 }
 
 void Shell::refresh_arp_content() {
   const int cols = m_panels.cell_width(PanelId::kArp, panel_columns());
   m_arp_selected = std::clamp(m_arp_selected, 0, static_cast<int>(kArpRowCount) - 1);
-  m_panels.set_content(
-      PanelId::kArp, render_arp_panel(m_engine.arp().params(), m_engine.arp_enabled(),
-                                      m_engine.arp().held_count(), m_arp_selected, cols, m_style));
+  // Seam D (§17.2): mirror the live ArpeggiatorParams into the core-free view
+  // struct; rate/direction ride the core enums' own raw numeric values.
+  const ArpeggiatorParams& p = m_engine.arp().params();
+  const ArpViewParams view{
+      .rate = static_cast<std::uint8_t>(p.rate),
+      .direction = static_cast<std::uint8_t>(p.direction),
+      .octaves = p.octaves,
+      .gate = p.gate,
+      .latch = p.latch,
+  };
+  m_panels.set_content(PanelId::kArp,
+                       render_arp_panel(view, m_engine.arp_enabled(), m_engine.arp().held_count(),
+                                        m_arp_selected, cols, m_style));
 }
 
 void Shell::refresh_chords_content() {

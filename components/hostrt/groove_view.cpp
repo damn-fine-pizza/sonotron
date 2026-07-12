@@ -8,39 +8,41 @@ namespace arrangrr::host {
 namespace {
 
 struct GrooveRow {
-  GrooveField field;
   const char* label;
   const char* hint;
 };
 
+// Display order matches GrooveViewParams' field order (and the panel's own
+// long-standing row order); row `i` reads/writes field `i` below.
 constexpr std::array<GrooveRow, kGrooveRowCount> kRows = {{
-    {.field = GrooveField::kSwing, .label = "swing", .hint = "off-beat push"},
-    {.field = GrooveField::kHumanizeTiming, .label = "humanize t", .hint = "timing wobble"},
-    {.field = GrooveField::kHumanizeVelocity, .label = "humanize v", .hint = "velocity wobble"},
-    {.field = GrooveField::kAccent, .label = "accent", .hint = "downbeat emphasis"},
-    {.field = GrooveField::kSwingGrid, .label = "swing grid", .hint = "8th / 16th offbeats"},
-    {.field = GrooveField::kQuantize, .label = "quantize", .hint = "pull timing to grid"},
+    {.label = "swing", .hint = "off-beat push"},
+    {.label = "humanize t", .hint = "timing wobble"},
+    {.label = "humanize v", .hint = "velocity wobble"},
+    {.label = "accent", .hint = "downbeat emphasis"},
+    {.label = "swing grid", .hint = "8th / 16th offbeats"},
+    {.label = "quantize", .hint = "pull timing to grid"},
 }};
 
-std::uint8_t field_value(const GrooveParams& p, GrooveField field) {
-  switch (field) {
-    case GrooveField::kSwing:
+std::uint8_t row_value(const GrooveViewParams& p, std::size_t row) {
+  switch (row) {
+    case 0:
       return p.swing;
-    case GrooveField::kHumanizeTiming:
+    case 1:
       return p.humanize_timing;
-    case GrooveField::kHumanizeVelocity:
+    case 2:
       return p.humanize_velocity;
-    case GrooveField::kAccent:
+    case 3:
       return p.accent;
-    case GrooveField::kSwingGrid:
+    case 4:
       return p.swing_grid;
-    case GrooveField::kQuantize:
+    case 5:
       return p.quantize;
-    case GrooveField::kSeed:
+    default:
       return 0;
   }
-  return 0;
 }
+
+bool row_is_swing_grid(std::size_t row) { return row == 4; }
 
 // A 10-cell bar for a 0..100 percent value.
 std::string bar(std::uint8_t pct) {
@@ -55,20 +57,16 @@ std::string bar(std::uint8_t pct) {
 
 }  // namespace
 
-GrooveField groove_row_field(std::size_t index) {
-  return kRows[index < kRows.size() ? index : 0].field;
-}
-
-std::vector<std::string> render_groove_panel(const GrooveParams& params, int selected, int cols,
+std::vector<std::string> render_groove_panel(const GrooveViewParams& params, int selected, int cols,
                                              const UiStyle& style) {
   std::vector<std::string> out;
   for (std::size_t i = 0; i < kRows.size(); ++i) {
     const GrooveRow& row = kRows[i];
     const char cursor = (static_cast<int>(i) == selected) ? '>' : ' ';
-    const std::uint8_t value = field_value(params, row.field);
+    const std::uint8_t value = row_value(params, i);
 
     char buf[128];
-    if (row.field == GrooveField::kSwingGrid) {
+    if (row_is_swing_grid(i)) {
       std::snprintf(buf, sizeof(buf), "%c %-11s   grid: %-4u  %s", cursor, row.label,
                     static_cast<unsigned>(value), row.hint);
     } else {

@@ -333,8 +333,24 @@ void Shell::groove_select(int delta) {
   (void)push_panels();
 }
 
+namespace {
+// Row -> core GrooveField, for the panel's own display order (Seam D,
+// docs/design/orchestrator-pipeline-extraction.md §17.2: groove_view.hpp no
+// longer names a core type, so the row/field mapping used to build the
+// outbound Command lives here instead, where it always belonged -- Shell is
+// core-linking dispatch-side code, not a render file). `kSeed` has no row
+// (set via the reseed key, not a slider) so it is intentionally absent here.
+constexpr GrooveField kGrooveRowField[kGrooveRowCount] = {
+    GrooveField::kSwing,          GrooveField::kHumanizeTiming, GrooveField::kHumanizeVelocity,
+    GrooveField::kAccent,         GrooveField::kSwingGrid,      GrooveField::kQuantize,
+};
+}  // namespace
+
 void Shell::groove_adjust(int delta) {
-  const GrooveField field = groove_row_field(static_cast<std::size_t>(m_groove_selected));
+  const GrooveField field =
+      kGrooveRowField[static_cast<std::size_t>(m_groove_selected) < kGrooveRowCount
+                          ? static_cast<std::size_t>(m_groove_selected)
+                          : 0];
   const GrooveParams& p = m_engine.arranger().groove_params();
   std::int32_t next = 0;
   switch (field) {

@@ -172,6 +172,9 @@ void test_play_d_in_c_major_is_dm7() {
   // The G1 spec: key C major, play D4 (62) -> Dm7 = 62 65 69 72.
   ChordFixture f;
   f.cmd(Param::kKeySet, 0, static_cast<std::int32_t>(Mode::kMajor), 0, Op::kSet);
+  // Phase 3a (§17.3b): kKeySet now also echoes a kParamState event; isolate
+  // the chord-play event that follows.
+  f.ev.clear();
   f.play(62);
   const OutEvent& chord = f.ev[0];
   CHECK(chord.kind == OutEvent::Kind::kChord);
@@ -237,6 +240,7 @@ void test_quality_override_and_output_channel() {
 void test_minor_key_v_is_dominant() {
   ChordFixture f;
   f.cmd(Param::kKeySet, 9, static_cast<std::int32_t>(Mode::kMinor), 0, Op::kSet);  // A minor
+  f.ev.clear();  // Phase 3a (§17.3b): drop kKeySet's own kParamState echo
   f.play(64);  // E4 -> E7 (harmonic V), not Em7
   const OutEvent& chord = f.ev[0];
   CHECK((chord.code >> 8) == static_cast<std::uint16_t>(ChordQuality::kDom7));
@@ -264,6 +268,7 @@ void test_range_clamp_and_bad_args() {
 void test_single_finger_mode() {
   ChordFixture f;
   f.cmd(Param::kChordMode, 1, 0, 0, Op::kSet);
+  f.ev.clear();  // Phase 3a (§17.3b): drop kChordMode's own kParamState echo
   f.play(66);  // F#4: chromatic anywhere, allowed in absolute mode
   const OutEvent& chord = f.ev[0];
   CHECK(chord.kind == OutEvent::Kind::kChord);
@@ -280,6 +285,7 @@ void test_single_finger_mode() {
 void test_shell_mode_completion() {
   ChordFixture f;
   f.cmd(Param::kChordMode, 2, 0, 0, Op::kSet);
+  f.ev.clear();  // Phase 3a (§17.3b): drop kChordMode's own kParamState echo
   // C4 + E4 + Bb4 packed -> C7 completed (60 64 67 70).
   f.cmd(Param::kChordPlay, 60 | (64 << 8) | (70 << 16), -1, 100);
   const OutEvent& chord = f.ev[0];

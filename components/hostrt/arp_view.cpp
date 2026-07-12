@@ -5,41 +5,47 @@
 
 namespace arrangrr::host {
 
-const char* arp_rate_name(ArpRate rate) {
+// Raw values mirror the core `ArpRate` enum (arp/arpeggiator.hpp): kQuarter=0,
+// kEighth=1, kSixteenth=2, kThirtySecond=3.
+const char* arp_rate_name(std::uint8_t rate) {
   switch (rate) {
-    case ArpRate::kQuarter:
+    case 0:
       return "1/4";
-    case ArpRate::kEighth:
+    case 1:
       return "1/8";
-    case ArpRate::kSixteenth:
+    case 2:
       return "1/16";
-    case ArpRate::kThirtySecond:
+    case 3:
       return "1/32";
+    default:
+      return "1/16";
   }
-  return "1/16";
 }
 
-const char* arp_direction_name(ArpDirection dir) {
-  switch (dir) {
-    case ArpDirection::kUp:
+// Raw values mirror the core `ArpDirection` enum: kUp=0, kDown=1, kUpDown=2,
+// kDownUp=3, kAsPlayed=4, kRandom=5.
+const char* arp_direction_name(std::uint8_t direction) {
+  switch (direction) {
+    case 0:
       return "up";
-    case ArpDirection::kDown:
+    case 1:
       return "down";
-    case ArpDirection::kUpDown:
+    case 2:
       return "up-down";
-    case ArpDirection::kDownUp:
+    case 3:
       return "down-up";
-    case ArpDirection::kAsPlayed:
+    case 4:
       return "as-played";
-    case ArpDirection::kRandom:
+    case 5:
       return "random";
+    default:
+      return "up";
   }
-  return "up";
 }
 
 namespace {
 
-std::string row_value(ArpRow row, const ArpeggiatorParams& p, bool enabled) {
+std::string row_value(ArpRow row, const ArpViewParams& p, bool enabled) {
   char buf[32];
   switch (row) {
     case ArpRow::kEnabled:
@@ -60,12 +66,12 @@ std::string row_value(ArpRow row, const ArpeggiatorParams& p, bool enabled) {
   return "";
 }
 
-constexpr std::array<const char*, kArpRowCount> kLabels = {"enabled", "rate",  "direction",
-                                                           "octaves", "gate",  "latch"};
+constexpr std::array<const char*, kArpRowCount> kLabels = {"enabled", "rate", "direction",
+                                                           "octaves", "gate", "latch"};
 
 }  // namespace
 
-std::vector<std::string> render_arp_panel(const ArpeggiatorParams& params, bool enabled,
+std::vector<std::string> render_arp_panel(const ArpViewParams& params, bool enabled,
                                           std::uint8_t held, int selected, int cols,
                                           const UiStyle& style) {
   std::vector<std::string> out;

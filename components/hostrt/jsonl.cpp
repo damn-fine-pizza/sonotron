@@ -80,6 +80,12 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
                     ev.msg.d1, ev.tick);
     case OutEvent::Kind::kTransport:
       return format(R"({"ev":"transport","state":"%s","@":%u})", transport_name(ev.code), ev.tick);
+    case OutEvent::Kind::kParamState:
+      // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): no
+      // wire text shape yet -- an empty string renders no line at all, so
+      // this new echo is invisible to the JSONL/human text channel (and the
+      // golden harness that diffs it) until Phase 3b gives it one.
+      return {};
     case OutEvent::Kind::kWarn:
     default:
       return format(R"({"ev":"warn","code":"%s","@":%u})", warn_name(ev.code), ev.tick);
@@ -131,6 +137,9 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
       return format("@%-8u beat %u.%u.%u", ev.tick, ev.code, ev.msg.status, ev.msg.d1);
     case OutEvent::Kind::kTransport:
       return format("@%-8u transport %s", ev.tick, transport_name(ev.code));
+    case OutEvent::Kind::kParamState:
+      // Phase 3a: see to_jsonl's kParamState case above -- no text shape yet.
+      return {};
     case OutEvent::Kind::kWarn:
     default:
       return format("@%-8u WARN %s", ev.tick, warn_name(ev.code));

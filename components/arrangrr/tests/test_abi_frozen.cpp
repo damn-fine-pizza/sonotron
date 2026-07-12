@@ -73,7 +73,7 @@ static_assert(static_cast<std::uint16_t>(Param::kChordFollow) == 41);
 static_assert(static_cast<std::uint16_t>(Param::kInputZone) == 42);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
-// kMidi(0) .. kBeat(6). Next free id is 7 (additive-only).
+// kMidi(0) .. kParamState(7). Next free id is 8 (additive-only).
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kMidi) == 0);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTransport) == 1);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kWarn) == 2);
@@ -81,6 +81,10 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kChord) == 3);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kSection) == 4);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kChordFollowed) == 5);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kBeat) == 6);
+// Phase 3a (§17.3b): the ABI waiver stays unspent -- kParamState is a NEW
+// appended enumerator, not a reshape. It rides the SAME 16-byte OutEvent
+// layout (sizeof(OutEvent) == 16, pinned below, is untouched).
+static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kParamState) == 7);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
 // kNone(0) .. kUnsupported(9), kWarnCodeCount == 10 (next free id).
