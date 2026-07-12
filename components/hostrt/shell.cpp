@@ -21,6 +21,15 @@ using namespace shell_detail;
 
 namespace {
 
+// Accompany (roadmap 9310), docs/design/orchestrator-pipeline-extraction.md
+// §16.2(b)/§16.5: the melody-thru's own output port, distinct from the
+// band's typical port 0 -- `OutScheduler::cancel_note_off`'s dedup key is
+// (port,channel,note), blind to which stage scheduled it, so a shared port
+// risks one stage's retrigger logic cancelling the other's note-off. Fixed
+// at construction (the MIDI-source stage's port never changes after
+// `midi-source load`).
+constexpr std::uint8_t kMidiSourcePort = 1;
+
 // Builds the selectable style list from the built-ins the core matches by
 // index; each style advertises exactly the sections it defines. Used to seed
 // the always-present chooser.
@@ -83,9 +92,27 @@ std::vector<std::string> tokenize(const std::string& line) {
 }  // namespace
 
 Shell::Shell(EventSink sink)
-    // Every host-visible OutEvent flows through the monitor before the user
-    // sink: the MIDI monitor observes exactly what the host emits (H2).
-    : m_sink([this, user = std::move(sink)](const OutEvent& ev) {
+    // Phase 4d (docs/design/orchestrator-pipeline-extraction.md
+    // §16.3/§16.9): each declared stage gets its OWN construction args --
+    // the MIDI-source stage is constructed inert (no file yet, its own port
+    // fixed at kMidiSourcePort, `midi-source load` fills it in later);
+    // chorddet needs only the shared FollowedContext (m_followed, already
+    // constructed by declaration order ahead of m_runtime); arrangrr's
+    // Engine needs the Runtime-injected scheduler/transport PLUS the same
+    // shared FollowedContext AND the already-constructed chorddet peer.
+    // Must be listed FIRST (declaration order, m_followed/m_runtime precede
+    // m_sink/m_chooser in shell.hpp).
+    : m_runtime(
+          [](auto& sched, auto&) {
+            return midisrc::MidiSourceStage<kSchedulerCapacity>(sched, kMidiSourcePort);
+          },
+          [this](auto&, auto&, auto&) { return ChorddetStage<kMaxPorts>(m_followed); },
+          [this](auto& sched, auto& transport, auto&, auto& chorddet) {
+            return Engine(sched, transport, m_followed, chorddet);
+          }),
+      // Every host-visible OutEvent flows through the monitor before the user
+      // sink: the MIDI monitor observes exactly what the host emits (H2).
+      m_sink([this, user = std::move(sink)](const OutEvent& ev) {
         m_monitor.observe(ev, m_pending_source_key);
         user(ev);
       }),
@@ -138,26 +165,36 @@ void Shell::refresh_piano_content() {
       .committed_pcs = committed_pcs,
       .pending_pcs = chord_pitch_class_set(m_engine.chords().pending()),
   };
-  m_panels.set_content(PanelId::kPiano,
-                       render_piano_panel(m_piano, width, m_monitor, m_filter, m_view_options,
-                                          m_style, overlay));
+  m_panels.set_content(PanelId::kPiano, render_piano_panel(m_piano, width, m_monitor, m_filter,
+                                                           m_view_options, m_style, overlay));
 }
 
 namespace {
 // Jazz/lead-sheet suffix for a chord quality ("" = plain major, so root only).
 const char* chord_quality_suffix(ChordQuality q) {
   switch (q) {
-    case ChordQuality::kMaj:      return "";
-    case ChordQuality::kMin:      return "m";
-    case ChordQuality::kDim:      return "dim";
-    case ChordQuality::kAug:      return "aug";
-    case ChordQuality::kMaj7:     return "maj7";
-    case ChordQuality::kMin7:     return "m7";
-    case ChordQuality::kDom7:     return "7";
-    case ChordQuality::kHalfDim7: return "m7b5";
-    case ChordQuality::kDim7:     return "dim7";
-    case ChordQuality::kSus2:     return "sus2";
-    case ChordQuality::kSus4:     return "sus4";
+    case ChordQuality::kMaj:
+      return "";
+    case ChordQuality::kMin:
+      return "m";
+    case ChordQuality::kDim:
+      return "dim";
+    case ChordQuality::kAug:
+      return "aug";
+    case ChordQuality::kMaj7:
+      return "maj7";
+    case ChordQuality::kMin7:
+      return "m7";
+    case ChordQuality::kDom7:
+      return "7";
+    case ChordQuality::kHalfDim7:
+      return "m7b5";
+    case ChordQuality::kDim7:
+      return "dim7";
+    case ChordQuality::kSus2:
+      return "sus2";
+    case ChordQuality::kSus4:
+      return "sus4";
   }
   return "";
 }
@@ -213,9 +250,9 @@ void Shell::refresh_groove_content() {
 void Shell::refresh_arp_content() {
   const int cols = m_panels.cell_width(PanelId::kArp, panel_columns());
   m_arp_selected = std::clamp(m_arp_selected, 0, static_cast<int>(kArpRowCount) - 1);
-  m_panels.set_content(PanelId::kArp,
-                       render_arp_panel(m_engine.arp().params(), m_engine.arp_enabled(),
-                                        m_engine.arp().held_count(), m_arp_selected, cols, m_style));
+  m_panels.set_content(
+      PanelId::kArp, render_arp_panel(m_engine.arp().params(), m_engine.arp_enabled(),
+                                      m_engine.arp().held_count(), m_arp_selected, cols, m_style));
 }
 
 void Shell::refresh_chords_content() {
@@ -237,7 +274,7 @@ void Shell::refresh_chords_content() {
   lines.push_back(std::string("follow: ") + chord_follow_label(follow) + "   (" +
                   chord_follow_hint(follow) + ")");
   // mode: single-finger needs one key; the fingered modes need a full triad.
-  const char* mode_name = mode == ChordMode::kSingle ? "single-finger"
+  const char* mode_name = mode == ChordMode::kSingle  ? "single-finger"
                           : mode == ChordMode::kShell ? "shell"
                                                       : "diatonic";
   lines.push_back(std::string("mode: ") + mode_name + "   (chord mode)");
@@ -248,7 +285,8 @@ void Shell::refresh_chords_content() {
   // The chords panel IS the harmony surface: playing its keys steers the band
   // silently. Only worth saying when focused (that is when the keys route here).
   if (chords_focused()) {
-    lines.push_back(std::string("play here: keys steer the band, no sound (octave ./ transpose [])"));
+    lines.push_back(
+        std::string("play here: keys steer the band, no sound (octave ./ transpose [])"));
   }
   m_panels.set_content(PanelId::kChords, std::move(lines));
 }
@@ -516,6 +554,9 @@ std::optional<bool> Shell::dispatch_midi(const std::vector<std::string>& t, cons
   }
   if (cmd == "midi" && t.size() >= 4 && t[1] == "send") {
     return cmd_midi_send(t, error);
+  }
+  if (cmd == "midi-source" && t.size() >= 3 && t[1] == "load") {
+    return cmd_midi_source(t, error);
   }
   if (cmd == "panic") {
     return cmd_panic(t, error);

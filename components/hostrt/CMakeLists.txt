@@ -28,5 +28,9 @@ add_library(hostrt STATIC
   uds_server.cpp
 )
 target_include_directories(hostrt PUBLIC .)
-target_link_libraries(hostrt PUBLIC arrangrr runtime ALSA::ALSA)
+# Phase 4d (docs/design/orchestrator-pipeline-extraction.md §16.3/§16.7):
+# `hostrt::Shell` drives `orchestrator::AccompanyPipeline` (the same 3-stage
+# `[MIDI-source, chorddet, arrangrr]` shape, host-only via the MIDI-source
+# stage) both interactively and for the `midi-source load` L1 verb.
+target_link_libraries(hostrt PUBLIC arrangrr runtime orchestrator ALSA::ALSA)
 target_compile_options(hostrt PRIVATE -Wall -Wextra -Werror)

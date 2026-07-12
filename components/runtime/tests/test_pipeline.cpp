@@ -9,13 +9,17 @@
 #include "runtime/runtime.hpp"
 #include "test.hpp"
 
-// Phase 4a (docs/design/phase4-execution-plan.md, orchestrator-pipeline-
+// Phase 4a/4d (docs/design/phase4-execution-plan.md, orchestrator-pipeline-
 // extraction.md §16.3/§16.7): the Pipeline composite unit tests.
 //
 // test_one_stage_pipeline_is_transparent: proves `Pipeline<Engine>` is a
 // byte-identical, transparent wrapper against driving `Engine` directly
 // through `Runtime<Engine, N>` -- the Phase-4a gate itself, at unit scope
-// (the 18 golden tests prove the same thing end-to-end).
+// (the 18 golden tests prove the same thing end-to-end). Updated for 4d's
+// heterogeneous, factory-based Pipeline construction contract (§16.9 point
+// 5) and Engine's new `FollowedContext&`/`ChorddetStage&` ctor params
+// (both sides share the SAME externally-owned instances so the comparison
+// stays apples-to-apples).
 //
 // test_two_stage_fixed_order: a pure mechanism test with fake stages,
 // independent of any real Accompany stage, proving (a) `on_tick` fires
@@ -35,8 +39,16 @@ bool same_event(const OutEvent& a, const OutEvent& b) {
 }
 
 void test_one_stage_pipeline_is_transparent() {
-  runtime::Runtime<Engine, kSchedulerCapacity> direct;
-  runtime::Runtime<runtime::Pipeline<Engine>, kSchedulerCapacity> piped;
+  FollowedContext direct_followed;
+  ChorddetStage<kMaxPorts> direct_chorddet(direct_followed);
+  runtime::Runtime<Engine, kSchedulerCapacity> direct(direct_followed, direct_chorddet);
+
+  FollowedContext piped_followed;
+  ChorddetStage<kMaxPorts> piped_chorddet(piped_followed);
+  runtime::Runtime<runtime::Pipeline<Engine>, kSchedulerCapacity> piped(
+      [&](auto& sched, auto& transport) {
+        return Engine(sched, transport, piped_followed, piped_chorddet);
+      });
 
   Events direct_events;
   Events piped_events;
@@ -111,7 +123,11 @@ class LoggingStageB {
 
 void test_two_stage_fixed_order() {
   std::vector<std::string> log;
-  runtime::Pipeline<LoggingStageA, LoggingStageB> pipeline(log);
+  int dummy_scheduler = 0;
+  int dummy_transport = 0;
+  runtime::Pipeline<LoggingStageA, LoggingStageB> pipeline(
+      dummy_scheduler, dummy_transport, [&](auto&, auto&) { return LoggingStageA(log); },
+      [&](auto&, auto&, auto&) { return LoggingStageB(log); });
 
   const runtime::StageContext ctx{.now = 0};
   auto sink = [](int) {};  // sink type is never named by Pipeline; any callable works

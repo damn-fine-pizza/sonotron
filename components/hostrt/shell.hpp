@@ -9,6 +9,7 @@
 
 #include "arrangrr/engine.hpp"
 #include "midi_monitor.hpp"
+#include "orchestrator/accompany.hpp"
 #include "panel_manager.hpp"
 #include "piano_view.hpp"
 #include "runtime/pipeline.hpp"
@@ -68,9 +69,21 @@ class Shell {
   // Supplies the rows available to the panel grid (Console::panel_rows()).
   using HeightProvider = std::function<int()>;
   // Sends raw bytes into the engine input path (used by the live backend).
+  // Phase-4d (§16.3/§16.4): goes through the Pipeline's own fan-out now
+  // (Seam C), not `m_engine` directly -- the SAME raw bytes reach both the
+  // chorddet peer (its own MidiParser) and arrangrr's own routing.
   void feed_midi(std::uint8_t port, Span<const std::uint8_t> bytes) {
-    m_engine.push_midi_in(port, bytes, m_sink);
+    m_runtime.stage().push_midi_in(port, bytes, m_sink);
   }
+
+  // Accompany (roadmap 9310), docs/design/orchestrator-pipeline-
+  // extraction.md §16.5/§16.7, Phase 4d: loads a plain Standard MIDI File
+  // into the pipeline's (always-declared, inert-until-loaded) MIDI-source
+  // stage (its output port is fixed at Shell construction, distinct from
+  // the band's typical port, §16.2(b)). Returns false with `error` set on a
+  // bad path or an unparsable file (mirrors every other cmd_* handler's
+  // error reporting) -- the `midi-source load <path>` L1 verb this backs.
+  bool load_midi_source(const std::string& path, std::string& error);
 
   // Direct ABI-Command entry point (Phase 2b in-process ring, docs/design/
   // sonotron-server-phase2-brief.md "Thread-boundary mechanism"): a thin
@@ -331,6 +344,7 @@ class Shell {
   bool cmd_thru(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_clock(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_midi_send(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_midi_source(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_panic(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_key(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_play(const std::vector<std::string>& tokens, std::string& error);
@@ -414,12 +428,31 @@ class Shell {
   // exposes it — see runtime/stage.hpp's on_tick()/flush() split).
   //
   // Phase 4a (docs/design/phase4-execution-plan.md, orchestrator-pipeline-
-  // extraction.md §16.3): Runtime now drives a 1-stage `Pipeline<Engine>`
-  // instead of a bare `Engine` -- one indirection level added
-  // (`.stage<0>()` on top of the existing `.stage()`), zero behaviour
-  // change (Pipeline degenerates to a transparent forwarding wrapper).
-  runtime::Runtime<runtime::Pipeline<Engine>, kSchedulerCapacity> m_runtime;
-  Engine& m_engine = m_runtime.stage().stage<0>();
+  // extraction.md §16.3): Runtime drove a 1-stage `Pipeline<Engine>` instead
+  // of a bare `Engine` -- one indirection level added on top of `.stage()`,
+  // zero behaviour change (Pipeline degenerates to a transparent forwarding
+  // wrapper).
+  //
+  // Phase 4d (§16.3/§16.4/§16.7/§16.9): the pipeline `hostrt::Shell` drives
+  // grows to its real 3-stage Accompany shape,
+  // `orchestrator::AccompanyPipeline<kSchedulerCapacity>` (`[MIDI-source,
+  // chorddet, arrangrr]`) -- chorddet ordered BEFORE arrangrr so its
+  // harmonic context is visible the SAME tick (D53); the MIDI-source stage
+  // is constructed inert (nothing loaded) and stays byte-identical to not
+  // being there at all until `midi-source load` runs (§16.7,
+  // midisrc::MidiSourceStage's own guarantee) -- this is what lets the SAME
+  // Shell drive both the plain interactive/18-golden default AND the new
+  // Accompany golden category through one L1 grammar, one CLI binary.
+  // `m_followed` (the shared FollowedContext, formerly an Engine-owned
+  // value) is now owned HERE, at the orchestrator level (`hostrt::Shell`
+  // plays that role for the pipeline it drives), injected by reference into
+  // both peer stages. `m_engine` keeps its exact old spelling/binding
+  // contract (now `.stage<kArrangrrStageIndex>()`) so every OTHER existing
+  // `m_engine.foo()` call site in this class stays unchanged.
+  FollowedContext m_followed{};
+  runtime::Runtime<orchestrator::AccompanyPipeline<kSchedulerCapacity>, kSchedulerCapacity>
+      m_runtime;
+  Engine& m_engine = m_runtime.stage().template stage<orchestrator::kArrangrrStageIndex>();
   EventSink m_sink;
   PortHook m_port_hook;
   PanelHook m_panel_hook;

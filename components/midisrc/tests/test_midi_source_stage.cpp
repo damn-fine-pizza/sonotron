@@ -43,7 +43,9 @@ std::string fixture_path(const std::string& name) { return std::string(MIDISRC_F
 void test_load_ok_and_event_count() {
   arrangrr::OutScheduler<kCapacity> scheduler;
   arrstyle::Diagnostics diag;
-  const MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0, fixture_path("tiny.mid"), diag);
+  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0);
+  CHECK(!stage.ok());  // constructed inert -- nothing loaded yet (4d)
+  CHECK(stage.load(fixture_path("tiny.mid"), diag));
 
   CHECK(stage.ok());
   CHECK(!diag.has_errors());
@@ -53,7 +55,8 @@ void test_load_ok_and_event_count() {
 void test_events_emitted_in_tick_order_thru_scheduler() {
   arrangrr::OutScheduler<kCapacity> scheduler;
   arrstyle::Diagnostics diag;
-  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0, fixture_path("tiny.mid"), diag);
+  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0);
+  CHECK(stage.load(fixture_path("tiny.mid"), diag));
   CHECK(stage.ok());
 
   // Drive on_tick far enough forward to schedule every event in one shot
@@ -86,7 +89,8 @@ void test_events_emitted_in_tick_order_thru_scheduler() {
 void test_flush_is_a_no_op() {
   arrangrr::OutScheduler<kCapacity> scheduler;
   arrstyle::Diagnostics diag;
-  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0, fixture_path("tiny.mid"), diag);
+  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0);
+  CHECK(stage.load(fixture_path("tiny.mid"), diag));
   CHECK(stage.ok());
 
   int sink_calls = 0;
@@ -97,12 +101,32 @@ void test_flush_is_a_no_op() {
 void test_missing_file_reports_error() {
   arrangrr::OutScheduler<kCapacity> scheduler;
   arrstyle::Diagnostics diag;
-  const MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0, fixture_path("does_not_exist.mid"),
-                                         diag);
+  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0);
+  CHECK(!stage.load(fixture_path("does_not_exist.mid"), diag));
 
   CHECK(!stage.ok());
   CHECK(diag.has_errors());
   CHECK(stage.event_count() == 0);
+}
+
+void test_uninitialized_stage_on_tick_is_a_no_op() {
+  // 4d: a pipeline that always declares a MIDI-source stage (e.g.
+  // hostrt::Shell's unified pipeline) must be byte-identical to one without
+  // it when no file is ever loaded -- on_tick/flush stay no-ops.
+  arrangrr::OutScheduler<kCapacity> scheduler;
+  MidiSourceStage<kCapacity> stage(scheduler, /*port=*/0);
+  CHECK(!stage.ok());
+
+  const runtime::StageContext ctx{.now = 20'000};
+  stage.on_tick(ctx, NullSink{});
+  int sink_calls = 0;
+  stage.flush(CountingSink{&sink_calls});
+  CHECK(sink_calls == 0);
+
+  std::vector<arrangrr::ScheduledEvent> popped;
+  scheduler.pop_due(20'000,
+                    [&popped](const arrangrr::ScheduledEvent& ev) { popped.push_back(ev); });
+  CHECK(popped.empty());
 }
 
 }  // namespace
@@ -112,5 +136,6 @@ int main() {
   test_events_emitted_in_tick_order_thru_scheduler();
   test_flush_is_a_no_op();
   test_missing_file_reports_error();
+  test_uninitialized_stage_on_tick_is_a_no_op();
   return midisrc::test::failures();
 }

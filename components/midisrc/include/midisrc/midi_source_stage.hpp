@@ -56,26 +56,41 @@ std::vector<SourceEvent> build_source_events(const arrstyle::SmfFile& file);
 template <std::size_t N>
 class MidiSourceStage {
  public:
+  // Constructed inert (§16.5's "parse ONCE, off the tick loop" now split
+  // into "construct once, load lazily", Phase 4d): `port` is this source's
+  // own output port (keep it distinct from the band's port/channel,
+  // §16.2(b)); no file is opened yet, so `ok()` is false and `on_tick` is a
+  // no-op until `load()` succeeds. This lets a pipeline that ALWAYS declares
+  // a MIDI-source stage (e.g. `hostrt::Shell`'s unified pipeline, driven
+  // interactively or via the `midi-source load <path>` L1 verb, docs/design/
+  // orchestrator-pipeline-extraction.md §16.7) stay byte-identical to one
+  // without a MIDI-source stage at all when no file is ever loaded.
+  explicit MidiSourceStage(arrangrr::OutScheduler<N>& scheduler, std::uint8_t port = 0) noexcept
+      : m_scheduler(scheduler), m_port(port) {}
+
   // Opens and parses `path` right here (host-only, heap freely used, off any
-  // tick loop — see the header comment above). `port` is this source's own
-  // output port; keep it distinct from the band's port/channel (§16.2(b)).
-  // `diag` collects parse errors/warnings the same way every arrstyle
-  // importer already does; `ok()` reports whether the file loaded.
-  MidiSourceStage(arrangrr::OutScheduler<N>& scheduler, std::uint8_t port, const std::string& path,
-                  arrstyle::Diagnostics& diag)
-      : m_scheduler(scheduler), m_port(port) {
+  // tick loop — see the header comment above). `diag` collects parse
+  // errors/warnings the same way every arrstyle importer already does.
+  // Returns `ok()`'s new value; a failed load leaves any PREVIOUSLY loaded
+  // events untouched-but-superseded (the cursor/event list are reset first,
+  // so a failed reload cannot half-apply a new file over the old one).
+  bool load(const std::string& path, arrstyle::Diagnostics& diag) {
+    m_events.clear();
+    m_cursor = 0;
+    m_ok = false;
     std::vector<std::uint8_t> bytes;
     std::string error;
     if (!read_binary_file(path, bytes, error)) {
       diag.error(error, path);
-      return;
+      return false;
     }
     arrstyle::SmfFile file;
     if (!arrstyle::parse_smf(bytes, path, file, diag)) {
-      return;
+      return false;
     }
     m_events = build_source_events(file);
     m_ok = true;
+    return true;
   }
 
   bool ok() const noexcept { return m_ok; }

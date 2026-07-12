@@ -65,22 +65,37 @@ enum class InputZone : std::uint8_t {
 //
 // Phase-4b promotion (§16.1/§16.2c/§16.4, Seam C): live piano->chord
 // recognition (`ChordDetector`) and its owner (`FollowedContext`) moved to
-// the peer `components/chorddet` component. `m_followed` is now the shared
-// owner, injected by reference into BOTH `m_chords` (writer for
-// kSequencer/kManual) and `m_chorddet` (writer for kDetect) -- same idiom as
-// Transport/OutScheduler above. `push_midi_in` fans the SAME inbound byte
-// stream out to `m_chorddet`'s own `push_midi_in`, which uses its OWN
-// MidiParser rather than sharing the routing parser below.
+// the peer `components/chorddet` component.
+//
+// Phase-4d (§16.3/§16.4/§16.9): `ChorddetStage` stops being an Engine-owned
+// VALUE member (`m_chorddet`) and becomes a Pipeline-owned SIBLING stage,
+// injected here BY REFERENCE -- the SAME shared-reference idiom already used
+// for Transport/OutScheduler above. `FollowedContext` is ALSO Pipeline-owned
+// now (was an Engine-owned value before 4d) and injected by reference,
+// shared with the chorddet peer -- same-tick visibility (D53) falls out of
+// it being the SAME object, not a message a tick late. `m_chorddet` is kept
+// here ONLY for its narrow CONFIG surface (set_key/set_min_notes/
+// set_single_finger/clear/enabled/held_count via chord_key_set/chord_mode/
+// cmd_routing's kPanic/the set_chord_detect family/fire_chord_seq's
+// live-priority check) -- these are single-target ABI command forwards
+// arrangrr's OWN `push_command` dispatch must still route (chorddet cannot
+// understand `Command`/`Param`, D43), NOT a data-flow concern. The DATA-FLOW
+// specific coupling (the raw inbound MIDI byte stream reaching chorddet's
+// OWN parser) is what Seam C moves OUT of `push_midi_in` and UP to
+// `runtime::Pipeline`'s fan-out instead (see pipeline.hpp): `push_midi_in`
+// below is now routing-only and no longer calls into `m_chorddet` at all.
 class Engine {
  public:
   // Monomorphic sink at the ABI boundary (D26): one instantiation, no
   // template bloat in flash; the callable is owned by the caller.
   using EventSink = FunctionRef<void(const OutEvent&)>;
 
-  Engine(OutScheduler<kSchedulerCapacity>& scheduler, Transport& transport) noexcept
+  Engine(OutScheduler<kSchedulerCapacity>& scheduler, Transport& transport,
+         FollowedContext& followed, ChorddetStage<kMaxPorts>& chorddet) noexcept
       : m_transport(transport),
+        m_followed(followed),
         m_chords(m_followed),
-        m_chorddet(m_followed),
+        m_chorddet(chorddet),
         m_scheduler(scheduler) {}
 
   constexpr Tick now() const noexcept { return m_now; }
@@ -94,16 +109,18 @@ class Engine {
   // scheduled at the current tick; due events are flushed to the sink at the
   // end of the batch.
   //
-  // Seam C (docs/design/orchestrator-pipeline-extraction.md §16.4, Phase 4b):
-  // routing (below) and chord recognition used to happen in ONE method
-  // sharing ONE parsed message. They are split now: the byte loop below
-  // covers ONLY arrangrr's own concern (routing/arp-capture/harmony-suppress)
-  // through arrangrr's OWN `m_parsers`; `m_chorddet.push_midi_in` (after the
-  // loop) is fed the SAME raw bytes independently, through chorddet's OWN
-  // MidiParser -- never a shared parser or a shared parsed MidiMessage. Only
-  // a genuine new chord invokes the callback, which announces it exactly
-  // where `observe_chord_input` used to (same emit_chord_followed, same
-  // shared dedup latch below, so the delta policy is untouched).
+  // Seam C (docs/design/orchestrator-pipeline-extraction.md §16.4): routing
+  // (below) and chord recognition used to happen in ONE method sharing ONE
+  // parsed message (pre-4b), then, in 4b, in one method that called INTO the
+  // chorddet peer as a sub-step. As of 4d this method is ROUTING-ONLY --
+  // arrangrr's own concern (routing/arp-capture/harmony-suppress) through
+  // arrangrr's OWN `m_parsers`, nothing else. Reaching chorddet's OWN
+  // `push_midi_in` (its own MidiParser, never shared with the one below) is
+  // now `runtime::Pipeline`'s job (its fan-out calls this method for the
+  // terminal stage and chorddet's `push_midi_in` for the peer, bridging
+  // chorddet's steer callback into THIS class's own `emit_chord_followed` --
+  // see pipeline.hpp). This keeps the single dedup-latched emit point here,
+  // unique, never duplicated (Corelli's §16.9 points 2/3).
   void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
     if (port >= kMaxPorts) {
       return;
@@ -135,8 +152,6 @@ class Engine {
         }
       });
     }
-    m_chorddet.push_midi_in(port, bytes.data(), bytes.size(),
-                            [&](Producer who) { emit_chord_followed(who, sink); });
     flush(sink);
   }
 
@@ -261,6 +276,29 @@ class Engine {
     });
   }
 
+  // The SINGLE emit point for the followed-context change event (kChordFollowed):
+  // all four producers (manual play, sequencer, live detect, bar-promote) funnel
+  // through here so their wire shape and delta policy cannot diverge. Emits ONLY
+  // when the current OR pending followed chord actually changed since the last
+  // emit — never one event per tick. `src` names the producer responsible.
+  //
+  // Public (4d): `runtime::Pipeline`'s inbound-MIDI fan-out (pipeline.hpp)
+  // bridges the chorddet peer's own steer callback straight into this method
+  // -- the dedup latch below stays the ONE, unique emit point, never
+  // duplicated on the chorddet side (Corelli's §16.9 points 2/3).
+  void emit_chord_followed(Producer src, EventSink sink) {
+    const ChordState& cur = m_chords.state();
+    const ChordState& next = m_chords.pending();
+    if (m_followed_emitted && same_chord_state(cur, m_last_followed_cur) &&
+        same_chord_state(next, m_last_followed_next)) {
+      return;  // no delta: do not spam an event every tick
+    }
+    m_last_followed_cur = cur;
+    m_last_followed_next = next;
+    m_followed_emitted = true;
+    sink(OutEvent::chord_followed(cur, next, src, m_now));
+  }
+
  private:
   // Per-domain command handlers (engine.cpp).
   void cmd_transport(const Command& cmd, EventSink sink);
@@ -323,24 +361,6 @@ class Engine {
 
   static constexpr bool same_chord_state(const ChordState& a, const ChordState& b) noexcept {
     return a.valid == b.valid && a.root_pc == b.root_pc && a.quality == b.quality;
-  }
-
-  // The SINGLE emit point for the followed-context change event (kChordFollowed):
-  // all four producers (manual play, sequencer, live detect, bar-promote) funnel
-  // through here so their wire shape and delta policy cannot diverge. Emits ONLY
-  // when the current OR pending followed chord actually changed since the last
-  // emit — never one event per tick. `src` names the producer responsible.
-  void emit_chord_followed(Producer src, EventSink sink) {
-    const ChordState& cur = m_chords.state();
-    const ChordState& next = m_chords.pending();
-    if (m_followed_emitted && same_chord_state(cur, m_last_followed_cur) &&
-        same_chord_state(next, m_last_followed_next)) {
-      return;  // no delta: do not spam an event every tick
-    }
-    m_last_followed_cur = cur;
-    m_last_followed_next = next;
-    m_followed_emitted = true;
-    sink(OutEvent::chord_followed(cur, next, src, m_now));
   }
 
   // Everything gated on the 24-PPQN clock pulse (called from advance_ticks,
@@ -502,13 +522,11 @@ class Engine {
     if (!m_arp_enabled) {
       return;
     }
-    m_arp.on_tick(transport_tick,
-                  [&](std::uint8_t note, std::uint8_t velocity, TickOffset gate) {
-                    schedule_pattern(m_arp_out_port, 0,
-                                     MidiMessage::note_on(m_arp_out_channel, note, velocity), sink);
-                    schedule_pattern(m_arp_out_port, gate,
-                                     MidiMessage::note_off(m_arp_out_channel, note), sink);
-                  });
+    m_arp.on_tick(transport_tick, [&](std::uint8_t note, std::uint8_t velocity, TickOffset gate) {
+      schedule_pattern(m_arp_out_port, 0, MidiMessage::note_on(m_arp_out_channel, note, velocity),
+                       sink);
+      schedule_pattern(m_arp_out_port, gate, MidiMessage::note_off(m_arp_out_channel, note), sink);
+    });
   }
 
   Tick m_now = 0;
@@ -516,33 +534,35 @@ class Engine {
   MidiParser m_parsers[kMaxPorts];
   Router m_router;
   Timeline m_timeline;
-  // Phase-4b promotion (§16.2c): the followed-context owner, shared BY
-  // REFERENCE between m_chords (writer for kSequencer/kManual) and
-  // m_chorddet (writer for kDetect, below) -- the SAME shared-reference
-  // idiom already used for Transport/OutScheduler (§14.3). Declared BEFORE
-  // both so member initialization (always DECLARATION order, never the ctor
-  // init-list order) constructs it first. A future Pipeline (4a/4d) can
-  // hoist this member out of Engine without touching either collaborator's
-  // constructor signature.
-  FollowedContext m_followed{};
+  // Phase-4d promotion (§16.2c/§16.9): the followed-context owner is now
+  // Pipeline-owned (was an Engine-owned value in 4b), injected here BY
+  // REFERENCE and shared BY REFERENCE with m_chords (writer for
+  // kSequencer/kManual) -- the SAME shared-reference idiom already used for
+  // Transport/OutScheduler (§14.3). Declared BEFORE m_chords so member
+  // initialization (always DECLARATION order, never the ctor init-list
+  // order) binds it first.
+  FollowedContext& m_followed;
   ChordEngine m_chords;
   ChordSequencer m_seq;
   Arranger m_arranger;
-  // Phase-4b promotion (§16.1/§16.4, Seam C): the chorddet peer -- its own
-  // ChordDetector and its own per-port MidiParser array. Config
-  // (enabled/port/quantize) now lives here; set_chord_detect/chord_detect/
-  // set_detect_quantize/detect_quantize/chord_held_count/chord_min_notes
-  // above are thin forwards.
-  ChorddetStage<kMaxPorts> m_chorddet;
-  InputZone m_input_zone[kMaxPorts] = {};   // Dxx: per-port harmony zone (kMelody default)
-  ArpeggiatorEngine m_arp;                  // live keyboard arpeggiator
-  bool m_arp_enabled = false;               // kArp: capture + play the input port
-  std::uint8_t m_arp_in_port = 0;           // keyboard the arp listens to
-  std::uint8_t m_arp_out_port = 0;          // where the arp plays
-  std::uint8_t m_arp_out_channel = 0;       // 0-based
+  // Phase-4d promotion (§16.1/§16.4/§16.9): the chorddet peer is now a
+  // Pipeline-owned SIBLING stage (was an Engine-owned value in 4b), injected
+  // here BY REFERENCE for its narrow CONFIG surface only (see the class
+  // header comment) -- its own ChordDetector and per-port MidiParser array
+  // live in the Pipeline-owned instance now, not here. Config
+  // (enabled/port/quantize) is still reached from here; set_chord_detect/
+  // chord_detect/set_detect_quantize/detect_quantize/chord_held_count/
+  // chord_min_notes above are thin forwards, unchanged.
+  ChorddetStage<kMaxPorts>& m_chorddet;
+  InputZone m_input_zone[kMaxPorts] = {};  // Dxx: per-port harmony zone (kMelody default)
+  ArpeggiatorEngine m_arp;                 // live keyboard arpeggiator
+  bool m_arp_enabled = false;              // kArp: capture + play the input port
+  std::uint8_t m_arp_in_port = 0;          // keyboard the arp listens to
+  std::uint8_t m_arp_out_port = 0;         // where the arp plays
+  std::uint8_t m_arp_out_channel = 0;      // 0-based
   NoteTracker m_tracker;
   OutScheduler<kSchedulerCapacity>& m_scheduler;  // Runtime-owned, injected by reference (§14.3)
-  std::uint8_t m_clock_out_mask = 0;  // off by default; enabled via kClockOutMask
+  std::uint8_t m_clock_out_mask = 0;              // off by default; enabled via kClockOutMask
   // Last-emitted followed context, so kChordFollowed fires only on a real delta.
   ChordState m_last_followed_cur{};
   ChordState m_last_followed_next{};

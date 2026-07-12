@@ -3,6 +3,8 @@
 
 #include <cstdio>
 
+#include "midisrc/diagnostics.hpp"
+
 // Shell command handlers for help/panels and MIDI/transport I/O (port, route,
 // thru, clock, raw send, panic, transport, bpm, advance). Bodies moved verbatim
 // from shell.cpp; see shell_music_commands.cpp for the musical commands.
@@ -69,7 +71,8 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
     return {
         "help: groove  (the arranger feel as parameters; focus it, then:)",
         "  up/down  select | left/right adjust | r  reseed humanize",
-        "  swing (off-beat push) · humanize-t/v (wobble) · accent · grid (8/16) · quantize (to grid)",
+        "  swing (off-beat push) · humanize-t/v (wobble) · accent · grid (8/16) · quantize (to "
+        "grid)",
         "  CLI: groove <swing|humanize-t|humanize-v|accent|grid|quantize|seed> <value>",
     };
   }
@@ -472,9 +475,33 @@ bool Shell::cmd_midi_send(const std::vector<std::string>& t, std::string& error)
     }
     bytes.push_back(b);
   }
-  m_engine.push_midi_in(static_cast<std::uint8_t>(port),
-                        Span<const std::uint8_t>(bytes.data(), bytes.size()), m_sink);
+  m_runtime.stage().push_midi_in(static_cast<std::uint8_t>(port),
+                                 Span<const std::uint8_t>(bytes.data(), bytes.size()), m_sink);
   return true;
+}
+
+bool Shell::load_midi_source(const std::string& path, std::string& error) {
+  arrstyle::Diagnostics diag;
+  const bool ok =
+      m_runtime.stage().template stage<orchestrator::kMidiSourceStageIndex>().load(path, diag);
+  if (!ok) {
+    std::string msg = "midi-source load failed: " + path;
+    for (const arrstyle::Diagnostic& d : diag.items()) {
+      if (d.severity == arrstyle::Severity::kError) {
+        msg += "; " + d.message;
+      }
+    }
+    error = msg;
+  }
+  return ok;
+}
+
+bool Shell::cmd_midi_source(const std::vector<std::string>& t, std::string& error) {
+  if (t[1] != "load") {
+    error = "usage: midi-source load <path>";
+    return false;
+  }
+  return load_midi_source(t[2], error);
 }
 
 bool Shell::cmd_panic(const std::vector<std::string>& /*t*/, std::string& /*error*/) {

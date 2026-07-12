@@ -38,6 +38,16 @@ if(ARRANGRR_FIRMWARE)
   add_subdirectory(tests/arm-smoke)
 else()
   enable_testing()
+  # Phase 4c/4d: the MIDI-source material (SMF reader + Diagnostics + Stage
+  # adapter, promoted out of arrstyle-converter, §16.5) and
+  # components/orchestrator (the Accompany pipeline NAME/composition,
+  # §16.3/§16.8) both need to exist BEFORE hostrt, which now depends on the
+  # Accompany pipeline shape too (docs/design/orchestrator-pipeline-
+  # extraction.md §16.7: hostrt::Shell drives the SAME 3-stage pipeline type
+  # interactively AND for the `midi-source load` L1 verb). HOST-ONLY; never
+  # on the arm-none-eabi branch above.
+  add_subdirectory(components/midisrc)
+  add_subdirectory(components/orchestrator)
   add_subdirectory(components/hostrt)
   add_subdirectory(apps/tools/cli-arrangrr)
   # Phase 2a (docs/design/orchestrator-pipeline-extraction.md §15 /
@@ -50,11 +60,6 @@ else()
   add_subdirectory(components/hostrt/tests)
   add_subdirectory(tests/golden)
   add_subdirectory(tests/integration)
-  # Phase 4c (docs/design/orchestrator-pipeline-extraction.md §16.5,
-  # docs/design/phase4-execution-plan.md): the MIDI-source material (SMF
-  # reader + Diagnostics + Stage adapter) promoted out of arrstyle-converter.
-  # HOST-ONLY (file I/O); never on the arm-none-eabi branch above.
-  add_subdirectory(components/midisrc)
   # Host-only importer/compiler tooling (never in the ARM/firmware build).
   add_subdirectory(apps/tools/arrstyle-converter)
   # Host-only GUI pure client (D38) + its vendored toolkit. Never in the
