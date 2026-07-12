@@ -26,3 +26,8 @@ add_executable(test_runtime_engine test_engine.cpp)
 target_link_libraries(test_runtime_engine PRIVATE runtime arrangrr)
 add_test(NAME test_runtime_engine COMMAND test_runtime_engine)
 set_tests_properties(test_runtime_engine PROPERTIES LABELS functional)
+
+# test_pipeline: the Pipeline composite (Phase 4a) -- 1-stage transparent-
+# wrapper proof plus a pure 2-stage fixed-order/flush-delegation mechanism
+# test with fake stages (links arrangrr only for the 1-stage proof half).
+runtime_test(test_pipeline unit)

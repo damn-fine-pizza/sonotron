@@ -11,6 +11,7 @@
 #include "midi_monitor.hpp"
 #include "panel_manager.hpp"
 #include "piano_view.hpp"
+#include "runtime/pipeline.hpp"
 #include "runtime/runtime.hpp"
 #include "style_chooser.hpp"
 
@@ -411,8 +412,14 @@ class Shell {
   // set_input_zone()/... — the Stage's own domain surface) keeps compiling
   // unchanged; only advance_ticks() moved to m_runtime (Engine no longer
   // exposes it — see runtime/stage.hpp's on_tick()/flush() split).
-  runtime::Runtime<Engine, kSchedulerCapacity> m_runtime;
-  Engine& m_engine = m_runtime.stage();
+  //
+  // Phase 4a (docs/design/phase4-execution-plan.md, orchestrator-pipeline-
+  // extraction.md §16.3): Runtime now drives a 1-stage `Pipeline<Engine>`
+  // instead of a bare `Engine` -- one indirection level added
+  // (`.stage<0>()` on top of the existing `.stage()`), zero behaviour
+  // change (Pipeline degenerates to a transparent forwarding wrapper).
+  runtime::Runtime<runtime::Pipeline<Engine>, kSchedulerCapacity> m_runtime;
+  Engine& m_engine = m_runtime.stage().stage<0>();
   EventSink m_sink;
   PortHook m_port_hook;
   PanelHook m_panel_hook;
