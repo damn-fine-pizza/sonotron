@@ -85,6 +85,14 @@ void AppState::apply(const BrainEvent& ev) {
       m_bar = ev.beat_bar;
       m_beat = ev.beat_index;
       m_pulse = ev.beat_pulse;
+      // A beat only fires while the core transport is running, so receiving one
+      // is authoritative confirmation of playback -- adopt kPlaying even if the
+      // GUI connected mid-play and never saw the transport "playing" event
+      // (there is no replay on connect). Mirrors kChordFollowed opening the
+      // activity gate above, and keeps the panel from showing a moving playhead
+      // beside a "stopped" label. A later "stopped" event resets it (and parks
+      // the playhead).
+      m_transport = Transport::kPlaying;
       break;
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:

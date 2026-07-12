@@ -98,6 +98,14 @@ void test_beat_reduction() {
   CHECK(app.beat_num() == 2);
   CHECK(app.pulse() == 5);
 
+  // A beat is authoritative proof the transport is running: even with no
+  // "playing" transport event received (the GUI can connect mid-play, and
+  // there is no replay on connect), a beat adopts kPlaying and opens the
+  // activity gate -- so the panel never shows a moving playhead next to a
+  // "stopped" label.
+  CHECK(app.transport() == AppState::Transport::kPlaying);
+  CHECK(app.harmony_active());
+
   app.apply_line(R"({"ev":"transport","state":"stopped","@":1201})");
   CHECK(app.bar() == 0);
   CHECK(app.beat_num() == 0);
