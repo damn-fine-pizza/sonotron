@@ -71,6 +71,15 @@ class Shell {
     m_engine.push_midi_in(port, bytes, m_sink);
   }
 
+  // Direct ABI-Command entry point (Phase 2b in-process ring, docs/design/
+  // sonotron-server-phase2-brief.md "Thread-boundary mechanism"): a thin
+  // adapter over Engine::push_command for a caller that already holds a POD
+  // Command (e.g. drained from the GUI->engine ring) instead of an L1 text
+  // line -- the exact same core entry point every exec_line handler already
+  // calls (see apply_style_step()/configure_default_surfaces() for existing
+  // internal call sites), so no dispatch logic is duplicated or reopened.
+  void push_command(const Command& cmd) { m_engine.push_command(cmd, m_sink); }
+
   explicit Shell(EventSink sink);
   void set_port_hook(PortHook hook) { m_port_hook = std::move(hook); }
   void set_panel_hook(PanelHook hook) { m_panel_hook = std::move(hook); }

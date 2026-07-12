@@ -5,18 +5,28 @@
 // middle; Sequence Edit across the bottom), laid out from a JSON layout
 // file, with a File/Edit/View/Transport/Help menu bar and every zone
 // dispatched to its live panel (G3, docs/design/gui-fase2-mechanical-plan.md).
-// A UdsBrainSession connects (if given `--control <path>`) as a pure client
-// and drives AppState; the core-dependent surfaces (real playhead, the
-// live harmonic visualizer, real clip launch) stay honest placeholders
-// until their core work lands (§11) — see docs/design/ux-workstation.md §3
-// for the screen this lays out, and src/layout_model.hpp / layout_json.hpp
-// / layout_renderer.hpp for the three-way split (pure-data model / JSON
+// Two BrainSession backends (Phase 2b, docs/design/
+// sonotron-server-phase2-brief.md):
+//   - DEFAULT (no `--control`): InProcessBrainSession -- the "integrated"
+//     conserver: a dedicated engine thread inside THIS binary runs the
+//     arrangrr Runtime/Stage + AlsaMidi, talking to the render thread over
+//     two SPSC rings (src/spsc_ring.hpp). No external process.
+//   - `--control <path>`: UdsBrainSession -- unchanged pure client of an
+//     external `sonotron-server`, exactly as before Phase 2b (regression
+//     preserved).
+// Either way AppState/the zone panels only ever see the abstract
+// BrainSession interface -- see docs/design/ux-workstation.md §3 for the
+// screen this lays out, and src/layout_model.hpp / layout_json.hpp /
+// layout_renderer.hpp for the three-way split (pure-data model / JSON
 // reader-writer / ImGui renderer).
 //
-// Pure client (D38): this file links neither arrangrr_core nor hostrt and
-// includes zero core headers — only the vendored toolkit
-// (third_party/imgui, third_party/glfw), system OpenGL, and this app's own
-// src/ files.
+// D38 (docs/design/gui-contract-map.md) is retired for Phase 2b (owner-
+// decided): the BINARY now links hostrt/runtime/arrangrr transitively
+// through gui_sonotron_engine. THIS file itself still includes zero core
+// headers on purpose -- it only ever names the BrainSession abstraction, the
+// vendored toolkit (third_party/imgui, third_party/glfw), and system OpenGL
+// -- see apps/gui-sonotron/CMakeLists.txt for where the core linkage now
+// lives.
 //
 // DPI/font pass: text is rendered with a vendored monospace TTF (JetBrains
 // Mono NL, see assets/fonts/ARRGRR_VENDOR.md) rasterized at the window's
@@ -33,6 +43,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -41,6 +52,7 @@
 #include "src/brain_session.hpp"
 #include "src/browser_model.hpp"
 #include "src/grid_model.hpp"
+#include "src/in_process_brain_session.hpp"
 #include "src/layout_json.hpp"
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
@@ -380,13 +392,34 @@ int main(int argc, char** argv) {
   std::fprintf(stdout, "sonotron: window open, GL renderer: %s\n",
                reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
 
-  // The GUI as a pure client of the headless core (docs/design/
-  // gui-contract-map.md, ux-workstation.md §9): UdsBrainSession is the first
-  // concrete BrainSession, connecting (if a control path was given at all)
-  // to `cli-arrangrr --control <path>`. AppState holds no truth of its own;
-  // it is only ever reduced from the events UdsBrainSession::poll() decodes.
+  // Two BrainSession backends (Phase 2b, docs/design/
+  // sonotron-server-phase2-brief.md): `--control <path>` (or
+  // SONOTRON_CONTROL_PATH) keeps the pure-client UdsBrainSession working
+  // exactly as before; the default is the NEW integrated
+  // InProcessBrainSession, a dedicated engine thread inside this binary.
+  // Either way AppState holds no truth of its own -- it is only ever reduced
+  // from the events BrainSession::poll() decodes, whichever backend produced
+  // them.
   const std::string control_path = control_path_from_args(argc, argv);
-  sonotron::UdsBrainSession brain_session;
+  std::unique_ptr<sonotron::BrainSession> brain_session_holder;
+  if (!control_path.empty()) {
+    auto uds_session = std::make_unique<sonotron::UdsBrainSession>();
+    if (uds_session->connect_to(control_path)) {
+      std::fprintf(stdout, "sonotron: connected to control socket %s\n", control_path.c_str());
+    } else {
+      std::fprintf(stderr, "sonotron: could not connect to control socket %s: %s\n",
+                   control_path.c_str(), uds_session->last_error().c_str());
+    }
+    brain_session_holder = std::move(uds_session);
+  } else {
+    auto in_process_session = std::make_unique<sonotron::InProcessBrainSession>();
+    in_process_session->start();
+    std::fprintf(stdout,
+                 "sonotron: no control socket given (--control <path> or "
+                 "SONOTRON_CONTROL_PATH) - running the integrated engine thread\n");
+    brain_session_holder = std::move(in_process_session);
+  }
+  sonotron::BrainSession& brain_session = *brain_session_holder;
   sonotron::AppState app_state;
 
   // The G3 zone panels' models (docs/design/gui-fase2-mechanical-plan.md):
@@ -404,19 +437,6 @@ int main(int argc, char** argv) {
                                                .grid = grid_model,
                                                .seqedit = seqedit_model,
                                                .parts = parts_model};
-
-  if (!control_path.empty()) {
-    if (brain_session.connect_to(control_path)) {
-      std::fprintf(stdout, "sonotron: connected to control socket %s\n", control_path.c_str());
-    } else {
-      std::fprintf(stderr, "sonotron: could not connect to control socket %s: %s\n",
-                   control_path.c_str(), brain_session.last_error().c_str());
-    }
-  } else {
-    std::fprintf(stdout,
-                 "sonotron: no control socket given (--control <path> or "
-                 "SONOTRON_CONTROL_PATH) - running disconnected\n");
-  }
 
   const int max_frames = max_frames_from_env();
   const char* screenshot_path = screenshot_path_from_env();

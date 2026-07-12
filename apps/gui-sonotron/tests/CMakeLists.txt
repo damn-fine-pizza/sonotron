@@ -35,6 +35,35 @@ gui_sonotron_brain_test(test_brain_event unit)
 gui_sonotron_brain_test(test_app_state unit)
 gui_sonotron_brain_test(test_uds_brain_session unit)
 
+# SPSC ring primitive (Phase 2b, docs/design/sonotron-server-phase2-brief.md):
+# header-only, dependency-free beyond STL (no core, no hostrt) -- links only
+# the INTERFACE ring target + Threads for its threaded producer/consumer
+# stress case. See this milestone's report for the separate, manual
+# ThreadSanitizer verification run (no TSan CMake preset exists project-wide
+# yet).
+add_executable(test_spsc_ring test_spsc_ring.cpp)
+target_link_libraries(test_spsc_ring PRIVATE gui_sonotron_ring Threads::Threads)
+target_compile_options(test_spsc_ring PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_spsc_ring COMMAND test_spsc_ring)
+set_tests_properties(test_spsc_ring PROPERTIES LABELS unit)
+
+# Engine-linking tests (Phase 2b): link gui_sonotron_engine, which pulls in
+# hostrt/runtime/arrangrr/ALSA transitively -- D38 is retired for this
+# milestone (see apps/gui-sonotron/CMakeLists.txt's gui_sonotron_engine
+# comment). test_in_process_brain_session is the Gate-2b round-trip smoke
+# (push a Command onto the ring -> engine tick -> drain an OutEvent -> decode
+# -> expected state), requires no display and no ALSA sequencer device.
+function(gui_sonotron_engine_test name category)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE gui_sonotron_engine)
+  target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS ${category})
+endfunction()
+
+gui_sonotron_engine_test(test_brain_event_from_outevent unit)
+gui_sonotron_engine_test(test_in_process_brain_session functional)
+
 # Zone-model tests (G3, docs/design/gui-fase2-mechanical-plan.md): link only
 # gui_sonotron_models (no ImGui, no GLFW) -- pure model tests, host-only.
 function(gui_sonotron_model_test name category)

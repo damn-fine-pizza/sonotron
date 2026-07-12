@@ -1,14 +1,32 @@
-# gui-sonotron: HOST-ONLY desktop frontend, a PURE CLIENT (D38).
+# gui-sonotron: HOST-ONLY desktop frontend.
 #
-# This target links neither arrangrr_core nor hostrt, and includes zero core
-# headers — see docs/design/gui-contract-map.md. It links only the vendored
-# toolkit (third_party/imgui, which pulls in third_party/glfw + OpenGL) plus
-# this app's own dependency-free src/ (JSON-driven general layout, the
-# brain-session seam, the zone models, and the zone panels -- node 11600,
-# G0-G3).
+# Phase 2b (docs/design/sonotron-server-phase2-brief.md) relaxed D38 for this
+# milestone (owner-decided): the GUI binary now hosts the engine in-process
+# on a dedicated thread (the "integrated" mode, no external `sonotron-server`
+# needed), so it DOES link hostrt/runtime/arrangrr — through the
+# gui_sonotron_engine library below, and ONLY through that library. Every
+# other library in this directory (gui_sonotron_models/brain/layout/
+# screenshot) stays exactly as core-free as it always was — see each
+# target's own comment below and docs/design/gui-contract-map.md for the
+# discipline that continues to apply at THIS granularity (compilation units
+# and target_link_libraries edges) now that the OS-level process boundary
+# that used to enforce it is gone. `--control <path>` (a pure client of an
+# external `sonotron-server`, unchanged) is still supported side by side with
+# the integrated default -- see main.cpp.
 #
 # Wired only from the non-firmware branch of the top-level CMakeLists.txt —
 # never built for arm-none-eabi.
+
+find_package(Threads REQUIRED)
+
+# Header-only lock-free SPSC ring (Phase 2b, docs/design/
+# sonotron-server-phase2-brief.md's "Thread-boundary mechanism"). INTERFACE
+# so both the engine-linking library below AND its standalone unit/stress
+# test can reach the header without depending on anything else -- the ring
+# itself names no core type (it is a generic template over any trivially
+# copyable POD).
+add_library(gui_sonotron_ring INTERFACE)
+target_include_directories(gui_sonotron_ring INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Pure-data zone models (G3, docs/design/gui-fase2-mechanical-plan.md,
 # ux-workstation.md §4): Browser/Grid/SeqEdit state feeding the workstation
@@ -64,6 +82,28 @@ target_include_directories(gui_sonotron_layout PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(gui_sonotron_layout PUBLIC imgui gui_sonotron_models)
 target_compile_options(gui_sonotron_layout PRIVATE -Wall -Wextra -Werror)
 
+# Engine-linking half of the GUI binary (Phase 2b, docs/design/
+# sonotron-server-phase2-brief.md): D38 is retired for THIS milestone
+# (owner-decided, Corelli §15 review resolution item 1) -- this library, and
+# only this library, includes arrangrr/runtime/hostrt headers and links
+# hostrt/ALSA directly. It owns the dedicated engine thread
+# (in_process_brain_session.cpp: Runtime + arrangrr Stage + AlsaMidi, driven
+# by the Command ring, producing the OutEvent ring) and the in-process
+# OutEvent -> BrainEvent decode (brain_event_from_outevent.cpp), which shares
+# components/hostrt/event_labels.hpp with jsonl.cpp so the ring's decode and
+# the socket's JSONL wire cannot drift into two independently-maintained
+# label tables. Depends on gui_sonotron_brain only for the BrainSession
+# interface + BrainEvent shape (both stay exactly as core-free as before);
+# every OTHER library in this directory is untouched by this addition.
+add_library(gui_sonotron_engine STATIC
+  src/brain_event_from_outevent.cpp
+  src/in_process_brain_session.cpp
+)
+target_include_directories(gui_sonotron_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(gui_sonotron_engine PUBLIC gui_sonotron_brain gui_sonotron_ring hostrt
+  Threads::Threads)
+target_compile_options(gui_sonotron_engine PRIVATE -Wall -Wextra -Werror)
+
 # Host-only screenshot helper: a thin wrapper over the stb_image_write.h
 # already vendored under third_party/glfw/deps (no new dependency). Kept in
 # its own target so the not-warning-clean stb implementation can be compiled
@@ -79,7 +119,7 @@ target_compile_options(gui_sonotron_screenshot PRIVATE -w)
 add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
 target_link_libraries(gui_sonotron PRIVATE
-  gui_sonotron_layout gui_sonotron_brain gui_sonotron_screenshot imgui)
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine gui_sonotron_screenshot imgui)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # Bakes the source-tree assets/ path into the binary so the vendored TTF
 # (see assets/fonts/ARRGRR_VENDOR.md) is found when running straight out of
