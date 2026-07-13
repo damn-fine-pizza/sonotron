@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/common/function_ref.hpp"
+#include "arrangrr/common/seeded_hash.hpp"  // D16 shared position hash (arrangrr::seeded_hash)
 #include "arrangrr/common/static_vector.hpp"
 #include "common/time.hpp"
 #include "arrangrr/config.hpp"
@@ -178,7 +179,7 @@ class Timeline {
       // and shift every step's probability verdict — acceptable because tracks
       // are add-only in this milestone; revisit if track deletion lands.
       if (s.probability < 100 &&
-          hash(static_cast<std::uint32_t>(ti), global_step) % 100u >= s.probability) {
+          seeded_hash(static_cast<std::uint32_t>(ti), global_step) % 100u >= s.probability) {
         continue;
       }
       emit_step(t, static_cast<std::uint32_t>(global_step % t.length), schedule);
@@ -186,15 +187,6 @@ class Timeline {
   }
 
  private:
-  // Same seeded position hash as the arpeggiator (D16): pure, reproducible.
-  static constexpr std::uint32_t hash(std::uint32_t seed, std::uint32_t pos) noexcept {
-    std::uint32_t h = seed * 2654435761u + pos + 0x9E3779B9u;
-    h ^= h >> 15;
-    h *= 2246822519u;
-    h ^= h >> 13;
-    return h;
-  }
-
   // Forward micro-timing push (0..127): a lay-back added to the step-relative
   // delay. Non-negative by construction, so the absolute tick can never go
   // negative and the D29 off-before-on order is preserved (off = on + gate).

@@ -87,3 +87,8 @@ arrangrr_test(test_voicing unit)
 # default / chord-tone-anchoring / harmony-preservation behavior. Subject is
 # ONE new stage -> unit (same precedent as test_arranger/test_voicing).
 arrangrr_test(test_restyle unit)
+# test_motif: the generative motif engine (roadmap 9210) -- motif::generate,
+# motif::apply_transform, motif::apply_repeat (call-and-response), plus their
+# wiring into Arranger::on_tick's gather phase. Subject is ONE new producer ->
+# unit (same precedent as test_restyle/test_gesture/test_voicing).
+arrangrr_test(test_motif unit)

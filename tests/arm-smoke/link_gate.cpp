@@ -97,6 +97,67 @@ bool pipeline_link_gate() {
   return events > 0;
 }
 
+// Roadmap 9210 (Motif engine), docs/design/motif-engine-placement.md's
+// verdict: the motif engine is NOT a distinct runtime::Pipeline stage -- it
+// lives entirely inside Arranger::on_tick's own gather phase, so it is
+// already structurally proven to cross-build by engine_link_gate/
+// pipeline_link_gate above (every build of Engine compiles Arranger's motif
+// branch, taken or not). This gate is additive proof that the producer
+// FUNCTIONALLY fires on the real target, not just that its code compiles: a
+// style with a motif-driven pattern (a generated seed motif, kDisplacement
+// transform) actually emits notes through Arranger alone, freestanding, no
+// heap -- same "gains a proof" precedent §16.7 established for chorddet and
+// restyle_link_gate below established for RestyleStage.
+bool motif_link_gate() {
+  static constexpr StyleEvent kDrumFourOnFloor[] = {
+      {.step = 0, .tone = styles::kKick, .octave = 0, .vel = 100, .gate = 100},
+      {.step = 4, .tone = styles::kKick, .octave = 0, .vel = 100, .gate = 100},
+      {.step = 8, .tone = styles::kKick, .octave = 0, .vel = 100, .gate = 100},
+      {.step = 12, .tone = styles::kKick, .octave = 0, .vel = 100, .gate = 100},
+  };
+  static constexpr MotifSpec kLeadMotifSpec{.transform = MotifTransform::kDisplacement,
+                                            .seed = 777,
+                                            .length = 4,
+                                            .center_degree = 0,
+                                            .vel = 90,
+                                            .gate = 200,
+                                            .idiom_role = TrackRole::kDrums};
+  static constexpr StylePattern kMotifPatterns[] = {
+      {.role = TrackRole::kDrums,
+       .policy = RolePolicy::kFixed,
+       .events = Span<const StyleEvent>(kDrumFourOnFloor)},
+      {.role = TrackRole::kLead,
+       .policy = RolePolicy::kChordTone,
+       .events = Span<const StyleEvent>(),
+       .motif = &kLeadMotifSpec},
+  };
+  static constexpr StyleSection kMotifSections[] = {
+      {.type = SectionType::kVarA,
+       .bars = 1,
+       .patterns = Span<const StylePattern>(kMotifPatterns)}};
+  static constexpr Style kMotifStyle{.name = "motiflinkgate",
+                                     .sections = Span<const StyleSection>(kMotifSections)};
+
+  static Arranger arr;
+  arr.load_style(&kMotifStyle);
+  arr.set_route(TrackRole::kDrums, 0, 9);
+  arr.set_route(TrackRole::kLead, 0, 3);
+  arr.on_transport_start();
+  const Key c_major{.root_pc = 0, .mode = Mode::kMajor};
+  const ChordState no_chord{};
+  int lead_notes = 0;
+  // Two bars: repeat 0 (the generated statement) and repeat 1 (the
+  // kDisplacement-transformed answer) both actually fire.
+  for (Tick t = 0; t < 2 * kTicksPerBar; ++t) {
+    arr.on_tick(t, c_major, no_chord, [&](std::uint8_t, TickOffset, const MidiMessage& msg) {
+      if (msg.type() == midi::kNoteOn && msg.channel() == 3) {
+        ++lead_notes;
+      }
+    });
+  }
+  return lead_notes > 0;
+}
+
 // Roadmap 9320 (Restyle), docs/design/restyle-placement.md §4: RestyleStage
 // itself must stay freestanding-clean even though its only real-world
 // producer (midisrc::MidiSourceStage) is host-only and therefore absent

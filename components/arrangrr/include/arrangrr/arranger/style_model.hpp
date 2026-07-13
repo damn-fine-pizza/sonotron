@@ -104,6 +104,49 @@ struct StyleEvent {
 // caught at compile time rather than silently growing flash.
 static_assert(sizeof(StyleEvent) == 10, "StyleEvent must stay 10 bytes (flash budget, D33)");
 
+// Generative motif engine (roadmap 9210, first slice): the three named
+// transforms, plus kNone (identity -- a motif-driven pattern with kNone plays
+// its seed motif verbatim on every repeat). See arrangrr/arranger/motif.hpp
+// for the generator/transform implementation and docs/design/
+// motif-engine-{scope,placement}.md for the full design rationale.
+enum class MotifTransform : std::uint8_t {
+  kNone = 0,               // identity: always play the seed motif unchanged
+  kDiatonicTranspose = 1,  // tone += amount; kScaleDegree/kInterval events only
+  kRetrograde = 2,         // step -> (span - 1 - step); every NoteSource, incl. kFixed
+  kDisplacement = 3,       // step += amount (mod span); every NoteSource, incl. kFixed
+};
+inline constexpr std::uint8_t kMotifTransformCount = 4;
+
+// Per-pattern motif-engine configuration (roadmap 9210, first slice). When a
+// StylePattern's `motif` pointer is non-null, the arranger's fire loop
+// GENERATES this step's events (arrangrr/arranger/motif.hpp) instead of
+// reading `events` literally:
+//   - if `events` is non-empty, IT is the authored seed motif (Ottorino's
+//     "Option 1" -- transform a hand-written seed; directly targets the
+//     measured corpus redundancy of one bass/lead table copy-pasted across
+//     every section variation, motif-engine-scope.md §0.4);
+//   - if `events` is empty, the seed motif is GENERATED from this spec
+//     (motif::generate, "Option 2") instead.
+// Either way, `transform` + `seed` then derive further repeats from that seed
+// (call-and-response: even repeats play the seed verbatim, odd repeats apply
+// `transform`, motif-engine-scope.md §2.2). This is entirely constexpr,
+// style-authored data (like gm_program/voicing below): no live ABI is needed
+// for this first slice -- motif-engine-placement.md §4 already resolves the
+// "fixed at style-load time" case as needing zero ABI surface.
+struct MotifSpec {
+  MotifTransform transform = MotifTransform::kNone;
+  std::uint32_t seed = 1;         // D16 determinism: same seed -> same motif
+  std::uint8_t length = 8;        // onsets in a GENERATED seed motif (authored: ignored)
+  std::int8_t center_degree = 0;  // GENERATOR contour center (kScaleDegree only)
+  std::uint8_t vel = 90;          // GENERATOR event velocity (authored: ignored)
+  std::uint16_t gate = 200;       // GENERATOR event gate, ticks (authored: ignored)
+  // Whose kFixed pattern in the SAME section supplies the idiomatic onset
+  // mask (motif-engine-scope.md §2.3) the GENERATOR draws candidate steps
+  // from; ignored when authored, and ignored (falls back to every 16th) if no
+  // such kFixed pattern exists this section.
+  TrackRole idiom_role = TrackRole::kDrums;
+};
+
 struct StylePattern {
   TrackRole role;
   RolePolicy policy;
@@ -116,6 +159,11 @@ struct StylePattern {
   // a default so existing designated initializers stay valid; fits existing
   // padding (no size growth).
   VoicingPolicy voicing = VoicingPolicy::kAsWritten;
+  // Motif engine (9210). nullptr (default) is the historical behavior: every
+  // existing style table is unaffected and stays byte-for-byte identical.
+  // StylePattern itself carries no static_assert size pin (unlike StyleEvent),
+  // so adding this pointer is safe.
+  const MotifSpec* motif = nullptr;
 };
 
 struct StyleSection {

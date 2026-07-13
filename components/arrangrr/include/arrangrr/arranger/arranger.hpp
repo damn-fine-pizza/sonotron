@@ -4,6 +4,7 @@
 
 #include "arrangrr/arranger/gesture.hpp"  // gesture::expand (per-event note fan-out)
 #include "arrangrr/arranger/groove.hpp"
+#include "arrangrr/arranger/motif.hpp"    // motif engine (9210): gather-phase seed/transform producer
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
 #include "chorddet/theory.hpp"      // ChordState, ChordShape, theory::shape_of
@@ -55,6 +56,7 @@ class Arranger {
     m_pending_valid = false;
     m_section_start = 0;
     m_voicing.reset();         // a new style must not voice-lead from the old one
+    m_motif_repeat = 0;        // 9210: a new style's motif call-and-response restarts at the statement
     m_groove = style->groove;  // 9110: adopt the style's default feel (user edits re-apply after)
     return true;
   }
@@ -189,7 +191,8 @@ class Arranger {
 
   void on_transport_start() noexcept {
     m_section_start = 0;
-    m_voicing.reset();  // start each run with a clean voice-leading history
+    m_voicing.reset();   // start each run with a clean voice-leading history
+    m_motif_repeat = 0;  // 9210: every fresh run restarts the call-and-response at the statement
     if (section_is_variation(m_current)) {
       m_return_to = m_current;
     }
@@ -263,6 +266,12 @@ class Arranger {
           } else if (section_is_ending(m_current)) {
             result.stop_transport = true;
             return result;
+          } else {
+            // A plain variation looped back to itself: advance the motif
+            // engine's repeat counter (9210) so a repeat-keyed call-and-
+            // response transform can progress. Bounded, wraps silently (only
+            // ever read mod small ranges downstream, motif.hpp).
+            ++m_motif_repeat;
           }
         }
         // The section clock restarts when the section wraps, the section
@@ -314,7 +323,32 @@ class Arranger {
       // debug signal rather than silence).
       NoteReq group[kMaxVoiceNotes];
       int count = 0;
-      for (const StyleEvent& ev : pattern.events) {
+
+      // Motif engine (9210): a gather-phase producer occupying the same slot
+      // gesture::expand does, one level upstream. When this pattern names a
+      // MotifSpec, its per-step events are GENERATED here (from an authored
+      // seed in `pattern.events`, or motif::generate() when that is empty)
+      // and the repeat-keyed call-and-response transform is applied, rather
+      // than reading `pattern.events` literally below. `generated_motif`'s
+      // backing array is a stack local (no heap); `source` aliases either it
+      // or the pattern's own authored span unchanged, so a pattern with no
+      // motif (motif == nullptr, the default) is byte-for-byte identical to
+      // the historical behavior.
+      Motif generated_motif;
+      Span<const StyleEvent> source = pattern.events;
+      if (pattern.motif != nullptr) {
+        const Motif seed = pattern.events.empty()
+                                ? motif::generate(pattern.motif->seed, pattern.motif->length,
+                                                  motif::idiom_onset_mask(section->patterns,
+                                                                          pattern.motif->idiom_role),
+                                                  pattern.motif->center_degree, pattern.motif->vel,
+                                                  pattern.motif->gate)
+                                : motif::from_span(pattern.events);
+        generated_motif = motif::apply_repeat(seed, *pattern.motif, m_motif_repeat);
+        source = Span<const StyleEvent>(generated_motif.events, generated_motif.count);
+      }
+
+      for (const StyleEvent& ev : source) {
         if (ev.step != step) {
           continue;
         }
@@ -467,6 +501,12 @@ class Arranger {
   std::uint16_t m_solo = 0;   // per-role solo bitmask
   GrooveParams m_groove;      // global groove feel applied to every part
   VoicingState m_voicing;     // per-role voice-leading memory (D40)
+  // Motif engine (9210): how many times the CURRENT section has looped back
+  // to itself (statement=even, answer=odd -- motif.hpp's call-and-response
+  // policy). One scalar suffices because every StylePattern in a section
+  // shares that section's own `bars` length, so they all loop in lockstep;
+  // reset on style load and transport start like m_voicing.
+  std::uint32_t m_motif_repeat = 0;
 };
 
 }  // namespace arrangrr

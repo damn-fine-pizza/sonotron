@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "arrangrr/common/function_ref.hpp"
+#include "arrangrr/common/seeded_hash.hpp"  // D16 shared position hash (arrangrr::seeded_hash)
 #include "common/time.hpp"  // Tick, TickOffset, kPpqn
 
 // Arpeggiator engine: turns a set of held notes into a rhythmic sequence on the
@@ -179,7 +180,7 @@ class ArpeggiatorEngine {
     }
     std::uint8_t idx = 0;
     if (m_params.direction == ArpDirection::kRandom) {
-      idx = static_cast<std::uint8_t>(hash(m_params.seed, m_step) % size);
+      idx = static_cast<std::uint8_t>(seeded_hash(m_params.seed, m_step) % size);
     } else {
       idx = static_cast<std::uint8_t>(m_step % size);
     }
@@ -192,14 +193,6 @@ class ArpeggiatorEngine {
   static constexpr std::uint8_t clamp_enum(std::int32_t v, std::uint8_t count) noexcept {
     return static_cast<std::uint8_t>(v < 0 ? 0 : (v >= count ? count - 1 : v));
   }
-  static constexpr std::uint32_t hash(std::uint32_t seed, std::uint32_t step) noexcept {
-    std::uint32_t h = seed * 2654435761u + step + 0x9E3779B9u;
-    h ^= h >> 15;
-    h *= 2246822519u;
-    h ^= h >> 13;
-    return h;
-  }
-
   void set_latch(bool on) noexcept {
     m_params.latch = on;
     if (!on) {

@@ -8,6 +8,7 @@ namespace arrangrr {
 bool engine_link_gate();    // link_gate.cpp: instantiates the full Engine alone
 bool pipeline_link_gate();  // link_gate.cpp: the real 2-stage [chorddet, arrangrr] pipeline
 bool restyle_link_gate();   // link_gate.cpp: the 3-stage [chorddet, restyle, arrangrr] pipeline
+bool motif_link_gate();     // link_gate.cpp: the motif engine (9210) firing through Arranger alone
 }  // namespace arrangrr
 
 int main() {
@@ -21,11 +22,15 @@ int main() {
   // (docs/design/orchestrator-pipeline-extraction.md §16.7, Phase 4d). The
   // restyle gate (roadmap 9320) additionally proves RestyleStage itself
   // cross-builds and links freestanding (docs/design/restyle-placement.md §4).
+  // The motif gate (roadmap 9210) additionally proves the motif engine's
+  // generator/transform actually fires notes through Arranger on the real
+  // target (docs/design/motif-engine-placement.md §1/§3).
   const bool engine_ok = arrangrr::engine_link_gate();
   const bool pipeline_ok = arrangrr::pipeline_link_gate();
   const bool restyle_ok = arrangrr::restyle_link_gate();
-  return (engine_ok && pipeline_ok && restyle_ok && arrangrr::version_string() != nullptr &&
-          acc.advance_us(1'000'000) == 1920)
+  const bool motif_ok = arrangrr::motif_link_gate();
+  return (engine_ok && pipeline_ok && restyle_ok && motif_ok &&
+          arrangrr::version_string() != nullptr && acc.advance_us(1'000'000) == 1920)
              ? 0
              : 1;
 }
