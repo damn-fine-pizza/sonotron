@@ -122,6 +122,72 @@ bool Shell::cmd_key(const std::vector<std::string>& t, std::string& error) {
   return true;
 }
 
+namespace {
+
+// Translates a kNoteRaw Command (docs/design/orchestrator-pipeline-
+// extraction.md §17.3a) into the exact 3-byte MIDI note-on/off message
+// surface_send_note() already builds in-process: `idx`'s low byte is the
+// input port, its high byte the 0-based MIDI channel; `a` is the note,
+// `b` the velocity, `c` the on/off flag. Never touches Engine::push_command
+// -- this is a pure wire-shape-to-bytes translation, exactly like
+// surface_send_note()'s own feed_midi() call.
+void note_raw_to_bytes(const Command& c, std::uint8_t out[3]) {
+  const auto channel = static_cast<std::uint8_t>((c.idx >> 8) & 0xFF);
+  out[0] = static_cast<std::uint8_t>((c.c != 0 ? midi::kNoteOn : midi::kNoteOff) | channel);
+  out[1] = static_cast<std::uint8_t>(c.a);
+  out[2] = static_cast<std::uint8_t>(c.b);
+}
+
+}  // namespace
+
+bool Shell::cmd_note(const std::vector<std::string>& t, std::string& error) {
+  // note <port>[:ch] on|off <midinote> [velocity]   -- the wire-safe
+  // equivalent of a piano/chords key gesture (§17.3a): a pure client sends
+  // this L1 line instead of building a raw Command/MIDI bytes itself.
+  std::string port_name;
+  int channel = -1;
+  if (!split_port_channel(t[1], port_name, channel)) {
+    error = "bad note port: " + t[1];
+    return false;
+  }
+  const int port = find_port(port_name, true);  // an INPUT port (feed_midi target)
+  if (port < 0) {
+    error = "unknown input port: " + port_name;
+    return false;
+  }
+  if (t[2] != "on" && t[2] != "off") {
+    error = "note <port>[:ch] on|off <midinote> [velocity]";
+    return false;
+  }
+  const bool on = t[2] == "on";
+  std::uint8_t note = 0;
+  if (!parse_note(t[3], note)) {
+    error = "bad midi note: " + t[3];
+    return false;
+  }
+  std::uint64_t vel = on ? 100 : kPianoReleaseVelocity;
+  if (t.size() >= 5) {
+    if (!parse_u64(t[4], vel) || vel < 1 || vel > 127) {
+      error = "bad velocity: " + t[4];
+      return false;
+    }
+  }
+  Command c;
+  c.op = Op::kDo;
+  c.param = Param::kNoteRaw;
+  c.idx = static_cast<std::uint16_t>(static_cast<std::uint16_t>(port) |
+                                     (static_cast<std::uint16_t>(channel < 0 ? 0 : channel) << 8));
+  c.a = note;
+  c.b = static_cast<std::int32_t>(vel);
+  c.c = on ? 1 : 0;
+
+  std::uint8_t bytes[3];
+  note_raw_to_bytes(c, bytes);
+  feed_midi(static_cast<std::uint8_t>(c.idx & 0xFF),
+            Span<const std::uint8_t>(bytes, sizeof(bytes)));
+  return true;
+}
+
 bool Shell::cmd_play(const std::vector<std::string>& t, std::string& error) {
   const std::size_t base = t[0] == "play" ? 1 : 2;
   // Up to 4 note tokens (shell mode voicings), then [quality] [velocity].

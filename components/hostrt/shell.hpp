@@ -347,6 +347,7 @@ class Shell {
   bool cmd_midi_source(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_panic(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_key(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_note(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_play(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_chord(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_style(const std::vector<std::string>& tokens, std::string& error);

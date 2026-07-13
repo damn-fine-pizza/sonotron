@@ -20,7 +20,7 @@
 //     remove, or re-semanticize an id that already ships. A shipped id keeps its
 //     number and its meaning for the entire life of protocol v1.
 //   * Growth is ONLY by APPENDING new enumerators at the end. Next free ids:
-//     Param = 43, OutEvent::Kind = 8, WarnCode = 10 (== kWarnCodeCount).
+//     Param = 44, OutEvent::Kind = 8, WarnCode = 10 (== kWarnCodeCount).
 //   * Command/OutEvent field order, types, and size are stable. New data must
 //     ride existing reserved bits/fields or an APPENDED field, guarded by the
 //     size static_asserts below. Never reorder or resize an existing field.
@@ -34,6 +34,12 @@
 // OutEvent::Kind::kParamState (id=7) is the first APPENDED Kind since the
 // freeze — it rides the SAME 16-byte layout unchanged (no new field, no
 // resize), additive-only exactly as the invariant above requires.
+//
+// Phase 3 growth (docs/design/orchestrator-pipeline-extraction.md §17.3a):
+// Param::kNoteRaw (id=43) is the wire shape for a client-driven note gesture
+// (piano/chords key -> note-on/off) that has no other L1-text equivalent —
+// it is APPENDED, rides the SAME 20-byte Command layout unchanged (no new
+// field, no resize), additive-only exactly as the invariant above requires.
 // ============================================================================
 
 namespace arrangrr {
@@ -135,6 +141,19 @@ enum class Param : std::uint16_t {
                            //     zone); kMelody routes/sounds (default). Rides
                            //     the same parsed input path; the detect port
                            //     (kChordDetect) still decides who OBSERVES.
+  kNoteRaw = 43,           // do: idx = input port (low byte) | (channel_0based
+                           //     << 8, high byte); a = MIDI note (0..127);
+                           //     b = velocity (1..127, ignored for note-off);
+                           //     c = 1 note-on / 0 note-off. Wire shape for a
+                           //     client-driven note gesture (the `note` L1
+                           //     verb, docs/design/orchestrator-pipeline-
+                           //     extraction.md §17.3a) -- a pure client's
+                           //     equivalent of what surface_send_note()
+                           //     already builds in-process. The host
+                           //     translates this DIRECTLY into the same
+                           //     3-byte MIDI note-on/off message and feeds it
+                           //     through feed_midi(); it never reaches
+                           //     Engine::push_command().
 };
 
 // ============================================================================

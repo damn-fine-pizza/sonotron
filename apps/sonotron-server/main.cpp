@@ -35,6 +35,7 @@
 #include <string>
 
 #include "alsa_midi.hpp"
+#include "arrangrr/arranger/style.hpp"
 #include "common/time.hpp"
 #include "jsonl.hpp"
 #include "param_state_wire.hpp"
@@ -113,6 +114,77 @@ void broadcast_control_event(UdsServer& control, const OutEvent& ev,
   }
 }
 
+// Mixer roles the `parts` mixer shows, Drums..Phrase (roles 0..7) -- the
+// SAME order components/hostrt/shell_internal.hpp's kMixerParts uses,
+// duplicated here (a plain TrackRole array) rather than exposed as a public
+// hostrt seam, since this is the ONLY caller outside Shell that needs it.
+constexpr TrackRole kMixerRoles[] = {TrackRole::kDrums,  TrackRole::kPerc,   TrackRole::kBass,
+                                     TrackRole::kChord1, TrackRole::kChord2, TrackRole::kPad,
+                                     TrackRole::kArp,    TrackRole::kPhrase};
+
+// State-dump on connect (docs/design/orchestrator-pipeline-extraction.md
+// §17, Phase 3): replays every CURRENT kParamState-bearing value to exactly
+// the client that just joined, so it syncs its panels/mirror without
+// waiting for the next mutation. Reads straight off the live engine, the
+// SAME accessors Shell's own refresh_*_content() methods already use.
+void send_state_dump(UdsServer& control, int client_fd, Shell& shell) {
+  const Engine& e = shell.engine();
+  const Tick now = e.now();
+  const auto send = [&](Param param, std::uint8_t sub, std::uint8_t v0, std::uint8_t v1) {
+    const std::string line = param_state_to_jsonl(OutEvent::param_state(param, sub, v0, v1, now));
+    if (!line.empty()) {
+      control.send_line(client_fd, line);
+    }
+  };
+
+  const GrooveParams& groove = e.arranger().groove_params();
+  send(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kSwing), groove.swing, 0);
+  send(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kHumanizeTiming),
+       groove.humanize_timing, 0);
+  send(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kHumanizeVelocity),
+       groove.humanize_velocity, 0);
+  send(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kAccent), groove.accent, 0);
+  send(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kSwingGrid), groove.swing_grid, 0);
+  send(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kQuantize), groove.quantize, 0);
+
+  const ArpeggiatorParams& arp = e.arp().params();
+  send(Param::kArp, static_cast<std::uint8_t>(ArpField::kEnabled), e.arp_enabled() ? 1 : 0, 0);
+  send(Param::kArp, static_cast<std::uint8_t>(ArpField::kRate), static_cast<std::uint8_t>(arp.rate),
+       0);
+  send(Param::kArp, static_cast<std::uint8_t>(ArpField::kDirection),
+       static_cast<std::uint8_t>(arp.direction), 0);
+  send(Param::kArp, static_cast<std::uint8_t>(ArpField::kOctaves), arp.octaves, 0);
+  send(Param::kArp, static_cast<std::uint8_t>(ArpField::kGate), arp.gate, 0);
+  send(Param::kArp, static_cast<std::uint8_t>(ArpField::kLatch), arp.latch ? 1 : 0, 0);
+
+  for (const TrackRole role : kMixerRoles) {
+    send(Param::kPartMute, static_cast<std::uint8_t>(role), e.arranger().muted(role) ? 1 : 0, 0);
+    send(Param::kPartSolo, static_cast<std::uint8_t>(role), e.arranger().soloed(role) ? 1 : 0, 0);
+  }
+
+  // The current style has no dedicated live-query accessor beyond the
+  // Style* the arranger loaded; resolve it back to its builtin index by
+  // pointer identity against styles::kBuiltins (the same table build_style_
+  // infos() in shell.cpp walks).
+  if (const Style* current = e.arranger().current_style(); current != nullptr) {
+    for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
+      if (styles::kBuiltins[i] == current) {
+        send(Param::kStyleLoad, 0, i, 0);
+        break;
+      }
+    }
+  }
+
+  // The chord-detect port has no live-query accessor (only enabled/disabled
+  // is exposed) -- 0 is a documented simplification when detect is off; a
+  // future accessor can widen this without a wire-shape change.
+  send(Param::kChordDetect, 0, e.chord_detect() ? 1 : 0, 0);
+  send(Param::kChordFollow, 0, static_cast<std::uint8_t>(e.chord_follow()), 0);
+  send(Param::kChordMode, 0, static_cast<std::uint8_t>(e.chords().mode()), 0);
+  const Key& key = e.chords().key();
+  send(Param::kKeySet, 0, key.root_pc, static_cast<std::uint8_t>(key.mode));
+}
+
 // The live/headless loop: owns exactly what the Phase 2 brief keeps out of
 // the server library — AlsaMidi, the UdsServer control socket + wiring, the
 // tick-timer clock drive, and the poll() fan-in across ALSA + control fds.
@@ -166,6 +238,10 @@ int run_server(bool human, const char* control_path) {
       control.send_error(client_fd, cmd_error, line);
     }
   });
+  // State-dump on connect (docs/design/orchestrator-pipeline-extraction.md
+  // §17): a freshly-connected client syncs its panels/mirror immediately,
+  // without waiting for the next mutation.
+  control.set_connect_handler([&](int client_fd) { send_state_dump(control, client_fd, shell); });
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
     if (!alsa.create_port(def, port_error)) {

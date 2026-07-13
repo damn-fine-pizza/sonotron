@@ -160,6 +160,9 @@ void UdsServer::handle_listen_readable() {
     }
     m_client_order.push_back(fd);
     m_buffers.emplace(fd, LineBuffer{});
+    if (m_on_connect) {
+      m_on_connect(fd);
+    }
   }
 }
 
@@ -239,6 +242,8 @@ void UdsServer::broadcast(const std::string& line) {
     write_line(fd, line);
   }
 }
+
+void UdsServer::send_line(int client_fd, const std::string& line) { write_line(client_fd, line); }
 
 void UdsServer::send_error(int client_fd, const std::string& message, const std::string& cmd) {
   const std::string json =

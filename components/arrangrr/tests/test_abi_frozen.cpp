@@ -27,7 +27,7 @@ static_assert(static_cast<std::uint8_t>(Op::kDo) == 1);
 static_assert(static_cast<std::uint8_t>(Op::kGet) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kInputZone(42). Next free id is 43 (additive-only).
+// kNone(0) .. kNoteRaw(43). Next free id is 44 (additive-only).
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -71,6 +71,7 @@ static_assert(static_cast<std::uint16_t>(Param::kArp) == 39);
 static_assert(static_cast<std::uint16_t>(Param::kArpOut) == 40);
 static_assert(static_cast<std::uint16_t>(Param::kChordFollow) == 41);
 static_assert(static_cast<std::uint16_t>(Param::kInputZone) == 42);
+static_assert(static_cast<std::uint16_t>(Param::kNoteRaw) == 43);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kParamState(7). Next free id is 8 (additive-only).

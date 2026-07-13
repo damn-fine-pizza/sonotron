@@ -620,6 +620,9 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   if ((cmd == "key" || cmd == "scale") && t.size() >= 3) {
     return cmd_key(t, error);
   }
+  if (cmd == "note" && t.size() >= 4) {
+    return cmd_note(t, error);
+  }
   if ((cmd == "play" && t.size() >= 2) || (cmd == "chord" && t.size() >= 3 && t[1] == "play")) {
     return cmd_play(t, error);
   }

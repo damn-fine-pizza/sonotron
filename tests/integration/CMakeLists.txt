@@ -18,3 +18,12 @@ set_tests_properties(tui_console PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30 LABEL
 add_test(NAME server_socket
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/server_socket.sh $<TARGET_FILE:sonotron_server>)
 set_tests_properties(server_socket PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30 LABELS functional)
+
+# Phase 3 (docs/design/orchestrator-pipeline-extraction.md §17): a pure
+# `cli-arrangrr --connect` client exchanges a note + a groove tweak with a
+# live sonotron-server session and folds the kParamState echo into its own
+# mirror.
+add_test(NAME client_session
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/client_session.sh
+          $<TARGET_FILE:sonotron_server> $<TARGET_FILE:cli_arrangrr>)
+set_tests_properties(client_session PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30 LABELS functional)

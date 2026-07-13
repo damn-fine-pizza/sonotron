@@ -28,6 +28,9 @@ add_library(hostrt STATIC
   style_chooser.cpp
   rc_config.cpp
   uds_server.cpp
+  uds_client.cpp
+  client_event.cpp
+  tui_client.cpp
 )
 target_include_directories(hostrt PUBLIC .)
 # Phase 4d (docs/design/orchestrator-pipeline-extraction.md §16.3/§16.7):

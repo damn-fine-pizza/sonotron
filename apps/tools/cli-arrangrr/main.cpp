@@ -4,6 +4,13 @@
 //                                                   canonical JSONL on stdout
 //   arrangrr [--events jsonl|human]                 live: ALSA virtual ports +
 //                                                   real clock + REPL on stdin
+//   arrangrr --connect PATH                         pure UDS client of an
+//                                                   already-running
+//                                                   sonotron-server (docs/
+//                                                   design/orchestrator-
+//                                                   pipeline-extraction.md
+//                                                   §17.5 Phase 3b) -- see
+//                                                   client_mode.cpp.
 //
 // The script mode is the golden-test driver (DESIGN.md §24.5): same shell,
 // same engine, no wall clock anywhere near the core.
@@ -20,6 +27,7 @@
 #include <string>
 
 #include "alsa_midi.hpp"
+#include "client_mode.hpp"
 #include "common/time.hpp"
 #include "console.hpp"
 #include "jsonl.hpp"
@@ -800,6 +808,7 @@ int main(int argc, char** argv) {
   const char* init = nullptr;
   const char* motd = nullptr;
   const char* control = nullptr;
+  const char* connect = nullptr;
   bool human = false;
   bool events_set = false;
   for (int i = 1; i < argc; ++i) {
@@ -811,20 +820,32 @@ int main(int argc, char** argv) {
       motd = argv[++i];
     } else if (std::strcmp(argv[i], "--control") == 0 && i + 1 < argc) {
       control = argv[++i];
+    } else if (std::strcmp(argv[i], "--connect") == 0 && i + 1 < argc) {
+      connect = argv[++i];
     } else if (std::strcmp(argv[i], "--events") == 0 && i + 1 < argc) {
       human = std::strcmp(argv[++i], "human") == 0;
       events_set = true;
     } else if (std::strcmp(argv[i], "--help") == 0) {
       std::printf(
           "usage: arrangrr [--script FILE|-] [--init FILE] [--motd FILE] "
-          "[--events jsonl|human] [--control PATH]\n"
+          "[--events jsonl|human] [--control PATH] [--connect PATH]\n"
           "  the live TUI also auto-runs ~/.arrangrr.init (a command script) if "
-          "present; --init FILE overrides it. See docs/arrangrr.init.example.\n");
+          "present; --init FILE overrides it. See docs/arrangrr.init.example.\n"
+          "  --connect PATH: pure client of an already-running sonotron-server\n"
+          "  (or another --control-serving arrangrr/sonotron-server); mutually\n"
+          "  exclusive with --script/--control/--init/--motd.\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
       return 2;
     }
+  }
+  // --connect: a pure socket client -- never constructs a Shell/Engine of
+  // its own (docs/design/orchestrator-pipeline-extraction.md §17.5 Phase
+  // 3b). Checked first since it is a wholly different mode from the
+  // embedded script/live paths below.
+  if (connect != nullptr) {
+    return arrangrr::client::run_connect(connect);
   }
   // Script mode defaults to canonical JSONL (golden format); live to human.
   if (script) {

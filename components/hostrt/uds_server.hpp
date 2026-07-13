@@ -59,6 +59,13 @@ class UdsServer {
   // send_error(). The handler itself decides what the line means — this
   // class never inspects it.
   using LineHandler = std::function<void(int client_fd, const std::string& line)>;
+  // Invoked once, right after a new client is accepted and registered
+  // (before it has sent anything). Lets the caller reply with a "state
+  // dump" -- e.g. every current kParamState value -- so a freshly-connected
+  // client syncs its panels without waiting for the next mutation (docs/
+  // design/orchestrator-pipeline-extraction.md §17, "state-dump on
+  // connect").
+  using ConnectHandler = std::function<void(int client_fd)>;
 
   UdsServer() = default;
   ~UdsServer();
@@ -84,6 +91,7 @@ class UdsServer {
   const std::vector<int>& client_fds() const { return m_client_order; }
 
   void set_line_handler(LineHandler handler) { m_on_line = std::move(handler); }
+  void set_connect_handler(ConnectHandler handler) { m_on_connect = std::move(handler); }
 
   // Accepts every pending connection on the listen socket (non-blocking —
   // returns as soon as accept() reports none left). Call when poll() reports
@@ -108,6 +116,12 @@ class UdsServer {
   // rationale.
   void broadcast(const std::string& line);
 
+  // Writes `line + '\n'` to exactly one client (the state-dump-on-connect
+  // use case: replaying current values to ONLY the client that just joined,
+  // never re-broadcasting them to everyone else). Same best-effort-drop
+  // behavior as broadcast()/send_error().
+  void send_line(int client_fd, const std::string& line);
+
  private:
   void close_client(int fd);
   void write_line(int fd, const std::string& line);
@@ -115,6 +129,7 @@ class UdsServer {
   int m_listen_fd = -1;
   std::string m_path;
   LineHandler m_on_line;
+  ConnectHandler m_on_connect;
   std::unordered_map<int, LineBuffer> m_buffers;
   std::vector<int> m_client_order;
 };

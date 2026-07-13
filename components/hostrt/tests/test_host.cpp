@@ -358,6 +358,59 @@ void test_shell_chord_commands() {
   CHECK(!f.run("chord detect maybe"));  // detect wants on|off
 }
 
+// docs/design/orchestrator-pipeline-extraction.md §17.3a: the `note` L1 verb
+// is a pure client's wire-safe equivalent of surface_send_note() -- parse ->
+// Command{Param::kNoteRaw, ...} -> the SAME 3-byte MIDI message, fed through
+// feed_midi(). Verified end to end via the resulting kMidi OutEvent bytes.
+void test_note_verb() {
+  ShellFixture f;
+  CHECK(f.run("port open in in0"));
+  CHECK(f.run("port open out out0"));
+  CHECK(f.run("thru in0 out0"));
+  f.events.clear();
+
+  // Error paths: unknown port, bad on/off, bad note, bad velocity.
+  CHECK(!f.run("note bogus on 60 100"));
+  CHECK(!f.run("note in0 maybe 60 100"));
+  CHECK(!f.run("note in0 on notanote 100"));
+  CHECK(!f.run("note in0 on 60 999"));
+  CHECK(f.midi_count() == 0);
+
+  // note-on: default velocity 100 when omitted.
+  CHECK(f.run("note in0 on 60"));
+  CHECK(f.midi_count() == 1);
+  {
+    const OutEvent& ev = f.events.back();
+    CHECK(ev.kind == OutEvent::Kind::kMidi);
+    CHECK(ev.port == 0);
+    CHECK(ev.msg.status == midi::kNoteOn);  // channel 1 (0-based 0), no ":ch" given
+    CHECK(ev.msg.d1 == 60);
+    CHECK(ev.msg.d2 == 100);
+  }
+
+  // note-off: default (release) velocity when omitted.
+  f.events.clear();
+  CHECK(f.run("note in0 off 60"));
+  CHECK(f.midi_count() == 1);
+  {
+    const OutEvent& ev = f.events.back();
+    CHECK(ev.msg.status == midi::kNoteOff);
+    CHECK(ev.msg.d1 == 60);
+    CHECK(ev.msg.d2 == 64);
+  }
+
+  // Explicit channel suffix (":2" -> 0-based channel 1) and velocity.
+  f.events.clear();
+  CHECK(f.run("note in0:2 on 61 127"));
+  CHECK(f.midi_count() == 1);
+  {
+    const OutEvent& ev = f.events.back();
+    CHECK(ev.msg.status == (midi::kNoteOn | 1));
+    CHECK(ev.msg.d1 == 61);
+    CHECK(ev.msg.d2 == 127);
+  }
+}
+
 void test_shell_chord_detect_panel() {
   ShellFixture f;
   std::vector<std::string> panel;
@@ -2342,6 +2395,7 @@ int main() {
   test_shell_track_commands();
   test_note_name_parsing();
   test_shell_chord_commands();
+  test_note_verb();
   test_shell_chord_detect_panel();
   test_note_letters_steer_from_every_panel_but_repl();
   test_permanent_transpose_persists_across_bars();
