@@ -162,6 +162,18 @@ void test_parse_beat() {
   CHECK(ev.tick == 1200);
 }
 
+// The additive "clip" shape (Phase-5 Item #2, docs/design/
+// clip-primitive-design.md) -- which Repeat-Zone cell is armed/playing/
+// stopped, rendered by components/hostrt/jsonl.cpp.
+void test_parse_clip() {
+  const BrainEvent ev = parse_brain_event(R"({"ev":"clip","id":1,"state":"playing","@":6})");
+  CHECK(ev.valid);
+  CHECK(ev.kind == BrainEvent::Kind::kClip);
+  CHECK(ev.clip_id == 1);
+  CHECK(ev.clip_state == "playing");
+  CHECK(ev.tick == 6);
+}
+
 void test_parse_error() {
   const BrainEvent ev = parse_brain_event(R"({"error":"unknown command: x","cmd":"x"})");
   CHECK(ev.valid);
@@ -181,17 +193,6 @@ void test_parse_malformed_and_unrecognized() {
   CHECK(ev2.kind == BrainEvent::Kind::kUnknown);
 }
 
-// The remaining additive shape (ux-workstation.md §11: clip) is NOT decoded
-// yet -- pinned explicitly so a future slice adding it is a deliberate,
-// reviewed change to this test, not a silent behaviour drift. "chord-followed"
-// and "beat" graduated out of this list -- see test_parse_chord_followed and
-// test_parse_beat.
-void test_additive_shapes_stay_undecoded() {
-  const BrainEvent clip = parse_brain_event(R"({"ev":"clip","id":1,"state":"playing","@":6})");
-  CHECK(!clip.valid);
-  CHECK(clip.kind == BrainEvent::Kind::kUnknown);
-}
-
 }  // namespace
 
 int main() {
@@ -204,8 +205,8 @@ int main() {
   test_parse_warn();
   test_parse_chord_followed();
   test_parse_beat();
+  test_parse_clip();
   test_parse_error();
   test_parse_malformed_and_unrecognized();
-  test_additive_shapes_stay_undecoded();
   return sonotron::test::failures();
 }

@@ -3,8 +3,8 @@
 #include <cstdint>
 
 #include "chorddet/followed_context.hpp"  // ChordState, Producer (freestanding)
-#include "common/time.hpp"
 #include "common/midi/message.hpp"
+#include "common/time.hpp"
 
 // Core binary ABI (D26): the core never parses JSON or strings. The host
 // resolves L1 string paths to these POD commands; the core emits POD events.
@@ -12,34 +12,36 @@
 // buffers or direct calls.
 //
 // ============================================================================
-// FROZEN v1 ABI BASELINE — locked at the GUI freeze line (node 11720).
+// v1 ABI — ADDITIVE-ONLY BASELINE, UNFROZEN for Phase 5 (owner, 2026-07-13).
 // ----------------------------------------------------------------------------
-// This command/event surface (node 0700) is the STABLE v1 baseline the host GUI
-// (node 11600) is built against. The single invariant is ADDITIVE-ONLY:
-//   * Existing enumerator values are STABLE FOREVER. Never renumber, reuse,
-//     remove, or re-semanticize an id that already ships. A shipped id keeps its
-//     number and its meaning for the entire life of protocol v1.
-//   * Growth is ONLY by APPENDING new enumerators at the end. Next free ids:
-//     Param = 44, OutEvent::Kind = 8, WarnCode = 10 (== kWarnCodeCount).
-//   * Command/OutEvent field order, types, and size are stable. New data must
-//     ride existing reserved bits/fields or an APPENDED field, guarded by the
-//     size static_asserts below. Never reorder or resize an existing field.
-//   * A BREAKING change (renumber, remove, re-semanticize, shrink, reorder)
-//     requires bumping kProtocolVersion to 2 (version.hpp) — never an in-place
-//     edit of v1.
-// The frozen values are pinned by test_abi_frozen.cpp; that test fails the build
-// the instant this invariant is violated. If it fails, APPEND — do not edit.
-// ----------------------------------------------------------------------------
-// Phase 3a growth (docs/design/orchestrator-pipeline-extraction.md §17.3b):
-// OutEvent::Kind::kParamState (id=7) is the first APPENDED Kind since the
-// freeze — it rides the SAME 16-byte layout unchanged (no new field, no
-// resize), additive-only exactly as the invariant above requires.
+// This command/event surface (node 0700) was locked append-only at the GUI
+// freeze line (node 11720) through the Phase 3 extraction. The banner that
+// used to sit here ("FROZEN v1 ABI BASELINE") is now STALE: the owner lifted
+// the freeze for Phase 5 (docs/design/phase5-execution-plan.md, fork F3
+// RESOLVED) -- `Op`/`Param`/`Command`/`OutEvent` may be reshaped wholesale for
+// Phase-5 work, and `test_abi_frozen.cpp` is updated deliberately (not just
+// appended) alongside a reshape, per that plan's gate discipline. The ONE
+// carve-out: the in-flight Phase 3c extraction cutover still closes under the
+// OLD additive-only discipline (see phase5-execution-plan.md's own note) --
+// everything below this line is Phase-5-forward.
 //
-// Phase 3 growth (docs/design/orchestrator-pipeline-extraction.md §17.3a):
-// Param::kNoteRaw (id=43) is the wire shape for a client-driven note gesture
-// (piano/chords key -> note-on/off) that has no other L1-text equivalent —
-// it is APPENDED, rides the SAME 20-byte Command layout unchanged (no new
-// field, no resize), additive-only exactly as the invariant above requires.
+// Phase-5 Item #2 (docs/design/clip-primitive-design.md) is the first reshape
+// spent from that budget: it adds a real `Boundary` field to `Command`
+// (kImmediate/kNextBar/kNextNBars) and consolidates `kChordPlay`'s old
+// `idx != 0` overload and `kStyleSwitch`'s old `c != 0` overload onto it
+// (closes docs/design/hook-interface.md §0/item #3's "inconsistently spelled"
+// finding) -- both fields still ride the exact SAME struct sizes as before
+// (sizeof(Command) == 20, sizeof(OutEvent) == 16 unchanged: the reshape reuses
+// what used to be alignment padding, not new bytes). Existing goldens stay
+// byte-identical: Boundary's default (kImmediate == 0) reproduces each verb's
+// pre-reshape effective behavior exactly (see chord_play/style_switch in
+// engine.cpp).
+//
+// A BREAKING change of a value that already shipped in a RELEASED build
+// (renumber, remove, re-semanticize, shrink, reorder) still bumps
+// kProtocolVersion to 2 (version.hpp) -- the unfreeze lifts the in-tree,
+// same-recompile discipline, not the "a released wire format never lies"
+// discipline for anything actually shipped to a user.
 // ============================================================================
 
 namespace arrangrr {
@@ -48,6 +50,24 @@ enum class Op : std::uint8_t {
   kSet = 0,
   kDo = 1,
   kGet = 2,
+};
+
+// WHEN a `do` command takes effect relative to the transport's bar grid
+// (Phase-5 Item #2, docs/design/clip-primitive-design.md decision 3): the
+// single shared spelling for a "quantize-at-boundary" verb, consolidating
+// three previously ad-hoc mechanisms (`kChordPlay`'s old `idx != 0` overload,
+// `kStyleSwitch`'s old `c != 0` overload, and the new clip launch/stop/
+// scene-quantize verbs below) onto ONE field instead of a fourth bespoke
+// spelling (closes docs/design/hook-interface.md §0/item #3). The core still
+// forces kImmediate whenever the transport is stopped for any verb where a
+// queued command could never land without ticks (chord_play/style_switch/
+// cmd_clip in engine.cpp all apply this the same way, unchanged from the
+// pre-reshape behavior). kNextNBars generalizes "next bar" to "next N bars";
+// N rides `Command::n_bars` (meaningful only for kNextNBars; 1 elsewhere).
+enum class Boundary : std::uint8_t {
+  kImmediate = 0,
+  kNextBar = 1,
+  kNextNBars = 2,
 };
 
 // Flat M0 parameter/action ids (the full L1 catalog grows with milestones;
@@ -82,8 +102,10 @@ enum class Param : std::uint16_t {
                            //         zero-terminated (single note == low byte)
                            //     b = quality override (-1 = smart/D19)
                            //     c = velocity (1..127)
-                           //     idx = 0 immediate (default), != 0 SHIFT-quantized
-                           //           (staged to the next bar like a shift note)
+                           //     boundary = kImmediate (default) plays now;
+                           //     kNextBar/kNextNBars stages it like a SHIFT
+                           //     note (Phase-5 Item #2: retires the old
+                           //     `idx != 0` overload -- idx is unused here now).
   kChordStop = 16,         // do
   kChordHold = 17,         // set: a = 0/1
   kChordOut = 18,          // set: a = port | (channel_0based << 8)
@@ -108,9 +130,13 @@ enum class Param : std::uint16_t {
                            //     while playing, immediate otherwise)
   kStyleRoute = 32,        // set: a = TrackRole, b = port | (channel << 8)
   kStyleSwitch = 33,       // do: a = builtin style index, b = SectionType,
-                           //     c = immediate (0 = next bar while playing,
-                           //     else a hard mid-bar cut; stopped is always
-                           //     immediate). Combined style + section switch.
+                           //     boundary = kImmediate forces a hard mid-bar
+                           //     cut now; kNextBar defers to the next bar
+                           //     while playing (stopped is always immediate
+                           //     regardless -- a queued switch could never
+                           //     land without ticks). Combined style +
+                           //     section switch. (Phase-5 Item #2: retires
+                           //     the old `c != 0`-is-immediate overload.)
   kChordDetect = 34,       // set: a = 0/1 (live piano->chord detection: held
                            //     notes on the input port re-harmonize the
                            //     arranger, chord-memory hold-last), b = input
@@ -154,6 +180,31 @@ enum class Param : std::uint16_t {
                            //     3-byte MIDI note-on/off message and feeds it
                            //     through feed_midi(); it never reaches
                            //     Engine::push_command().
+  // Phase-5 Item #2 (docs/design/clip-primitive-design.md): the Repeat-Zone
+  // launch primitive. `ClipMatrix` (arrangrr/clip/clip_matrix.hpp) is an
+  // Engine-owned bounded POD pool; a clip is {TrackRole part_role,
+  // scene_index, ContentKind, content_index} plus a runtime LaunchState --
+  // never a pointer/variant. LIGHTER than the Looper (node 6000): arm/
+  // launch/stop only, no record/overdub/capture.
+  kClipAdd = 44,        // do: registers a new clip (host/script-only
+                        //     plumbing -- the design's 3 launch/stop/
+                        //     scene-quantize verbs need SOMETHING to
+                        //     address; this mirrors kSeqNew's own
+                        //     established convention of an implicit
+                        //     SEQUENTIAL id with no return-value echo).
+                        //     a = TrackRole part_role, b = scene_index,
+                        //     c = ContentKind (low byte) |
+                        //     (content_index << 8).
+  kClipLaunch = 45,     // do: idx = clip id (ClipMatrix slot, assigned by
+                        //     kClipAdd in registration order). boundary +
+                        //     n_bars (kNextNBars only) decide when it
+                        //     starts.
+  kClipStop = 46,       // do: idx = clip id. boundary + n_bars decide
+                        //     when it stops.
+  kSceneQuantize = 47,  // do: idx = scene index. boundary + n_bars decide
+                        //     when; launches every registered clip whose
+                        //     scene_index matches (`launch scene <n>
+                        //     quantize <q>`).
 };
 
 // ============================================================================
@@ -165,7 +216,10 @@ enum class Param : std::uint16_t {
 // (ABI-none): kMaxInserts below is the only committed symbol; the kFx... Param
 // ids described here do NOT exist yet and MUST NOT be added until node 5000 is
 // implemented, at which point they are APPENDED as new Param enumerators (next
-// free id = 43), honoring the additive-only freeze above.
+// free id = 48, after Phase-5 Item #2's kClipAdd/kClipLaunch/kClipStop/
+// kSceneQuantize above), honoring the additive-only-per-shipped-value
+// discipline (still in force even though the Phase-5 ABI *shape* freeze is
+// lifted -- see the banner at the top of this file).
 //
 // Chain model: a bounded chain of MIDI transforms, per-track first (per-zone is
 // deferred). On disk / on the ABI the chain holds up to kMaxInserts slots; the
@@ -190,8 +244,16 @@ inline constexpr std::uint16_t kMaxInserts = 8;
 
 struct Command {
   Op op = Op::kDo;
+  // Phase-5 Item #2 reshape: occupies what used to be alignment padding
+  // between `op` and `param` (uint8_t then a 1-byte pad) -- sizeof(Command)
+  // stays 20, unchanged (see the ABI banner at the top of this file).
+  Boundary boundary = Boundary::kImmediate;
   Param param = Param::kNone;
   std::uint16_t idx = 0;  // collection index (D26): track, route, ... target
+  // N for Boundary::kNextNBars (1..255); meaningless (and ignored) otherwise.
+  // Also occupies former alignment padding (between `idx` and `a`) -- no size
+  // change.
+  std::uint8_t n_bars = 1;
   std::int32_t a = 0;
   std::int32_t b = 0;
   std::int32_t c = 0;
@@ -207,7 +269,7 @@ enum class WarnCode : std::uint16_t {
   kTrackTableFull = 5,
   kNotInKey = 6,  // chord input note is chromatic to the key (D20: strict)
   kSeqTableFull = 7,
-  kSeqEmpty = 8,  // play/record on a sequence with no usable content
+  kSeqEmpty = 8,     // play/record on a sequence with no usable content
   kUnsupported = 9,  // parameter reserved by the ABI but not implemented yet
 };
 inline constexpr std::uint16_t kWarnCodeCount = 10;
@@ -266,6 +328,15 @@ struct OutEvent {
     //   kKeySet       port=0 (unused)    status = root pitch class (0..11),
     //                                    d1 = Mode
     kParamState = 7,
+    // Phase-5 Item #2 (docs/design/clip-primitive-design.md): a ClipMatrix
+    // cell's launch-state changed -- which cell is armed/playing/stopped.
+    // Fired both when a launch/stop lands IMMEDIATELY (Command::boundary ==
+    // kImmediate) and, for a queued one, TWICE: once announcing the armed/
+    // queued-stop state right away, and again when ClipMatrix::on_bar
+    // promotes it at the quantize boundary (engine.cpp's fire_clips).
+    //   code       = clip id (ClipMatrix slot)
+    //   msg.status = LaunchState (0 stopped, 1 armed, 2 playing, 3 queued-stop)
+    kClip = 8,
   };
 
   Kind kind = Kind::kMidi;
@@ -295,7 +366,7 @@ struct OutEvent {
     OutEvent e;
     e.kind = Kind::kChord;
     e.port = port;
-    e.msg = MidiMessage{.status=root_note, .d1=count, .d2=vel};
+    e.msg = MidiMessage{.status = root_note, .d1 = count, .d2 = vel};
     e.tick = t;
     e.code = static_cast<std::uint16_t>(degree | (quality << 8));
     return e;
@@ -360,6 +431,20 @@ struct OutEvent {
     e.code = static_cast<std::uint16_t>(param);
     e.port = sub;
     e.msg = MidiMessage{.status = v0, .d1 = v1, .d2 = 0};
+    e.tick = t;
+    return e;
+  }
+  // Packs a kClip event (Phase-5 Item #2): `id` rides `code`, the numeric
+  // LaunchState rides msg.status. Plain numeric packing like every other
+  // factory here -- ClipMatrix's own LaunchState enum is a core-internal
+  // type (arrangrr/clip/clip_matrix.hpp); the caller casts to std::uint8_t
+  // the same way chord_out()/cmd_style() cast their own enums before calling
+  // chord()/section() above.
+  static constexpr OutEvent clip(std::uint16_t id, std::uint8_t state, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kClip;
+    e.code = id;
+    e.msg = MidiMessage{.status = state, .d1 = 0, .d2 = 0};
     e.tick = t;
     return e;
   }

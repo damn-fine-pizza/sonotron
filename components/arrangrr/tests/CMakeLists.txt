@@ -92,3 +92,9 @@ arrangrr_test(test_restyle unit)
 # wiring into Arranger::on_tick's gather phase. Subject is ONE new producer ->
 # unit (same precedent as test_restyle/test_gesture/test_voicing).
 arrangrr_test(test_motif unit)
+# test_clip: the clip launch primitive (Phase-5 Item #2, docs/design/
+# clip-primitive-design.md). ClipMatrix is pure POD bookkeeping, but the
+# musically-observable behavior only exists through Engine's cmd_clip/
+# apply_clip_content/fire_clips cross-producer wiring (Arranger/
+# ChordSequencer/Timeline) -> functional, same precedent as test_input_zone.
+arrangrr_test(test_clip functional)

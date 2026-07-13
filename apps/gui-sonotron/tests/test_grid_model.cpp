@@ -1,8 +1,7 @@
 // Unit tests for GridModel: the Repeat Zone matrix/scene shape
 // (ux-workstation.md §4.4/§5). No GPU, no display, no core -- real LAUNCH is
-// an honest placeholder (kGridLaunchWired == false) until the core clip
-// primitive lands; this test pins that constant rather than a fake launch
-// result.
+// wired to the core clip primitive now (kGridLaunchWired == true, Phase-5
+// Item #2); this test pins that constant rather than a fake launch result.
 
 #include "src/grid_model.hpp"
 
@@ -71,10 +70,11 @@ void test_add_scene_caps_at_max() {
   CHECK(grid.scene_count() == GridModel::kMaxSceneCount);
 }
 
-void test_launch_wired_is_honest_placeholder() {
-  // Pinned false: flipping this to true is the exact seam the core clip
-  // primitive (ux-workstation.md §11.3) lights up when it lands.
-  CHECK(sonotron::kGridLaunchWired == false);
+void test_launch_wired_is_lit() {
+  // Pinned true: the core clip primitive (Phase-5 Item #2, docs/design/
+  // clip-primitive-design.md) shipped -- launch/stop/scene-quantize are
+  // real L1 verbs and the wire carries a real `clip` event.
+  CHECK(sonotron::kGridLaunchWired == true);
 }
 
 }  // namespace
@@ -85,6 +85,6 @@ int main() {
   test_set_and_clear_cell();
   test_add_scene_preserves_existing_cells_and_grows_shape();
   test_add_scene_caps_at_max();
-  test_launch_wired_is_honest_placeholder();
+  test_launch_wired_is_lit();
   return sonotron::test::failures();
 }

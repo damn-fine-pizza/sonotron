@@ -379,6 +379,13 @@ class Shell {
   bool cmd_part(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_groove(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_arp(const std::vector<std::string>& tokens, std::string& error);
+  // Phase-5 Item #2 (docs/design/clip-primitive-design.md): the clip launch
+  // primitive's L1 grammar (shell_clip_commands.cpp). `clip add` is
+  // host/script-only registration; `launch`/`stop` are the documented verbs
+  // (ux-workstation.md §7/§8).
+  bool cmd_clip(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_launch(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_stop_clip(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);

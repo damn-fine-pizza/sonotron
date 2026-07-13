@@ -251,7 +251,7 @@ bool Shell::cmd_play(const std::vector<std::string>& t, std::string& error) {
   const bool quantize = next < t.size() && (t[next] == "next" || t[next] == "shift");
   Command c;
   c.param = Param::kChordPlay;
-  c.idx = quantize ? 1 : 0;
+  c.boundary = quantize ? Boundary::kNextBar : Boundary::kImmediate;
   c.a = packed;
   c.b = quality;
   c.c = static_cast<std::int32_t>(vel);
@@ -387,7 +387,8 @@ bool Shell::cmd_program(const std::vector<std::string>& t, std::string& error) {
   c.b = port | (ch << 8);
   m_engine.push_command(c, m_sink);
   console_output("program " + port_name + ":" + std::to_string(ch + 1) + " -> " +
-                 std::to_string(program) + " " + gm_program_name(static_cast<std::uint8_t>(program)));
+                 std::to_string(program) + " " +
+                 gm_program_name(static_cast<std::uint8_t>(program)));
   return true;
 }
 
@@ -513,13 +514,13 @@ bool Shell::cmd_arp(const std::vector<std::string>& t, std::string& error) {
     }
     send(ArpField::kRate, r);
   } else if (sub == "dir" || sub == "direction") {
-    int d = (v == "up")           ? 0
-            : (v == "down")       ? 1
-            : (v == "updown")     ? 2
-            : (v == "downup")     ? 3
-            : (v == "as-played")  ? 4
-            : (v == "random")     ? 5
-                                  : -1;
+    int d = (v == "up")          ? 0
+            : (v == "down")      ? 1
+            : (v == "updown")    ? 2
+            : (v == "downup")    ? 3
+            : (v == "as-played") ? 4
+            : (v == "random")    ? 5
+                                 : -1;
     if (d < 0) {
       error = "arp dir up|down|updown|downup|as-played|random";
       return false;
@@ -531,7 +532,9 @@ bool Shell::cmd_arp(const std::vector<std::string>& t, std::string& error) {
       error = "bad value: " + v;
       return false;
     }
-    send(sub == "octaves" ? ArpField::kOctaves : sub == "gate" ? ArpField::kGate : ArpField::kSeed,
+    send(sub == "octaves" ? ArpField::kOctaves
+         : sub == "gate"  ? ArpField::kGate
+                          : ArpField::kSeed,
          static_cast<std::int32_t>(n));
   } else if (sub == "latch") {
     if (v != "on" && v != "off") {

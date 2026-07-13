@@ -70,6 +70,14 @@ const char* section_name(std::uint16_t code) {
   return code < kSectionTypeCount ? kNames[code] : "?";
 }
 
+const char* clip_state_name(std::uint8_t state) {
+  // One entry per arrangrr::LaunchState (clip/clip_matrix.hpp): stopped(0),
+  // armed(1), playing(2), queued_stop(3).
+  static constexpr const char* kNames[] = {"stopped", "armed", "playing", "queued_stop"};
+  constexpr std::uint8_t kCount = sizeof(kNames) / sizeof(kNames[0]);
+  return state < kCount ? kNames[state] : "unknown";
+}
+
 const char* quality_suffix(ChordQuality q) {
   switch (q) {
     case ChordQuality::kMaj:

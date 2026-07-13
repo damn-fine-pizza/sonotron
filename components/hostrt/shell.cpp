@@ -681,6 +681,15 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   if (cmd == "arp" && t.size() >= 2) {
     return cmd_arp(t, error);
   }
+  if (cmd == "clip" && t.size() >= 2) {
+    return cmd_clip(t, error);
+  }
+  if (cmd == "launch" && t.size() >= 2) {
+    return cmd_launch(t, error);
+  }
+  if (cmd == "stop" && t.size() >= 2 && t[1] == "clip") {
+    return cmd_stop_clip(t, error);
+  }
   return std::nullopt;
 }
 

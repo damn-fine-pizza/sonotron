@@ -19,10 +19,14 @@ using Events = StaticVector<OutEvent, 512>;
 constexpr StyleEvent kVoiceBass[] = {{.step = 0, .tone = 0, .octave = 0, .vel = 100, .gate = 200}};
 constexpr StyleEvent kVoicePad[] = {{.step = 0, .tone = 0, .octave = 0, .vel = 70, .gate = 3600}};
 constexpr StylePattern kVoicePatterns[] = {
-    {.role = TrackRole::kBass, .policy = RolePolicy::kChordTone,
-     .events = Span<const StyleEvent>(kVoiceBass), .gm_program = 33},  // Fingered Bass
-    {.role = TrackRole::kPad, .policy = RolePolicy::kChordTone,
-     .events = Span<const StyleEvent>(kVoicePad), .gm_program = 89},  // Pad 2 (warm)
+    {.role = TrackRole::kBass,
+     .policy = RolePolicy::kChordTone,
+     .events = Span<const StyleEvent>(kVoiceBass),
+     .gm_program = 33},  // Fingered Bass
+    {.role = TrackRole::kPad,
+     .policy = RolePolicy::kChordTone,
+     .events = Span<const StyleEvent>(kVoicePad),
+     .gm_program = 89},  // Pad 2 (warm)
 };
 constexpr StyleSection kVoiceSections[] = {
     {.type = SectionType::kVarA, .bars = 1, .patterns = Span<const StylePattern>(kVoicePatterns)}};
@@ -123,10 +127,12 @@ struct Band {
   test::TestEngine e;
   Events ev;
 
-  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {
+  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo,
+           Boundary boundary = Boundary::kImmediate) {
     Command command;
     command.op = op;
     command.param = p;
+    command.boundary = boundary;
     command.a = a;
     command.b = b;
     command.c = c;
@@ -192,8 +198,9 @@ void test_deferred_style_switch_seeds_tempo() {
   b.setup_basic();  // loads basic (12000)
   b.cmd(Param::kTransportStart);
   CHECK(b.e.transport().bpm() == 12000);
-  // Queue a combined switch to rock/varA while playing (cmd.c == 0 -> deferred).
-  b.cmd(Param::kStyleSwitch, 2, static_cast<std::int32_t>(SectionType::kVarA), 0, Op::kSet);
+  // Queue a combined switch to rock/varA while playing (boundary kNextBar -> deferred).
+  b.cmd(Param::kStyleSwitch, 2, static_cast<std::int32_t>(SectionType::kVarA), 0, Op::kSet,
+        Boundary::kNextBar);
   CHECK(b.e.transport().bpm() == 12000);  // not yet: waits for the bar boundary
   b.advance(kTicksPerBar);                // cross into the next bar
   CHECK(b.e.transport().bpm() == 13000);  // rock tempo landed with the switch
@@ -275,7 +282,7 @@ void test_groove_apply() {
   const std::uint8_t beat1 = groove::apply(p, 0, 0, 0, 80).velocity;
   const std::uint8_t beat3 = groove::apply(p, 0, 8, 0, 80).velocity;
   CHECK(beat1 > 80);
-  CHECK(beat3 > 80 && beat3 < beat1);  // beat 3 lifted, but less than beat 1
+  CHECK(beat3 > 80 && beat3 < beat1);                   // beat 3 lifted, but less than beat 1
   CHECK(groove::apply(p, 0, 4, 0, 80).velocity < 80);   // beat 2 softened
   CHECK(groove::apply(p, 0, 12, 0, 80).velocity < 80);  // beat 4 softened
 
@@ -460,7 +467,7 @@ void test_style_warns() {
   b.cmd(Param::kStyleLoad, 99);    // no such builtin (past the 16 registered)
   b.cmd(Param::kStyleSection, 2);  // no style loaded
   b.cmd(Param::kStyleLoad, 0);
-  b.cmd(Param::kStyleSection, 99);                                             // bogus section id
+  b.cmd(Param::kStyleSection, 99);                                              // bogus section id
   b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kBreak));  // absent
   b.cmd(Param::kStyleRoute, 99, 0, 0, Op::kSet);
   b.cmd(Param::kStyleRoute, 0, 9, 0, Op::kSet);  // bad port
@@ -566,8 +573,9 @@ void test_style_switch_immediate_when_stopped() {
   Band b;
   b.setup_basic();  // basic is builtin 0, loaded on varA
   b.ev.clear();
-  // Combined switch to (style 0, VarB): stopped -> immediate regardless of c.
-  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 0);
+  // Combined switch to (style 0, VarB): stopped -> immediate regardless of boundary.
+  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 0, Op::kDo,
+        Boundary::kNextBar);
   CHECK(b.e.arranger().current() == SectionType::kVarB);
   const auto sec = b.sections();
   CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarB));
@@ -580,8 +588,10 @@ void test_style_switch_next_bar_when_playing() {
   b.cmd(Param::kTransportStart);
   b.advance(10);
   b.ev.clear();
-  // c = 0 while playing -> quantized to the next bar, no immediate section event.
-  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 0);
+  // boundary kNextBar while playing -> quantized to the next bar, no immediate
+  // section event.
+  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 0, Op::kDo,
+        Boundary::kNextBar);
   CHECK(b.sections().empty());  // nothing landed yet
   CHECK(b.e.arranger().current() == SectionType::kVarA);
   b.ev.clear();
@@ -598,8 +608,9 @@ void test_style_switch_immediate_while_playing() {
   b.cmd(Param::kTransportStart);
   b.advance(10);
   b.ev.clear();
-  // c != 0 while playing -> hard cut now.
-  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 1);
+  // boundary kImmediate while playing -> hard cut now.
+  b.cmd(Param::kStyleSwitch, 0, static_cast<std::int32_t>(SectionType::kVarB), 1, Op::kDo,
+        Boundary::kImmediate);
   CHECK(b.e.arranger().current() == SectionType::kVarB);
   const auto sec = b.sections();
   CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarB));
@@ -628,14 +639,14 @@ void test_builtin_styles_registered() {
   // Sixteen builtins exist in order: the original four first, then the twelve
   // genre styles.
   CHECK(styles::kBuiltinCount == 16);
-  const char* expected[] = {"basic",  "pop",   "rock",   "ballad", "funk",  "disco",
-                            "house",  "swing", "bossa",  "samba",  "reggae", "country",
-                            "blues",  "shuffle", "latin", "motown"};
+  const char* expected[] = {"basic", "pop",     "rock",  "ballad", "funk",   "disco",
+                            "house", "swing",   "bossa", "samba",  "reggae", "country",
+                            "blues", "shuffle", "latin", "motown"};
   // Every builtin must resolve the full twelve-section vocabulary so the chooser
   // and the section stepper always have a consistent set to work with.
   const SectionType full_set[] = {
-      SectionType::kIntro1, SectionType::kIntro2, SectionType::kVarA,   SectionType::kVarB,
-      SectionType::kVarC,   SectionType::kVarD,   SectionType::kFillA,  SectionType::kFillB,
+      SectionType::kIntro1, SectionType::kIntro2, SectionType::kVarA,    SectionType::kVarB,
+      SectionType::kVarC,   SectionType::kVarD,   SectionType::kFillA,   SectionType::kFillB,
       SectionType::kFillC,  SectionType::kFillD,  SectionType::kEnding1, SectionType::kEnding2};
   for (std::uint8_t i = 0; i < styles::kBuiltinCount; ++i) {
     const Style* s = styles::kBuiltins[i];

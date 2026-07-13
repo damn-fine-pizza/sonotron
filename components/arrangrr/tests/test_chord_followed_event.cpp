@@ -51,8 +51,8 @@ struct Band {
   Events ev;
 
   void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo,
-           std::uint16_t idx = 0) {
-    Command command{.op = op, .param = p, .idx = idx, .a = a, .b = b, .c = c};
+           Boundary boundary = Boundary::kImmediate) {
+    Command command{.op = op, .boundary = boundary, .param = p, .a = a, .b = b, .c = c};
     e.push_command(command, [&](const OutEvent& o) { CHECK(ev.push_back(o)); });
   }
   void advance(std::uint32_t n) {
@@ -65,14 +65,14 @@ struct Band {
                    [&](const OutEvent& o) { CHECK(ev.push_back(o)); });
   }
 
-  // C major band, chord voicing routed to channel 5. idx=0 => immediate manual
-  // play; idx=1 => SHIFT-quantized (staged to the next bar).
+  // C major band, chord voicing routed to channel 5. boundary kImmediate =>
+  // immediate manual play; kNextBar => SHIFT-quantized (staged to the next bar).
   void setup() {
     cmd(Param::kKeySet, 0, static_cast<std::int32_t>(Mode::kMajor), 0, Op::kSet);
     cmd(Param::kChordOut, 0 | (5 << 8), 0, 0, Op::kSet);
   }
-  void play(std::uint8_t note, std::uint16_t shift = 0) {
-    cmd(Param::kChordPlay, note, /*smart*/ -1, /*vel*/ 100, Op::kDo, shift);
+  void play(std::uint8_t note, Boundary boundary = Boundary::kImmediate) {
+    cmd(Param::kChordPlay, note, /*smart*/ -1, /*vel*/ 100, Op::kDo, boundary);
   }
 
   int followed_count() const {
@@ -176,7 +176,7 @@ void test_bar_promote_uses_staging_producer() {
   b.cmd(Param::kTransportStart);
   b.advance(1);  // start playing, land inside the first bar
   b.clear();
-  b.play(67, /*shift*/ 1);  // stage G7 for the next bar
+  b.play(67, Boundary::kNextBar);  // stage G7 for the next bar
   const Followed staged = b.last_followed();
   CHECK(staged.next_valid && staged.next_root == 7 && staged.next_quality == ChordQuality::kDom7);
   CHECK(staged.src == Producer::kManual);

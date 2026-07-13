@@ -39,6 +39,7 @@ class TestEngine {
   const ChordEngine& chords() const noexcept { return engine().chords(); }
   const ChordSequencer& sequences() const noexcept { return engine().sequences(); }
   const Arranger& arranger() const noexcept { return engine().arranger(); }
+  const ClipMatrix& clips() const noexcept { return engine().clips(); }
 
   void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
     m_runtime.stage().push_midi_in(port, bytes, sink);

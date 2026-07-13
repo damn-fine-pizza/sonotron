@@ -1,14 +1,22 @@
-// Frozen-ABI guard (node 11720). This test is the ENFORCEMENT mechanism for the
-// additive-only v1 ABI freeze declared in arrangrr/abi.hpp: it pins the exact
-// numeric value of every command/event id and the exact size of the wire
-// structs. It is almost entirely compile-time (static_assert), so it breaks the
-// BUILD the instant someone renumbers, removes, reorders, re-semanticizes, or
-// resizes an existing part of protocol v1.
+// ABI pin -- RE-BASELINED for Phase 5 (docs/design/phase5-execution-plan.md,
+// docs/design/clip-primitive-design.md). This test used to enforce an
+// additive-only FREEZE (node 11720); the owner lifted that freeze for Phase 5
+// (fork F3 RESOLVED), and Item #2 (the clip primitive) is the first reshape
+// spent from that budget: it adds `Command::boundary`/`Command::n_bars` and
+// consolidates `kChordPlay`'s old `idx != 0` overload and `kStyleSwitch`'s old
+// `c != 0` overload onto the new shared `Boundary` field (both still ride the
+// SAME struct sizes -- sizeof(Command) == 20, sizeof(OutEvent) == 16,
+// unchanged, because the reshape reuses what used to be alignment padding).
 //
-// A FAILURE HERE MEANS THE FREEZE WAS VIOLATED. The fix is never to edit this
-// test to match — the fix is to APPEND (a new enumerator at the end, a reserved
-// bit, or an appended field guarded by the size asserts) and, only for a
-// genuine BREAKING change, bump kProtocolVersion to 2 in version.hpp.
+// This file is now a DELIBERATE re-baseline of the current shape, not an
+// append-only enforcement mechanism: it pins every id/size AS THEY STAND
+// TODAY so a future accidental renumber/resize still fails loudly, but a
+// deliberate Phase-5 reshape is expected to EDIT this file (update the pins),
+// not just append to it -- see phase5-execution-plan.md's gate discipline
+// ("no test_abi_frozen constraint on Phase-5 items; if the ABI is rewritten,
+// update/retire that test deliberately"). A BREAKING change to a value that
+// has already shipped to a released build still bumps kProtocolVersion to 2
+// (version.hpp).
 
 #include <cstddef>
 #include <cstdint>
@@ -26,8 +34,13 @@ static_assert(static_cast<std::uint8_t>(Op::kSet) == 0);
 static_assert(static_cast<std::uint8_t>(Op::kDo) == 1);
 static_assert(static_cast<std::uint8_t>(Op::kGet) == 2);
 
+// --- Boundary (Phase-5 Item #2 reshape): every value pinned -----------------
+static_assert(static_cast<std::uint8_t>(Boundary::kImmediate) == 0);
+static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
+static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
+
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kNoteRaw(43). Next free id is 44 (additive-only).
+// kNone(0) .. kSceneQuantize(47). Next free id is 48.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -72,9 +85,13 @@ static_assert(static_cast<std::uint16_t>(Param::kArpOut) == 40);
 static_assert(static_cast<std::uint16_t>(Param::kChordFollow) == 41);
 static_assert(static_cast<std::uint16_t>(Param::kInputZone) == 42);
 static_assert(static_cast<std::uint16_t>(Param::kNoteRaw) == 43);
+static_assert(static_cast<std::uint16_t>(Param::kClipAdd) == 44);
+static_assert(static_cast<std::uint16_t>(Param::kClipLaunch) == 45);
+static_assert(static_cast<std::uint16_t>(Param::kClipStop) == 46);
+static_assert(static_cast<std::uint16_t>(Param::kSceneQuantize) == 47);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
-// kMidi(0) .. kParamState(7). Next free id is 8 (additive-only).
+// kMidi(0) .. kClip(8). Next free id is 9.
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kMidi) == 0);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTransport) == 1);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kWarn) == 2);
@@ -86,6 +103,9 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kBeat) == 6);
 // appended enumerator, not a reshape. It rides the SAME 16-byte OutEvent
 // layout (sizeof(OutEvent) == 16, pinned below, is untouched).
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kParamState) == 7);
+// Phase-5 Item #2: kClip is the clip-primitive launch-state echo -- rides the
+// SAME 16-byte OutEvent layout unchanged (no new field, no resize).
+static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kClip) == 8);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
 // kNone(0) .. kUnsupported(9), kWarnCodeCount == 10 (next free id).
@@ -118,11 +138,12 @@ static_assert(kMaxInserts == 8);
 }  // namespace
 
 int main() {
-  // All pins above are compile-time; reaching here means the build honored the
-  // frozen v1 ABI. A runtime CHECK keeps this a real, registered ctest target.
+  // All pins above are compile-time; reaching here means the build matches
+  // this re-baselined shape. A runtime CHECK keeps this a real, registered
+  // ctest target.
   CHECK(kProtocolVersion == 1);
   if (arrangrr::test::failures() == 0) {
-    std::printf("test_abi_frozen: all OK (frozen v1 ABI intact)\n");
+    std::printf("test_abi_frozen: all OK (v1 ABI matches the re-baselined shape)\n");
   }
   return arrangrr::test::failures();
 }

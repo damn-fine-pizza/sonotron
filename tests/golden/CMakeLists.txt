@@ -37,6 +37,14 @@ arrangrr_golden(feel_swing)
 arrangrr_golden(feel_shuffle)
 arrangrr_golden(feel_blues)
 
+# clip_launch (Phase-5 Item #2, docs/design/clip-primitive-design.md): the
+# NEW clip launch primitive -- `clip add` registration for all three content
+# kinds, an immediate stop/relaunch of a step-track clip (mute/unmute, since
+# Timeline::Track has no play/stop state of its own), a next-bar-quantized
+# launch of a style-section clip (lands on the bar boundary), and a bad clip
+# id (warns, does not crash). See clip_launch.acmd's own header comment.
+arrangrr_golden(clip_launch)
+
 # Accompany (roadmap 9310), docs/design/orchestrator-pipeline-extraction.md
 # §16.7, phase4-execution-plan.md 4d: the NEW golden category proving the
 # 3-stage `[MIDI-source, chorddet, arrangrr]` pipeline end-to-end -- a

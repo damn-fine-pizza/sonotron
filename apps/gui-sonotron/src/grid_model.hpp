@@ -14,15 +14,18 @@
 
 namespace sonotron {
 
-// Whether a launched cell/scene actually fires anything on the core. FALSE
-// until the core clip/scene primitive ships (`launch/stop clip <id>
-// quantize <n>`, `launch scene <n> quantize <q>` — ux-workstation.md
-// §11.3, brought-forward front-of-line core work, still pending). Kept as
-// one named constant grid_panel.cpp checks to grey out the launch
-// affordance honestly rather than silently doing nothing on click; flip it
-// to true (no GridModel/grid_panel rewrite needed) once a real send() of
-// the launch verb lands.
-inline constexpr bool kGridLaunchWired = false;
+// Whether a launched cell/scene actually fires anything on the core. TRUE:
+// the core clip/scene primitive shipped (Phase-5 Item #2, docs/design/
+// clip-primitive-design.md) -- `launch clip <id> quantize <n>` / `launch
+// scene <n> quantize <q>` are real L1 verbs (components/hostrt/
+// shell_clip_commands.cpp), the core emits a real `clip` event, and
+// grid_panel.cpp's cell/scene-header buttons send() them for real. Kept as
+// one named constant (rather than deleting it outright) so a future full
+// grid-cell-to-ClipMatrix content binding (registering each cell's content
+// with the core, still a follow-up -- see clip-primitive-design.md's own
+// scope note) has one obvious place to gate on if that ever needs staging
+// again.
+inline constexpr bool kGridLaunchWired = true;
 
 enum class GridCellKind : std::uint8_t { kEmpty, kStyleSection, kChordSequence, kStepTrack };
 
@@ -37,9 +40,10 @@ struct GridCell {
 
 // Rows are the 9 TrackRole parts (track_roles.hpp); columns are scenes.
 // Real cell CONTENT is real today (dragging a style from the browser sets
-// a cell, §4.3/§5); real LAUNCH stays an honest placeholder
-// (kGridLaunchWired) until the core clip primitive exists. The shape is
-// modeled now so the panel lights up later with no rewrite.
+// a cell, §4.3/§5); real LAUNCH is now wired too (kGridLaunchWired) through
+// the core clip primitive (Phase-5 Item #2). Registering each cell's own
+// content with the core's ClipMatrix (so the launched id actually plays
+// THIS cell's material) is a follow-up, not yet done here.
 class GridModel {
  public:
   static constexpr std::size_t kPartCount = kTrackRoleCount;

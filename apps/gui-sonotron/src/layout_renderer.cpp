@@ -27,7 +27,7 @@ void render_zone_content(const Zone& zone, WorkstationState& state) {
   } else if (zone.id == "browser") {
     render_browser_panel(state.browser, state.brain_session);
   } else if (zone.id == "grid") {
-    render_grid_panel(state.grid);
+    render_grid_panel(state.grid, state.brain_session);
   } else if (zone.id == "seqedit") {
     render_seqedit_panel(state.seqedit);
   } else if (zone.id == "parts") {

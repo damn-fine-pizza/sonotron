@@ -19,6 +19,11 @@ const char* warn_name(std::uint16_t code);
 const char* transport_name(std::uint16_t state);
 const char* realtime_name(std::uint8_t status);
 const char* section_name(std::uint16_t code);
+// Phase-5 Item #2: the numeric LaunchState a kClip OutEvent carries in
+// msg.status (arrangrr::LaunchState, a core-internal enum -- this takes the
+// plain wire code, like warn_name/section_name above, so event_labels.hpp
+// stays decoupled from clip_matrix.hpp).
+const char* clip_state_name(std::uint8_t state);
 const char* quality_suffix(ChordQuality quality);
 std::string roman_degree(std::uint8_t degree, ChordQuality quality);
 

@@ -95,6 +95,12 @@ BrainEvent brain_event_from_outevent(const arrangrr::OutEvent& ev, bool prefer_f
       out.beat_pulse = ev.msg.d1;
       break;
 
+    case OutEvent::Kind::kClip:
+      out.kind = BrainEvent::Kind::kClip;
+      out.clip_id = ev.code;
+      out.clip_state = host::clip_state_name(ev.msg.status);
+      break;
+
     case OutEvent::Kind::kTransport:
       out.kind = BrainEvent::Kind::kTransport;
       out.transport_state = host::transport_name(ev.code);

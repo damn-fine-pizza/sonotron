@@ -29,6 +29,7 @@ namespace sonotron {
 
 namespace {
 
+using arrangrr::Boundary;
 using arrangrr::Command;
 using arrangrr::Op;
 using arrangrr::OutEvent;
@@ -82,6 +83,55 @@ struct PathResult {
 // Splits on ASCII space (single delimiter, no quoting) -- sufficient for the
 // fixed-shape command lines translated below; Shell's own tokenizer (private
 // to hostrt) does the same for exec_line's richer grammar.
+// A bare non-negative decimal integer (clip/scene ids, quantize counts) --
+// enough for the fixed-shape lines translated below; no sign, no whitespace.
+bool parse_uint(std::string_view s, std::uint64_t& out) {
+  if (s.empty()) {
+    return false;
+  }
+  std::uint64_t value = 0;
+  for (char c : s) {
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    value = value * 10 + static_cast<std::uint64_t>(c - '0');
+  }
+  out = value;
+  return true;
+}
+
+// Decodes an optional trailing `quantize <n>` starting at token index `at` in
+// a `launch clip/scene ...` or `stop clip ...` line (mirrors
+// components/hostrt/shell_clip_commands.cpp's own parse_quantize_suffix --
+// deliberate small duplication, D38: this pure-client translator never
+// reaches into hostrt's own parsing helpers). `ok` is set false only on a
+// MALFORMED trailing quantize (present but unparsable); an ABSENT suffix is
+// a valid immediate default.
+bool parse_quantize_suffix(const std::vector<std::string_view>& t, std::size_t at,
+                           Boundary& boundary, std::uint8_t& n_bars) {
+  boundary = Boundary::kImmediate;
+  n_bars = 1;
+  if (at >= t.size()) {
+    return true;
+  }
+  if (t[at] != "quantize" || at + 1 >= t.size()) {
+    return false;
+  }
+  std::uint64_t n = 0;
+  if (!parse_uint(t[at + 1], n)) {
+    return false;
+  }
+  if (n == 0) {
+    boundary = Boundary::kImmediate;
+  } else if (n == 1) {
+    boundary = Boundary::kNextBar;
+  } else {
+    boundary = Boundary::kNextNBars;
+    n_bars = n > 255 ? static_cast<std::uint8_t>(255) : static_cast<std::uint8_t>(n);
+  }
+  return true;
+}
+
 std::vector<std::string_view> split_ws(std::string_view s) {
   std::vector<std::string_view> tokens;
   std::size_t i = 0;
@@ -163,6 +213,48 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.param = t[2] == "mute" ? Param::kPartMute : Param::kPartSolo;
     out.a = static_cast<std::int32_t>(role);
     out.b = t[3] == "on" ? 1 : 0;
+    return TranslateOutcome::kOk;
+  }
+
+  // Phase-5 Item #2 (docs/design/clip-primitive-design.md): `launch clip <id>
+  // quantize <n>` / `launch scene <n> quantize <q>` -- grid_panel.cpp's own
+  // send() shape.
+  if (t.size() >= 3 && t[0] == "launch" && (t[1] == "clip" || t[1] == "scene")) {
+    std::uint64_t target = 0;
+    if (!parse_uint(t[2], target) || target > 0xFFFF) {
+      detail = "bad id: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    Boundary boundary = Boundary::kImmediate;
+    std::uint8_t n_bars = 1;
+    if (!parse_quantize_suffix(t, 3, boundary, n_bars)) {
+      detail = "usage: launch clip|scene <id> quantize <n>";
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = t[1] == "clip" ? Param::kClipLaunch : Param::kSceneQuantize;
+    out.idx = static_cast<std::uint16_t>(target);
+    out.boundary = boundary;
+    out.n_bars = n_bars;
+    return TranslateOutcome::kOk;
+  }
+
+  // `stop clip <id> [quantize <n>]`.
+  if (t.size() >= 3 && t[0] == "stop" && t[1] == "clip") {
+    std::uint64_t target = 0;
+    if (!parse_uint(t[2], target) || target > 0xFFFF) {
+      detail = "bad clip id: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    Boundary boundary = Boundary::kImmediate;
+    std::uint8_t n_bars = 1;
+    if (!parse_quantize_suffix(t, 3, boundary, n_bars)) {
+      detail = "usage: stop clip <id> [quantize <n>]";
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kClipStop;
+    out.idx = static_cast<std::uint16_t>(target);
+    out.boundary = boundary;
+    out.n_bars = n_bars;
     return TranslateOutcome::kOk;
   }
 

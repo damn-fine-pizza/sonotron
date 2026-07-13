@@ -7,6 +7,7 @@
 #include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/chord_sequencer.hpp"
+#include "arrangrr/clip/clip_matrix.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/config.hpp"
@@ -104,6 +105,12 @@ class Engine {
   const ChordEngine& chords() const noexcept { return m_chords; }
   const ChordSequencer& sequences() const noexcept { return m_seq; }
   const Arranger& arranger() const noexcept { return m_arranger; }
+  // Phase-5 Item #2: the Repeat-Zone launch primitive (mirrors arp()'s own
+  // mutable+const accessor pair). Host/test code registers clips directly
+  // through the mutable accessor (kClipAdd's own in-engine equivalent, see
+  // cmd_clip in engine.cpp for the ABI path).
+  const ClipMatrix& clips() const noexcept { return m_clips; }
+  ClipMatrix& clips() noexcept { return m_clips; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -260,6 +267,10 @@ class Engine {
       if (had_pending) {
         emit_chord_followed(promoted_by, sink);
       }
+      // Phase-5 Item #2 (decision 2): promote any armed/queued-stop clip
+      // whose quantize window closes THIS bar, still BEFORE fire_arranger --
+      // same reason the chord commit above precedes it.
+      fire_clips(m_transport.tick(), sink);
     }
     fire_arranger(m_transport.tick(), sink);
     fire_arp(m_transport.tick(), sink);
@@ -309,6 +320,7 @@ class Engine {
   void cmd_style(const Command& cmd, EventSink sink);
   void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
   void cmd_arp(const Command& cmd, EventSink sink);    // live arpeggiator
+  void cmd_clip(const Command& cmd, EventSink sink);   // Phase-5 Item #2: clip launch primitive
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on
@@ -329,6 +341,23 @@ class Engine {
   // cmd_style case handlers split out for the same reason.
   void style_switch(const Command& cmd, EventSink sink);
   void style_route(const Command& cmd, EventSink sink);
+
+  // cmd_clip case handlers (Phase-5 Item #2), split out for the same reason.
+  void clip_add(const Command& cmd, EventSink sink);
+  void clip_launch(const Command& cmd, EventSink sink);
+  void clip_stop(const Command& cmd, EventSink sink);
+  void clip_scene_launch(const Command& cmd, EventSink sink);
+  // Shared launch/stop request path: applies the effect immediately
+  // (Boundary::kImmediate) or arms ClipMatrix for the quantize boundary
+  // (kNextBar/kNextNBars), emitting the kClip echo either way.
+  void clip_request(std::size_t id, LaunchState target, const Command& cmd, EventSink sink);
+  // Drives the underlying content (Arranger/ChordSequencer/Timeline) a fired
+  // clip references -- the ONE place that translates {kind, content_index}
+  // into a real musical effect, per ClipMatrix's own scope tripwire.
+  void apply_clip_content(const Clip& clip, LaunchState target, EventSink sink);
+  // Promotes any clip whose quantize window closes THIS bar (on_tick's
+  // existing tick % kTicksPerBar == 0 gate, decision #2).
+  void fire_clips(Tick transport_tick, EventSink sink);
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
@@ -545,6 +574,13 @@ class Engine {
   ChordEngine m_chords;
   ChordSequencer m_seq;
   Arranger m_arranger;
+  // Phase-5 Item #2 (docs/design/clip-primitive-design.md decision 1): the
+  // Repeat-Zone launch primitive, an Engine-owned VALUE member mirroring
+  // m_arp below (NOT a Pipeline peer -- Clip orchestrates subsystems Engine
+  // already owns and shares no raw cross-stage data). Declared after
+  // m_arranger/m_seq/m_timeline so a future audit of construction order
+  // finds it beside the subsystems it references by index.
+  ClipMatrix m_clips;
   // Phase-4d promotion (§16.1/§16.4/§16.9): the chorddet peer is now a
   // Pipeline-owned SIBLING stage (was an Engine-owned value in 4b), injected
   // here BY REFERENCE for its narrow CONFIG surface only (see the class

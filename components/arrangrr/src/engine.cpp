@@ -65,6 +65,12 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kProgram:
       cmd_voice(cmd, sink);
       break;
+    case Param::kClipAdd:
+    case Param::kClipLaunch:
+    case Param::kClipStop:
+    case Param::kSceneQuantize:
+      cmd_clip(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -306,10 +312,11 @@ void Engine::chord_play(const Command& cmd, EventSink sink) {
   };
   // Manual `chord play` always SOUNDS its notes and always attempts to steer;
   // the owner's D47 gate decides whether Producer::kManual actually publishes.
-  // Immediate by default (`current` changes now); a shift/quantized variant
-  // (idx != 0) STAGES it for the next bar like a SHIFT-note, additive and POD.
+  // Immediate by default (`current` changes now); a boundary != kImmediate
+  // STAGES it for the next bar like a SHIFT-note, additive and POD (Phase-5
+  // Item #2: retired the old `idx != 0` overload -- idx is unused here now).
   const bool steer = true;
-  const bool quantize = cmd.idx != 0;
+  const bool quantize = cmd.boundary != Boundary::kImmediate;
   ChordResult r;
   switch (m_chords.mode()) {
     case ChordMode::kSingle:
@@ -536,8 +543,7 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
         m_chords.reset_pending();
         // Phase 3a (§17.3b): echo the newly active style index -- no other
         // OutEvent reports it (kSection only ever carries the SECTION).
-        sink(OutEvent::param_state(Param::kStyleLoad, 0,
-                                   static_cast<std::uint8_t>(cmd.a & 0xFF),
+        sink(OutEvent::param_state(Param::kStyleLoad, 0, static_cast<std::uint8_t>(cmd.a & 0xFF),
                                    static_cast<std::uint8_t>((cmd.a >> 8) & 0xFF), m_now));
       }
       break;
@@ -590,10 +596,12 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
 
 void Engine::style_switch(const Command& cmd, EventSink sink) {
   // A combined style + section switch (D24). Immediate on explicit request
-  // (CTRL+\ "now") or whenever the transport is stopped — a queued switch
-  // could never land without ticks; otherwise it rides the next bar
-  // boundary (ENTER "next-bar"), matching kStyleSection's quantization.
-  const bool immediate = cmd.c != 0 || !m_transport.playing();
+  // (CTRL+\ "now", boundary == kImmediate) or whenever the transport is
+  // stopped — a queued switch could never land without ticks; otherwise it
+  // rides the next bar boundary (ENTER "next-bar"), matching kStyleSection's
+  // quantization. (Phase-5 Item #2: retired the old `c != 0`-is-immediate
+  // overload -- boundary is the single shared spelling now.)
+  const bool immediate = cmd.boundary == Boundary::kImmediate || !m_transport.playing();
   const bool ok = cmd.a >= 0 && cmd.a < static_cast<std::int32_t>(styles::kBuiltinCount) &&
                   cmd.b >= 0 && cmd.b < kSectionTypeCount &&
                   m_arranger.request_style(styles::kBuiltins[static_cast<std::uint8_t>(cmd.a)],
@@ -665,6 +673,148 @@ void Engine::cmd_arp(const Command& cmd, EventSink sink) {
   sink(OutEvent::param_state(Param::kArp, static_cast<std::uint8_t>(cmd.a),
                              static_cast<std::uint8_t>(cmd.b & 0xFF),
                              static_cast<std::uint8_t>((cmd.b >> 8) & 0xFF), m_now));
+}
+
+// Phase-5 Item #2 (docs/design/clip-primitive-design.md): the clip launch
+// primitive. cmd_clip dispatches the 4 verbs; clip_request is the shared
+// immediate-vs-quantized path clip_launch/clip_stop/clip_scene_launch all
+// route through; apply_clip_content is the ONE place that translates a fired
+// clip's {kind, content_index} into a real effect on the subsystem Engine
+// already owns (Arranger/ChordSequencer/Timeline) -- ClipMatrix itself never
+// touches them (scope tripwire, decision 5).
+void Engine::cmd_clip(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kClipAdd:
+      clip_add(cmd, sink);
+      break;
+    case Param::kClipLaunch:
+      clip_launch(cmd, sink);
+      break;
+    case Param::kClipStop:
+      clip_stop(cmd, sink);
+      break;
+    case Param::kSceneQuantize:
+    default:
+      clip_scene_launch(cmd, sink);
+      break;
+  }
+}
+
+// Host/script-only registration (no L1 grammar of its own beyond `clip add`,
+// shell_clip_commands.cpp): a = TrackRole, b = scene_index, c = ContentKind
+// (low byte) | (content_index << 8).
+void Engine::clip_add(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) || cmd.b < 0 || cmd.b > 255) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto kind_value = cmd.c & 0xFF;
+  if (kind_value > static_cast<std::int32_t>(ContentKind::kStepTrack)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto role = static_cast<TrackRole>(cmd.a);
+  const auto scene = static_cast<std::uint8_t>(cmd.b);
+  const auto kind = static_cast<ContentKind>(kind_value);
+  const auto content_index = static_cast<std::uint16_t>((cmd.c >> 8) & 0xFFFF);
+  if (m_clips.add(role, scene, kind, content_index) < 0) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+void Engine::clip_launch(const Command& cmd, EventSink sink) {
+  clip_request(cmd.idx, LaunchState::kPlaying, cmd, sink);
+}
+
+void Engine::clip_stop(const Command& cmd, EventSink sink) {
+  clip_request(cmd.idx, LaunchState::kStopped, cmd, sink);
+}
+
+// `launch scene <n> quantize <q>`: fans out to every registered clip whose
+// scene_index matches idx, each launched through the SAME clip_request path
+// (so an individual clip's own quantize window rules apply identically).
+void Engine::clip_scene_launch(const Command& cmd, EventSink sink) {
+  bool any = false;
+  for (std::size_t id = 0; id < m_clips.size(); ++id) {
+    const Clip* c = m_clips.get(id);
+    if (c == nullptr || c->scene_index != cmd.idx) {
+      continue;
+    }
+    any = true;
+    clip_request(id, LaunchState::kPlaying, cmd, sink);
+  }
+  if (!any) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+void Engine::clip_request(std::size_t id, LaunchState target, const Command& cmd, EventSink sink) {
+  const Clip* c = m_clips.get(id);
+  if (c == nullptr) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const Clip content = *c;  // copy: apply_clip_content only reads kind/content_index
+  const auto wire_id = static_cast<std::uint16_t>(id);
+  if (cmd.boundary == Boundary::kImmediate) {
+    apply_clip_content(content, target, sink);
+    (void)m_clips.force(id, target);
+    sink(OutEvent::clip(wire_id, static_cast<std::uint8_t>(target), m_now));
+    return;
+  }
+  const std::uint8_t n_bars = cmd.boundary == Boundary::kNextNBars ? cmd.n_bars : 1;
+  (void)m_clips.arm(id, target, n_bars);
+  const LaunchState pending =
+      target == LaunchState::kPlaying ? LaunchState::kArmed : LaunchState::kQueuedStop;
+  sink(OutEvent::clip(wire_id, static_cast<std::uint8_t>(pending), m_now));
+}
+
+void Engine::apply_clip_content(const Clip& clip, LaunchState target, EventSink sink) {
+  switch (clip.kind) {
+    case ContentKind::kStyleSection:
+      // A style section has no natural "stopped" target (the arranger
+      // always plays SOME section) -- launching is the only musically
+      // meaningful direction; stopping is bookkeeping-only (the clip's own
+      // state still moves to kStopped in the caller).
+      if (target == LaunchState::kPlaying) {
+        const auto section = static_cast<SectionType>(clip.content_index);
+        if (m_arranger.request(section, /*immediate=*/true)) {
+          sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+        }
+      }
+      break;
+    case ContentKind::kChordSequence:
+      if (target == LaunchState::kPlaying) {
+        if (m_seq.use(clip.content_index) && m_seq.play(m_transport.tick())) {
+          fire_chord_seq(m_transport.tick(), sink);
+        }
+      } else if (m_seq.playing() && m_seq.current_index() == clip.content_index) {
+        // Only stop the sequencer when ITS active sequence is actually the
+        // one this clip references -- ChordSequencer is a single-active-
+        // sequence machine, not per-clip parallel playback.
+        m_seq.stop_playback([&]() {
+          m_chords.release([&](std::uint8_t port, const MidiMessage& msg) {
+            schedule_or_warn(port, m_now, msg, sink);
+          });
+        });
+        flush(sink);
+      }
+      break;
+    case ContentKind::kStepTrack:
+    default:
+      if (Track* t = m_timeline.track(clip.content_index); t != nullptr) {
+        t->mute = target != LaunchState::kPlaying;
+      }
+      break;
+  }
+}
+
+void Engine::fire_clips(Tick transport_tick, EventSink sink) {
+  m_clips.on_bar(transport_tick, [&](std::size_t id, const Clip& clip) {
+    apply_clip_content(clip, clip.state, sink);
+    sink(OutEvent::clip(static_cast<std::uint16_t>(id), static_cast<std::uint8_t>(clip.state),
+                        m_now));
+  });
 }
 
 }  // namespace arrangrr

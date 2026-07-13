@@ -43,6 +43,11 @@ class ChordSequencer {
     return m_pool.empty() ? nullptr : &m_pool[m_current];
   }
   std::size_t count() const noexcept { return m_pool.size(); }
+  // Which pool slot is current (Phase-5 Item #2: lets a caller -- Engine's
+  // clip-stop path -- tell whether ITS sequence is the one actually playing
+  // before stopping it, since this is a single-active-sequence machine, not
+  // per-clip parallel playback).
+  std::size_t current_index() const noexcept { return m_current; }
 
   // ---- recording (D13: the recorded half) ----------------------------------
   bool start_record(Tick now) noexcept {
@@ -68,7 +73,11 @@ class ChordSequencer {
     if (ChordStep* prev = seq->last(); prev != nullptr && prev->duration == 0) {
       prev->duration = rel - prev->start;
     }
-    (void)seq->record(ChordStep{.start=rel, .duration=0, .degree=degree, .quality_ovr=quality_ovr, .velocity=velocity});
+    (void)seq->record(ChordStep{.start = rel,
+                                .duration = 0,
+                                .degree = degree,
+                                .quality_ovr = quality_ovr,
+                                .velocity = velocity});
   }
 
   // Stops recording; the open step is closed at `now`, then quantize-after.

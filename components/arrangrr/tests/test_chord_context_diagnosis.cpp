@@ -47,8 +47,9 @@ struct Band {
   test::TestEngine e;
   Events ev;
 
-  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo) {
-    Command command{.op = op, .param = p, .idx = 0, .a = a, .b = b, .c = c};
+  void cmd(Param p, std::int32_t a = 0, std::int32_t b = 0, std::int32_t c = 0, Op op = Op::kDo,
+           Boundary boundary = Boundary::kImmediate) {
+    Command command{.op = op, .boundary = boundary, .param = p, .idx = 0, .a = a, .b = b, .c = c};
     e.push_command(command, [&](const OutEvent& o) { CHECK(ev.push_back(o)); });
   }
   void advance(std::uint32_t n) {
@@ -172,7 +173,7 @@ void test_idle_drift_under_follow_detect() {
 // deliberately isolated, effect).
 void steer_to_F_maj7_and_commit(Band& b) {
   hold_F_maj7(b);
-  CHECK(!b.next().valid);    // immediate model: nothing staged, it commits at once
+  CHECK(!b.next().valid);   // immediate model: nothing staged, it commits at once
   b.advance(kTicksPerBar);  // cross a bar boundary; the committed chord persists
   print_state("current after FMaj7 steer", b.followed());
   CHECK(b.followed().valid);
@@ -218,8 +219,9 @@ void test_style_switch_persists_the_steered_chord() {
 
   // The interactive styles-panel chooser (shell_chooser.cpp) ALWAYS issues
   // kStyleSwitch, even for a pure section change (same style, new section).
-  // immediate=0 (c=0): quantized, lands on the next bar like kStyleSection.
-  b.cmd(Param::kStyleSwitch, kBasicStyleIndex, static_cast<std::int32_t>(SectionType::kVarC), 0);
+  // boundary kNextBar: quantized, lands on the next bar like kStyleSection.
+  b.cmd(Param::kStyleSwitch, kBasicStyleIndex, static_cast<std::int32_t>(SectionType::kVarC), 0,
+        Op::kDo, Boundary::kNextBar);
   b.advance(kTicksPerBar);
   print_state("current AFTER kStyleSwitch (same style, varC)", b.followed());
 

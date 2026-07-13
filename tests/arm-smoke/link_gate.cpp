@@ -167,6 +167,42 @@ bool motif_link_gate() {
 // cross-builds and links freestanding, exercising RestyleStage's own
 // push_midi_in (a chord-tone note, anchored + voiced) through the firmware
 // toolchain, not just on host.
+// Phase-5 Item #2 (docs/design/clip-primitive-design.md): ClipMatrix is an
+// Engine-owned VALUE member (mirroring ArpeggiatorEngine), so every build of
+// Engine already compiles it -- this gate is additive proof (§16.7's
+// precedent) that the clip verbs FUNCTIONALLY fire on the real target: a
+// step-track clip registered, launched immediately, and observed to unmute
+// the track and emit a real `clip` OutEvent, freestanding, no heap.
+bool clip_link_gate() {
+  static FollowedContext followed;
+  static ChorddetStage<kMaxPorts> chorddet(followed);
+  static runtime::Runtime<Engine, kSchedulerCapacity> rt(followed, chorddet);
+  int events = 0;
+  const Engine::EventSink sink = [&events](const OutEvent&) { ++events; };
+
+  Command track_new;
+  track_new.param = Param::kTrackNew;
+  track_new.a = static_cast<std::int32_t>(TrackRole::kDrums);
+  track_new.b = 0;  // port 0, channel 0
+  rt.push_command(track_new, sink);
+
+  Command clip_add;
+  clip_add.param = Param::kClipAdd;
+  clip_add.a = static_cast<std::int32_t>(TrackRole::kDrums);
+  clip_add.b = 0;                                                   // scene 0
+  clip_add.c = static_cast<std::int32_t>(ContentKind::kStepTrack);  // content_index 0
+  rt.push_command(clip_add, sink);
+
+  Command launch;
+  launch.op = Op::kDo;
+  launch.boundary = Boundary::kImmediate;
+  launch.param = Param::kClipLaunch;
+  launch.idx = 0;
+  rt.push_command(launch, sink);
+
+  return events > 0;
+}
+
 bool restyle_link_gate() {
   static FollowedContext followed;
   static runtime::Runtime<

@@ -1,0 +1,25 @@
+# Golden: the clip launch primitive (Phase-5 Item #2, docs/design/
+# clip-primitive-design.md). Exercises all three content kinds' registration
+# (clip add), an immediate stop on a step-track clip BEFORE the transport
+# starts (so its step never sounds), a next-bar-quantized launch of a
+# style-section clip (lands with the bar boundary), a bad clip id (warns,
+# does not crash), and an immediate re-launch of the step-track clip.
+port open out synth
+track new lead synth:1
+track length lead 4
+track step lead 1 C4 100 240
+clip add lead 0 track 0
+style load basic
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+play C
+clip add bass 0 style varB
+stop clip 0
+transport start
+launch clip 1 quantize 1
+launch clip 99 quantize 0
+advance 3840
+launch clip 0 quantize 0
+advance 960
+quit

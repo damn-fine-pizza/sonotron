@@ -236,6 +236,48 @@ void test_midi_source_load_invalid_path_surfaces_clean_error() {
   session.stop();
 }
 
+// Phase-5 Item #2 (docs/design/clip-primitive-design.md): `launch clip <id>
+// quantize <n>` translates to a real kClipLaunch Command -- grid_panel.cpp's
+// own send() shape. No clip is registered in this fresh engine, so the CORE
+// itself warns (kWarn, "bad_argument") rather than the translator failing --
+// the translator's own job (parsing the line into a Command) succeeds, and
+// that warn round-trips as a real OutEvent, proving the whole path reaches
+// push_command.
+void test_launch_clip_translates_and_reaches_engine() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("launch clip 0 quantize 1");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kWarn && ev.warn_code == "bad_argument";
+  }));
+
+  session.send("transport start");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kTransport && ev.transport_state == "playing";
+  }));
+
+  session.stop();
+}
+
+// A malformed clip id must surface a clean kError from the TRANSLATOR itself
+// (never reaches push_command) -- mirrors the style/part "invalid name"
+// tests above.
+void test_launch_clip_bad_id_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("launch clip not-a-number quantize 1");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError && ev.error.find("bad id") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 void test_stop_is_idempotent_and_safe_before_start() {
   InProcessBrainSession session;
   session.stop();  // never started: must be a safe no-op
@@ -256,6 +298,8 @@ int main() {
   test_part_invalid_role_surfaces_clean_error();
   test_midi_source_load_valid_path_is_accepted_without_error();
   test_midi_source_load_invalid_path_surfaces_clean_error();
+  test_launch_clip_translates_and_reaches_engine();
+  test_launch_clip_bad_id_surfaces_clean_error();
   test_stop_is_idempotent_and_safe_before_start();
   return sonotron::test::failures();
 }

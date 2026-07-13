@@ -89,6 +89,11 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
       // echo. param_state_wire.hpp's param_state_to_jsonl() is the real wire
       // encoding, wired ONLY into a control-plane broadcast, never stdout.
       return {};
+    case OutEvent::Kind::kClip:
+      // Phase-5 Item #2: which cell is armed/playing/stopped -- id rides
+      // `code`, the LaunchState rides msg.status.
+      return format(R"({"ev":"clip","id":%u,"state":"%s","@":%u})", ev.code,
+                    clip_state_name(ev.msg.status), ev.tick);
     case OutEvent::Kind::kWarn:
     default:
       return format(R"({"ev":"warn","code":"%s","@":%u})", warn_name(ev.code), ev.tick);
@@ -144,6 +149,8 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
       // Permanent (see to_jsonl's kParamState case above): no text shape on
       // this channel, ever.
       return {};
+    case OutEvent::Kind::kClip:
+      return format("@%-8u clip %u %s", ev.tick, ev.code, clip_state_name(ev.msg.status));
     case OutEvent::Kind::kWarn:
     default:
       return format("@%-8u WARN %s", ev.tick, warn_name(ev.code));

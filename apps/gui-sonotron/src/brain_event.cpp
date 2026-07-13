@@ -336,10 +336,14 @@ BrainEvent parse_brain_event(const std::string& line) {
     ev.beat_bar = static_cast<int>(obj.get_int("bar", 0));
     ev.beat_index = static_cast<int>(obj.get_int("beat", 0));
     ev.beat_pulse = static_cast<int>(obj.get_int("pulse", 0));
+  } else if (kind == "clip") {
+    ev.kind = BrainEvent::Kind::kClip;
+    ev.valid = true;
+    ev.clip_id = static_cast<int>(obj.get_int("id", 0));
+    ev.clip_state = obj.get_string("state", "stopped");
   }
-  // "clip" (ux-workstation.md §11) and any other unrecognized "ev" value fall
-  // through to kind == kUnknown, valid == false -- see the file header: that
-  // shape is not decoded yet, on purpose.
+  // Any other unrecognized "ev" value falls through to kind == kUnknown,
+  // valid == false.
   return ev;
 }
 

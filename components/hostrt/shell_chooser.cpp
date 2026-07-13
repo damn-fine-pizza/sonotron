@@ -90,7 +90,7 @@ void Shell::chooser_apply(ChooserApply mode) {
     c.param = Param::kStyleSwitch;
     c.a = style->index;
     c.b = static_cast<std::int32_t>(m_chooser.selected_section());
-    c.c = mode == ChooserApply::kImmediate ? 1 : 0;
+    c.boundary = mode == ChooserApply::kImmediate ? Boundary::kImmediate : Boundary::kNextBar;
     m_engine.push_command(c, m_sink);
   }
   // Applying keeps the styles panel focused, so you can keep switching styles
@@ -150,7 +150,7 @@ void Shell::apply_style_step() {
   c.param = Param::kStyleSwitch;
   c.a = m_step_style_index;
   c.b = static_cast<std::int32_t>(m_step_section);
-  c.c = 0;
+  c.boundary = Boundary::kNextBar;
   m_engine.push_command(c, m_sink);
   m_style_step_pending = false;
   (void)push_panels();

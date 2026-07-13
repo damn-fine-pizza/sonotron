@@ -59,6 +59,18 @@ void test_beat_decode() {
   CHECK(decoded.beat_pulse == 12);
 }
 
+void test_clip_decode() {
+  // Phase-5 Item #2: id=3, LaunchState::kPlaying == 2 (arrangrr/clip/
+  // clip_matrix.hpp) -- OutEvent::clip's own factory is exercised directly
+  // via the raw wire code, matching every other decode test here.
+  const OutEvent ev = OutEvent::clip(3, 2, 42);
+  const BrainEvent decoded = brain_event_from_outevent(ev, false);
+  CHECK(decoded.kind == BrainEvent::Kind::kClip);
+  CHECK(decoded.clip_id == 3);
+  CHECK(decoded.clip_state == "playing");
+  CHECK(decoded.tick == 42);
+}
+
 void test_chord_decode_prefers_sharps_by_default() {
   // root_note=60 (C4), degree=0, quality=kMaj -- mirrors the golden's own
   // simplest "chord" shape (in="C4", out="C", deg="I").
@@ -109,6 +121,7 @@ int main() {
   test_transport_decode();
   test_warn_decode();
   test_beat_decode();
+  test_clip_decode();
   test_chord_decode_prefers_sharps_by_default();
   test_chord_followed_decode();
   test_chord_followed_invalid_renders_dash();

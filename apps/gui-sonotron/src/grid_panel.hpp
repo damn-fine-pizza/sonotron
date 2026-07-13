@@ -1,5 +1,6 @@
 #pragma once
 
+#include "brain_session.hpp"
 #include "grid_model.hpp"
 
 // Renders the Repeat Zone / Live-Loops launch grid (ux-workstation.md
@@ -12,10 +13,12 @@ namespace sonotron {
 // part (GridModel::part_label), one column per scene, plus a "+" to add a
 // scene. Each cell is a real ImGui drop target for a browser style drag
 // (browser_panel.hpp's kStyleDragPayloadId) — dropping sets the cell's
-// content for real (GridModel::set_cell). LAUNCH stays an honest
-// placeholder: the per-cell/per-scene launch button is disabled
-// (kGridLaunchWired == false, grid_model.hpp) with a tooltip naming the gap,
-// rather than a click that silently does nothing.
-void render_grid_panel(GridModel& model);
+// content for real (GridModel::set_cell). LAUNCH is wired to the real core
+// clip primitive (Phase-5 Item #2, docs/design/clip-primitive-design.md):
+// clicking a cell sends `launch clip <id> quantize <n>` (id = part_index *
+// scene_count() + scene_index, mirroring the cell's own ImGui PushID);
+// clicking a scene header's "▶" fans out `launch scene <n> quantize <q>`.
+// `brain_session` mirrors render_styles_branch's own BrainSession& param.
+void render_grid_panel(GridModel& model, BrainSession& brain_session);
 
 }  // namespace sonotron

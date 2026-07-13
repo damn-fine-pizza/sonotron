@@ -28,6 +28,8 @@ std::string format_log_line(const BrainEvent& ev) {
     case BrainEvent::Kind::kBeat:
       return "beat " + std::to_string(ev.beat_bar) + "." + std::to_string(ev.beat_index) + "." +
              std::to_string(ev.beat_pulse);
+    case BrainEvent::Kind::kClip:
+      return "clip " + std::to_string(ev.clip_id) + " " + ev.clip_state;
     case BrainEvent::Kind::kUnknown:
     default:
       return "unknown/malformed event";
@@ -97,8 +99,12 @@ void AppState::apply(const BrainEvent& ev) {
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:
     case BrainEvent::Kind::kError:
+    case BrainEvent::Kind::kClip:
     case BrainEvent::Kind::kUnknown:
-      break;  // logged above, but no other view-state change (yet)
+      break;  // logged above, but no other view-state change (yet) -- a
+              // live per-cell armed/playing indicator on the grid itself is
+              // follow-up work (GridModel has no runtime launch-state field
+              // yet, only authored content, grid_model.hpp)
   }
 }
 

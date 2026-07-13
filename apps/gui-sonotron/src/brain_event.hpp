@@ -15,14 +15,17 @@
 // The framing logic mirrors components/hostrt/uds_server.hpp's LineBuffer (a
 // deliberate OWN copy, not an #include of the host header -- the pure-client
 // boundary rule forbids reusing host-side code) and the decoder understands
-// the 7 JSONL event shapes the host currently emits (see gui-contract-map.md
+// the 8 JSONL event shapes the host currently emits (see gui-contract-map.md
 // §3 for the original 5, plus the additive "chord-followed" shape landed by
-// pipeline-p0-mechanical-plan.md P0-1, plus the additive "beat" shape landed
-// by P0-2): midi-out, chord, section, transport, warn, chord-followed, beat,
-// plus the per-client {"error":...} line. `kBeat` (P0-2, the transport
-// heartbeat) is now decoded: {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick}
-// -- bar/beat/pulse are purely numeric (core concern), a live playhead is a
-// HOST/GUI rendering choice built on top of them.
+// pipeline-p0-mechanical-plan.md P0-1, the additive "beat" shape landed by
+// P0-2, plus the additive "clip" shape, Phase-5 Item #2): midi-out, chord,
+// section, transport, warn, chord-followed, beat, clip, plus the per-client
+// {"error":...} line. `kBeat` (P0-2, the transport heartbeat) is decoded:
+// {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick} -- bar/beat/pulse are
+// purely numeric (core concern), a live playhead is a HOST/GUI rendering
+// choice built on top of them. `kClip` (Phase-5 Item #2) is decoded:
+// {"ev":"clip","id":N,"state":"stopped"|"armed"|"playing"|"queued_stop","@":
+// tick} -- which Repeat-Zone cell is armed/playing/stopped.
 
 namespace sonotron {
 
@@ -89,6 +92,7 @@ struct BrainEvent {
     kError,          // per-client {"error":...,"cmd":...} line (not an OutEvent)
     kChordFollowed,  // additive, gap P0-1 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-1)
     kBeat,           // additive, gap P0-2 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-2)
+    kClip,           // additive, Phase-5 Item #2 (docs/design/clip-primitive-design.md) -- decoded
   };
 
   Kind kind = Kind::kUnknown;
@@ -134,14 +138,23 @@ struct BrainEvent {
   int beat_index = 0;
   int beat_pulse = 0;
 
+  // clip (additive, Phase-5 Item #2): {"ev":"clip","id":N,"state":"stopped"|
+  // "armed"|"playing"|"queued_stop","@":tick}. `clip_id` addresses a
+  // ClipMatrix slot (the Repeat-Zone cell id grid_panel.cpp sends);
+  // `clip_state` is the label text verbatim (event_labels.hpp's
+  // clip_state_name on the host side) -- a pure client renders it directly,
+  // no core enum crosses this boundary.
+  int clip_id = 0;
+  std::string clip_state;
+
   // per-client error
   std::string error;
   std::string cmd;
 };
 
-// Parses one JSONL line into a BrainEvent. A line the GUI does not model (the
-// still-inert `clip` additive shape included), or a malformed line, yields
-// BrainEvent{kind = kUnknown, valid = false} -- never a crash.
+// Parses one JSONL line into a BrainEvent. A line the GUI does not model, or
+// a malformed line, yields BrainEvent{kind = kUnknown, valid = false} --
+// never a crash.
 BrainEvent parse_brain_event(const std::string& line);
 
 }  // namespace sonotron
