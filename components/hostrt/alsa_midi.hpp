@@ -16,6 +16,14 @@
 
 namespace arrangrr::host {
 
+// Unified ALSA sequencer client name presented by every arrangrr MIDI-emitting
+// frontend (cli-arrangrr, gui-sonotron, sonotron-server). A single source of
+// truth so `aconnect sonotron:1 <destination>` works no matter which frontend
+// the user launched -- before this, each frontend picked its own client name
+// ("arrangrr" / "sonotron-gui" / "sonotron-server"), and the SAME aconnect
+// invocation silently connected nothing depending on which one was running.
+inline constexpr const char* kAlsaClientName = "sonotron";
+
 class AlsaMidi {
  public:
   ~AlsaMidi();

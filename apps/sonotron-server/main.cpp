@@ -193,7 +193,7 @@ void send_state_dump(UdsServer& control, int client_fd, Shell& shell) {
 int run_server(bool human, const char* control_path) {
   AlsaMidi alsa;
   std::string error;
-  if (!alsa.open("sonotron-server", error)) {
+  if (!alsa.open(kAlsaClientName, error)) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 2;
   }

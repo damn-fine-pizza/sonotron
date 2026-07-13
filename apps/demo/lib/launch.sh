@@ -121,12 +121,12 @@ launch_jam() {
 
   (
     for i in $(seq 1 50); do
-      if aconnect -l 2>/dev/null | grep -q "arrangrr"; then
+      if aconnect -l 2>/dev/null | grep -q "sonotron"; then
         break
       fi
       sleep 0.1
     done
-    aconnect arrangrr:1 "FLUID Synth":0 2>/dev/null || true
+    aconnect sonotron:1 "FLUID Synth":0 2>/dev/null || true
   ) &
   WAITER_PID=$!
 

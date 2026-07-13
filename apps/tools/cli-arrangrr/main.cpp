@@ -182,7 +182,7 @@ std::string status_line(const Shell& shell) {
 int run_live(bool human, const char* init_path, const char* motd_path, const char* control_path) {
   AlsaMidi alsa;
   std::string error;
-  if (!alsa.open("arrangrr", error)) {
+  if (!alsa.open(kAlsaClientName, error)) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 2;
   }

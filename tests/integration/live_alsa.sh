@@ -50,12 +50,12 @@ exec 9<>"$tmp/repl"
 APP=$!
 sleep 0.6
 
-aseqdump -l | grep -q arrangrr || { echo "arrangrr ALSA client not found"; exit 1; }
+aseqdump -l | grep -q sonotron || { echo "sonotron ALSA client not found"; exit 1; }
 
-aseqdump -p "arrangrr:1" > "$tmp/dump.log" 2>&1 &
+aseqdump -p "sonotron:1" > "$tmp/dump.log" 2>&1 &
 DUMP=$!
 sleep 0.4
-aseqsend -p "arrangrr:0" 90 3C 64 80 3C 40 || { echo "aseqsend failed"; exit 1; }
+aseqsend -p "sonotron:0" 90 3C 64 80 3C 40 || { echo "aseqsend failed"; exit 1; }
 sleep 0.6
 
 echo "quit" >&9

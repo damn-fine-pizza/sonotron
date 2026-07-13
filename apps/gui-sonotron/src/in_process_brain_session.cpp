@@ -37,6 +37,7 @@ using arrangrr::Param;
 using arrangrr::TickAccumulator;
 using arrangrr::TrackRole;
 using arrangrr::host::AlsaMidi;
+using arrangrr::host::kAlsaClientName;
 using arrangrr::host::PortDef;
 using arrangrr::host::Shell;
 
@@ -301,7 +302,7 @@ struct InProcessBrainSession::Impl {
 void InProcessBrainSession::Impl::run_engine() {
   AlsaMidi alsa;
   std::string alsa_error;
-  const bool alsa_ok = alsa.open("sonotron-gui", alsa_error);
+  const bool alsa_ok = alsa.open(kAlsaClientName, alsa_error);
   if (!alsa_ok) {
     std::fprintf(stderr,
                  "sonotron: integrated engine: ALSA unavailable (%s) -- running without sound\n",

@@ -3,8 +3,11 @@
 // playback device; the miniaudio callback pulls rendered frames from a
 // melodd::Synth, incoming ALSA MIDI drives that same Synth. A DIRECT
 // replacement for the demo launcher's FluidSynth wiring
-// (apps/demo/lib/launch.sh): `aconnect arrangrr:1 melodd:0` and you hear the
-// band, no external synth required.
+// (apps/demo/lib/launch.sh): `aconnect sonotron:1 melodd:0` and you hear the
+// band, no external synth required. Every arrangrr MIDI-emitting frontend
+// presents as ALSA client "sonotron" (components/hostrt/alsa_midi.hpp's
+// kAlsaClientName); port 1 is the outbound MIDI port each frontend opens
+// right after its inbound port 0 at startup, so it is stable across launches.
 //
 // HOST-ONLY. This binary talks to melodd::Synth through raw MIDI bytes only
 // -- it links neither arrangrr nor hostrt (D43: a realizer does not know its
@@ -179,7 +182,7 @@ int main(int argc, char** argv) {
   }
 
   std::printf("melodd: ALSA MIDI input port '%s:0' ready, audio device running.\n", kClientName);
-  std::printf("melodd: connect a source, e.g.  aconnect arrangrr:1 %s:0\n", kClientName);
+  std::printf("melodd: connect a source, e.g.  aconnect sonotron:1 %s:0\n", kClientName);
   std::printf("melodd: Ctrl-C to quit.\n");
 
   std::signal(SIGINT, handle_signal);
