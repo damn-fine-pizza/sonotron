@@ -14,6 +14,7 @@
 #include "midisrc/smf.hpp"
 #include "serialize.hpp"
 #include "sff_import.hpp"
+#include "style_lower.hpp"
 #include "validate.hpp"
 
 namespace arrstyle {
@@ -122,6 +123,10 @@ void print_usage(std::ostream& out) {
          "  infer-genre <file>                     classify a style's genre from content\n"
          "  build-canon [--kb <dir>] --out <f.hpp> distil KB aggregates into a constexpr header\n"
          "              [--max-cells N] [--max-bass N]\n"
+         "  compile-style <in.mid|.sty> --out <f.hpp> --style-name <id>\n"
+         "                                          lower a StyleModel onto the device constexpr\n"
+         "                                          Style format (standalone artifact; never\n"
+         "                                          wired into the built-in style list)\n"
          "  help                                   show this message\n"
          "  version                                print the tool version\n";
 }
@@ -390,6 +395,75 @@ int cmd_build_canon(const std::vector<std::string>& args, std::ostream& out, std
   return kExitOk;
 }
 
+// Phase-5 Item #8, first slice: alien style/MIDI -> StyleModel (existing
+// importers) -> device-format C++ text (style_lower.hpp). This is HOST-only
+// tooling that emits a STANDALONE generated header: it never touches
+// arrangrr/arranger/style.hpp's kBuiltins list, any default build, or ci.sh.
+int cmd_compile_style(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
+  if (args.size() < 2) {
+    err << "compile-style: expected an input file\n";
+    return kExitUsage;
+  }
+  std::string out_path;
+  if (!find_out(args, 2, out_path)) {
+    err << "compile-style: missing --out <file>\n";
+    return kExitUsage;
+  }
+  std::string style_name;
+  if (!find_option(args, 2, "--style-name", style_name)) {
+    err << "compile-style: missing --style-name <identifier>\n";
+    return kExitUsage;
+  }
+
+  std::vector<std::uint8_t> bytes;
+  std::string error;
+  if (!read_binary(args[1], bytes, error)) {
+    err << error << '\n';
+    return kExitFailure;
+  }
+
+  Diagnostics diag;
+  StyleModel style;
+  bool imported = false;
+  const SourceFormat fmt = detect_format(args[1], bytes);
+  switch (fmt) {
+    case SourceFormat::kYamahaSff:
+      if (!sff_is_importable(bytes)) {
+        err << "error: " << args[1] << ": not a Yamaha SFF style (no CASM/SFF markers)\n";
+        return kExitFailure;
+      }
+      imported = import_sff(bytes, args[1], style, diag);
+      break;
+    case SourceFormat::kStandardMidiFile:
+      imported = import_midi(bytes, args[1], style, diag);
+      break;
+    case SourceFormat::kChordPro:
+    case SourceFormat::kUnknown:
+    default:
+      err << "compile-style: unsupported input format (need a .mid or a Yamaha .sty)\n";
+      return kExitUsage;
+  }
+  if (!imported) {
+    diag.print(err);
+    return kExitFailure;
+  }
+
+  StyleLowerOptions opts;
+  opts.style_name = style_name;
+  std::string text;
+  if (!lower_style(style, opts, text, diag)) {
+    diag.print(err);
+    return kExitFailure;
+  }
+  if (!write_text(out_path, text, error)) {
+    err << error << '\n';
+    return kExitFailure;
+  }
+  out << "wrote " << out_path << " (namespace " << style_name << ")\n";
+  diag.print(err);
+  return diag.has_errors() ? kExitFailure : kExitOk;
+}
+
 }  // namespace
 
 int run(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
@@ -426,6 +500,9 @@ int run(const std::vector<std::string>& args, std::ostream& out, std::ostream& e
   }
   if (cmd == "build-canon") {
     return cmd_build_canon(args, out, err);
+  }
+  if (cmd == "compile-style") {
+    return cmd_compile_style(args, out, err);
   }
   err << "unknown command: " << cmd << "\n\n";
   print_usage(err);

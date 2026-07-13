@@ -17,6 +17,7 @@ add_library(arrstyle_lib STATIC
   src/chordpro_import.cpp
   src/casm.cpp
   src/sff_import.cpp
+  src/style_lower.cpp
   src/validate.cpp
   src/cli.cpp
 )
