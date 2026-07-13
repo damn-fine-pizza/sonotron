@@ -1,0 +1,25 @@
+# clangd configuration for sonotron.
+#
+# Point clangd at the host build's compilation database. build/host is the
+# canonical full host build (CMAKE_EXPORT_COMPILE_COMMANDS=ON), regenerated on
+# every `cmake -S . -B build/host`, so it stays current as new files are added.
+#
+# Why this matters: the root compile_commands.json symlink historically pointed
+# at build/tidy, which goes stale — files added after its last configure are
+# absent from the DB, so clangd cannot see how to compile them and falls back to
+# guessing, producing phantom diagnostics ("'test.hpp' file not found",
+# "'CHECK' undeclared", "std::string aka int"). Pointing at the regularly-
+# reconfigured build/host DB fixes that class of false positive.
+#
+# The dual-target arm-none-eabi DB (build/arm) is deliberately NOT used: those
+# freestanding compile commands drop std::string/exceptions, and if clangd used
+# them for a shared header it would report host-side std:: types as unavailable.
+# Host flags keep std:: resolving correctly.
+#
+# Residual (not fixable by config alone): files inside .claude/worktrees/ during
+# a multi-agent run are absent from this DB (transient — they resolve once the
+# worktrees are cleaned), and a header genuinely compiled for BOTH host and arm
+# can only carry one config, so occasional core-header noise remains. Always
+# treat clangd here as advisory; the ground truth is `cmake --build` + `ctest`.
+CompileFlags:
+  CompilationDatabase: build/host
