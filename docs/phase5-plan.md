@@ -1,8 +1,8 @@
 # Phase 5 execution plan — the owner-ordered 8-item program
 
-Status: **ORDERED + ABI-UNFROZEN (owner, 2026-07-13).** From the ten Verdi
-candidates (`docs/strategy/phase5-proposals.md`) the owner selected **eight**, in
-this execution order:
+Status: **ORDERED + ABI-UNFROZEN (owner, 2026-07-13).** From the ten candidates
+(long-list boiled down below) the owner selected **eight**, in this execution
+order:
 
 > **`1 → 7 → 8 → 2 → 9 → 6 → 4 → 10`**
 > Restyle · Motif generativo · Import corpus · Clip · Pad/Scene · melodd ·
@@ -13,7 +13,7 @@ clock-in** — platform/interop bets, each its own future owner-decision fork.
 
 **Owner directive — the ABI freeze is LIFTED for Phase 5.** Verbatim intent: *in
 this phase don't ever worry about breaking the ABI — you may break it, rewrite it
-from scratch, whatever you want.* This **resolves fork F3** (`hook-interface.md`
+from scratch, whatever you want.* This **resolves fork F3** (`docs/architecture.md`
 ABI-reopen = ACCEPTED) and retires the append-only-only discipline for Phase-5
 work. `test_abi_frozen` may be rewritten or removed; `Op`/`Param`/`Command`/
 `OutEvent` may be reshaped wholesale. **Boundary:** the in-flight extraction cutover
@@ -25,7 +25,33 @@ its gate stays golden-identical + frozen. The unfreeze applies from Phase 5 forw
 program answers Verdi's fork #2 — the `sonotron` workstation vision (audio/Engines
 tier) **is still the destination**.
 
-This file is the execution index (mirrors `phase4-execution-plan.md`).
+This file is the execution index.
+
+## Candidate long-list (the ten, boiled down)
+
+Ten genuinely different directions were weighed after the pipeline extraction —
+each tied to a real gap, a shipped capability, or a quarantined design, not ten
+variants of one idea. The owner's `1 → 7 → 8 → 2 → 9 → 6 → 4 → 10` order selects
+eight; the two platform/interop bets are deferred to their own owner-decision forks.
+
+| # | Candidate | Feasibility | Verdict |
+|---|-----------|-------------|---------|
+| 1 | **Restyle** (`9320`) — transform the input's own parts into the genre idiom (rhythm/voicing/articulation), harmony preserved | HOST-only, no dep, same pipeline shape | Selected — 1st (the spine) |
+| 7 | **Generative motif engine** (`9210`) — seeded/deterministic motif+transform (transpose/retrograde/displacement) that generates new material | SHIPPABLE core, dual-target | Selected — 2nd |
+| 8 | **Style corpus import** (`9400`/`9430`) — CASM/SFF→NTT importer pulling real content from `../resources/` into the compiled style format | HOST tooling, no dep | Selected — 3rd |
+| 2 | **Clip / launch primitive** — real launchable cell for the GUI hero zone (`launch`/`stop`/`scene-quantize` + `clip` event), lighter than the Looper (`6000`) | core + HOST GUI | Selected — 4th |
+| 9 | **Live pads/scenes** (`7200`/`8100`–`8200`) — 4-pad performance banks + one-button full-state recall (Registration/STS) | core + HOST GUI | Selected — 5th |
+| 6 | **melodd first slice** — minimal host-only audio peer (one synth voice) realizing arrangrr's MIDI through the opaque-reference interface | HOST-only, FLAGGED `0800` dep | Selected — 6th |
+| 4 | **Untrusted-parser fuzzing** — libFuzzer on `midisrc` SMF (then SFF/CASM), closing the door Accompany's `midi-source load` opened | HOST/CI-only, no dep | Selected — 7th |
+| 10 | **MIDI-FX / transform chain** (`5000`) — bounded (`kMaxInserts=8`) insert-chain; 2–3 inserts + groove/arp refactored into chain instances | SHIPPABLE core | Selected — 8th |
+| 3 | **STM32 hardware bring-up** (`12100`) — run the dual-target core on real silicon, not just cross-compile + `arm-smoke` | device target, NEEDS-DECISION | Deferred — platform bet |
+| 5 | **External clock-in** (`4500`) — slave-sync the 960-PPQN transport to an incoming external clock | SHIPPABLE core | Deferred — interop bet |
+
+**Through-line:** three anti-sameness moves lead (1, 7, 8 — idiom transfer,
+procedural generation, raw content volume), then GUI depth (2, 9), the first audio
+peer (6), robustness (4), and the hackability framework (10) as the on-ramp to the
+Director capstone (`10000`). Musical capability leads; #3 and #5 are foundational
+bets deferred because each opens a new front rather than continuing the GUI-era arc.
 
 ## Reading of the order
 Three anti-sameness moves first (**1, 7, 8** — idiom transfer, procedural
@@ -111,7 +137,7 @@ discipline (`0100`). Risk is musical (correct-but-inert), not technical.
 
 ### Item C — #8 Style corpus import (`9400`/`9430`)  [HOST tooling]
 Extend `arrstyle-converter`'s inspect-only `sff_import.cpp` to pull real content
-from `../resources/` (70+ rules studied in `docs/backlog/yamaha-style-corpus-and-rules.md`)
+from `../resources/` (70+ rules studied in `docs/style-corpus-and-generation.md`)
 into the compiled-`.cpp` style format. **Risks:** messy proprietary-adjacent format
 (least-predictable effort) + **`../resources/` provenance/licensing must be checked
 before any imported style ships publicly** (ship-gate, not build-gate).
@@ -131,7 +157,7 @@ data) — Corelli review of the persisted shape.
 
 ### Item F — #6 melodd first slice  [HOST-only, FLAGGED dependency]
 Minimal host-only audio peer (one synth voice) realizing arrangrr's MIDI through the
-opaque-reference interface (`workstation-vision.md`). **`0800` dependency fork —
+opaque-reference interface (`docs/product-vision.md`). **`0800` dependency fork —
 owner approval required before start** (which softsynth/DSP or PortAudio-class lib,
 license, weight). **Largest scope risk:** must stay one voice / no mixing / no
 editing, or it becomes the DAW-gravity the identity docs refuse.
@@ -154,7 +180,7 @@ refactor touches all 15 styles — gated by the feel goldens (`feel_swing`/`shuf
 
 ## Forks (updated)
 - **F1 — RESOLVED (Vasari mechanical pass):** `docs/DESIGN.md` §22 and
-  `docs/strategy/roadmap-numbered.md` reconciled against the tree — `0910` (`melodd`)
+  `docs/roadmap.md` reconciled against the tree — `0910` (`melodd`)
   marked SCHEDULED (Phase-5 Item F), `11500`/`11700`/`11720` record the Phase-3
   extraction wire-work (`807c140`/`b98dbda`, deferred `hostrt::Shell` split/`--connect`
   parity noted) and the ABI-freeze-lift for Phase 5, `9400`/`9420`/`9430` corrected
@@ -164,7 +190,7 @@ refactor touches all 15 styles — gated by the feel goldens (`feel_swing`/`shuf
   commit/path; see the Vasari pass report for the full diff. Left uncommitted per
   Vasari's own role boundary (does not commit) — for the dispatching agent/owner to
   commit and cherry-pick.
-- **F3 — RESOLVED:** owner lifted the ABI freeze for Phase 5 (`hook-interface.md`
+- **F3 — RESOLVED:** owner lifted the ABI freeze for Phase 5 (`docs/architecture.md`
   ACCEPTED). No longer gates #2/#10.
 - **Verdi fork #2 — RESOLVED** by including Item F (melodd): audio destination live.
 - **Open dep fork:** Item F/melodd `0800` audio dependency — owner decides before

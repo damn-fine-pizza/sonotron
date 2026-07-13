@@ -91,7 +91,7 @@ These bind every node below. They are the "why the schedule is honest" layer.
   allowed only if lightweight/self-contained AND evaluated with the owner first. Any
   move implying a dependency is flagged, never assumed.
 - **0910 Captured direction — `melodd` audio companion — ◑ SCHEDULED (Phase-5 Item F,
-  program position #6, owner-ordered 2026-07-13; `docs/design/phase5-execution-plan.md`).**
+  program position #6, owner-ordered 2026-07-13; `docs/phase5-plan.md`).**
   arrangrr (the MIDI brain) and a future host-only audio engine are peer modules wired by an
   orchestrator, name-blind, talking only through the POD interface; audio never
   crosses the interface; the core stays audio-ignorant (identity `0110` intact). Still
@@ -165,7 +165,7 @@ These bind every node below. They are the "why the schedule is honest" layer.
     *one owner of the followed chord + pending; folds the follow-gate and the
     reset-vs-persist policy inside; kills three bugs by construction (transport-start
     clobber, style-load reset, self-drift). No ABI, no dep. Source:
-    `docs/reviews/followed-chord-context-ownership.md`*
+    `docs/architecture.md`*
   - `2540` Delete dead `set_context` seam — ○ SHIPPABLE
   - `2590` *(reserved: shared-voicing split — separate "who plays the pad" from "who
     steers"; specified, not yet scheduled)* — ○ SHIPPABLE
@@ -274,14 +274,14 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
     (Rule R: swung eighths moved from steps 3/7/11/15 onto the even off-8ths 2/6/10/14 that
     `groove::apply` actually swings; fills/pickups/chromatic-approach exceptions preserved). The
     other 13 styles stay byte-identical. Three regression goldens (`feel_swing/shuffle/blues`) lock
-    the swung ticks. Spec in `docs/proposals/per-style-feel-values.md` §5 (Swing re-authoring spec).
+    the swung ticks. Spec in `docs/style-corpus-and-generation.md` §5 (Swing re-authoring spec).
   - `9130` Triplet / shuffle grid (feel expressible in note placement) — ○ SHIPPABLE, deferred
     *(analysis: only `blues` needs a true 3-equal-subdivision grid to refine its 12/8 beyond the
     shipped 2-note shuffle; swing/shuffle are complete as 2-note swing — this is a blues-only
     quality upgrade, not a blocker)*
   *ranked the single biggest lever against style sameness (corpus measurement,
-  `docs/backlog/style-differentiation-and-generation.md`); feel values in
-  `docs/proposals/per-style-feel-values.md`*
+  `docs/style-corpus-and-generation.md`); feel values in
+  `docs/style-corpus-and-generation.md`*
 - **9200 Generative style — ○ planned**
   - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE
   - `9220` Offline-trained Markov/grammar on scale degrees, baked constexpr — ○ runtime SHIPPABLE / training HOST-ONLY
@@ -299,7 +299,7 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
     `tests/golden/accompany_melody_detect.golden` (both green, `ctest -R accompany`).
     No ABI break: `test_abi_frozen` untouched, `sizeof(OutEvent)==16` unchanged — the
     ABI waiver this pipeline could have spent (a stage/source tag) stays UNSPENT, per
-    the ABI-fork analysis in `docs/design/orchestrator-pipeline-extraction.md` §16.2.
+    the ABI-fork analysis in `docs/architecture.md` §16.2.
   - `9320` Restyle (transform the input's own parts into the genre idiom) — ○ HOST-ONLY *(depends on 9100)*
 - **9400 Style data format + generator — ◑ partial**
   - `9410` Style inspector + serialize/deserialize (offset/index-based) — ○ HOST-ONLY
@@ -323,14 +323,14 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
     unpacked, `casm.cpp:132-134`). Proven by
     `test_sff_import.cpp::test_real_corpus_samples` against two real files under
     `../resources/styles/extra/**`: `ctest --test-dir build/host -R sff_import` green
-    (live run recorded in `docs/design/corpus-import-scope.md` §0). **Known stale spot,
+    (live run recorded in `docs/phase5-design-reviews.md` §0). **Known stale spot,
     code-level not just docs:** `cmd_inspect` still routes SFF files through
     `inspect_sff()` (`sff_import.cpp:336-363`), which prints the old "unsupported
     subset — inspect-only" / "not decoded" text even though `import-sff` on the same
     file now decodes it fully — a one-line fix flagged for whoever next touches this
     tool, not blocking. Not ✅: the SFF2 sub-structure gap + the stale `inspect` message
-    keep this partial. *(Correction still owed elsewhere: `docs/backlog/
-    yamaha-style-corpus-and-rules.md`, `docs/backlog/style-data-format.md`, and
+    keep this partial. *(Correction still owed elsewhere:
+    `docs/style-corpus-and-generation.md`, and
     `apps/tools/arrstyle-converter/DESIGN.md` still say CASM decode is not implemented
     — those are outside this reconciliation's file scope; flagged, not fixed here.)*
 
@@ -374,10 +374,10 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   backends `imgui_impl_glfw` / `imgui_impl_opengl3`, under `third_party/imgui` +
   `third_party/glfw` (each with an `ARRGRR_VENDOR.md` pin), built and linked by
   `apps/gui-sonotron/`** (dependency fork resolved under `0800` and executed in code;
-  rationale as-built in `docs/design/gui-contract-map.md` §1). — ◑ partial HOST-ONLY
+  rationale as-built in `docs/gui-and-ux.md` §1). — ◑ partial HOST-ONLY
   (**mechanical GUI strand COMPLETE — G0 concept demolition `38b5826`, G1 workstation
   layout `c49f8c6`, G2 brain session + G3 zone panels `473ab60` (66/66 host tests
-  green); `docs/design/gui-fase2-mechanical-plan.md` records "mechanical strand
+  green); `docs/gui-and-ux.md` records "mechanical strand
   COMPLETE — G0, G1, G2 and G3 all DONE". Core-dependent strand (§11): `kChordFollowed`
   (P0-1, `52008e4`) and `kBeat`/position (P0-2, `ba568ca` + `f4c6188`) are now DONE and
   wired end-to-end (`apps/gui-sonotron/src/brain_event.cpp`, `app_state.cpp`,
@@ -386,7 +386,7 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   live playhead are real, not placeholders. Still open: the clip/scene launch
   primitive (`apps/gui-sonotron/src/grid_panel.cpp`'s "awaits the core clip primitive"
   tooltip — unimplemented; also the still-open Phase-5 candidate in
-  `docs/strategy/phase5-proposals.md` #2) — this is the one remaining §11 gap, so the
+  `docs/phase5-plan.md` #2) — this is the one remaining §11 gap, so the
   node stays ◑, not ✅. Toolkit dependency flag: RESOLVED / vendored. **Architecture
   fact (Phase 2a/2b, owner-decided):** the GUI now hosts the engine IN-PROCESS by
   default — a dedicated thread driven by lock-free SPSC Command/OutEvent rings;
@@ -403,10 +403,10 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   (owner-decided). STATUS: ✅ CROSSED (2026-07-06). The pre-GUI batch `11710` is all ✅
   and `11720` (freeze) has executed — the ABI is frozen v1 and the `5100` shape is
   reserved. **Update (owner directive, 2026-07-13): the freeze itself is LIFTED for
-  Phase-5 work forward** — resolves `docs/design/hook-interface.md` fork F3 (the
+  Phase-5 work forward** — resolves `docs/architecture.md` fork F3 (the
   freeze-lift is ACCEPTED; the specific ABI-reshape proposal in that document remains
   its own separate open design review), recorded in
-  `docs/design/phase5-execution-plan.md`: `Op`/`Param`/`Command`/`OutEvent` may be
+  `docs/phase5-plan.md`: `Op`/`Param`/`Command`/`OutEvent` may be
   reshaped/rewritten for Phase-5 items, and `test_abi_frozen` may be rewritten or
   retired for those changes. This does NOT retroactively reopen the Phase-3 extraction
   wire-work recorded under `11500` (`807c140`/`b98dbda`), which shipped under the OLD
@@ -470,11 +470,11 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
       `9300` stylizer, `9400` format/tooling), `7000` remainder, `12000` device/HW.
     - **Phase-5 program (owner-ordered, 2026-07-13) — supersedes the informal order
       above.** The owner selected and ORDERED eight of Verdi's ten Phase-5 candidates
-      (`docs/strategy/phase5-proposals.md`): `1→7→8→2→9→6→4→10` — Restyle (`9320`) ·
+      (`docs/phase5-plan.md`): `1→7→8→2→9→6→4→10` — Restyle (`9320`) ·
       Motif (`9210`) · Corpus import (`9400`/`9430`) · Clip/launch primitive (no
       canonical node assigned yet) · Pad/Scene (`7200`/`8100`–`8200`) · `melodd`
       (`0910`) · Fuzzing harness (no canonical node assigned yet) · MIDI-FX chain
-      (`5000`). Full detail: `docs/design/phase5-execution-plan.md`. **Deferred out of
+      (`5000`). Full detail: `docs/phase5-plan.md`. **Deferred out of
       this program:** #3 STM32 bring-up (`12100`), #5 external clock-in (`4500`).
       **Shipped:** the Fuzzing harness — `components/midisrc/fuzz/`,
       `option(SONOTRON_FUZZ)`, commit `c2251f2`. **In-flight, not yet on this branch:**
@@ -596,7 +596,7 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
 - **No new core dependency** is introduced by any SHIPPABLE item. The former open
   dependency flag — the **GUI toolkit** for `11600` (HOST-ONLY, policy `0800`) — is now
   RESOLVED: Dear ImGui + GLFW3 vendored under `third_party/` and driven by
-  `apps/gui-sonotron/` (see the `11600` entry; rationale `docs/design/gui-contract-map.md` §1).
+  `apps/gui-sonotron/` (see the `11600` entry; rationale `docs/gui-and-ux.md` §1).
 - **Dual-target / no-heap reality (`0200`/`0300`/`0400`):** every SHIPPABLE leaf is
   bounded and flash/static-resident; `6000` is pre-budgeted; all ML training (`9220`)
   is HOST-ONLY, only the baked table ships. `11700`/`11600` are HOST-ONLY by
@@ -635,10 +635,10 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
    Dear ImGui (`ocornut/imgui` v1.92.8) + GLFW3.** The dependency fork under policy `0800`
    is resolved and EXECUTED in code: vendored under `third_party/imgui` + `third_party/glfw`
    (each with an `ARRGRR_VENDOR.md` pin) and built/linked by `apps/gui-sonotron/`
-   (`target_link_libraries(... imgui)`). Rationale as-built: `docs/design/gui-contract-map.md` §1.
+   (`target_link_libraries(... imgui)`). Rationale as-built: `docs/gui-and-ux.md` §1.
 5. **D38 ("the GUI never links/#includes the core")** (`11600`, surfaced by Phase 2) —
    **RELAXED / RETIRED, scoped to one library (owner-decided).**
-   `docs/design/sonotron-server-phase2-brief.md`'s Corelli §15 review resolves the collision:
+   `docs/architecture.md`'s Corelli §15 review resolves the collision:
    the GUI binary now hosts the engine in-process by default, so `gui_sonotron_engine`
    (`apps/gui-sonotron/CMakeLists.txt`) links `hostrt`/`runtime`/`arrangrr` directly
    and names `OutEvent` — EXECUTED in commits `bf2c4b2` (Phase 2a, `sonotron-server`)
