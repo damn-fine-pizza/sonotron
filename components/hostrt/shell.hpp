@@ -9,6 +9,7 @@
 
 #include "arrangrr/engine.hpp"
 #include "midi_monitor.hpp"
+#include "midisrc/smf_write.hpp"
 #include "orchestrator/accompany.hpp"
 #include "panel_manager.hpp"
 #include "piano_view.hpp"
@@ -84,6 +85,18 @@ class Shell {
   // bad path or an unparsable file (mirrors every other cmd_* handler's
   // error reporting) -- the `midi-source load <path>` L1 verb this backs.
   bool load_midi_source(const std::string& path, std::string& error);
+
+  // Phase-5 infrastructure (by-ear-validation gap, no committed SMF WRITER
+  // before this): writes every kMidi OutEvent observed since Shell
+  // construction to `path` as a Standard MIDI File (single track, division =
+  // arrangrr::kPpqn -- tick values ride straight through, no rescaling), so
+  // a real session's musical output (Restyle/Motif/...) can be audited in any
+  // DAW/synth. The capture is a plain unbounded vector (not the MidiMonitor's
+  // bounded ring, which drops old events) -- fine at the scale a live session
+  // produces; documented, not a hot/realtime path. Returns false with `error`
+  // set when `path` cannot be opened for writing -- the `export-smf <path>`
+  // L1 verb this backs.
+  bool export_smf(const std::string& path, std::string& error);
 
   // Direct ABI-Command entry point (Phase 2b in-process ring, docs/design/
   // sonotron-server-phase2-brief.md "Thread-boundary mechanism"): a thin
@@ -345,6 +358,7 @@ class Shell {
   bool cmd_clock(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_midi_send(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_midi_source(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_export_smf(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_panic(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_key(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_note(const std::vector<std::string>& tokens, std::string& error);
@@ -492,6 +506,10 @@ class Shell {
   std::uint32_t m_style_step_gen = 0;
   bool m_style_step_pending = false;
   MidiMonitor m_monitor;
+  // Phase-5 infrastructure: unbounded capture of every kMidi OutEvent since
+  // construction, fed by the same sink wrapper that feeds m_monitor (see the
+  // Shell constructor) -- export_smf()'s source data.
+  std::vector<arrstyle::SmfEvent> m_export_events;
   MidiEventFilter m_filter;
   MidiViewOptions m_view_options;
   ActiveNoteTracker m_piano_held;    // notes the melody (piano) surface holds

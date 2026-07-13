@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "midisrc/diagnostics.hpp"
+#include "midisrc/file_io.hpp"
 
 // Shell command handlers for help/panels and MIDI/transport I/O (port, route,
 // thru, clock, raw send, panic, transport, bpm, advance). Bodies moved verbatim
@@ -502,6 +503,19 @@ bool Shell::cmd_midi_source(const std::vector<std::string>& t, std::string& erro
     return false;
   }
   return load_midi_source(t[2], error);
+}
+
+bool Shell::export_smf(const std::string& path, std::string& error) {
+  const std::vector<std::uint8_t> bytes = arrstyle::write_smf(m_export_events);
+  return midisrc::write_binary_file(path, bytes, error);
+}
+
+bool Shell::cmd_export_smf(const std::vector<std::string>& t, std::string& error) {
+  if (t.size() < 2) {
+    error = "usage: export-smf <path>";
+    return false;
+  }
+  return export_smf(t[1], error);
 }
 
 bool Shell::cmd_panic(const std::vector<std::string>& /*t*/, std::string& /*error*/) {

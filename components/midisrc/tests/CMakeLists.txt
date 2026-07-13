@@ -11,3 +11,4 @@ function(midisrc_test name category)
 endfunction()
 
 midisrc_test(test_midi_source_stage unit)
+midisrc_test(test_smf_write unit)

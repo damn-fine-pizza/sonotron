@@ -19,4 +19,10 @@ namespace midisrc {
 // `error`) if the file cannot be opened.
 bool read_binary_file(const std::string& path, std::vector<std::uint8_t>& out, std::string& error);
 
+// Writes `bytes` to `path`, truncating any existing file. Returns false (and
+// fills `error`) if the file cannot be opened for writing. The `export-smf`
+// L1 verb (phase-5 infrastructure) is this function's first caller.
+bool write_binary_file(const std::string& path, const std::vector<std::uint8_t>& bytes,
+                       std::string& error);
+
 }  // namespace midisrc

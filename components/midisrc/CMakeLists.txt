@@ -12,6 +12,7 @@
 add_library(midisrc STATIC
   src/diagnostics.cpp
   src/smf.cpp
+  src/smf_write.cpp
   src/file_io.cpp
   src/midi_source_stage.cpp
 )

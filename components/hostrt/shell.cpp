@@ -138,10 +138,16 @@ Shell::Shell(EventSink sink)
       // the kMidi events and converts them into the panel's MidiOutEvent
       // mirror; every other kind is filtered out here exactly as
       // MidiMonitor::observe used to filter it internally.
+      //
+      // Phase-5 infrastructure: the SAME kMidi selection also appends to
+      // m_export_events (export_smf()'s source data) -- one more sink
+      // observer, same shape/seam as the monitor above, no new fan-out
+      // mechanism.
       m_sink([this, user = std::move(sink)](const OutEvent& ev) {
         if (ev.kind == OutEvent::Kind::kMidi) {
           m_monitor.observe(MidiOutEvent{.port = ev.port, .msg = ev.msg, .tick = ev.tick},
                             m_pending_source_key);
+          m_export_events.push_back(arrstyle::SmfEvent{.tick = ev.tick, .msg = ev.msg});
         }
         user(ev);
       }),
@@ -625,6 +631,9 @@ std::optional<bool> Shell::dispatch_midi(const std::vector<std::string>& t, cons
   }
   if (cmd == "midi-source" && t.size() >= 3 && t[1] == "load") {
     return cmd_midi_source(t, error);
+  }
+  if (cmd == "export-smf" && t.size() >= 2) {
+    return cmd_export_smf(t, error);
   }
   if (cmd == "panic") {
     return cmd_panic(t, error);
