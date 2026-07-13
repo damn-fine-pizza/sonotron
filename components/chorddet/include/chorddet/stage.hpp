@@ -62,6 +62,9 @@ class ChorddetStage {
   constexpr bool quantize() const noexcept { return m_quantize; }
 
   constexpr void set_key(const Key& key) noexcept { m_detector.set_key(key); }
+  // Read-only access to the current key (roadmap 9320, Restyle): forwards to
+  // the detector's own getter -- see chord_detector.hpp's comment.
+  constexpr const Key& key() const noexcept { return m_detector.key(); }
   constexpr void set_min_notes(std::uint8_t n) noexcept { m_detector.set_min_notes(n); }
   constexpr void set_single_finger(bool on) noexcept { m_detector.set_single_finger(on); }
   // Releases every held note (panic): the held set resets, the latched chord

@@ -1,0 +1,32 @@
+# Golden (Restyle, roadmap 9320, Phase 5 Item A, docs/design/restyle-musical-
+# scope.md + restyle-placement.md): the node-9320 feature itself -- the
+# imported melody's OWN notes transformed into the "blues" style's idiom
+# (rhythm snap-to-grid + that style's own groove::apply, register anchored
+# into the kLead comping range) instead of Accompany's verbatim melody-thru.
+#
+# `restyle blues` selects the target style AND flips the raw melody-thru OFF
+# (the double-note guard, restyle-placement.md §2) so only the RESTYLED
+# notes reach the shared scheduler -- on their own fixed port (2), distinct
+# from the band (port 0) and the (now-silenced) melody-thru port (1).
+#
+# `style load basic` seeds the followed chord to the C-major home triad
+# (Engine::cmd_style's own establish_default seeding, no live chord steer
+# needed here) so the classifier has a known, deterministic ChordState/Key to
+# work against without exercising live chord-detect in this golden.
+#
+# The shared fixture `components/midisrc/tests/fixtures/tiny.mid` (also used
+# by accompany_basic/accompany_melody_detect and midisrc's own tests) carries
+# C4 (a chord tone: the root) then D4 (a scale degree, not a chord tone -- ii
+# over the C-major home chord) on channel 0, plus one drum hit (channel 9,
+# note 36) on the SAME melody port. This first slice is deliberately
+# CHANNEL-BLIND (restyle-musical-scope.md/-placement.md never scope a
+# channel filter): the drum hit's pitch class (36 % 12 = 0, same as the
+# chord root) classifies and restyles exactly like any other chord-tone
+# note. That is an honest, documented characteristic of this first slice,
+# not a bug -- a future slice may add channel-aware filtering.
+key C major
+style load basic
+restyle blues
+midi-source load components/midisrc/tests/fixtures/tiny.mid
+advance 3000
+quit

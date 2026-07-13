@@ -26,6 +26,7 @@
 // and links freestanding.
 
 #include "arrangrr/engine.hpp"
+#include "arrangrr/restyle/restyle_stage.hpp"
 #include "runtime/pipeline.hpp"
 #include "runtime/runtime.hpp"
 
@@ -94,6 +95,55 @@ bool pipeline_link_gate() {
   rt.advance_ticks(kTicksPerBar, sink);
 
   return events > 0;
+}
+
+// Roadmap 9320 (Restyle), docs/design/restyle-placement.md §4: RestyleStage
+// itself must stay freestanding-clean even though its only real-world
+// producer (midisrc::MidiSourceStage) is host-only and therefore absent
+// here -- additive to (not a replacement of) `pipeline_link_gate` above,
+// same "gains a proof" precedent §16.7 already established for chorddet.
+// Proves the real 3-stage `[chorddet, restyle, arrangrr]` composite
+// cross-builds and links freestanding, exercising RestyleStage's own
+// push_midi_in (a chord-tone note, anchored + voiced) through the firmware
+// toolchain, not just on host.
+bool restyle_link_gate() {
+  static FollowedContext followed;
+  static runtime::Runtime<
+      runtime::Pipeline<ChorddetStage<kMaxPorts>, RestyleStage<kMaxPorts>, Engine>,
+      kSchedulerCapacity>
+      rt([](auto&, auto&) { return ChorddetStage<kMaxPorts>(followed); },
+         [](auto& sched, auto&, auto& chorddet) {
+           return RestyleStage<kMaxPorts>(sched, chorddet, followed, /*port=*/2);
+         },
+         [](auto& sched, auto& transport, auto& chorddet, auto&) {
+           return Engine(sched, transport, followed, chorddet);
+         });
+  int events = 0;
+  const Engine::EventSink sink = [&events](const OutEvent&) { ++events; };
+
+  Command key;
+  key.op = Op::kSet;
+  key.param = Param::kKeySet;
+  rt.push_command(key, sink);
+
+  Command chord_play;
+  chord_play.param = Param::kChordPlay;
+  chord_play.a = 60;
+  chord_play.b = -1;
+  chord_play.c = 100;
+  rt.push_command(chord_play, sink);
+
+  auto& restyle = rt.stage().template stage<1>();
+  restyle.load_style(styles::kBuiltins[0]);
+
+  const std::uint8_t note_on[] = {0x90, 60, 100};
+  rt.stage().push_midi_in(0, Span<const std::uint8_t>(note_on), sink);
+  rt.advance_ticks(kTicksPerStep, sink);
+  const std::uint8_t note_off[] = {0x80, 60, 0};
+  rt.stage().push_midi_in(0, Span<const std::uint8_t>(note_off), sink);
+  rt.advance_ticks(kTicksPerStep, sink);
+
+  return restyle.loaded();
 }
 
 }  // namespace arrangrr

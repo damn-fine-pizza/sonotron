@@ -30,6 +30,14 @@ namespace {
 // `midi-source load`).
 constexpr std::uint8_t kMidiSourcePort = 1;
 
+// Restyle (roadmap 9320): the restyled output's own port, distinct from both
+// the band (port 0, via `style route`) and the raw melody-thru
+// (kMidiSourcePort = 1) -- same reasoning as kMidiSourcePort's own comment
+// (OutScheduler::cancel_note_off's dedup key is (port,channel,note), blind to
+// which stage scheduled it). Fixed at construction; `restyle <style>` only
+// selects WHICH style this stage restyles into, never its port.
+constexpr std::uint8_t kRestylePort = 2;
+
 // Builds the selectable style list from the built-ins the core matches by
 // index; each style advertises exactly the sections it defines. Used to seed
 // the always-present chooser. Seam D (§17.2): the core SectionType is cast to
@@ -104,12 +112,23 @@ Shell::Shell(EventSink sink)
     // shared FollowedContext AND the already-constructed chorddet peer.
     // Must be listed FIRST (declaration order, m_followed/m_runtime precede
     // m_sink/m_chooser in shell.hpp).
+    //
+    // Roadmap 9320 (Restyle), docs/design/restyle-placement.md §1: the
+    // RestyleStage slots in between chorddet and Engine, constructed inert
+    // (no style loaded, `restyle <style>` fills it in later) at its own
+    // fixed output port (kRestylePort) -- it needs the scheduler + the
+    // already-constructed chorddet peer (for `key()`) + the shared
+    // FollowedContext, the same triple-injection idiom every other stage
+    // here already uses.
     : m_runtime(
           [](auto& sched, auto&) {
             return midisrc::MidiSourceStage<kSchedulerCapacity>(sched, kMidiSourcePort);
           },
           [this](auto&, auto&, auto&) { return ChorddetStage<kMaxPorts>(m_followed); },
-          [this](auto& sched, auto& transport, auto&, auto& chorddet) {
+          [this](auto& sched, auto&, auto&, auto& chorddet) {
+            return RestyleStage<kMaxPorts>(sched, chorddet, m_followed, kRestylePort);
+          },
+          [this](auto& sched, auto& transport, auto&, auto& chorddet, auto&) {
             return Engine(sched, transport, m_followed, chorddet);
           }),
       // Every host-visible OutEvent flows through the monitor before the user
@@ -631,6 +650,9 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   }
   if (cmd == "style" && t.size() >= 2) {
     return cmd_style(t, error);
+  }
+  if (cmd == "restyle" && t.size() >= 2) {
+    return cmd_restyle(t, error);
   }
   if (cmd == "seq" && t.size() >= 2) {
     return cmd_seq(t, error);

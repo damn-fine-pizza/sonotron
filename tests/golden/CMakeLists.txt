@@ -70,3 +70,10 @@ accompany_golden(accompany_basic)
 # DETECTED FROM the imported melody, no scripted `chord`/`seq` steer anywhere
 # in the script (see accompany_melody_detect.acmd's own header comment).
 accompany_golden(accompany_melody_detect)
+
+# Restyle (roadmap 9320, Phase 5 Item A): the node-9320 feature proof --
+# `restyle <style>` transforms the imported melody's OWN notes into the
+# target style's idiom (rhythm snap + groove, register-anchored chord tones)
+# instead of Accompany's verbatim melody-thru (see accompany_restyle.acmd's
+# own header comment for the exact transform this pins).
+accompany_golden(accompany_restyle)

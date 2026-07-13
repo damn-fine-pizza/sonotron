@@ -81,3 +81,9 @@ arrangrr_test(test_arp_functional functional)
 arrangrr_test(test_arranger unit)
 arrangrr_test(test_gesture unit)
 arrangrr_test(test_voicing unit)
+# test_restyle: the RestyleStage (roadmap 9320) -- the inverse NTT classifier
+# (restyle::classify, the one genuinely new piece), the rhythmic snap
+# (restyle::snap_to_grid), the register anchor, and the stage's own inert-by-
+# default / chord-tone-anchoring / harmony-preservation behavior. Subject is
+# ONE new stage -> unit (same precedent as test_arranger/test_voicing).
+arrangrr_test(test_restyle unit)

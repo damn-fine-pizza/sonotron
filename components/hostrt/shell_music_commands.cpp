@@ -101,6 +101,31 @@ bool Shell::resolve_track_role(const std::string& name, TrackRole& out) {
   return parse_role(name, out);
 }
 
+// `restyle <style>` (roadmap 9320): selects the target style the RestyleStage
+// transforms the imported melody's own notes into -- a load-time L1 verb
+// mirroring `style load <name>`'s own builtin-name resolution
+// (docs/design/restyle-placement.md §3: "no ABI Command"). RestyleStage is a
+// Pipeline-level peer, not part of arrangrr's terminal Engine, so this reaches
+// it directly through the Pipeline's own stage<> accessor -- the same way
+// load_midi_source() reaches the MIDI-source stage. Also flips the raw
+// melody-thru OFF (the double-note guard, restyle-placement.md §2): once
+// Restyle owns the transformed output, the raw thru replay must not sound the
+// same note a second time.
+bool Shell::cmd_restyle(const std::vector<std::string>& t, std::string& error) {
+  const int index = find_builtin_style(t[1]);
+  if (index < 0) {
+    error = "unknown style: " + t[1];
+    return false;
+  }
+  auto& restyle = m_runtime.stage().template stage<orchestrator::kRestyleStageIndex>();
+  if (!restyle.load_style(styles::kBuiltins[index])) {
+    error = "restyle load failed: " + t[1];
+    return false;
+  }
+  m_runtime.stage().template stage<orchestrator::kMidiSourceStageIndex>().set_thru_enabled(false);
+  return true;
+}
+
 bool Shell::cmd_key(const std::vector<std::string>& t, std::string& error) {
   std::uint8_t root = 0;
   Mode mode = Mode::kMajor;

@@ -351,6 +351,11 @@ class Shell {
   bool cmd_play(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_chord(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_style(const std::vector<std::string>& tokens, std::string& error);
+  // `restyle <style>` (roadmap 9320): load-time L1 verb selecting the target
+  // style the RestyleStage transforms the imported melody's own notes into
+  // (docs/design/restyle-placement.md §3). Mirrors `midi-source load`: no
+  // ABI Command, reaches the Pipeline stage directly.
+  bool cmd_restyle(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_seq(const std::vector<std::string>& tokens, std::string& error);
   bool seq_add(const std::vector<std::string>& tokens, std::string& error);
   bool seq_transpose(const std::vector<std::string>& tokens, std::string& error);
@@ -450,6 +455,16 @@ class Shell {
   // both peer stages. `m_engine` keeps its exact old spelling/binding
   // contract (now `.stage<kArrangrrStageIndex>()`) so every OTHER existing
   // `m_engine.foo()` call site in this class stays unchanged.
+  //
+  // Roadmap 9320 (Restyle), docs/design/restyle-placement.md §1: the pipeline
+  // grew again to its real 4-stage shape, `[MIDI-source, chorddet, restyle,
+  // arrangrr]` -- RestyleStage inserted between chorddet and arrangrr (the
+  // forward-flow seam already reaches exactly this slot); it is constructed
+  // inert (no style loaded) and stays byte-identical to not being there at
+  // all until `restyle <style>` runs, the same convention MidiSourceStage
+  // already established. `kArrangrrStageIndex` tracks the shift
+  // automatically (named constant, orchestrator/accompany.hpp), so this
+  // binding needed no change at all.
   FollowedContext m_followed{};
   runtime::Runtime<orchestrator::AccompanyPipeline<kSchedulerCapacity>, kSchedulerCapacity>
       m_runtime;

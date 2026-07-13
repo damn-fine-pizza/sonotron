@@ -83,6 +83,11 @@ class ChordDetector {
   // n==0 (bare-root) resolution; two or more pitch classes still shell-complete
   // exactly as before, so nothing else about recognition changes.
   constexpr void set_key(const Key& key) noexcept { m_key = key; }
+  // Read-only access to the current key (roadmap 9320, Restyle): the same
+  // scale-aware key `set_key` already stores for single-finger resolution is
+  // exactly what Restyle's inverse classifier needs alongside the live
+  // ChordState -- a plain additive getter, no behavior change.
+  constexpr const Key& key() const noexcept { return m_key; }
   constexpr void set_single_finger(bool on) noexcept { m_single_finger = on; }
 
   // Recognizes the chord from the currently-held notes. Returns true and fills

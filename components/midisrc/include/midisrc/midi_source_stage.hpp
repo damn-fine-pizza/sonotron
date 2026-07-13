@@ -106,6 +106,17 @@ class MidiSourceStage {
   bool ok() const noexcept { return m_ok; }
   std::size_t event_count() const noexcept { return m_events.size(); }
 
+  // Double-note guard (roadmap 9320, Restyle, docs/design/restyle-
+  // placement.md §2): when a downstream RestyleStage owns the transformed
+  // output, the raw "thru" replay scheduled below must be suppressed so the
+  // SAME input note does not sound twice (once raw, once restyled). Additive
+  // and defaults to true (byte-identical to every existing caller that never
+  // calls this -- Accompany's own goldens are unaffected). Forward-flow
+  // itself is untouched by this flag: chorddet/Restyle still need the raw
+  // bytes even with the thru silenced.
+  void set_thru_enabled(bool enabled) noexcept { m_thru_enabled = enabled; }
+  bool thru_enabled() const noexcept { return m_thru_enabled; }
+
   // Plain 2-arg overload: forwards to the 3-arg one below with a no-op
   // `forward` — kept so this component's OWN unit tests (and anyone driving
   // this stage outside a Pipeline) never need to know forward-flow exists.
@@ -125,7 +136,9 @@ class MidiSourceStage {
                  // reference-injection idiom.
     while (m_cursor < m_events.size() && m_events[m_cursor].tick <= ctx.now) {
       const arrangrr::MidiMessage& msg = m_events[m_cursor].msg;
-      (void)m_scheduler.schedule(m_port, m_events[m_cursor].tick, msg);
+      if (m_thru_enabled) {
+        (void)m_scheduler.schedule(m_port, m_events[m_cursor].tick, msg);
+      }
       const std::uint8_t wire[3] = {msg.status, msg.d1, msg.d2};
       forward(m_port, wire, static_cast<std::size_t>(msg.wire_length()));
       ++m_cursor;
@@ -143,6 +156,7 @@ class MidiSourceStage {
   std::vector<SourceEvent> m_events;  // tick-sorted, built once at construction
   std::size_t m_cursor = 0;
   bool m_ok = false;
+  bool m_thru_enabled = true;  // roadmap 9320 double-note guard; on by default
 };
 
 }  // namespace midisrc

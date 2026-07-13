@@ -7,6 +7,7 @@
 namespace arrangrr {
 bool engine_link_gate();    // link_gate.cpp: instantiates the full Engine alone
 bool pipeline_link_gate();  // link_gate.cpp: the real 2-stage [chorddet, arrangrr] pipeline
+bool restyle_link_gate();   // link_gate.cpp: the 3-stage [chorddet, restyle, arrangrr] pipeline
 }  // namespace arrangrr
 
 int main() {
@@ -17,10 +18,13 @@ int main() {
   // chord engine, sequencer, arranger and timeline (D20). The pipeline gate
   // additionally proves the real 2-stage `Pipeline<ChorddetStage<N>, Engine>`
   // composite production drives cross-builds and links freestanding too
-  // (docs/design/orchestrator-pipeline-extraction.md §16.7, Phase 4d).
+  // (docs/design/orchestrator-pipeline-extraction.md §16.7, Phase 4d). The
+  // restyle gate (roadmap 9320) additionally proves RestyleStage itself
+  // cross-builds and links freestanding (docs/design/restyle-placement.md §4).
   const bool engine_ok = arrangrr::engine_link_gate();
   const bool pipeline_ok = arrangrr::pipeline_link_gate();
-  return (engine_ok && pipeline_ok && arrangrr::version_string() != nullptr &&
+  const bool restyle_ok = arrangrr::restyle_link_gate();
+  return (engine_ok && pipeline_ok && restyle_ok && arrangrr::version_string() != nullptr &&
           acc.advance_us(1'000'000) == 1920)
              ? 0
              : 1;

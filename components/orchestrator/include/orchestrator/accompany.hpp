@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arrangrr/engine.hpp"
+#include "arrangrr/restyle/restyle_stage.hpp"
 #include "chorddet/stage.hpp"
 #include "midisrc/midi_source_stage.hpp"
 #include "runtime/pipeline.hpp"
@@ -31,16 +32,24 @@
 
 namespace orchestrator {
 
+// Roadmap 9320 (Restyle), docs/design/restyle-placement.md §1: grown to a
+// 4-stage pipeline, RestyleStage inserted between ChorddetStage and Engine --
+// the one slot the forward-flow seam already reaches one level short of the
+// terminal (see runtime/pipeline.hpp's own header comment). Additive to the
+// TYPE, not a fork of it (no second "RestylePipeline" alias): RestyleStage is
+// constructed inert by default (restyle_stage.hpp), so a pipeline that never
+// calls `load_style()` stays byte-identical to the pre-9320 3-stage shape.
 template <std::size_t N>
 using AccompanyPipeline =
     runtime::Pipeline<midisrc::MidiSourceStage<N>, arrangrr::ChorddetStage<arrangrr::kMaxPorts>,
-                      arrangrr::Engine>;
+                      arrangrr::RestyleStage<arrangrr::kMaxPorts>, arrangrr::Engine>;
 
 // 0-based stage indices into `AccompanyPipeline` -- named here once so every
 // consumer (hostrt::Shell, a future sonotron-server/GUI wiring) reaches a
 // declared stage the same documented way instead of a bare magic number.
 inline constexpr std::size_t kMidiSourceStageIndex = 0;
 inline constexpr std::size_t kChorddetStageIndex = 1;
-inline constexpr std::size_t kArrangrrStageIndex = 2;
+inline constexpr std::size_t kRestyleStageIndex = 2;
+inline constexpr std::size_t kArrangrrStageIndex = 3;
 
 }  // namespace orchestrator
