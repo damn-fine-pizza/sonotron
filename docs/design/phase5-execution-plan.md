@@ -153,8 +153,17 @@ refactor touches all 15 styles — gated by the feel goldens (`feel_swing`/`shuf
 ---
 
 ## Forks (updated)
-- **F1 — reconcile `DESIGN.md` §22 with the tree** (Phase 4/P0/`sonotron` pivot +
-  this program + the ABI unfreeze). Vasari mechanical pass; cheapest risk-reducer.
+- **F1 — RESOLVED (Vasari mechanical pass):** `docs/DESIGN.md` §22 and
+  `docs/strategy/roadmap-numbered.md` reconciled against the tree — `0910` (`melodd`)
+  marked SCHEDULED (Phase-5 Item F), `11500`/`11700`/`11720` record the Phase-3
+  extraction wire-work (`807c140`/`b98dbda`, deferred `hostrt::Shell` split/`--connect`
+  parity noted) and the ABI-freeze-lift for Phase 5, `9400`/`9420`/`9430` corrected
+  (real CASM decode, `9420` first-slice in-flight), and a new Phase-5-program bullet
+  under `11730` records the ordered `1→7→8→2→9→6→4→10` sequence with #4 shipped
+  (`c2251f2`) and #8 in-flight (`f6611e5`, pending cherry-pick). Every change cites its
+  commit/path; see the Vasari pass report for the full diff. Left uncommitted per
+  Vasari's own role boundary (does not commit) — for the dispatching agent/owner to
+  commit and cherry-pick.
 - **F3 — RESOLVED:** owner lifted the ABI freeze for Phase 5 (`hook-interface.md`
   ACCEPTED). No longer gates #2/#10.
 - **Verdi fork #2 — RESOLVED** by including Item F (melodd): audio destination live.

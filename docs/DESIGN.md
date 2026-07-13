@@ -694,11 +694,14 @@ These bind every node below. They are the "why the schedule is honest" layer.
 - **0800 Dependency policy.** The core stays dependency-free. Host-layer deps are
   allowed only if lightweight/self-contained AND evaluated with the owner first. Any
   move implying a dependency is flagged, never assumed.
-- **0910 Captured direction — `melodd` audio companion (not scheduled).** arrangrr (the
-  MIDI brain) and a future host-only audio engine are peer modules wired by an
+- **0910 Captured direction — `melodd` audio companion — ◑ SCHEDULED (Phase-5 Item F,
+  program position #6, owner-ordered 2026-07-13; `docs/design/phase5-execution-plan.md`).**
+  arrangrr (the MIDI brain) and a future host-only audio engine are peer modules wired by an
   orchestrator, name-blind, talking only through the POD interface; audio never
-  crosses the interface; the core stays audio-ignorant (identity `0110` intact). A
-  recorded direction, not work.
+  crosses the interface; the core stays audio-ignorant (identity `0110` intact). Still
+  zero code (`components/melodd/README.md`: "SLOT — no code yet") and gated on an
+  explicit owner `0800` dependency approval (softsynth/DSP lib, license, weight) before
+  its slot opens — an ORDERED direction now, not yet started work.
 - **Product identity (what the tree is building toward):** `0110` MIDI-only, never
   audio (drives external gear, syncs by clock); `0120` live + studio use, 50/50;
   `0130` the signature is the COMBINATION — chord intelligence + unified
@@ -902,17 +905,49 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
     HOST-ONLY. End-to-end: `components/orchestrator`'s `AccompanyPipeline` (MIDI-source →
     chorddet → arrangrr, `components/orchestrator/include/orchestrator/accompany.hpp`)
     drives the band from chords detected FROM the imported melody, not a scripted steer
-    — Phase 4d stands up the 3-stage pipeline (`17f8f43`), Phase 4e wires melody-driven
-    detection (`2e55d9b`). Proven by `tests/golden/accompany_basic.golden` +
+    — all five sub-phases committed: 4a `Pipeline<StageT...>` composite in
+    `components/runtime` (`8a0f701`), 4b `ChordDetector`+`FollowedContext` promoted to
+    `components/chorddet` (`65f16bc`), 4c the SMF parser + MIDI-source stage extracted
+    to `components/midisrc` (`85cd454`), Phase 4d stands up the 3-stage pipeline
+    (`17f8f43`), Phase 4e wires melody-driven detection (`2e55d9b`). Proven by
+    `tests/golden/accompany_basic.golden` +
     `tests/golden/accompany_melody_detect.golden` (both green, `ctest -R accompany`).
     No ABI break: `test_abi_frozen` untouched, `sizeof(OutEvent)==16` unchanged — the
     ABI waiver this pipeline could have spent (a stage/source tag) stays UNSPENT, per
     the ABI-fork analysis in `docs/design/orchestrator-pipeline-extraction.md` §16.2.
   - `9320` Restyle (transform the input's own parts into the genre idiom) — ○ HOST-ONLY *(depends on 9100)*
-- **9400 Style data format + generator — ○ direction**
+- **9400 Style data format + generator — ◑ partial**
   - `9410` Style inspector + serialize/deserialize (offset/index-based) — ○ HOST-ONLY
-  - `9420` Style compiler (data → .cpp constexpr for the device path) — ○ HOST-ONLY
-  - `9430` CASM→NTT importer body (arrstyle-converter; 1010-style corpus) — ○ HOST-ONLY
+  - `9420` Style compiler (data → .cpp constexpr for the device path) — ◑ partial,
+    first slice IN-FLIGHT: `apps/tools/arrstyle-converter/src/style_lower.{hpp,cpp}` +
+    a new `compile-style` CLI subcommand lower a `StyleModel` to a compilable
+    `arrangrr::Style` header (section-slot mapping, role rename, tick/gate rescale,
+    exact chord-tone reduction against each lane's own reference chord); anything
+    needing a musical judgment call is dropped with a diagnostic, never guessed.
+    Verified end-to-end against one real corpus `.sty` (compiles clean); deliberately
+    never wired into the built-in style list or `ci.sh`. Commit `f6611e5`, currently on
+    sibling worktree branch `worktree-agent-a3f3c787996a2023e`, **not yet merged onto
+    this branch** — pending cherry-pick. Stays ◑, not ✅: a first slice, not full
+    corpus coverage.
+  - `9430` CASM→NTT importer body (arrstyle-converter; 1010-style corpus) — ◑ partial,
+    real decode (not "inspect-only" as stale docs elsewhere still claim — see below):
+    `apps/tools/arrstyle-converter/src/casm.cpp` is a bounds-checked CASM/CSEG/Ctab/Ctb2
+    decoder and `sff_import.cpp`'s `import_sff()` (`:365-417`) actually calls it, builds
+    real per-role `PhraseLane`s, and applies the bass-register filter — SFF1 fully
+    decoded, SFF2 partially (`Ctb2`'s richer per-chord-group sub-structure not fully
+    unpacked, `casm.cpp:132-134`). Proven by
+    `test_sff_import.cpp::test_real_corpus_samples` against two real files under
+    `../resources/styles/extra/**`: `ctest --test-dir build/host -R sff_import` green
+    (live run recorded in `docs/design/corpus-import-scope.md` §0). **Known stale spot,
+    code-level not just docs:** `cmd_inspect` still routes SFF files through
+    `inspect_sff()` (`sff_import.cpp:336-363`), which prints the old "unsupported
+    subset — inspect-only" / "not decoded" text even though `import-sff` on the same
+    file now decodes it fully — a one-line fix flagged for whoever next touches this
+    tool, not blocking. Not ✅: the SFF2 sub-structure gap + the stale `inspect` message
+    keep this partial. *(Correction still owed elsewhere: `docs/backlog/
+    yamaha-style-corpus-and-rules.md`, `docs/backlog/style-data-format.md`, and
+    `apps/tools/arrstyle-converter/DESIGN.md` still say CASM decode is not implemented
+    — those are outside this reconciliation's file scope; flagged, not fixed here.)*
 
 #### 10000 — Generative Director — ○ planned, CAPSTONE (last; also behind `11700`)
 
@@ -936,7 +971,19 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
     ABI; committed-green gated OFF at rest — lit only when transport plays or the chord is
     explicitly steered)
   - `11420` WHITE (direct play) — ○ HOST-ONLY *(deferred: needs a sounding melody surface)*
-- `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅
+- `11500` UDS-JSONL control adapter (one protocol, three consumers) — ✅ done, and
+  extended (Phase 3): `kParamState` given a wire shape (`param_state_wire.{hpp,cpp}` +
+  `param_state_mirror.{hpp,cpp}`, commit `807c140`) and `Param::kNoteRaw` + the `note`
+  L1 verb added so `apps/tools/cli-arrangrr --connect` runs as a genuinely
+  arrangrr-free pure socket client (`TuiClient`+`UdsClient`+`client_event`,
+  `apps/tools/cli-arrangrr/client_mode.{hpp,cpp}`, commit `b98dbda`) — both additive,
+  `test_abi_frozen`-safe (`sizeof` unchanged). **Deferred, not owed** (per `b98dbda`'s
+  own commit message): "deliberately does NOT split `hostrt::Shell` or retire
+  cli-arrangrr's embedded live mode — that larger, riskier cutover is left for a
+  follow-up"; `--connect` is a flat REPL, not full TUI parity with the embedded mode.
+  `components/hostrt/shell.hpp`'s `Shell` is still one class (unsplit, verified). Scoped
+  as a DEFERRED OPTIONAL follow-up (owner-decided 2026-07-13), not outstanding work
+  against this node.
 - `11600` Host GUI client — the TARGET of the GUI freeze line (`11700`). Tech stack —
   **DECIDED & vendored: Dear ImGui (upstream `ocornut/imgui`, pinned v1.92.8) + GLFW3,
   backends `imgui_impl_glfw` / `imgui_impl_opengl3`, under `third_party/imgui` +
@@ -970,8 +1017,18 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
 - **11700 GUI freeze line — pivot from core-feature work to the host GUI**
   (owner-decided). STATUS: ✅ CROSSED (2026-07-06). The pre-GUI batch `11710` is all ✅
   and `11720` (freeze) has executed — the ABI is frozen v1 and the `5100` shape is
-  reserved. Core-feature work is now BEHIND the line; the next action is `11600` (build
-  the host GUI). This node still governs sequencing of everything below it.
+  reserved. **Update (owner directive, 2026-07-13): the freeze itself is LIFTED for
+  Phase-5 work forward** — resolves `docs/design/hook-interface.md` fork F3 (the
+  freeze-lift is ACCEPTED; the specific ABI-reshape proposal in that document remains
+  its own separate open design review), recorded in
+  `docs/design/phase5-execution-plan.md`: `Op`/`Param`/`Command`/`OutEvent` may be
+  reshaped/rewritten for Phase-5 items, and `test_abi_frozen` may be rewritten or
+  retired for those changes. This does NOT retroactively reopen the Phase-3 extraction
+  wire-work recorded under `11500` (`807c140`/`b98dbda`), which shipped under the OLD
+  additive-only discipline and stays byte-identical/frozen — its identity is "same
+  behaviour, restructured." Core-feature work is now BEHIND the line; the next action
+  is `11600` (build the host GUI). This node still governs sequencing of everything
+  below it.
   *Through-line: **validate feel in the hands, then grow on a living instrument.** The
   product is a MIDI arranger — a live instrument whose value is in the hands. The TUI
   structurally cannot validate FEEL (timing, the chord-steer sensation, the piano
@@ -1014,6 +1071,8 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
       a RESERVED block documenting the future per-track `kFx…` verbs and their
       `(idx,a,b,c)` packing, no live enum values — the GUI is born aware, appended when
       `5000` lands.
+    - **Phase-5 update:** this freeze is LIFTED for Phase-5 items going forward — see
+      the `11700` note above (owner directive 2026-07-13).
   - `11730` Behind the line — reprioritized on a living instrument, no longer ordered
     by this document alone:
     - `11600` itself (the GUI build) is the FIRST thing behind the line — it is what
@@ -1024,6 +1083,22 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
     - `10000` Generative Director (capstone, unchanged: still last).
     - the remainder of `9000` not in the gating batch (`9200` generative style,
       `9300` stylizer, `9400` format/tooling), `7000` remainder, `12000` device/HW.
+    - **Phase-5 program (owner-ordered, 2026-07-13) — supersedes the informal order
+      above.** The owner selected and ORDERED eight of Verdi's ten Phase-5 candidates
+      (`docs/strategy/phase5-proposals.md`): `1→7→8→2→9→6→4→10` — Restyle (`9320`) ·
+      Motif (`9210`) · Corpus import (`9400`/`9430`) · Clip/launch primitive (no
+      canonical node assigned yet) · Pad/Scene (`7200`/`8100`–`8200`) · `melodd`
+      (`0910`) · Fuzzing harness (no canonical node assigned yet) · MIDI-FX chain
+      (`5000`). Full detail: `docs/design/phase5-execution-plan.md`. **Deferred out of
+      this program:** #3 STM32 bring-up (`12100`), #5 external clock-in (`4500`).
+      **Shipped:** the Fuzzing harness — `components/midisrc/fuzz/`,
+      `option(SONOTRON_FUZZ)`, commit `c2251f2`. **In-flight, not yet on this branch:**
+      the corpus-import lowering first slice — see `9420` above (commit `f6611e5`, on
+      sibling worktree branch `worktree-agent-a3f3c787996a2023e`, pending
+      cherry-pick). **Also resolved by this program:** the ABI freeze LIFTED for
+      Phase-5 (see the `11700`/`11720` update above) and Verdi's fork #2 (the
+      `sonotron`/workstation audio destination) answered by including `melodd` (see
+      `0910`).
   *Dual-target note: this whole node is HOST-ONLY by construction — the GUI is a
   desktop client. The STM32 target (`12000`) keeps its OWN separate physical UI
   (`12400`); `11600` is never the device front-end — do not conflate the two
@@ -1109,7 +1184,11 @@ this list is kept for continuity and for ordering WITHIN the behind-the-line set
 - **`9400` style data format + CASM importer** — HOST-ONLY tooling; the compiled-C++
   style path works today (`0400`). Defer until authoring pain is real or the corpus
   import becomes the priority. Smallest first step: teach `arrstyle-converter` to emit
-  today's constexpr header from its model.
+  today's constexpr header from its model. **Update: no longer deferred** — the corpus
+  import became the priority (Phase-5 program item #8, position 3 of 8, owner-ordered
+  2026-07-13; see the `9400`/`9420`/`9430` entries above and the Phase-5 program note
+  under `11730`) and the "smallest first step" is now IN-FLIGHT (`f6611e5`, pending
+  cherry-pick).
 - **`11300` presentation layer; `4200` remaining step params; `3300` arranger
   refinements** — incremental polish; interleave opportunistically, none on the
   critical arc.
