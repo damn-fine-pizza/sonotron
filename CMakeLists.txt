@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(sonotron LANGUAGES CXX)
+# C is needed only for the single-header C libraries melodd vendors
+# (TinySoundFont/miniaudio, third_party/tinysoundfont and third_party/
+# miniaudio) -- enabled at top level (rather than relying solely on GLFW's
+# own nested project(LANGUAGES C)) so the Ninja generator sets up the C
+# object/archive rules correctly from the start.
+project(sonotron LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,4 +71,11 @@ else()
   # ARM/firmware build; the GUI never links arrangrr or hostrt.
   add_subdirectory(third_party)
   add_subdirectory(apps/gui-sonotron)
+  # Phase-5 Item F (docs/design/phase5-execution-plan.md, `0910`/D43): the
+  # melodd GM SoundFont realizer + its standalone drop-in-synth binary.
+  # HOST-ONLY, links third_party/tinysoundfont (just entered above) --
+  # never on the arm-none-eabi branch above, same placement discipline as
+  # components/midisrc / components/orchestrator.
+  add_subdirectory(components/melodd)
+  add_subdirectory(apps/tools/melodd)
 endif()

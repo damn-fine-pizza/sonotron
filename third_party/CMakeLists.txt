@@ -14,3 +14,9 @@ set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(glfw)
 
 add_subdirectory(imgui)
+
+# TinySoundFont + miniaudio: melodd's first-slice audio dependency (D43/
+# `0800`, owner-approved 2026-07-13). Single-header, permissive license, see
+# each library's own ARRGRR_VENDOR.md.
+add_subdirectory(tinysoundfont)
+add_subdirectory(miniaudio)
