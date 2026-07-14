@@ -82,15 +82,14 @@ inline constexpr std::array<ImVec4, kTrackRoleCount> kRoleTint = {
 // not explicitly touch keeps ImGui's own sane dark default.
 void apply();
 
-// Renders `fmt` in `color` with a faked "bold" stroke: the real text is
-// drawn once (normal cursor advance, exactly like ImGui::TextColored), then
-// the same glyphs are stamped again 1px to the right directly on the draw
-// list (no extra cursor advance). Only one font weight (Regular) is
-// vendored/loaded (tokens/fonts.css: "500-700 are synthetic") and ImGui has
-// no font-weight axis of its own, so this is the closest ImGui-side
-// equivalent of a synthetic-bold fallback -- used for the readouts the
-// design calls out as bold (ChordReadout's "follows"/"next" value,
-// BeatReadout's bar/beat).
+// Renders `fmt` in `color` as a single crisp draw (exactly ImGui::TextColored),
+// naming the readouts the design calls out as emphasised (ChordReadout's
+// "follows"/"next" value, BeatReadout's bar/beat, the BPM readout). Only the
+// Regular font weight is loaded (tokens/fonts.css: "500-700 are synthetic") and
+// ImGui has no font-weight axis, so emphasis is carried by COLOR, not a faked
+// weight: an earlier synthetic-bold double-stamp (a 1px-offset second draw)
+// smeared the 13px monospace glyphs into a doubled, unreadable look and was
+// removed. The helper is kept as the semantic seam for these readouts.
 void text_bold_colored(const ImVec4& color, const char* fmt, ...) IM_FMTARGS(2);
 
 // Renders a fixed-cell block Meter (the "cells" glyph bars components.jsx

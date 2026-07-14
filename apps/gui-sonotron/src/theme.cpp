@@ -122,10 +122,15 @@ void text_bold_colored(const ImVec4& color, const char* fmt, ...) {
   std::vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
 
-  const ImVec2 pos = ImGui::GetCursorScreenPos();
-  ImGui::TextColored(color, "%s", buffer);  // real draw, real cursor advance
-  ImGui::GetWindowDrawList()->AddText(ImVec2(pos.x + 1.0F, pos.y),
-                                      ImGui::ColorConvertFloat4ToU32(color), buffer);
+  // Emphasis is carried by COLOR (bright white / accent / semantic green-amber),
+  // never a faked weight. An earlier synthetic-bold double-stamp (the same
+  // glyphs redrawn 1px to the right straight on the draw list) smeared the 13px
+  // monospace text into an unreadable doubled look on the bar/beat and BPM
+  // readouts -- a real display defect. Only the Regular weight is loaded and
+  // ImGui has no weight axis, so a single crisp draw in the token color is the
+  // honest rendering; the helper stays as the named "this readout is emphasised"
+  // seam for its callers.
+  ImGui::TextColored(color, "%s", buffer);
 }
 
 void render_meter_cells(int cells, int filled, const ImVec4& fill_color, const ImVec2& cell_size,
