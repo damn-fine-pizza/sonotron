@@ -205,6 +205,46 @@ enum class Param : std::uint16_t {
                         //     when; launches every registered clip whose
                         //     scene_index matches (`launch scene <n>
                         //     quantize <q>`).
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): pad banks (arrangrr/pad/pad_bank.hpp) are WRAPPER-ONLY --
+  // each PadType fans out to an EXISTING verb (clip launch, an Arranger
+  // section request, or a Performance recall); there is no new note/CC
+  // emission engine. kPadAssign is host/script-only registration, mirroring
+  // kClipAdd's own convention.
+  kPadAssign = 48,          // do: idx = flat pad id (0..kMaxPads-1)
+                            //     a = type | (mode << 8) | (sync << 16) | (pitch << 24)
+                            //       (type: PadType, mode: PadMode, sync: Boundary,
+                            //        pitch: PadPitch)
+                            //     b = dest_port | (dest_channel << 8) | (n_bars << 16)
+                            //       (dest_port/channel: RESERVED, not yet consumed by
+                            //        any wrapper dispatch, see pad_bank.hpp; n_bars is
+                            //        meaningful only when sync == kNextNBars)
+                            //     c = source_idx | (source_aux << 24)
+                            //       (source_idx meaning depends on `type`: ClipMatrix
+                            //        clip id for kPhrase/kChord, scene index for
+                            //        kSceneColumn, SectionType for kVariation/kFill,
+                            //        PerformanceStore slot for kPerformance)
+  kPadTrigger = 49,         // do: idx = flat pad id. Fires the pad per its OWN
+                            //     assigned sync/n_bars (NOT this Command's own
+                            //     boundary/n_bars, which are unused here) --
+                            //     kHold launches (release stops); kToggle flips
+                            //     launched/stopped; kOneShot/kLoop launch.
+  kPadRelease = 50,         // do: idx = flat pad id. Ends a kHold pad's sounding
+                            //     content; no-op for every other PadMode and for
+                            //     kVariation/kFill/kPerformance pad types (they
+                            //     have no reverse action).
+  kPerformanceStore = 51,   // do: idx = slot (0..kMaxPerformances-1). Captures the
+                            //     live rig (style/variation/routes/mute/solo/
+                            //     groove/tempo/key/chord-mode/chord-follow/
+                            //     playing chord-sequence) into the PerformanceStore.
+  kPerformanceRecall = 52,  // do: idx = slot. Atomically applies a stored
+                            //     Performance (validates every referenced id
+                            //     FIRST; applies nothing on any failure).
+                            //     boundary == kImmediate (or the transport
+                            //     stopped) applies now; kNextBar/kNextNBars
+                            //     arms a BoundaryLatch that lands the WHOLE
+                            //     recall at the bar boundary (Engine::on_tick,
+                            //     AFTER fire_clips/BEFORE fire_arranger).
 };
 
 // ============================================================================
@@ -216,10 +256,12 @@ enum class Param : std::uint16_t {
 // (ABI-none): kMaxInserts below is the only committed symbol; the kFx... Param
 // ids described here do NOT exist yet and MUST NOT be added until node 5000 is
 // implemented, at which point they are APPENDED as new Param enumerators (next
-// free id = 48, after Phase-5 Item #2's kClipAdd/kClipLaunch/kClipStop/
-// kSceneQuantize above), honoring the additive-only-per-shipped-value
-// discipline (still in force even though the Phase-5 ABI *shape* freeze is
-// lifted -- see the banner at the top of this file).
+// free id = 53, after Phase-5 Item #2's kClipAdd/kClipLaunch/kClipStop/
+// kSceneQuantize and Phase-5 Item #9's kPadAssign/kPadTrigger/kPadRelease/
+// kPerformanceStore/kPerformanceRecall above), honoring the
+// additive-only-per-shipped-value discipline (still in force even though the
+// Phase-5 ABI *shape* freeze is lifted -- see the banner at the top of this
+// file).
 //
 // Chain model: a bounded chain of MIDI transforms, per-track first (per-zone is
 // deferred). On disk / on the ABI the chain holds up to kMaxInserts slots; the

@@ -12,3 +12,9 @@ hostrt_test(test_style_chooser unit)
 hostrt_test(test_rc_config unit)
 hostrt_test(test_param_state_wire unit)
 hostrt_test(test_tui_client unit)
+# Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+# Performance"): the `pad assign|trigger|release` / `perf store|recall|save|
+# load` L1 grammar, including the host-only perf-file round trip -- the
+# subject is the shell's own string<->Command integration, same precedent as
+# test_host's own shell command coverage -> functional.
+hostrt_test(test_pad_perf functional)

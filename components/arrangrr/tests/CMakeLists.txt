@@ -98,3 +98,41 @@ arrangrr_test(test_motif unit)
 # apply_clip_content/fire_clips cross-producer wiring (Arranger/
 # ChordSequencer/Timeline) -> functional, same precedent as test_input_zone.
 arrangrr_test(test_clip functional)
+# Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+# Performance"). test_boundary_latch: the ONE shared arm-at-boundary
+# primitive (Corelli fix #2) is a pure freestanding POD -> unit, same
+# precedent as test_common.cpp's own common/ primitive coverage.
+arrangrr_test(test_boundary_latch unit)
+# test_pad_bank: PadEngine's own pure bookkeeping (assign/get/runtime), no
+# dispatch logic -> unit, same precedent as test_common.cpp/ClipMatrix's own
+# scope tripwire (dispatch lives in Engine, covered separately below).
+arrangrr_test(test_pad_bank unit)
+# test_pad: the pad-bank WRAPPER dispatch (fire_pad routing each PadType to
+# the verb it wraps, the 4 PadModes, and quantize/BoundaryLatch reuse) only
+# exists through Engine's cmd_pad/fire_pad cross-producer wiring -> functional,
+# same precedent as test_clip.
+arrangrr_test(test_pad functional)
+# test_performance: Performance capture/recall (Engine's cmd_perf/
+# capture_performance/validate_performance/apply_performance), including the
+# Corelli-flagged recall atomicity and bar-gate-ordering properties -- only
+# observable through the Engine's cross-producer wiring -> functional.
+arrangrr_test(test_performance functional)
+# test_performance_wire: the on-disk serialize()/deserialize() byte format +
+# PerformanceStore's own pool bookkeeping -- pure, no Engine -> unit, same
+# precedent as test_common.cpp.
+arrangrr_test(test_performance_wire unit)
+# test_performance_validate: QA gate-restoration follow-up (owner-approved
+# "extract pure logic + unit-test it") -- arrangrr::perf::validate is now a
+# PURE free function (performance.hpp/performance.cpp), exhaustively branch-
+# covered here WITHOUT an Engine instance -> unit, and now counts toward the
+# enforced metric-1 gate (previously only reachable through
+# test_performance.cpp's functional atomicity coverage).
+arrangrr_test(test_performance_validate unit)
+# test_performance_style_id_regression: Torquato QA pin for an open defect in
+# Engine::apply_performance (a recalled CONCRETE style_id degrades to 0xFFFF
+# "unknown", poisoning the metadata AND any later capture) -- written to pin
+# a not-yet-fixed bug, red-before/green-after once Nazzareno lands the fix.
+# Currently RED; do not silence it. Kept in its OWN file/CTest entry (mirrors
+# test_chord_context_diagnosis's own precedent) so its failure never masks
+# the surrounding GREEN test_performance.cpp coverage.
+arrangrr_test(test_performance_style_id_regression regression)

@@ -4,14 +4,14 @@
 
 #include "arrangrr/arranger/gesture.hpp"  // gesture::expand (per-event note fan-out)
 #include "arrangrr/arranger/groove.hpp"
-#include "arrangrr/arranger/motif.hpp"    // motif engine (9210): gather-phase seed/transform producer
+#include "arrangrr/arranger/motif.hpp"  // motif engine (9210): gather-phase seed/transform producer
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
-#include "chorddet/theory.hpp"      // ChordState, ChordShape, theory::shape_of
-#include "common/assert.hpp"     // ARR_ASSERT (voice-group cap net)
 #include "arrangrr/common/function_ref.hpp"
-#include "common/time.hpp"
 #include "arrangrr/config.hpp"
+#include "chorddet/theory.hpp"  // ChordState, ChordShape, theory::shape_of
+#include "common/assert.hpp"    // ARR_ASSERT (voice-group cap net)
+#include "common/time.hpp"
 
 // The arranger (second WOW): plays the loaded style's current section on
 // transport ticks, resolving chord-tone patterns against the live chord
@@ -37,11 +37,26 @@ class Arranger {
     if (builtin_index >= styles::kBuiltinCount) {
       return false;
     }
-    return load_style(styles::kBuiltins[builtin_index]);
+    if (!load_style(styles::kBuiltins[builtin_index])) {
+      return false;
+    }
+    // Phase-5 Item #9 (Corelli fix #1): the ONE path that knows the builtin
+    // TABLE INDEX, so it is the only one that can set a concrete, known
+    // style_id -- load_style() itself (called by pointer, from here AND from
+    // request_style()'s live-switch path) has no index to give it and marks
+    // "unknown/compiled" instead.
+    m_style_id = builtin_index;
+    return true;
   }
   constexpr bool loaded() const noexcept { return m_style != nullptr; }
   constexpr SectionType current() const noexcept { return m_current; }
   constexpr const Style* current_style() const noexcept { return m_style; }
+  // Phase-5 Item #9 (Corelli fix #1): the live-backing field
+  // Performance::style_id captures/recalls -- 0xFFFF ("unknown/compiled")
+  // whenever the current style was NOT reached through load(builtin_index)
+  // (a raw load_style(ptr) call, or a request_style() live switch, which
+  // receives a pointer, not an index).
+  constexpr std::uint16_t style_id() const noexcept { return m_style_id; }
 
   // Loads a style by pointer (compiled user styles, tests). The pointee must
   // outlive the arranger — builtin styles are constexpr, compiled ones live
@@ -51,12 +66,13 @@ class Arranger {
       return false;
     }
     m_style = style;
+    m_style_id = 0xFFFF;  // unknown/compiled (Corelli fix #1); load() overwrites this after
     m_current = SectionType::kVarA;
     m_return_to = SectionType::kVarA;
     m_pending_valid = false;
     m_section_start = 0;
-    m_voicing.reset();         // a new style must not voice-lead from the old one
-    m_motif_repeat = 0;        // 9210: a new style's motif call-and-response restarts at the statement
+    m_voicing.reset();   // a new style must not voice-lead from the old one
+    m_motif_repeat = 0;  // 9210: a new style's motif call-and-response restarts at the statement
     m_groove = style->groove;  // 9110: adopt the style's default feel (user edits re-apply after)
     return true;
   }
@@ -67,6 +83,20 @@ class Arranger {
       return false;
     }
     m_routes[idx] = Route{.port = port, .channel = channel, .enabled = true};
+    return true;
+  }
+
+  // Phase-5 Item #9 (Corelli fix #3): set_route() above always ENABLES the
+  // route it writes -- there was no way to restore a route to DISABLED
+  // without this. A Performance recall needs exactly that (a role that was
+  // routed-but-off when captured). Port/channel are left untouched; only the
+  // enabled flag moves.
+  bool set_route_enabled(TrackRole role, bool enabled) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    m_routes[idx].enabled = enabled;
     return true;
   }
 
@@ -98,6 +128,10 @@ class Arranger {
     groove::set_field(m_groove, field, value);
   }
   constexpr const GrooveParams& groove_params() const noexcept { return m_groove; }
+  // Phase-5 Item #9 (Corelli recommendation): bulk recall setter -- a
+  // Performance carries a whole captured GrooveParams, not one field at a
+  // time (unlike the live `groove` panel's set_groove_field above).
+  constexpr void set_groove(const GrooveParams& groove) noexcept { m_groove = groove; }
 
   // A snapshot of one part for the host mixer: its route, its voice in the
   // current section, and its mute/solo state. `present` is false when the
@@ -173,6 +207,7 @@ class Arranger {
 
     if (immediate) {
       m_style = style;
+      m_style_id = 0xFFFF;  // Corelli fix #1: a pointer-based switch has no known builtin index
       m_current = target;
       if (section_is_variation(target)) {
         m_return_to = target;
@@ -213,9 +248,9 @@ class Arranger {
     for (const StylePattern& pattern : section->patterns) {
       const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
       if (route.enabled && pattern.gm_program >= 0 && pattern.gm_program <= 127) {
-        schedule(route.port, 0,
-                 MidiMessage::program(route.channel,
-                                      static_cast<std::uint8_t>(pattern.gm_program)));
+        schedule(
+            route.port, 0,
+            MidiMessage::program(route.channel, static_cast<std::uint8_t>(pattern.gm_program)));
       }
     }
   }
@@ -254,6 +289,7 @@ class Arranger {
           // style switch is seamless (both on the same downbeat).
           if (m_pending_style != nullptr && m_pending_style != m_style) {
             m_style = m_pending_style;
+            m_style_id = 0xFFFF;  // Corelli fix #1: same "unknown" convention as the immediate path
             style_switched = true;
             m_groove = m_style->groove;  // 9110: deferred switch adopts the new style's feel
           }
@@ -337,13 +373,13 @@ class Arranger {
       Motif generated_motif;
       Span<const StyleEvent> source = pattern.events;
       if (pattern.motif != nullptr) {
-        const Motif seed = pattern.events.empty()
-                                ? motif::generate(pattern.motif->seed, pattern.motif->length,
-                                                  motif::idiom_onset_mask(section->patterns,
-                                                                          pattern.motif->idiom_role),
-                                                  pattern.motif->center_degree, pattern.motif->vel,
-                                                  pattern.motif->gate)
-                                : motif::from_span(pattern.events);
+        const Motif seed =
+            pattern.events.empty()
+                ? motif::generate(
+                      pattern.motif->seed, pattern.motif->length,
+                      motif::idiom_onset_mask(section->patterns, pattern.motif->idiom_role),
+                      pattern.motif->center_degree, pattern.motif->vel, pattern.motif->gate)
+                : motif::from_span(pattern.events);
         generated_motif = motif::apply_repeat(seed, *pattern.motif, m_motif_repeat);
         source = Span<const StyleEvent>(generated_motif.events, generated_motif.count);
       }
@@ -387,8 +423,9 @@ class Arranger {
         const GrooveOut g = groove::apply(m_groove, static_cast<std::uint8_t>(pattern.role), step,
                                           transport_tick, nr.vel);
         const TickOffset on = g.timing_offset + nr.gesture_delay;
-        schedule(route.port, on,
-                 MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(nr.note), g.velocity));
+        schedule(
+            route.port, on,
+            MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(nr.note), g.velocity));
         schedule(route.port, static_cast<TickOffset>(nr.gate) + on,
                  MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(nr.note)));
       }
@@ -490,6 +527,12 @@ class Arranger {
   };
 
   const Style* m_style = nullptr;
+  // Phase-5 Item #9 (Corelli fix #1): the live backing for
+  // Performance::style_id -- 0xFFFF ("unknown/compiled") until load(idx) sets
+  // a concrete builtin index; any pointer-based style assignment
+  // (load_style/request_style) resets it to 0xFFFF (see those methods' own
+  // comments).
+  std::uint16_t m_style_id = 0xFFFF;
   const Style* m_pending_style = nullptr;  // queued with m_pending for a seamless switch
   SectionType m_current = SectionType::kVarA;
   SectionType m_return_to = SectionType::kVarA;

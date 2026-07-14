@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "arrangrr/engine.hpp"
 
@@ -96,6 +97,16 @@ int find_builtin_style(const std::string& name);
 bool parse_role(const std::string& s, TrackRole& out);
 bool parse_hex_byte(const std::string& s, std::uint8_t& out);
 bool parse_int(const std::string& s, int& out);
+
+// Parses an optional trailing `quantize <n>` at token index `at` (one past
+// the last positional argument of the command it decorates). Absent ->
+// Boundary::kImmediate. n == 0 -> immediate, n == 1 -> next bar, n > 1 ->
+// next N bars (n_bars clamped to 255, the Command field's own width). Shared
+// by the clip-launch verbs (shell_clip_commands.cpp) and the pad/performance
+// verbs (shell_pad_commands.cpp) -- the SAME "quantize <n>" spelling
+// Phase-5 Item #2's Boundary reshape consolidated onto one field.
+bool parse_quantize_suffix(const std::vector<std::string>& t, std::size_t at, Boundary& boundary,
+                           std::uint8_t& n_bars, std::string& error);
 
 // D47 chord-follow labels, shared by the `chord follow` confirmation and the
 // chords panel so the wording matches. `label` is the short selector name;

@@ -690,6 +690,12 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   if (cmd == "stop" && t.size() >= 2 && t[1] == "clip") {
     return cmd_stop_clip(t, error);
   }
+  if (cmd == "pad" && t.size() >= 2) {
+    return cmd_pad(t, error);
+  }
+  if (cmd == "perf" && t.size() >= 2) {
+    return cmd_perf(t, error);
+  }
   return std::nullopt;
 }
 

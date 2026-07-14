@@ -8,9 +8,12 @@
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/clip/clip_matrix.hpp"
+#include "arrangrr/common/boundary_latch.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/config.hpp"
+#include "arrangrr/pad/pad_bank.hpp"
+#include "arrangrr/perf/performance.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
 #include "arrangrr/timeline/timeline.hpp"
@@ -111,6 +114,15 @@ class Engine {
   // cmd_clip in engine.cpp for the ABI path).
   const ClipMatrix& clips() const noexcept { return m_clips; }
   ClipMatrix& clips() noexcept { return m_clips; }
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): pad-bank wrapper bookkeeping and the Performance recall
+  // store, mirroring clips()' own const+mutable accessor pair. Host code
+  // configures pads and (de)serializes the store through the mutable
+  // accessor; the ABI paths are cmd_pad/cmd_perf below.
+  const PadEngine& pads() const noexcept { return m_pads; }
+  PadEngine& pads() noexcept { return m_pads; }
+  const PerformanceStore& performances() const noexcept { return m_perfs; }
+  PerformanceStore& performances() noexcept { return m_perfs; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -271,6 +283,13 @@ class Engine {
       // whose quantize window closes THIS bar, still BEFORE fire_arranger --
       // same reason the chord commit above precedes it.
       fire_clips(m_transport.tick(), sink);
+      // Phase-5 Item #9 (Corelli fix #3): a pending Performance recall lands
+      // HERE -- after fire_clips, still BEFORE fire_arranger. A mid-bar
+      // recall that changed the style before fire_clips ran would resolve a
+      // clip's content_index against the OLD style; landing after fire_clips
+      // but before fire_arranger keeps both correct for the bar that is
+      // about to play.
+      apply_pending_performance_recall(sink);
     }
     fire_arranger(m_transport.tick(), sink);
     fire_arp(m_transport.tick(), sink);
@@ -321,6 +340,8 @@ class Engine {
   void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
   void cmd_arp(const Command& cmd, EventSink sink);    // live arpeggiator
   void cmd_clip(const Command& cmd, EventSink sink);   // Phase-5 Item #2: clip launch primitive
+  void cmd_pad(const Command& cmd, EventSink sink);    // Phase-5 Item #9: pad-bank wrapper dispatch
+  void cmd_perf(const Command& cmd, EventSink sink);   // Phase-5 Item #9: Performance store/recall
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on
@@ -358,6 +379,30 @@ class Engine {
   // Promotes any clip whose quantize window closes THIS bar (on_tick's
   // existing tick % kTicksPerBar == 0 gate, decision #2).
   void fire_clips(Tick transport_tick, EventSink sink);
+
+  // cmd_pad case handlers (Phase-5 Item #9), split out for the same reason.
+  void pad_assign(const Command& cmd, EventSink sink);
+  void pad_trigger(const Command& cmd, EventSink sink);
+  void pad_release(const Command& cmd, EventSink sink);
+  // Fires (or stops) one pad's wrapped content by type -- the ONE place that
+  // translates a Pad into a call on the verb it wraps (clip_request/
+  // clip_scene_launch/Arranger::request/perf_recall), mirroring
+  // apply_clip_content's own placement for the clip primitive.
+  void fire_pad(const Pad& pad, LaunchState target, EventSink sink);
+
+  // cmd_perf case handlers (Phase-5 Item #9), split out for the same reason.
+  void perf_store(const Command& cmd, EventSink sink);
+  void perf_recall(const Command& cmd, EventSink sink);
+  // Captures/validates/applies a full rig snapshot -- see performance.hpp's
+  // own header comment for the persisted-format discipline these back.
+  Performance capture_performance() const;
+  bool validate_performance(const Performance& perf) const noexcept;
+  bool apply_performance(const Performance& perf, EventSink sink);
+  void emit_performance_confirmation(const Performance& perf, EventSink sink);
+  // Promotes a pending (armed) Performance recall whose BoundaryLatch closes
+  // THIS bar -- called from on_tick's existing bar gate, AFTER fire_clips and
+  // BEFORE fire_arranger (Corelli fix #3, see on_tick's own comment above).
+  void apply_pending_performance_recall(EventSink sink);
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
@@ -581,6 +626,24 @@ class Engine {
   // m_arranger/m_seq/m_timeline so a future audit of construction order
   // finds it beside the subsystems it references by index.
   ClipMatrix m_clips;
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): pad-bank wrapper bookkeeping (mirrors m_clips' own
+  // placement/rationale -- PadEngine orchestrates subsystems Engine already
+  // owns and shares no raw cross-stage data).
+  PadEngine m_pads;
+  // Performance recall store + its pending-boundary latch (Corelli fix #2:
+  // the ONE shared BoundaryLatch primitive, not a 4th hand-rolled
+  // arm-at-boundary mechanism). ClipMatrix/Arranger/ChordEngine each still
+  // hand-roll their OWN boundary state (LaunchState::kArmed, m_pending_valid,
+  // FollowedContext staging) -- they could adopt BoundaryLatch later; not
+  // retrofitted here so their existing goldens stay byte-identical.
+  PerformanceStore m_perfs;
+  BoundaryLatch m_perf_recall;
+  std::uint16_t m_perf_recall_slot = 0;
+  // v1: always bank 0 -- no live "active pad bank" focus concept exists yet
+  // (no ABI verb selects it); Performance::pad_bank_id captures this constant
+  // until a future host UI adds bank switching.
+  std::uint16_t m_pad_bank = 0;
   // Phase-4d promotion (§16.1/§16.4/§16.9): the chorddet peer is now a
   // Pipeline-owned SIBLING stage (was an Engine-owned value in 4b), injected
   // here BY REFERENCE for its narrow CONFIG surface only (see the class

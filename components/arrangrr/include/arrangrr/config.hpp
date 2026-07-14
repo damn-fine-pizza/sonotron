@@ -30,4 +30,26 @@ inline constexpr std::size_t kMaxClips = 96;
 // size.
 static_assert(kMaxClips <= 256, "ClipMatrix pool: keep the Repeat-Zone grid bounded (D33)");
 
+// Pad banks (Phase-5 Item #9, docs/phase5-design-reviews.md "Pad/Scene live ->
+// Performance"): 8 banks x 4 pads (Yamaha/Korg's own "4 pads per bank"
+// convention) = 32 flat pad slots, addressed by a flat 0..kMaxPads-1 id on
+// the ABI (kPadAssign/kPadTrigger/kPadRelease). Budget (D33): Pad is a
+// 12-byte POD (pinned by static_assert(sizeof(Pad) == 12) in
+// arrangrr/pad/pad_bank.hpp), so kMaxPads x 12 B stays a trivial slice of the
+// STM32H743 512 KB envelope.
+inline constexpr std::size_t kMaxPadsPerBank = 4;
+inline constexpr std::size_t kMaxPadBanks = 8;
+inline constexpr std::size_t kMaxPads = kMaxPadsPerBank * kMaxPadBanks;
+static_assert(kMaxPads == kMaxPadsPerBank * kMaxPadBanks);
+static_assert(kMaxPads <= 256, "Pad grid: keep the pad-bank pool bounded (D33)");
+
+// Performance store (Phase-5 Item #9): one-button full-state recall slots
+// (DESIGN.md section 17, node 8200). Budget (D33): Performance is a 96-byte
+// POD (pinned by static_assert(sizeof(Performance) == 96) in
+// arrangrr/perf/performance.hpp), so kMaxPerformances x 96 B stays a trivial
+// slice of the STM32H743 512 KB envelope.
+inline constexpr std::size_t kMaxPerformances = 16;
+static_assert(kMaxPerformances <= 256,
+              "Performance store: keep the recall-slot pool bounded (D33)");
+
 }  // namespace arrangrr

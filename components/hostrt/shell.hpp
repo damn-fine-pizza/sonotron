@@ -386,6 +386,18 @@ class Shell {
   bool cmd_clip(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_launch(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_stop_clip(const std::vector<std::string>& tokens, std::string& error);
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): the pad-bank + Performance recall L1 grammar
+  // (shell_pad_commands.cpp). `pad assign` is host/script-only registration
+  // (mirrors `clip add`'s own convention, see kPadAssign's abi.hpp comment);
+  // `pad trigger`/`pad release` and `perf store`/`perf recall` ride the ABI;
+  // `perf save`/`perf load` are HOST-ONLY file I/O (Architectural Principle
+  // #2: the core never touches a filesystem) over performance.hpp's
+  // serialize()/deserialize().
+  bool cmd_pad(const std::vector<std::string>& tokens, std::string& error);
+  bool cmd_perf(const std::vector<std::string>& tokens, std::string& error);
+  bool perf_save(const std::string& path, std::string& error);
+  bool perf_load(const std::string& path, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);

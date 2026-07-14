@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kSceneQuantize(47). Next free id is 48.
+// kNone(0) .. kPerformanceRecall(52). Next free id is 53.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -89,6 +89,13 @@ static_assert(static_cast<std::uint16_t>(Param::kClipAdd) == 44);
 static_assert(static_cast<std::uint16_t>(Param::kClipLaunch) == 45);
 static_assert(static_cast<std::uint16_t>(Param::kClipStop) == 46);
 static_assert(static_cast<std::uint16_t>(Param::kSceneQuantize) == 47);
+// Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+// Performance"): pad banks + the Performance one-button recall.
+static_assert(static_cast<std::uint16_t>(Param::kPadAssign) == 48);
+static_assert(static_cast<std::uint16_t>(Param::kPadTrigger) == 49);
+static_assert(static_cast<std::uint16_t>(Param::kPadRelease) == 50);
+static_assert(static_cast<std::uint16_t>(Param::kPerformanceStore) == 51);
+static_assert(static_cast<std::uint16_t>(Param::kPerformanceRecall) == 52);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kClip(8). Next free id is 9.
