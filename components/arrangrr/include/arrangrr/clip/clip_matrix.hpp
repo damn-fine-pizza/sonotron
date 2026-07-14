@@ -46,7 +46,7 @@ enum class LaunchState : std::uint8_t {
   kQueuedStop = 3,
 };
 
-// One grid cell's content reference + runtime launch state. 8 bytes, POD.
+// One grid cell's content reference + runtime launch state. 12 bytes, POD.
 struct Clip {
   TrackRole part_role = TrackRole::kDrums;
   std::uint8_t scene_index = 0;
@@ -54,13 +54,28 @@ struct Clip {
   std::uint16_t content_index = 0;
   LaunchState state = LaunchState::kStopped;
   // Quantize window while armed/queued-stop: the clip is due when
-  // `transport_tick % (n_bars * kTicksPerBar) == 0` -- Corelli's per-clip/
+  // `transport_tick % (n_bars * ticks_per_bar) == 0` -- Corelli's per-clip/
   // per-request generalization of "next bar" to "next N bars" (decision 2).
   // No new clock: the SAME Transport tick every other boundary check already
   // reuses. Meaningless once kStopped/kPlaying; always >= 1.
   std::uint8_t n_bars = 1;
+  // Frozen quantize window in ticks (Phase 7 node T0 fix, Torquato QA
+  // regression test_clip_matrix_live_meter_change_regression.cpp):
+  // `n_bars * ticks_per_bar` resolved ONCE, on the FIRST on_bar() check since
+  // arm(), and held fixed from then on -- mirroring BoundaryLatch::window's
+  // own frozen-at-arm-time field (boundary_latch.hpp). ClipMatrix holds no
+  // Transport&, so it cannot freeze inside arm() itself; it freezes on the
+  // first on_bar() evaluation instead, using whatever ticks_per_bar Engine
+  // threads in at that tick (the live meter as of the first bar boundary this
+  // armed clip actually sees). A later meter change can therefore no longer
+  // retune an already-counting-down clip, closing the divergence from
+  // BoundaryLatch the live ticks_per_bar recompute used to introduce. 0 = not
+  // yet resolved for the current arm cycle (sentinel; a resolved window is
+  // always > 0 since n_bars >= 1 and ticks_per_bar > 0); meaningless once
+  // kStopped/kPlaying.
+  Tick window = 0;
 };
-static_assert(sizeof(Clip) == 8);
+static_assert(sizeof(Clip) == 12);
 
 class ClipMatrix {
  public:
@@ -96,6 +111,10 @@ class ClipMatrix {
     }
     c->state = target == LaunchState::kPlaying ? LaunchState::kArmed : LaunchState::kQueuedStop;
     c->n_bars = n_bars < 1 ? 1 : n_bars;
+    // Re-resolve the quantize window on the next on_bar() check (Phase 7
+    // node T0 fix): a fresh arm cycle must never inherit a stale frozen
+    // window left over from a previous life of this slot.
+    c->window = 0;
     return true;
   }
 
@@ -120,6 +139,16 @@ class ClipMatrix {
   // Engine threads it explicitly (defaults to the compile-time kTicksPerBar
   // so every pre-existing 2-arg caller, e.g. unit tests, keeps computing the
   // exact same window).
+  //
+  // Phase 7 node T0 fix (Torquato QA regression
+  // test_clip_matrix_live_meter_change_regression.cpp): each clip's window is
+  // resolved ONCE -- on the first on_bar() check since its own arm() -- and
+  // held fixed in Clip::window from then on, mirroring BoundaryLatch's own
+  // frozen-at-arm-time window. Earlier this recomputed `n_bars *
+  // ticks_per_bar` fresh on EVERY call from whatever live ticks_per_bar the
+  // caller threaded in that tick, so a meter change mid-countdown silently
+  // retuned an already-armed clip to an unrelated fire tick; under a stable
+  // meter the two are identical, so every byte-identical golden is unaffected.
   template <typename Fn>
   void on_bar(Tick transport_tick, Fn&& on_due, Tick ticks_per_bar = kTicksPerBar) {
     for (std::size_t id = 0; id < m_clips.size(); ++id) {
@@ -127,11 +156,14 @@ class ClipMatrix {
       if (c.state != LaunchState::kArmed && c.state != LaunchState::kQueuedStop) {
         continue;
       }
-      const Tick window = static_cast<Tick>(c.n_bars) * ticks_per_bar;
-      if (transport_tick % window != 0) {
+      if (c.window == 0) {
+        c.window = static_cast<Tick>(c.n_bars) * ticks_per_bar;
+      }
+      if (transport_tick % c.window != 0) {
         continue;
       }
       c.state = c.state == LaunchState::kArmed ? LaunchState::kPlaying : LaunchState::kStopped;
+      c.window = 0;
       on_due(id, c);
     }
   }

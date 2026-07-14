@@ -22,11 +22,12 @@ inline constexpr std::size_t kMaxChordSteps = 128;       // free-duration steps 
 // kRoleCount(10) x GridModel::kMaxSceneCount(8) = 80 cells
 // (apps/gui-sonotron/src/grid_model.hpp).
 inline constexpr std::size_t kMaxClips = 96;
-// Budget (D33): Clip is a tiny 8-byte POD (TrackRole + scene_index +
-// ContentKind + content_index + LaunchState + n_bars) -- pinned by
-// static_assert(sizeof(Clip) == 8) in arrangrr/clip/clip_matrix.hpp, so even
-// generous headroom stays a trivial slice of the STM32H743 512 KB envelope
-// (kMaxClips x 8 B <= 2 KB well below kSchedulerCapacity's own 64 KB pool).
+// Budget (D33): Clip is a tiny 12-byte POD (TrackRole + scene_index +
+// ContentKind + content_index + LaunchState + n_bars + the Phase 7 node T0
+// frozen quantize window) -- pinned by static_assert(sizeof(Clip) == 12) in
+// arrangrr/clip/clip_matrix.hpp, so even generous headroom stays a trivial
+// slice of the STM32H743 512 KB envelope (kMaxClips x 12 B ~= 1.1 KB well
+// below kSchedulerCapacity's own 64 KB pool).
 // Capped here so a future caller cannot silently balloon the grid past a sane
 // size.
 static_assert(kMaxClips <= 256, "ClipMatrix pool: keep the Repeat-Zone grid bounded (D33)");
