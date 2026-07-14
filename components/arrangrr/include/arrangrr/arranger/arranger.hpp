@@ -207,6 +207,31 @@ class Arranger {
     return true;
   }
 
+  // Phase-6 Theme 3 Item #3 (Performance format_version 2, P1): the one READ
+  // accessor onto m_chain -- every FX surface above is write-only by design
+  // (v1 never needed to read a chain back). `role` is always a real TrackRole
+  // value in practice (a scoped enum with exactly kRoleCount members), so an
+  // out-of-range idx traps rather than degrading gracefully -- same
+  // discipline as InsertChain's own constructor (ARR_ASSERT), and unlike the
+  // write forwarders above (which fail closed) because there is no safe
+  // "empty" InsertChain to return by reference.
+  const InsertChain& chain(TrackRole role) const noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    ARR_ASSERT(idx < kRoleCount);
+    return m_chain[idx];
+  }
+  // Companion write path to chain(): restores ONE slot of a role's chain to
+  // an exact Insert value -- Performance recall's (Engine::apply_performance)
+  // own write path, mirroring set_fx's bounds-checked-forwarder shape (fails
+  // closed on an out-of-range role/slot, unlike chain() above).
+  bool restore_fx(TrackRole role, std::size_t slot, const Insert& ins) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    return m_chain[idx].restore(slot, ins);
+  }
+
   // A snapshot of one part for the host mixer: its route, its voice in the
   // current section, and its mute/solo state. `present` is false when the
   // current section has no pattern for this role (e.g. arp only in varC/varD).

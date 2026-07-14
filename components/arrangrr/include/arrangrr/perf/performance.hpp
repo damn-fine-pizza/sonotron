@@ -20,7 +20,12 @@
 // Scope: a Performance snapshots the Arranger's per-role routing
 // (Arranger::m_routes / part_info()), NOT the general Router thru-matrix
 // (routing/router.hpp) -- the Corelli review's narrower, already-backed v1
-// choice.
+// choice. format_version 2 (Phase-6 Theme 3 Item #3, docs/reflections/
+// phase6-theme3-performance-format-v2-review.md) adds the per-role FX
+// insert-chain snapshot (Insert/InsertChain, arrangrr/fx/insert_chain.hpp)
+// and a RESERVED `routing_profile_id` field for a future RoutingProfileStore
+// -- still NOT the live Router thru-matrix itself (that reversal of node
+// 8200's locked scope is deliberately deferred, per that review's P2).
 //
 // PerformanceStore is implicitly scoped to the LIVE project: a slot number is
 // meaningful only within one running session / one loaded project file --
@@ -45,16 +50,35 @@ struct PerfRoute {
   std::uint8_t enabled = 0;
 };
 
+// Wire-mirrored, explicit-LE snapshot of ONE arrangrr::Insert slot (Phase-6
+// Theme 3 Item #3, P1): `type` is the raw arrangrr::InsertType value, `params`
+// is a RAW 4-byte copy of Insert::Params' union bytes -- deliberately NOT
+// decoded per-type here (that would require this header to know every
+// InsertType's own field shape, pulling fx/insert_chain.hpp's heavier
+// dependency graph into this decoupled, freestanding header). This is safe
+// and portable: Insert::Params is itself a flat, padding-free union of 4-byte
+// PODs (insert_chain.hpp's own `static_assert(sizeof(Insert) == 6)` proves
+// it, and abi.hpp already documents Insert as "the on-disk / ABI format"),
+// unlike GrooveParams' padding gap that motivates every OTHER field's
+// explicit put/get walk below.
+struct PerfInsert {
+  std::uint8_t type = 0;     // arrangrr::InsertType (0 == InsertType::kScaleLock)
+  std::uint8_t enabled = 1;  // matches Insert{}'s own default (true)
+  std::uint8_t params[4]{};  // raw Insert::Params bytes; default all-zero == Insert{}'s own
+                             // default ScaleLockParams{strength=0} -- an exact passthrough
+};
+static_assert(sizeof(PerfInsert) == 6, "PerfInsert mirrors Insert's own 6 B budget pin (D33)");
+
 // Field order is alignment-optimal (widest members first): char[24], the two
-// u32 masks, GrooveParams (alignof 4), the u16 cluster, the PerfRoute[10]
-// table (alignof 1), then the trailing u8 cluster + reserved pad.
-// sizeof(Performance) == 96 is a RAM/flash BUDGET check ONLY -- the ON-DISK
-// format is the EXPLICIT field-by-field little-endian byte stream
-// serialize()/deserialize() below produce, never a memcpy/reinterpret_cast of
-// this struct: GrooveParams carries 2 bytes of implicit inter-field padding
-// (between `quantize` and `seed`) whose value must never cross the wire, and
-// host GCC vs arm-none-eabi struct layout is not guaranteed identical
-// (Corelli fix).
+// u32 masks, GrooveParams (alignof 4), the u16 cluster, the PerfRoute[10] and
+// PerfInsert[10][8] tables (alignof 1), then the trailing u8 cluster +
+// reserved pad. sizeof(Performance) == 576 is a RAM/flash BUDGET check ONLY
+// -- the ON-DISK format is the EXPLICIT field-by-field little-endian byte
+// stream serialize()/deserialize() below produce, never a memcpy/
+// reinterpret_cast of this struct: GrooveParams carries 2 bytes of implicit
+// inter-field padding (between `quantize` and `seed`) whose value must never
+// cross the wire, and host GCC vs arm-none-eabi struct layout is not
+// guaranteed identical (Corelli fix).
 struct Performance {
   char name[24]{};  // host-set display name (D26: the core ABI never carries a string
                     // itself -- see PerformanceStore::get()'s mutable overload)
@@ -65,26 +89,42 @@ struct Performance {
   std::uint16_t style_id = 0xFFFF;  // builtin style index, or 0xFFFF = keep current
   std::uint16_t tempo_x100 = 0;
   // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
-  // scope.md): the LOW byte reinterprets as a signed std::int8_t semitone
-  // offset ([-12, +12], perf::validate() below rejects anything outside that
+  // scope.md), formalized into its real signed type by Item #3's
+  // format_version 2 bump (P3, the header comment above): a real semitone
+  // offset, [-12, +12] (perf::validate() below rejects anything outside that
   // range), matching the live kMasterTranspose ABI command's own encoding
-  // (Engine::capture_performance/apply_performance). The high byte stays
-  // reserved. 0 still means "no transpose" -- every pre-existing on-disk
-  // record (where this field was always 0) keeps that meaning unchanged, no
-  // format_version bump needed.
-  std::uint16_t master_transpose = 0;
+  // (Engine::capture_performance/apply_performance). 0 still means "no
+  // transpose" -- every pre-existing v1 on-disk record (where this field was
+  // always 0) keeps that meaning unchanged across the v1->v2 migration
+  // (components/hostrt's migrate_performance_v1_to_v2, P4).
+  std::int16_t master_transpose = 0;
   std::uint16_t pad_bank_id = 0;
   std::uint16_t chord_sequence_id = 0xFFFF;  // 0xFFFF = none
   std::uint16_t controller_map_id = 0xFFFF;  // 0xFFFF = none (unbuilt today; reserved)
-  PerfRoute routes[10]{};                    // indexed by the core's TrackRole (kRoleCount == 10)
-  std::uint8_t variation = 0;                // SectionType
-  std::uint8_t chord_mode = 0;               // ChordMode
-  std::uint8_t chord_follow = 0;             // ChordFollow
-  std::uint8_t key_root = 0;                 // pitch class 0..11
-  std::uint8_t key_mode = 0;                 // Mode
-  std::uint8_t reserved[5]{};                // future growth -> bump format_version, add a migrator
+  // Phase-6 Theme 3 Item #3 (P2): a RESERVED id into a future
+  // RoutingProfileStore (docs/DESIGN.md section 17's original "reference, not
+  // blob" shape for the general Router thru-matrix) -- unbuilt today, exactly
+  // like controller_map_id above. perf::validate() accepts ONLY 0xFFFF.
+  std::uint16_t routing_profile_id = 0xFFFF;
+  PerfRoute routes[10]{};  // indexed by the core's TrackRole (kRoleCount == 10)
+  // Phase-6 Theme 3 Item #3 (P1): the FX-chain snapshot -- one PerfInsert per
+  // (TrackRole, InsertChain slot), FIXED cardinality (kRoleCount x
+  // kMaxInserts, both mirrored here as literal 10/8 rather than #including
+  // arranger.hpp/abi.hpp into this decoupled header, same discipline as
+  // routes[10] above), no count prefix, no variable-length parsing.
+  PerfInsert insert_chains[10][8]{};
+  std::uint8_t variation = 0;     // SectionType
+  std::uint8_t chord_mode = 0;    // ChordMode
+  std::uint8_t chord_follow = 0;  // ChordFollow
+  std::uint8_t key_root = 0;      // pitch class 0..11
+  std::uint8_t key_mode = 0;      // Mode
+  // Shrunk from 5 -> 3 B by format_version 2 to fund routing_profile_id's 2 B
+  // (P2) without moving any other field's offset or growing the record's own
+  // alignment -- future growth still bumps format_version, adds a migrator.
+  std::uint8_t reserved[3]{};
 };
-static_assert(sizeof(Performance) == 96, "Performance RAM/flash budget pin (D33)");
+static_assert(sizeof(Performance) == 576,
+              "Performance RAM/flash budget pin (D33), format_version 2");
 
 struct PerformanceStoreHeader {
   std::uint32_t magic = 0;
@@ -100,28 +140,33 @@ inline constexpr std::uint32_t kPerformanceMagic =
     static_cast<std::uint32_t>('S') | (static_cast<std::uint32_t>('N') << 8) |
     (static_cast<std::uint32_t>('P') << 16) | (static_cast<std::uint32_t>('F') << 24);
 
-// format_version 1 is the subset shipped now (Phase-5 Item #9): every field
-// above. master_transpose (Phase-6 Theme 3 Item #1) wired WITHOUT a bump --
-// a pure semantic reinterpretation of already-reserved bits at the same
-// byte position/width. A future version that adds the general Router
-// snapshot bumps this and gets an explicit migrator in deserialize()
-// (Architectural Principle #8's own discipline -- a persisted format's
-// version bump is visible and versioned, unlike the live wire ABI's
-// same-recompile discipline).
-inline constexpr std::uint16_t kPerformanceFormatVersion = 1;
+// format_version 1 shipped Phase-5 Item #9's original field set; Phase-6
+// Theme 3 Item #1's master_transpose landed WITHOUT a bump (a pure semantic
+// reinterpretation of already-reserved bits at the same byte position/
+// width). format_version 2 (Phase-6 Theme 3 Item #3, docs/reflections/
+// phase6-theme3-performance-format-v2-review.md) is the first REAL bump:
+// insert_chains + routing_profile_id append new fields and master_transpose
+// widens to its real signed type (same byte width, no wire-size cost of its
+// own) -- deserialize() below hard-rejects anything != 2, exactly the same
+// discipline it always applied to v1 (Architectural Principle #8 /
+// docs/DESIGN.md line 588: the DEVICE never migrates). A v1 file's own
+// migration to v2 lives HOST-ONLY, in components/hostrt's
+// migrate_performance_v1_to_v2 (P4) -- NOT here.
+inline constexpr std::uint16_t kPerformanceFormatVersion = 2;
 
 // Explicit TIGHT (no padding) wire size of one Performance record: the sum of
 // its LOGICAL field widths. Deliberately SMALLER than sizeof(Performance) ==
-// 96 because it drops GrooveParams' 2 bytes of implicit in-memory padding
+// 576 because it drops GrooveParams' 2 bytes of implicit in-memory padding
 // (see the struct comment above) -- the wire format is not required to match
 // the in-memory layout.
 inline constexpr std::size_t kPerformanceRecordWireSize =
     24 /* name */ + 4 /* track_mute_mask */ + 4 /* track_solo_mask */ +
     10 /* groove: 6 u8 fields + u32 seed */ + 2 /* style_id */ + 2 /* tempo_x100 */ +
     2 /* master_transpose */ + 2 /* pad_bank_id */ + 2 /* chord_sequence_id */ +
-    2 /* controller_map_id */ + 10 * 3 /* routes[10] */ + 1 /* variation */ + 1 /* chord_mode */ +
-    1 /* chord_follow */ + 1 /* key_root */ + 1 /* key_mode */ + 5 /* reserved */;
-static_assert(kPerformanceRecordWireSize == 94);
+    2 /* controller_map_id */ + 2 /* routing_profile_id */ + 10 * 3 /* routes[10] */ +
+    10 * 8 * 6 /* insert_chains[10][8], 6 B/PerfInsert */ + 1 /* variation */ + 1 /* chord_mode */ +
+    1 /* chord_follow */ + 1 /* key_root */ + 1 /* key_mode */ + 3 /* reserved */;
+static_assert(kPerformanceRecordWireSize == 574);
 
 // Bounded pool of Performance slots, addressed directly by slot number (NOT a
 // sequential push_back id like ClipMatrix/ChordSequencer -- a Performance
@@ -212,6 +257,25 @@ inline std::uint32_t get_u32(Span<const std::uint8_t> in, std::size_t& off) noex
   return lo | (hi << 16);
 }
 
+// PerfInsert's own explicit-LE 6-byte wire shape (Phase-6 Theme 3 Item #3,
+// P1): type u8 + enabled u8 + params 4 raw bytes, same field-by-field
+// discipline as every other put_*/get_* pair above (PerfInsert itself has no
+// internal padding to worry about -- see its own struct comment).
+inline void put_insert(Span<std::uint8_t> out, std::size_t& off, const PerfInsert& ins) noexcept {
+  put_u8(out, off, ins.type);
+  put_u8(out, off, ins.enabled);
+  for (std::uint8_t b : ins.params) {
+    put_u8(out, off, b);
+  }
+}
+inline void get_insert(Span<const std::uint8_t> in, std::size_t& off, PerfInsert& ins) noexcept {
+  ins.type = get_u8(in, off);
+  ins.enabled = get_u8(in, off);
+  for (std::uint8_t& b : ins.params) {
+    b = get_u8(in, off);
+  }
+}
+
 inline void put_record(Span<std::uint8_t> out, std::size_t& off, const Performance& p) noexcept {
   for (char c : p.name) {
     put_u8(out, off, static_cast<std::uint8_t>(c));
@@ -227,14 +291,23 @@ inline void put_record(Span<std::uint8_t> out, std::size_t& off, const Performan
   put_u32(out, off, p.groove.seed);
   put_u16(out, off, p.style_id);
   put_u16(out, off, p.tempo_x100);
-  put_u16(out, off, p.master_transpose);
+  // P3: master_transpose is now a real std::int16_t; the cast to uint16_t
+  // preserves the exact two's-complement bit pattern (well-defined, C++20
+  // mandates two's complement for signed integers).
+  put_u16(out, off, static_cast<std::uint16_t>(p.master_transpose));
   put_u16(out, off, p.pad_bank_id);
   put_u16(out, off, p.chord_sequence_id);
   put_u16(out, off, p.controller_map_id);
+  put_u16(out, off, p.routing_profile_id);
   for (const PerfRoute& r : p.routes) {
     put_u8(out, off, r.port);
     put_u8(out, off, r.channel);
     put_u8(out, off, r.enabled);
+  }
+  for (const auto& role_chain : p.insert_chains) {
+    for (const PerfInsert& ins : role_chain) {
+      put_insert(out, off, ins);
+    }
   }
   put_u8(out, off, p.variation);
   put_u8(out, off, p.chord_mode);
@@ -261,14 +334,20 @@ inline void get_record(Span<const std::uint8_t> in, std::size_t& off, Performanc
   p.groove.seed = get_u32(in, off);
   p.style_id = get_u16(in, off);
   p.tempo_x100 = get_u16(in, off);
-  p.master_transpose = get_u16(in, off);
+  p.master_transpose = static_cast<std::int16_t>(get_u16(in, off));
   p.pad_bank_id = get_u16(in, off);
   p.chord_sequence_id = get_u16(in, off);
   p.controller_map_id = get_u16(in, off);
+  p.routing_profile_id = get_u16(in, off);
   for (PerfRoute& r : p.routes) {
     r.port = get_u8(in, off);
     r.channel = get_u8(in, off);
     r.enabled = get_u8(in, off);
+  }
+  for (auto& role_chain : p.insert_chains) {
+    for (PerfInsert& ins : role_chain) {
+      get_insert(in, off, ins);
+    }
   }
   p.variation = get_u8(in, off);
   p.chord_mode = get_u8(in, off);
@@ -328,7 +407,16 @@ inline bool deserialize(Span<const std::uint8_t> in, PerformanceStore& store) no
   const std::size_t needed = sizeof(PerformanceStoreHeader) +
                              static_cast<std::size_t>(count) * kPerformanceRecordWireSize +
                              sizeof(std::uint32_t);
-  if (in.size() < needed) {
+  // EXACT length required (Nazzareno fix, Torquato QA finding): a strict `<`
+  // only rejected a too-SHORT buffer, silently accepting extra trailing bytes
+  // past a perfectly valid record (an interrupted resave or a file
+  // concatenation would load as if nothing were wrong, see
+  // test_deserialize_rejects_oversized_buffer_with_trailing_garbage). Both
+  // legitimate callers hand this function a tight buffer -- serialize()
+  // writes exactly `needed` bytes and Shell::perf_load reads exactly the
+  // file's own bytes (midisrc::read_binary_file) -- so `!=` never rejects a
+  // well-formed record, only a truncated OR oversized one.
+  if (in.size() != needed) {
     return false;
   }
   const std::size_t crc_off = needed - sizeof(std::uint32_t);

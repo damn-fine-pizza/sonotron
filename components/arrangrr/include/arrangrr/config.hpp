@@ -44,10 +44,11 @@ static_assert(kMaxPads == kMaxPadsPerBank * kMaxPadBanks);
 static_assert(kMaxPads <= 256, "Pad grid: keep the pad-bank pool bounded (D33)");
 
 // Performance store (Phase-5 Item #9): one-button full-state recall slots
-// (DESIGN.md section 17, node 8200). Budget (D33): Performance is a 96-byte
-// POD (pinned by static_assert(sizeof(Performance) == 96) in
-// arrangrr/perf/performance.hpp), so kMaxPerformances x 96 B stays a trivial
-// slice of the STM32H743 512 KB envelope.
+// (DESIGN.md section 17, node 8200). Budget (D33): Performance is a 576-byte
+// POD as of format_version 2's FX-chain snapshot (Phase-6 Theme 3 Item #3,
+// pinned by static_assert(sizeof(Performance) == 576) in
+// arrangrr/perf/performance.hpp), so kMaxPerformances x 576 B (~9 KB) stays a
+// trivial slice of the STM32H743 512 KB envelope.
 inline constexpr std::size_t kMaxPerformances = 16;
 static_assert(kMaxPerformances <= 256,
               "Performance store: keep the recall-slot pool bounded (D33)");

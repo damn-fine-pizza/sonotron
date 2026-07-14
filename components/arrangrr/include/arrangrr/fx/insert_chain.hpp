@@ -19,11 +19,13 @@
 // function (D16 determinism: same input+params+context always yields the
 // same output, no per-note history, no RNG).
 //
-// FX persistence: NOT in v1. Performance (arrangrr/perf/performance.hpp)
-// does not carry the chain -- a future format_version would add it
-// explicitly (Architectural Principle #8's own versioned-migration
-// discipline). Live config only, exactly like the `groove`/`arp` panels
-// before a Performance existed to snapshot them.
+// FX persistence: NOT in v1 (live config only, exactly like the `groove`/
+// `arp` panels before a Performance existed to snapshot them). Performance
+// format_version 2 (Phase-6 Theme 3 Item #3) adds it explicitly, as a
+// wire-mirrored PerfInsert[kRoleCount][kMaxInserts] array
+// (arrangrr/perf/performance.hpp) -- captured via Arranger::chain()'s read
+// accessor, restored via Arranger::restore_fx()'s companion write accessor
+// (both below), NOT through set_type()/set_param()'s semantic per-field API.
 
 namespace arrangrr {
 
@@ -380,6 +382,22 @@ class InsertChain {
 
   const Insert* get(std::size_t slot) const noexcept {
     return slot < m_inserts.size() ? &m_inserts[slot] : nullptr;
+  }
+
+  // Restores ONE slot to an EXACT Insert value (type + enabled + params),
+  // bypassing set_type()/set_param()'s semantic per-field API -- the
+  // companion to get() for Performance recall (Engine::apply_performance),
+  // which must reconstruct a chain byte-for-byte from a snapshot rather than
+  // replaying individual field edits one param_id at a time. A plain struct
+  // copy: Insert is a flat POD with no internal padding
+  // (static_assert(sizeof(Insert) == 6) above), exactly as safe as
+  // `m_inserts[slot] = Insert{}` in clear() above.
+  bool restore(std::size_t slot, const Insert& ins) noexcept {
+    if (slot >= kMaxInserts) {
+      return false;
+    }
+    m_inserts[slot] = ins;
+    return true;
   }
 
   // Runs `in` through every ENABLED slot in order, fanning 1 note into up to

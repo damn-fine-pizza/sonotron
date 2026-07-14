@@ -1,5 +1,10 @@
 #include "arrangrr/engine.hpp"
 
+#include <cstring>  // std::memcpy: PerfInsert::params <-> Insert::Params raw-byte copy (Phase-6
+                    // Theme 3 Item #3) -- Insert::Params is a padding-free 4-byte union
+                    // (insert_chain.hpp's own static_assert(sizeof(Insert) == 6) proves it), so
+                    // this is NOT the "never memcpy the record" case GrooveParams motivates.
+
 // Binary-ABI command handling (D26), split per domain: the dispatch is a
 // ten-line switch, each family owns its validation and warns.
 
@@ -1214,19 +1219,29 @@ Performance Engine::capture_performance() const {
     perf.routes[r] = PerfRoute{.port = info.port,
                                .channel = info.channel,
                                .enabled = info.routed ? std::uint8_t{1} : std::uint8_t{0}};
+    // Phase-6 Theme 3 Item #3 (P1): snapshot the role's live FX chain, one
+    // PerfInsert per slot. Insert::Params' 4 raw bytes copy verbatim -- see
+    // this file's own top-of-file comment on why memcpy is safe here.
+    const InsertChain& chain = m_arranger.chain(role);
+    for (std::size_t slot = 0; slot < kMaxInserts; ++slot) {
+      const Insert* ins = chain.get(slot);
+      PerfInsert& out = perf.insert_chains[r][slot];
+      out.type = static_cast<std::uint8_t>(ins->type);
+      out.enabled = ins->enabled ? std::uint8_t{1} : std::uint8_t{0};
+      std::memcpy(out.params, &ins->params, sizeof(out.params));
+    }
   }
   perf.groove = m_arranger.groove_params();
   perf.style_id = m_arranger.style_id();
   perf.tempo_x100 = static_cast<std::uint16_t>(m_transport.bpm());
-  // Phase-6 Theme 3 Item #1: the low byte reinterpreted as a signed int8_t
-  // semitone offset (owner-locked encoding, no format_version bump -- see
-  // performance.hpp's field comment); the high byte stays reserved/0.
-  perf.master_transpose =
-      static_cast<std::uint16_t>(static_cast<std::uint8_t>(m_arranger.master_transpose()));
+  // Phase-6 Theme 3 Item #3 (P3): master_transpose is now a real
+  // std::int16_t field -- a plain widening copy, no reinterpret hack.
+  perf.master_transpose = m_arranger.master_transpose();
   perf.pad_bank_id = m_pad_bank;
   perf.chord_sequence_id =
       m_seq.playing() ? static_cast<std::uint16_t>(m_seq.current_index()) : std::uint16_t{0xFFFF};
-  perf.controller_map_id = 0xFFFF;  // unbuilt today; reserved
+  perf.controller_map_id = 0xFFFF;   // unbuilt today; reserved
+  perf.routing_profile_id = 0xFFFF;  // Phase-6 Theme 3 Item #3 (P2): unbuilt today; reserved
   perf.variation = static_cast<std::uint8_t>(m_arranger.current());
   perf.chord_mode = static_cast<std::uint8_t>(m_chords.mode());
   perf.chord_follow = static_cast<std::uint8_t>(m_chords.follow());
@@ -1295,14 +1310,28 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
     m_arranger.set_route_enabled(role, route.enabled != 0);
     m_arranger.set_mute(role, (perf.track_mute_mask & (1u << r)) != 0);
     m_arranger.set_solo(role, (perf.track_solo_mask & (1u << r)) != 0);
+    // Phase-6 Theme 3 Item #3 (P1): restore the role's FX chain slot-for-slot,
+    // byte-exact -- validate_performance() above already bounded every
+    // insert_chains[r][slot].type to a real InsertType, so this is a plain
+    // restore, no further clamping (mirrors pad_bank_id's own "validated
+    // above, plain restore here" precedent).
+    for (std::size_t slot = 0; slot < kMaxInserts; ++slot) {
+      const PerfInsert& in = perf.insert_chains[r][slot];
+      Insert ins;
+      ins.type = static_cast<InsertType>(in.type);
+      ins.enabled = in.enabled != 0;
+      std::memcpy(&ins.params, in.params, sizeof(ins.params));
+      m_arranger.restore_fx(role, slot, ins);
+    }
   }
   m_arranger.set_groove(perf.groove);
   apply_arranger_voices(sink);           // the (possibly new) style's voices land with the recall
   m_transport.set_bpm(perf.tempo_x100);  // out-of-range silently ignored (Transport::set_bpm)
-  // Phase-6 Theme 3 Item #1: the low byte reinterpreted back into a signed
-  // int8_t semitone offset (mirrors capture_performance's own encoding);
+  // Phase-6 Theme 3 Item #3 (P3): master_transpose is a real std::int16_t,
+  // already bounded to [-12, +12] by validate_performance() above, so the
+  // narrowing cast back to Arranger/ChordEngine's own std::int8_t is safe;
   // propagated to both note-emitting paths, exactly like cmd_master_transpose.
-  const auto transpose = static_cast<std::int8_t>(perf.master_transpose & 0xFFu);
+  const auto transpose = static_cast<std::int8_t>(perf.master_transpose);
   m_arranger.set_master_transpose(transpose);
   m_chords.set_master_transpose(transpose);
   // Phase-6 Theme 3 Item #4: restore the active pad-bank view cursor.
@@ -1365,8 +1394,14 @@ void Engine::emit_performance_confirmation(const Performance& perf, EventSink si
   sink(OutEvent::param_state(Param::kChordMode, 0, perf.chord_mode, 0, m_now));
   sink(OutEvent::param_state(Param::kChordFollow, 0, perf.chord_follow, 0, m_now));
   sink(OutEvent::param_state(Param::kKeySet, 0, perf.key_root, perf.key_mode, m_now));
+  // The event payload is a single byte; validate_performance() already
+  // bounded master_transpose to [-12, +12], so the low byte alone is always
+  // the full value -- same low-byte extraction as capture/apply above, just
+  // via an explicit uint16_t reinterpret first (never a signed '&', which
+  // -Wsign-conversion correctly flags).
+  const auto transpose_u16 = static_cast<std::uint16_t>(perf.master_transpose);
   sink(OutEvent::param_state(Param::kMasterTranspose, 0,
-                             static_cast<std::uint8_t>(perf.master_transpose & 0xFFu), 0, m_now));
+                             static_cast<std::uint8_t>(transpose_u16 & 0xFFu), 0, m_now));
 }
 
 void Engine::apply_pending_performance_recall(EventSink sink) {

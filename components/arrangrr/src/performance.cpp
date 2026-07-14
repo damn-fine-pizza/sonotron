@@ -4,6 +4,7 @@
 #include "arrangrr/chord/chord_engine.hpp"  // ChordMode/kChordModeCount, and (transitively via
                                             // chorddet/theory.hpp + chorddet/followed_context.hpp)
                                             // Mode/kModeCount and ChordFollow
+#include "arrangrr/fx/insert_chain.hpp"     // kInsertTypeCount (Phase-6 Theme 3 Item #3)
 
 // perf::validate's definition lives here, not in performance.hpp: it is the
 // ONE piece of this header's surface that needs the heavier arranger/style +
@@ -39,12 +40,11 @@ bool validate(const Performance& p, std::size_t chord_sequence_count) noexcept {
   if (p.chord_follow > static_cast<std::uint8_t>(ChordFollow::kLivePriority)) {
     return false;
   }
-  // Phase-6 Theme 3 Item #1: the low byte reinterprets as a signed int8_t
-  // semitone offset (performance.hpp's field comment); reject a corrupt/
-  // out-of-range record the same way every other field here does, matching
-  // the live kMasterTranspose command's own [-12, +12] bound.
-  const auto transpose = static_cast<std::int8_t>(p.master_transpose & 0xFFu);
-  if (transpose < -12 || transpose > 12) {
+  // Phase-6 Theme 3 Item #1/#3: master_transpose is a real std::int16_t as of
+  // format_version 2 (P3) -- reject a corrupt/out-of-range record the same
+  // way every other field here does, matching the live kMasterTranspose
+  // command's own [-12, +12] bound.
+  if (p.master_transpose < -12 || p.master_transpose > 12) {
     return false;
   }
   // Phase-6 Theme 3 Item #4: pad_bank_id is a plain index into the fixed
@@ -56,6 +56,27 @@ bool validate(const Performance& p, std::size_t chord_sequence_count) noexcept {
   for (const PerfRoute& route : p.routes) {
     if (route.port >= kMaxPorts || route.channel > 15) {
       return false;
+    }
+  }
+  // Phase-6 Theme 3 Item #3 (P2): routing_profile_id is RESERVED -- no
+  // RoutingProfileStore exists yet, so the ONLY value accepted today is the
+  // sentinel (exactly controller_map_id's own current, unbacked treatment).
+  if (p.routing_profile_id != 0xFFFF) {
+    return false;
+  }
+  // Phase-6 Theme 3 Item #3 (P1): every FX-chain slot's `type` must be a real
+  // InsertType -- a corrupt/adversarial on-disk value would otherwise be
+  // static_cast into Insert::type and dispatched against the WRONG active
+  // union member inside Insert::process (Engine::apply_performance ->
+  // Arranger::restore_fx -> InsertChain::restore, no further clamp there).
+  // `enabled` rides a full byte (not a bitfield), so no range check needed --
+  // `!= 0` is the only interpretation, same as every other route/PerfRoute
+  // enabled byte above.
+  for (const auto& role_chain : p.insert_chains) {
+    for (const PerfInsert& ins : role_chain) {
+      if (ins.type >= kInsertTypeCount) {
+        return false;
+      }
     }
   }
   return true;

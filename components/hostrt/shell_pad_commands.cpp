@@ -1,6 +1,7 @@
 #include <vector>
 
 #include "midisrc/file_io.hpp"
+#include "perf_v1_migrate.hpp"
 #include "shell.hpp"
 #include "shell_internal.hpp"
 
@@ -268,18 +269,25 @@ bool Shell::perf_save(const std::string& path, std::string& error) {
   return midisrc::write_binary_file(path, buf, error);
 }
 
+// Tries the native format_version 2 deserialize() FIRST; on failure, falls
+// back to the v1 -> v2 migrator (Phase-6 Theme 3 Item #3, P4) -- the ONE
+// place a v1-on-disk file gets a second chance, since the core's own
+// deserialize() hard-rejects anything but its own current version (line 588:
+// the device never migrates). Only when BOTH fail does this report the
+// original "bad performance file" error, unchanged from before this item.
 bool Shell::perf_load(const std::string& path, std::string& error) {
   std::vector<std::uint8_t> buf;
   if (!midisrc::read_binary_file(path, buf, error)) {
     return false;
   }
+  const Span<const std::uint8_t> data(buf.data(), buf.size());
   PerformanceStore loaded;
-  if (!deserialize(Span<const std::uint8_t>(buf.data(), buf.size()), loaded)) {
-    error = "bad performance file: " + path;
-    return false;
+  if (deserialize(data, loaded) || migrate_performance_v1_to_v2(data, loaded)) {
+    m_engine.performances() = loaded;
+    return true;
   }
-  m_engine.performances() = loaded;
-  return true;
+  error = "bad performance file: " + path;
+  return false;
 }
 
 }  // namespace arrangrr::host

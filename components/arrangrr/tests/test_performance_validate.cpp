@@ -16,6 +16,7 @@
 
 #include "arrangrr/arranger/style.hpp"      // styles::kBuiltinCount
 #include "arrangrr/chord/chord_engine.hpp"  // ChordMode/kChordModeCount, ChordFollow, Mode/kModeCount
+#include "arrangrr/fx/insert_chain.hpp"     // kInsertTypeCount (Phase-6 Theme 3 Item #3)
 #include "test.hpp"
 
 namespace {
@@ -185,12 +186,10 @@ void test_chord_follow_one_past_live_priority_is_invalid() {
   CHECK(!perf::validate(p, kNoSequences));
 }
 
-// ---- master_transpose (Phase-6 Theme 3 Item #1): low byte reinterprets as a
-// signed int8_t semitone offset, validated to [-12, +12] --------------------
+// ---- master_transpose (Phase-6 Theme 3 Item #1, widened by Item #3's P3 to
+// a real std::int16_t): validated to [-12, +12] -----------------------------
 
-std::uint16_t encode_transpose(std::int8_t semitones) {
-  return static_cast<std::uint16_t>(static_cast<std::uint8_t>(semitones));
-}
+std::int16_t encode_transpose(std::int8_t semitones) { return semitones; }
 
 void test_master_transpose_zero_is_valid() {
   Performance p = valid_performance();
@@ -258,6 +257,51 @@ void test_route_channel_16_is_invalid() {
   CHECK(!perf::validate(p, kNoSequences));
 }
 
+// ---- routing_profile_id (Phase-6 Theme 3 Item #3, P2): RESERVED, ONLY
+// 0xFFFF accepted today (no RoutingProfileStore exists yet) --------------
+
+void test_routing_profile_id_sentinel_0xffff_is_valid() {
+  Performance p = valid_performance();
+  p.routing_profile_id = 0xFFFF;
+  CHECK(perf::validate(p, kNoSequences));
+}
+
+void test_routing_profile_id_zero_is_invalid() {
+  Performance p = valid_performance();
+  p.routing_profile_id = 0;  // a concrete id, but no RoutingProfileStore is backed yet
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
+void test_routing_profile_id_one_below_sentinel_is_invalid() {
+  Performance p = valid_performance();
+  p.routing_profile_id = 0xFFFE;  // one past what "reserved" allows
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
+// ---- insert_chains[][] (Phase-6 Theme 3 Item #3, P1): every slot's `type`
+// must be a real InsertType, or a corrupt on-disk value would dispatch
+// against the wrong active Insert::Params union member on restore --------
+
+void test_insert_chain_type_last_insert_type_is_valid() {
+  Performance p = valid_performance();
+  p.insert_chains[9][7].type = static_cast<std::uint8_t>(kInsertTypeCount - 1);
+  CHECK(perf::validate(p, kNoSequences));
+}
+
+void test_insert_chain_type_one_past_insert_type_count_is_invalid() {
+  Performance p = valid_performance();
+  p.insert_chains[9][7].type = static_cast<std::uint8_t>(kInsertTypeCount);
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
+// A bad type on ANY single slot (not just the last one) is caught -- proves
+// the check walks every role/slot, not just a boundary index.
+void test_insert_chain_type_bad_on_first_slot_is_invalid() {
+  Performance p = valid_performance();
+  p.insert_chains[0][0].type = static_cast<std::uint8_t>(kInsertTypeCount);
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
 }  // namespace
 
 int main() {
@@ -293,5 +337,11 @@ int main() {
   test_route_port_and_channel_at_max_is_valid();
   test_route_port_one_past_kmaxports_is_invalid();
   test_route_channel_16_is_invalid();
+  test_routing_profile_id_sentinel_0xffff_is_valid();
+  test_routing_profile_id_zero_is_invalid();
+  test_routing_profile_id_one_below_sentinel_is_invalid();
+  test_insert_chain_type_last_insert_type_is_valid();
+  test_insert_chain_type_one_past_insert_type_count_is_invalid();
+  test_insert_chain_type_bad_on_first_slot_is_invalid();
   return arrangrr::test::failures();
 }
