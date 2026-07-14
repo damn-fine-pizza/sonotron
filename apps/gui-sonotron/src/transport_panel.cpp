@@ -156,6 +156,13 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
   // authoritative state (app_state.hpp's own design note), so this control's
   // own value is local UI state only, not re-derived from the event stream.
   // Track/grab colors come from the global theme (FrameBg/SliderGrab).
+  // Inline on the SAME transport row as everything else: the transport zone is
+  // a deliberately single-line-tall strip (layout_renderer.cpp), so a Transpose
+  // control on its own line overflowed the thin zone -- pushing it below the
+  // fold (hidden) and making the strip scrollable, which then swallowed the
+  // mouse wheel. Keep it on the one line, at the same level as the other
+  // controls.
+  ImGui::SameLine();
   static int transpose_semitones = 0;
   ImGui::SetNextItemWidth(160.0F);
   if (ImGui::SliderInt("Transpose", &transpose_semitones, -12, 12)) {
