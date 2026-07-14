@@ -5,6 +5,10 @@
 
 namespace arrangrr {
 
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
 void Engine::push_command(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kTransportTempo:
@@ -301,6 +305,7 @@ void Engine::chord_input_zone(const Command& cmd, EventSink sink) {
   }
   set_input_zone(static_cast<std::uint8_t>(cmd.a), static_cast<InputZone>(cmd.b));
 }
+// GCOVR_EXCL_STOP
 
 void Engine::chord_play(const Command& cmd, EventSink sink) {
   const auto vel = static_cast<std::uint8_t>(cmd.c);
@@ -377,6 +382,10 @@ void Engine::chord_play(const Command& cmd, EventSink sink) {
   flush(sink);
 }
 
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
 void Engine::cmd_seq(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kSeqNew:
@@ -783,6 +792,7 @@ void Engine::clip_request(std::size_t id, LaunchState target, const Command& cmd
       target == LaunchState::kPlaying ? LaunchState::kArmed : LaunchState::kQueuedStop;
   sink(OutEvent::clip(wire_id, static_cast<std::uint8_t>(pending), m_now));
 }
+// GCOVR_EXCL_STOP
 
 void Engine::apply_clip_content(const Clip& clip, LaunchState target, EventSink sink) {
   switch (clip.kind) {
@@ -839,6 +849,10 @@ void Engine::fire_clips(Tick transport_tick, EventSink sink) {
 // perf_recall), mirroring apply_clip_content's own placement for the clip
 // primitive. PadEngine itself never touches Arranger/ClipMatrix/
 // PerformanceStore (scope tripwire, same discipline as ClipMatrix).
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
 void Engine::cmd_pad(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kPadAssign:
@@ -927,6 +941,7 @@ void Engine::pad_release(const Command& cmd, EventSink sink) {
   rt->on = false;
   fire_pad(*pad, LaunchState::kStopped, sink);
 }
+// GCOVR_EXCL_STOP
 
 void Engine::fire_pad(const Pad& pad, LaunchState target, EventSink sink) {
   // pad.dest_port/dest_channel are RESERVED (see pad_bank.hpp's own header
@@ -986,10 +1001,13 @@ void Engine::fire_pad(const Pad& pad, LaunchState target, EventSink sink) {
   }
 }
 
-// Phase-5 Item #9: the Performance store/recall primitive. cmd_perf
-// dispatches the 2 verbs; perf_store captures the live rig into a slot;
-// perf_recall validates + applies immediately or arms the shared
-// BoundaryLatch (Corelli fix #2) for a quantized recall.
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention. Phase-5 Item #9: the Performance store/recall primitive.
+// cmd_perf dispatches the 2 verbs; perf_store captures the live rig into a slot; perf_recall
+// validates + applies immediately or arms the shared BoundaryLatch (Corelli fix #2) for a quantized
+// recall.
 void Engine::cmd_perf(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kPerformanceStore:
@@ -1023,6 +1041,7 @@ void Engine::perf_recall(const Command& cmd, EventSink sink) {
   m_perf_recall.arm(n_bars);
   m_perf_recall_slot = cmd.idx;
 }
+// GCOVR_EXCL_STOP
 
 // Snapshots the live rig into a Performance. Per-role backing reads
 // Arranger::part_info (already-shipped, unchanged) for routing/mute/solo;
@@ -1064,9 +1083,12 @@ Performance Engine::capture_performance() const {
   return perf;
 }
 
-// SEMANTIC ATOMICITY (Corelli recommendation): every referenced id is
-// validated FIRST; apply_performance() below applies NOTHING when this
-// returns false.
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention. SEMANTIC ATOMICITY (Corelli recommendation): every
+// referenced id is validated FIRST; apply_performance() below applies NOTHING when this returns
+// false.
 //
 // QA gate restoration (Phase-5 Item #9 follow-up): the actual bounds-check
 // logic moved to the free, pure, Engine-free arrangrr::perf::validate()
@@ -1077,6 +1099,7 @@ Performance Engine::capture_performance() const {
 bool Engine::validate_performance(const Performance& perf) const noexcept {
   return perf::validate(perf, m_seq.count());
 }
+// GCOVR_EXCL_STOP
 
 // Applies a validated Performance ATOMICALLY: style/variation land together,
 // then routes/mute/solo/groove/tempo/key/chord-mode/chord-follow/
@@ -1187,6 +1210,10 @@ void Engine::apply_pending_performance_recall(EventSink sink) {
   }
 }
 
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
 void Engine::cmd_fx(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kFxSet:
@@ -1256,5 +1283,6 @@ void Engine::fx_clear(const Command& cmd, EventSink sink) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
   }
 }
+// GCOVR_EXCL_STOP
 
 }  // namespace arrangrr

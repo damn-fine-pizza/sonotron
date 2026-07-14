@@ -159,3 +159,12 @@ arrangrr_test(test_insert_chain_fan_overflow_regression regression)
 # Arranger::on_tick D40-pipeline cross-producer wiring -> functional, same
 # precedent as test_pad/test_clip.
 arrangrr_test(test_fx functional)
+# Phase 6 Theme 1b (Torquato QA, coverage-gate restoration). test_clip_matrix:
+# ClipMatrix's own pure bookkeeping (add/get/arm/force/on_bar promotion) --
+# no dispatch logic lives here (Engine::apply_clip_content/fire_clips, covered
+# by test_clip.cpp, own that) -> unit, same precedent as test_pad_bank.
+arrangrr_test(test_clip_matrix unit)
+# test_function_ref: FunctionRef's own call/rebind/reference-semantics
+# contract -- pure, freestanding, no Engine -> unit, same precedent as
+# test_common.cpp's own common/ primitive coverage.
+arrangrr_test(test_function_ref unit)

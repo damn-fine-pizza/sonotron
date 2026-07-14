@@ -31,3 +31,12 @@ set_tests_properties(test_runtime_engine PROPERTIES LABELS functional)
 # wrapper proof plus a pure 2-stage fixed-order/flush-delegation mechanism
 # test with fake stages (links arrangrr only for the 1-stage proof half).
 runtime_test(test_pipeline unit)
+
+# Phase 6 Theme 1b (Torquato QA, coverage-gate restoration). test_midi_parser:
+# MidiParser's own pure byte-stream state machine (running status, realtime
+# interleaving, SysEx skip, malformed/truncated input) -- no Runtime/Engine
+# needed -> unit.
+add_executable(test_midi_parser test_midi_parser.cpp)
+target_link_libraries(test_midi_parser PRIVATE runtime)
+add_test(NAME test_midi_parser COMMAND test_midi_parser)
+set_tests_properties(test_midi_parser PROPERTIES LABELS unit)

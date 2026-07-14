@@ -156,7 +156,7 @@ printf ' metric 2  functional  lines %-7s functions %-7s branches %-7s\n' \
 printf ' metric 3  regression  census: %s tests, all-green: %s, monotonic: %s\n' \
   "${REG_N}" "${REG_GREEN}" "${REG_MONO}"
 echo "------------------------------------------------------------"
-echo " metric 1 = ENFORCED gate | metrics 2 & 3 = report-only"
+echo " metric 1 = ADVISORY (target 80% l/f/b, report-only) | metrics 2 & 3 = report-only"
 echo " text report: ${REPORT_DIR}/coverage.txt"
 echo " html report: ${REPORT_DIR}/coverage.html (unit) / coverage_full.html"
 echo "============================================================"
@@ -170,18 +170,29 @@ if [ "${UNIT_RC}" -ne 0 ] || [ "${FUNC_RC}" -ne 0 ] || [ "${REG_RC}" -ne 0 ]; th
   exit 1
 fi
 
-# --- ENFORCED GATE: metric 1 (unit), core only ----------------------------
-# Re-measure unit coverage in isolation and fail under 80% on any of
-# lines/functions/branches. This is the ONLY metric that fails the build.
-echo "=== ENFORCED GATE: metric 1 (unit) core (components/arrangrr/ + components/runtime/) >= 80% l/f/b ==="
+# --- ADVISORY METRIC: metric 1 (unit), core only --------------------------
+# Owner decision (2026-07-14, docs/phase6-plan.md Theme 1b): metric-1 keeps its
+# 80% l/f/b TARGET but is REPORT-ONLY, not a build-failing gate. Rationale: the
+# branch floor is not reachable by unit tests over functional-tested domain
+# logic (chord_play / apply_performance / fire_pad / capture_performance / ...
+# are covered by metric-2 functional, not unit); the thin ABI dispatch glue is
+# GCOVR_EXCL-excluded so these numbers are already honest. A RED test suite is
+# STILL a hard failure (checked above) -- only the coverage PERCENTAGE is
+# advisory. See the coverage-gate-local-not-ci memory.
+echo "=== ADVISORY: metric 1 (unit) core (components/arrangrr/ + components/runtime/), target >= 80% l/f/b (report-only) ==="
 reset_gcda
 UNIT_RC2=$(run_category unit)
 if [ "${UNIT_RC2}" -ne 0 ]; then
-  echo "FAIL: unit suite red on the gate re-run; see ${REPORT_DIR}/ctest_unit.log" >&2
+  echo "FAIL: unit suite red on the advisory re-run; see ${REPORT_DIR}/ctest_unit.log" >&2
   exit 1
 fi
-"${GCOVR[@]}" "${CORE_ARGS[@]}" \
-  --fail-under-line 80 \
-  --fail-under-function 80 \
-  --fail-under-branch 80 \
-  --print-summary
+if "${GCOVR[@]}" "${CORE_ARGS[@]}" \
+    --fail-under-line 80 \
+    --fail-under-function 80 \
+    --fail-under-branch 80 \
+    --print-summary; then
+  echo "ADVISORY metric 1: at/above the 80% target on lines/functions/branches."
+else
+  echo "ADVISORY metric 1: below the 80% target on one or more of l/f/b -- report-only, NOT failing the build (owner 2026-07-14)."
+fi
+exit 0
