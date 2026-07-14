@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // Pure-data UI layout model for gui-sonotron's general screen layout.
@@ -28,6 +29,17 @@ inline constexpr float kMinFontSizePx = 6.0F;
 inline constexpr float kMaxFontSizePx = 64.0F;
 
 bool is_valid_font_size_px(float value);
+
+// The on-disk JSON schema version (the "schema_version" key, written first
+// by write_layout() for readability). Bump this whenever the persisted
+// shape changes in a way an OLDER binary's renderer could not safely draw
+// (e.g. a zone id inventory change) — Layout::schema_version and the
+// load-time check in layout_json.cpp's load_or_create_default() are what
+// turn a stale file (from an older app version) into a self-upgraded
+// default instead of a silently broken UI (host-side analog of
+// docs/DESIGN.md §2 architectural principle #8, "one single versioned
+// format").
+inline constexpr int kLayoutSchemaVersion = 1;
 
 // One titled zone of the dashboard. `row`/`col` place it on the grid: `col`
 // is only meaningful relative to sibling zones sharing the same `row` (their
@@ -67,6 +79,13 @@ bool operator==(const Zone& lhs, const Zone& rhs);
 // grouping is derived on demand by `compute_rows`, not stored redundantly
 // here — the model is exactly what a hand-edited JSON file expresses.
 struct Layout {
+  // See kLayoutSchemaVersion above. A freshly-constructed Layout (or one
+  // built by default_layout()) is always current; parse_layout() treats an
+  // ABSENT "schema_version" key as legacy and sets this to 0 before
+  // dispatching the rest of the file's fields, so load_or_create_default()
+  // (layout_json.cpp) can tell a pre-versioning file apart from a current
+  // one.
+  int schema_version = kLayoutSchemaVersion;
   std::string window_title = "sonotron";
   // See kDefaultFontSizePx above for the meaning/units and the fallback
   // rule; the in-class default here is what a freshly-constructed Layout
@@ -76,6 +95,16 @@ struct Layout {
 };
 
 bool operator==(const Layout& lhs, const Layout& rhs);
+
+// The single authority on which zone ids layout_renderer.cpp's
+// render_zone_content() can actually dispatch to a live panel (transport,
+// browser, grid, seqedit, parts, intention — G3, docs/design/
+// gui-fase2-mechanical-plan.md). layout_json.cpp's load_or_create_default()
+// consults the SAME predicate to decide whether a persisted zone id is
+// still renderable, so the loader's notion of "valid id" can never drift
+// from what the renderer can actually draw — that drift is exactly what let
+// a stale layout.json silently render empty panels.
+bool is_renderable_zone_id(std::string_view id);
 
 // The built-in fallback: the workstation screen from
 // docs/design/ux-workstation.md §3 — Transport across the top; Browser,

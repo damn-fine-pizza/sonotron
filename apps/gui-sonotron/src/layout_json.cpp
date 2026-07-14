@@ -1,5 +1,6 @@
 #include "layout_json.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -112,6 +113,11 @@ class Parser {
   bool parse(Layout& out) {
     out = Layout{};
     out.zones.clear();
+    // A freshly-constructed Layout defaults schema_version to the CURRENT
+    // schema (kLayoutSchemaVersion) -- but a file whose "schema_version" key
+    // is simply absent is legacy, not current, so treat it as version 0
+    // until/unless an explicit "schema_version" field below overwrites it.
+    out.schema_version = 0;
     skip_ws();
     if (!expect('{')) {
       return false;
@@ -161,6 +167,9 @@ class Parser {
   // loop body purely to keep that loop's own cognitive complexity low —
   // no behavior change from having this inline.
   bool parse_top_level_field(const std::string& key, Layout& out) {
+    if (key == "schema_version") {
+      return parse_schema_version(out);
+    }
     if (key == "window") {
       return parse_string(out.window_title);
     }
@@ -171,6 +180,20 @@ class Parser {
       return parse_zones(out.zones);
     }
     return skip_value();
+  }
+
+  // Parses the "schema_version" value into `out.schema_version`. A
+  // syntactically invalid number is a parse failure like any other
+  // malformed field; interpreting the resulting value (current, legacy,
+  // or newer-than-current) is load_or_create_default()'s job, not the
+  // parser's -- this function only extracts the number.
+  bool parse_schema_version(Layout& out) {
+    double value = 0.0;
+    if (!parse_number(value)) {
+      return false;
+    }
+    out.schema_version = static_cast<int>(std::llround(value));
+    return true;
   }
 
   // Parses the "font_size" value into `out.font_size_px`. A syntactically
@@ -594,6 +617,11 @@ bool parse_layout(const std::string& text, Layout& out, std::string& error) {
 std::string write_layout(const Layout& layout) {
   std::string out;
   out += "{\n";
+  // "schema_version" is written FIRST, ahead of every other field, so a
+  // human skimming the file (or a future migration tool) sees it before
+  // anything else. See kLayoutSchemaVersion (layout_model.hpp) for why this
+  // field exists.
+  out += "  \"schema_version\": " + std::to_string(layout.schema_version) + ",\n";
   out += "  \"window\": ";
   append_escaped_string(out, layout.window_title);
   out += ",\n";
@@ -633,7 +661,48 @@ bool load_or_create_default(const std::string& path, Layout& out, std::string& e
   }
   std::ostringstream buffer;
   buffer << in.rdbuf();
-  return parse_layout(buffer.str(), out, error);
+
+  Layout parsed;
+  if (!parse_layout(buffer.str(), parsed, error)) {
+    return false;
+  }
+
+  // Graceful degradation (host-side analog of docs/DESIGN.md §2 principle
+  // #8, versioned persisted formats): a file whose schema_version does not
+  // match exactly -- absent/legacy (0), or, symmetrically, GREATER than
+  // what this binary knows how to read -- is incompatible, same as a file
+  // naming a zone id this binary's renderer cannot draw
+  // (is_renderable_zone_id(), layout_model.hpp). Either case used to leave
+  // the stale file loaded verbatim: unknown zones drew as empty panels and,
+  // worse, a whole zone (e.g. "browser") could simply be missing with no
+  // way to notice.
+  //
+  // Design choice (owner-locked): RESET to the built-in default rather than
+  // attempt a partial migration -- no layout editor ships yet, so there is
+  // no hand-made customization worth salvaging. Real per-field migration
+  // only becomes worthwhile once a layout editor exists and users can build
+  // up layouts worth preserving across a schema bump.
+  const bool schema_incompatible = parsed.schema_version != kLayoutSchemaVersion;
+  const bool has_unrenderable_zone =
+      std::any_of(parsed.zones.begin(), parsed.zones.end(),
+                  [](const Zone& zone) { return !is_renderable_zone_id(zone.id); });
+
+  if (schema_incompatible || has_unrenderable_zone) {
+    // A reset is NOT an error -- the app still starts, with a working
+    // (if unfamiliar) layout -- so this is a non-fatal stderr notice, not a
+    // `false` return / `error` message, consistent with load_or_create_
+    // default()'s existing "missing file -> default" path also returning
+    // true.
+    std::fprintf(stderr,
+                 "sonotron: layout file %s is incompatible (schema_version=%d, expected %d) "
+                 "or names an unrenderable zone; resetting to the built-in default layout\n",
+                 path.c_str(), parsed.schema_version, kLayoutSchemaVersion);
+    out = default_layout();
+    return save_layout(path, out, error);
+  }
+
+  out = std::move(parsed);
+  return true;
 }
 
 bool save_layout(const std::string& path, const Layout& layout, std::string& error) {

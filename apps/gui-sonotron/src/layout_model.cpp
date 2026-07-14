@@ -1,6 +1,7 @@
 #include "layout_model.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 
@@ -9,6 +10,14 @@ namespace sonotron {
 namespace {
 
 constexpr float kWeightEpsilon = 1e-4F;
+
+// The renderable zone-id inventory backing is_renderable_zone_id() below —
+// see that function's declaration in layout_model.hpp for why this is the
+// one place this list is written down. Keep in sync with
+// layout_renderer.cpp's render_zone_content() if-else dispatch.
+constexpr std::array<std::string_view, 6> kRenderableZoneIds = {
+    "transport", "browser", "grid", "seqedit", "parts", "intention",
+};
 
 bool nearly_equal(float lhs, float rhs) { return std::fabs(lhs - rhs) < kWeightEpsilon; }
 
@@ -36,8 +45,13 @@ bool operator==(const Zone& lhs, const Zone& rhs) {
 }
 
 bool operator==(const Layout& lhs, const Layout& rhs) {
-  return lhs.window_title == rhs.window_title && nearly_equal(lhs.font_size_px, rhs.font_size_px) &&
-         lhs.zones == rhs.zones;
+  return lhs.schema_version == rhs.schema_version && lhs.window_title == rhs.window_title &&
+         nearly_equal(lhs.font_size_px, rhs.font_size_px) && lhs.zones == rhs.zones;
+}
+
+bool is_renderable_zone_id(std::string_view id) {
+  return std::find(kRenderableZoneIds.begin(), kRenderableZoneIds.end(), id) !=
+         kRenderableZoneIds.end();
 }
 
 Layout default_layout() {

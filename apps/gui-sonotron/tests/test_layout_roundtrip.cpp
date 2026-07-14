@@ -67,7 +67,10 @@ void test_modified_layout_round_trips_after_save() {
 // Owner-facing knob: editing "font_size" in ~/.config/sonotron/layout.json
 // by hand (no rebuild) must take effect on the next load, and must survive
 // the app's on-exit save unchanged — this is the exact path main.cpp drives
-// (load_or_create_default at startup, save_layout at shutdown).
+// (load_or_create_default at startup, save_layout at shutdown). The
+// hand-edit carries a current "schema_version" so the graceful-degradation
+// reset (test_layout_schema_upgrade.cpp) does not fire here — this test is
+// about the font_size knob, not about schema versioning.
 void test_hand_edited_font_size_survives_load_and_save() {
   const std::filesystem::path path = unique_temp_path();
   std::error_code remove_error;
@@ -76,7 +79,8 @@ void test_hand_edited_font_size_survives_load_and_save() {
 
   {
     std::ofstream hand_edited(path);
-    hand_edited << R"({ "window": "sonotron", "font_size": 22, "zones": [] })";
+    hand_edited << R"({ "schema_version": )" << sonotron::kLayoutSchemaVersion
+                << R"(, "window": "sonotron", "font_size": 22, "zones": [] })";
   }
 
   sonotron::Layout loaded;

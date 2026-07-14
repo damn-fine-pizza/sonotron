@@ -62,6 +62,35 @@ void test_layout_equality() {
   sonotron::Layout d = sonotron::default_layout();
   d.font_size_px = 20.0F;
   CHECK(!(a == d));
+
+  sonotron::Layout e = sonotron::default_layout();
+  e.schema_version = 0;
+  CHECK(!(a == e));
+}
+
+// The single shared authority both layout_renderer.cpp's dispatch and
+// layout_json.cpp's load-time validation consult (see its declaration in
+// layout_model.hpp for why that sharing matters).
+void test_is_renderable_zone_id() {
+  CHECK(sonotron::is_renderable_zone_id("transport"));
+  CHECK(sonotron::is_renderable_zone_id("browser"));
+  CHECK(sonotron::is_renderable_zone_id("grid"));
+  CHECK(sonotron::is_renderable_zone_id("seqedit"));
+  CHECK(sonotron::is_renderable_zone_id("parts"));
+  CHECK(sonotron::is_renderable_zone_id("intention"));
+
+  // The exact stale ids a pre-Fase-2-restart layout.json carried.
+  CHECK(!sonotron::is_renderable_zone_id("arrangement"));
+  CHECK(!sonotron::is_renderable_zone_id("harmony"));
+  CHECK(!sonotron::is_renderable_zone_id("structure"));
+  CHECK(!sonotron::is_renderable_zone_id(""));
+  CHECK(!sonotron::is_renderable_zone_id("bogus"));
+
+  // default_layout()'s own zones must all be renderable -- otherwise the
+  // built-in fallback would fail its own consistency check.
+  for (const sonotron::Zone& zone : sonotron::default_layout().zones) {
+    CHECK(sonotron::is_renderable_zone_id(zone.id));
+  }
 }
 
 void test_is_valid_font_size_px_bounds() {
@@ -183,6 +212,7 @@ void test_compute_rows_orders_columns_by_col_not_declaration_order() {
 int main() {
   test_default_layout_shape();
   test_layout_equality();
+  test_is_renderable_zone_id();
   test_is_valid_font_size_px_bounds();
   test_compute_rows_default_layout();
   test_compute_rows_defaults_unweighted_columns_to_equal_split();
