@@ -80,14 +80,22 @@ else()
   # Host-only importer/compiler tooling (never in the ARM/firmware build).
   add_subdirectory(apps/tools/arrstyle-converter)
   # Host-only GUI pure client (D38) + its vendored toolkit. Never in the
-  # ARM/firmware build; the GUI never links arrangrr or hostrt.
+  # ARM/firmware build; the GUI never links arrangrr or hostrt directly --
+  # only gui_sonotron_engine does, see apps/gui-sonotron/CMakeLists.txt.
   add_subdirectory(third_party)
-  add_subdirectory(apps/gui-sonotron)
   # Phase-5 Item F (docs/design/phase5-execution-plan.md, `0910`/D43): the
-  # melodd GM SoundFont realizer + its standalone drop-in-synth binary.
-  # HOST-ONLY, links third_party/tinysoundfont (just entered above) --
-  # never on the arm-none-eabi branch above, same placement discipline as
-  # components/midisrc / components/orchestrator.
+  # melodd GM SoundFont realizer component. HOST-ONLY, links
+  # third_party/tinysoundfont (just entered above) -- never on the
+  # arm-none-eabi branch above, same placement discipline as
+  # components/midisrc / components/orchestrator. Ordered BEFORE
+  # apps/gui-sonotron (Phase-6 Theme 2, docs/phase6-design-reviews.md "Audio
+  # in the standalone GUI"): gui_sonotron_audio links `melodd` directly now,
+  # so the component target must exist first (CMake target_link_libraries
+  # requires the target to already be defined).
   add_subdirectory(components/melodd)
+  add_subdirectory(apps/gui-sonotron)
+  # The melodd standalone drop-in-synth binary; unaffected by the reorder
+  # above (it only needs components/melodd + third_party, both already
+  # added).
   add_subdirectory(apps/tools/melodd)
 endif()

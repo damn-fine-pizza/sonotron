@@ -50,6 +50,50 @@ using arrangrr::host::Shell;
 constexpr std::size_t kCommandRingCapacity = 1024;
 constexpr std::size_t kOutEventRingCapacity = 1024;
 
+// Phase-6 Theme 2 port-filtering (owner decision, docs/phase6-design-
+// reviews.md "Audio in the standalone GUI", Decision 3/4 -- differs from
+// Corelli's own "realize every kMidi event unconditionally" default): the
+// owner chose to realize ONLY the primary integrated output port, not every
+// port. Today's default integrated wiring below opens exactly one output
+// port, "out0", and Shell::cmd_port's m_next_out counter starts at 0
+// (components/hostrt/shell_io_commands.cpp) -- so out0 is always index 0. A
+// single named constant, not a magic literal, so a future multi-port
+// realization config only ever needs to change this one spot.
+constexpr std::uint8_t kPrimaryAudioOutPort = 0;
+
+// Follow-up to the Theme-2 QA pass's reachability finding
+// (test_audio_primary_port_unreachable.cpp's own header comment,
+// docs/phase6-design-reviews.md "Audio in the standalone GUI"): `style load`
+// alone never routes any TrackRole to an output port (Route::enabled
+// defaults to false, arranger.hpp) -- a freshly loaded style is silent until
+// something issues `style route`, and no gui-sonotron panel exposes that
+// verb. Owner decision: auto-enable default band routing the moment the GUI
+// loads a style, so "load style -> play -> hear the band" needs zero new UI.
+//
+// This table is EXACTLY apps/demo/jam/setup.acmd's own `style route` lines,
+// byte-for-byte (role name + the 1-based channel exactly as written after
+// the ':' in that file's "out0:N") -- so a GUI-loaded style routes and
+// sounds identically to the proven demo jam session, and there is no
+// separate 1-vs-0-index channel judgement call to make here: it is the
+// demo's own already-working numbers, copied. Roles absent from this table
+// stay unrouted, mirroring the demo (it does not route drums-and-friends'
+// remaining roles either). Every "out0" below resolves to kPrimaryAudioOutPort
+// (0) -- see that constant's own comment -- so these routes land inside the
+// Theme-2 audio gate.
+struct DefaultStyleRoute {
+  const char* role_name;
+  std::uint8_t channel_one_based;
+};
+constexpr std::array<DefaultStyleRoute, 7> kDefaultStyleRoutes = {{
+    {.role_name = "drums", .channel_one_based = 10},
+    {.role_name = "perc", .channel_one_based = 10},
+    {.role_name = "bass", .channel_one_based = 2},
+    {.role_name = "chord1", .channel_one_based = 3},
+    {.role_name = "chord2", .channel_one_based = 7},
+    {.role_name = "pad", .channel_one_based = 5},
+    {.role_name = "arp", .channel_one_based = 6},
+}};
+
 // `midi-source load <path>` (Accompany, Phase 4d) carries a variable-length
 // filesystem path that the fixed-size ABI `Command` POD (abi.hpp, <=20 B, no
 // string field) has no room for -- so it rides its own pair of rings instead
@@ -262,6 +306,25 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
   return TranslateOutcome::kUnknownCommand;
 }
 
+// Builds one `style route <role> <port>:<ch>` Command out of a
+// DefaultStyleRoute entry, through the SAME encoding cmd_style()'s "route"
+// verb uses (components/hostrt/shell_music_commands.cpp): `b = port |
+// (channel << 8)`, where `channel` is 0-based (split_port_channel converts
+// the 1-based text form -- shell_parse.cpp -- before encoding). The role
+// name always resolves: kDefaultStyleRoutes only ever holds the fixed,
+// known-good names parse_role() accepts (mirrored 1:1 with setup.acmd).
+Command make_default_style_route_command(const DefaultStyleRoute& route) {
+  Command cmd{};
+  cmd.op = Op::kSet;
+  cmd.param = Param::kStyleRoute;
+  TrackRole role = TrackRole::kLead;
+  Shell::resolve_track_role(route.role_name, role);
+  cmd.a = static_cast<std::int32_t>(role);
+  const std::int32_t channel_zero_based = static_cast<std::int32_t>(route.channel_one_based) - 1;
+  cmd.b = static_cast<std::int32_t>(kPrimaryAudioOutPort) | (channel_zero_based << 8);
+  return cmd;
+}
+
 std::uint64_t monotonic_us() {
   const auto epoch = std::chrono::steady_clock::now().time_since_epoch();
   return static_cast<std::uint64_t>(
@@ -277,6 +340,12 @@ struct InProcessBrainSession::Impl {
   SpscRing<OutEvent, kOutEventRingCapacity> out_event_ring;
   SpscRing<PathCommand, kPathCommandRingCapacity> path_command_ring;
   SpscRing<PathResult, kPathResultRingCapacity> path_result_ring;
+  // Phase-6 Theme 2 (Decision 1/2/3): gui_sonotron_audio::AudioEngine's
+  // producer-side ring handle, set (or left null) by set_audio_ring()
+  // BEFORE start() -- see that method's own doc comment for the
+  // synchronization argument. Never touched after run_engine() reads it
+  // once at thread-start.
+  AudioMidiRing* audio_ring = nullptr;
   std::atomic<bool> running{false};
   std::atomic<bool> prefer_flats{false};
   std::atomic<Status> status{Status::kDisconnected};
@@ -309,9 +378,24 @@ void InProcessBrainSession::Impl::run_engine() {
                  alsa_error.c_str());
   }
 
-  Shell shell([this, &alsa, alsa_ok](const OutEvent& ev) {
+  // Snapshot once, before the engine loop starts (GUI thread already set it,
+  // if at all, before start() -- see set_audio_ring()'s own doc comment for
+  // why no atomic is needed here).
+  AudioMidiRing* const audio_out_ring = audio_ring;
+
+  Shell shell([this, &alsa, alsa_ok, audio_out_ring](const OutEvent& ev) {
     if (alsa_ok && ev.kind == OutEvent::Kind::kMidi) {
       alsa.send(ev.port, ev.msg);
+    }
+    // Phase-6 Theme 2 (Decision 1/3/4): realize ONLY the primary integrated
+    // output port through gui_sonotron_audio's Synth. audio_out_ring is
+    // null in --control mode and whenever no AudioEngine was attached;
+    // try_push is best-effort (MAY drop under backpressure, same asymmetric
+    // policy as out_event_ring below) -- this is a felt-latency interactive
+    // path, never a stall point for the engine thread.
+    if (audio_out_ring != nullptr && ev.kind == OutEvent::Kind::kMidi &&
+        ev.port == kPrimaryAudioOutPort) {
+      (void)audio_out_ring->try_push(AudioMidiEvent{.port = ev.port, .msg = ev.msg});
     }
     // engine -> GUI: best-effort, MAY drop under backpressure (asymmetric
     // policy, matches the existing UDS broadcast precedent for a slow
@@ -412,6 +496,8 @@ void InProcessBrainSession::stop() {
   m_impl->status.store(Status::kDisconnected, std::memory_order_release);
 }
 
+void InProcessBrainSession::set_audio_ring(AudioMidiRing* ring) { m_impl->audio_ring = ring; }
+
 void InProcessBrainSession::send(std::string_view command_line) {
   if (command_line == "quit" || command_line == "exit") {
     return;  // never tear down the shared engine thread from a stray Enter
@@ -488,6 +574,25 @@ void InProcessBrainSession::send(std::string_view command_line) {
     warn.valid = true;
     warn.warn_code = "command_ring_full";
     m_impl->local_warnings.push_back(std::move(warn));
+    return;
+  }
+
+  // Auto-route the default band (see kDefaultStyleRoutes's own comment)
+  // right after a successful `style load` -- and only then: routing before a
+  // style is loaded would apply to whatever style loads next, not this one,
+  // and there is no style to route if the load itself never reached the
+  // ring. Same validated Command path as every other verb here (never a
+  // shortcut around push_command).
+  if (cmd.param == Param::kStyleLoad) {
+    for (const DefaultStyleRoute& route : kDefaultStyleRoutes) {
+      if (!m_impl->command_ring.try_push(make_default_style_route_command(route))) {
+        BrainEvent warn;
+        warn.kind = BrainEvent::Kind::kWarn;
+        warn.valid = true;
+        warn.warn_code = "command_ring_full";
+        m_impl->local_warnings.push_back(std::move(warn));
+      }
+    }
   }
 }
 

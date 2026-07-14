@@ -72,6 +72,40 @@ gui_sonotron_engine_test(test_in_process_brain_session functional)
 target_compile_definitions(test_in_process_brain_session PRIVATE
   GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
 
+# Phase-6 Theme 2 QA pass (docs/phase6-design-reviews.md "Audio in the
+# standalone GUI", Decision 3/4): pins the negative half of the OutEvent ->
+# AudioMidiEvent port filter (kPrimaryAudioOutPort == 0) -- non-primary-port
+# kMidi traffic (midi-source replay, fixed port 1) must reach poll() but
+# never the audio ring. See this file's own header comment for why the
+# positive case (primary-port traffic reaching the ring) is NOT exercised
+# here.
+gui_sonotron_engine_test(test_audio_port_gate functional)
+target_compile_definitions(test_audio_port_gate PRIVATE
+  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
+
+# Device-independent AudioEngine smoke test (Torquato QA pass): links
+# gui_sonotron_audio directly (melodd + miniaudio + gui_sonotron_ring +
+# Threads) -- construction/destruction, note_ring(), and load_soundfont()'s
+# success/failure paths, none of which require a real audio device to open.
+# See this file's own header comment for what is and is not reachable this
+# way (the private data_callback()/render() path needs a live device).
+add_executable(test_audio_engine_smoke test_audio_engine_smoke.cpp)
+target_link_libraries(test_audio_engine_smoke PRIVATE gui_sonotron_audio)
+target_compile_options(test_audio_engine_smoke PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_audio_engine_smoke COMMAND test_audio_engine_smoke)
+# NOT a hard SKIP_RETURN_CODE convention: only the LAST block (load_soundfont
+# success path) needs a system SoundFont -- construction/ring/failure-path
+# checks always run for real, so a missing SoundFont degrades this to a
+# partial (still meaningful) pass rather than a full skip.
+set_tests_properties(test_audio_engine_smoke PROPERTIES LABELS functional)
+
+# Flips Torquato's RED-by-design QA pin to GREEN (Nazzareno, closing the
+# Theme-2 reachability gap): InProcessBrainSession::send() now auto-routes
+# the default band on `style load` (kDefaultStyleRoutes,
+# in_process_brain_session.cpp), so primary-port kMidi traffic IS reachable
+# now -- a normal, registered, always-green test like every other one here.
+gui_sonotron_engine_test(test_audio_primary_port_reachable functional)
+
 # Zone-model tests (G3, docs/design/gui-fase2-mechanical-plan.md): link only
 # gui_sonotron_models (no ImGui, no GLFW) -- pure model tests, host-only.
 function(gui_sonotron_model_test name category)

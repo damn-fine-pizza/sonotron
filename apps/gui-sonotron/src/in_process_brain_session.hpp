@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "audio_midi_event.hpp"
 #include "brain_session.hpp"
 
 // The SECOND concrete BrainSession (Phase 2b, docs/design/
@@ -32,6 +33,12 @@
 // ever touches the two ring endpoints (through send()/poll()) and the
 // atomics below. There is no `engine()`/`stage()` accessor on this class,
 // deliberately.
+//
+// Phase-6 Theme 2 addition (docs/phase6-design-reviews.md "Audio in the
+// standalone GUI", Decision 2/3): set_audio_ring() below adds ONE narrow
+// handle, mirroring the same discipline -- AudioMidiRing (audio_midi_event.
+// hpp) is a small, arrangrr-free POD ring type, never arrangrr::OutEvent/
+// Param/Kind, so this header still names zero arrangrr types.
 
 namespace sonotron {
 
@@ -56,6 +63,19 @@ class InProcessBrainSession final : public BrainSession {
   // Signals the engine thread to stop and joins it. Safe to call when not
   // started (no-op) and safe to call from the destructor path (~ calls it).
   void stop();
+
+  // Attaches gui_sonotron_audio::AudioEngine's producer-side ring handle
+  // (Phase-6 Theme 2, Decision 1/2/3): once set, run_engine() pushes every
+  // kMidi OutEvent on the primary integrated output port onto `ring` for
+  // AudioEngine's ma_device callback to drain and realize. MUST be called
+  // BEFORE start() -- the engine thread reads this pointer once at
+  // thread-start time, not on every tick; the happens-before edge
+  // std::thread's own constructor establishes between this call (on the
+  // calling/GUI thread) and the new thread's first instruction is the only
+  // synchronization this needs. `ring` may be null (the default -- never
+  // set in --control mode), in which case OutEvents are simply never
+  // realized locally, same as today.
+  void set_audio_ring(AudioMidiRing* ring);
 
   // BrainSession
   void send(std::string_view command_line) override;

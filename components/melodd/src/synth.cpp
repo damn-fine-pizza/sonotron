@@ -37,18 +37,29 @@ Synth& Synth::operator=(Synth&& other) noexcept {
 }
 
 bool Synth::load_soundfont(const std::string& path, std::string& error) {
+  tsf* loaded = read_soundfont_file(path, error);
+  if (loaded == nullptr) {
+    return false;
+  }
+  adopt_soundfont(loaded);
+  return true;
+}
+
+tsf* Synth::read_soundfont_file(const std::string& path, std::string& error) {
   tsf* loaded = tsf_load_filename(path.c_str());
   if (loaded == nullptr) {
     error = "failed to load SoundFont: " + path;
-    return false;
   }
+  return loaded;
+}
+
+void Synth::adopt_soundfont(tsf* loaded) {
   if (m_tsf != nullptr) {
     tsf_close(m_tsf);
   }
   m_tsf = loaded;
   tsf_set_output(m_tsf, TSF_STEREO_INTERLEAVED, m_sample_rate, 0.0f);
   reset_gm_channel_defaults();
-  return true;
 }
 
 void Synth::reset_gm_channel_defaults() {
@@ -109,6 +120,20 @@ void Synth::all_notes_off() {
   for (int channel = 0; channel < kGmChannelCount; ++channel) {
     tsf_channel_sounds_off_all(m_tsf, channel);
   }
+}
+
+int Synth::debug_program(int channel) const {
+  if (m_tsf == nullptr) {
+    return -1;
+  }
+  return tsf_channel_get_preset_number(m_tsf, channel);
+}
+
+int Synth::debug_pitch_wheel(int channel) const {
+  if (m_tsf == nullptr) {
+    return -1;
+  }
+  return tsf_channel_get_pitchwheel(m_tsf, channel);
 }
 
 void Synth::render(float* out, int frame_count) {
