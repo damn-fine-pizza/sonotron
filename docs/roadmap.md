@@ -7,6 +7,16 @@ milestone and every former decision becomes a NODE in this tree, with its ration
 folded into that node. There is no parallel milestone list and no parallel decisions
 log; both collapse here.
 
+> **Unresolved cross-document flag (saverio-doc-steward, recorded not resolved by
+> this pass):** this file still self-describes as `Status: PROPOSAL` awaiting the
+> orchestrator's merge into `docs/DESIGN.md` (see the next paragraph), yet
+> `docs/DESIGN.md` §22 already carries a fully-formed, near-duplicate "canonical
+> numbered roadmap (WBS) — single roadmap & decision record" with its own status
+> tracking for the same node IDs. Which of the two is actually canonical, and
+> whether this file should be retired/merged/kept as the working proposal, is a
+> scope/ownership decision for `verdi-roadmap-strategist` or the owner — out of
+> this reconciliation pass's mandate (status glyphs only, not document structure).
+
 History is preserved in ONE place: the migration appendix at the end maps every old
 identifier to its new numeric ID, so existing references in code and docs still
 resolve. The BODY uses numbers only.
@@ -210,18 +220,24 @@ These bind every node below. They are the "why the schedule is honest" layer.
 - **4500 External clock-in (slave sync)** — ○ SHIPPABLE
   *the one pure-interop MIDI-engine/sequencer gap; master-out only today*
 
-### 5000 — MIDI-FX / Transform chain — ○ planned (behind the GUI freeze line, `11700`)
+### 5000 — MIDI-FX / Transform chain — ◑ partial (`5100` core shipped, rest behind the GUI freeze line, `11700`)
 
 *A composable bounded chain (fixed max inserts) of MIDI transforms per track/zone —
 the open/hackable north-star (`0600`) made concrete. Arp/groove/scale-lock become
 INSTANCES of the chain, not disconnected modules.*
-- **5100 Insert-chain framework** (bounded, per-track/zone, POD) — ○ SHIPPABLE,
-  **shape pre-fixed at the GUI freeze line (`11700`)**: `kMaxInserts=8` in the
-  on-disk/ABI format, UI exposes 4; per-track first (per-zone deferred); ABI-none
-  for this data-model increment — locked so the GUI (`11600`) is born aware of
-  this surface and is not rebuilt when `5000` lands. The earlier
-  **NEEDS-DECISION is RESOLVED** by that lock; implementing the framework body +
-  inserts remains ○ planned, behind the freeze line.
+- **5100 Insert-chain framework** (bounded, POD) — ✅ core shipped (Phase-5 Item
+  #10, commit `95f542b`, 2026-07-14): `kMaxInserts=8`, UI exposes 4.
+  **Addressing re-decided by the owner from per-track to per-ROLE**
+  (`kRoleCount=10`, the same ordinal space as `Arranger::m_routes` — the graft
+  point is `Arranger::on_tick`, which is per-role, not per-Timeline-Track); the
+  `kFx…` ABI verbs (`kFxSet/kFxParam/kFxEnable/kFxClear`, Param 53–56) and the
+  reserved block are now written to that decision. v1 ships four stateless
+  per-note stream-transform inserts (scale-lock, velocity-proc, echo,
+  note-repeat, `components/arrangrr/include/arrangrr/fx/insert_chain.hpp`)
+  grafted ahead of `groove::apply` with a per-fan-out-note grid recompute
+  (existing goldens byte-identical: an empty chain is passthrough). The chain
+  is live config only — **not** persisted in the `Performance` v1 format yet.
+  (Mirrors the DESIGN.md §22 `5100` entry, corrected in the same commit.)
 - **5200 Refactor existing modules into chain instances**
   - `5210` groove as a chain instance — ○ SHIPPABLE
   - `5220` arp as a track MIDI-FX instance — ○ SHIPPABLE *(= 7130)*
@@ -248,17 +264,59 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
   - `7110` Live-keyboard arp (rate/dir/octaves/gate/latch/seed) — ✅
   - `7120` Arp as a style part (replace hand-written kArp patterns) — ○ SHIPPABLE
   - `7130` Arp as a track MIDI-FX — ○ SHIPPABLE *(= 5220)*
-- **7200 Phrase/Pad engine** (banks of 4; one-shot/loop/hold/toggle) — ○ SHIPPABLE
+- **7200 Phrase/Pad engine** (banks of 4; one-shot/loop/hold/toggle) — ◑ partial
+  (Phase-5 Item #9, commit `e980665`, 2026-07-14): `PadEngine`
+  (`components/arrangrr/include/arrangrr/pad/pad_bank.hpp`) ships 8 banks × 4 =
+  32 flat POD pad slots, all four trigger modes (OneShot/Loop/Hold/Toggle), and
+  six pad types (Phrase/Chord/SceneColumn/Variation/Fill/Performance), each a
+  wrapper fanning out to an EXISTING verb (clip launch / Arranger section
+  request / Performance recall) — wrapper-only by design, no new emission
+  engine. Still open: `Drum`/`CC`/`NoteRepeat` pad types (deferred — they would
+  need new note/CC emission, per the commit message) and
+  `PadPitch::kTransposeWithChord` (captured in the struct, not yet wired to any
+  dispatch behavior). Tests: `test_pad.cpp`, `test_pad_bank.cpp`,
+  `test_pad_perf.cpp`.
 - **7300 Groove/Humanize** — ✅ *(shared with 3250)*
 - **7400 Metronome/click, tap-tempo, tempo-nudge** — ○ SHIPPABLE
 
-### 8000 — Structure & recall + persistence — ○ planned (behind the GUI freeze line, `11700`)
+### 8000 — Structure & recall + persistence — ◑ partial (`8200`/`8500` done, rest behind the GUI freeze line, `11700`)
 
 - `8100` Scenes / song mode (snapshot + chain + tempo/time-sig) — ○ SHIPPABLE
-- `8200` Performance/Registration (recall live state) — ○ SHIPPABLE
+  *(explicitly NOT built by Phase-5 Item #9: the shipped `Performance` scopes
+  itself away from this node — "Deliberately NOT ... DESIGN.md section 7's
+  Song-anchored timed Scene (node 8100, a separate, later concern)",
+  `components/arrangrr/include/arrangrr/perf/performance.hpp:12-18`. Still
+  planned, unchanged.)*
+- `8200` Performance/Registration (recall live state) — ✅ done (Phase-5 Item
+  #9, commit `e980665`, 2026-07-14): `Performance` POD (96 B,
+  `components/arrangrr/include/arrangrr/perf/performance.hpp`) snapshots
+  style/variation/per-role routes/mute+solo/groove/tempo/key/chord-mode/
+  chord-follow/chord-sequence; `apply_performance` validates every referenced
+  id before applying anything (atomic recall, no half-applied rig). ABI
+  `Param::kPerformanceStore`/`kPerformanceRecall` (Param 51–52, `abi.hpp`);
+  host `perf store|recall|save|load` verbs
+  (`components/hostrt/shell_pad_commands.cpp`). Tests: `test_performance.cpp`,
+  `test_performance_validate.cpp`, `test_performance_style_id_regression.cpp`
+  (91/91 host green per the commit message). Scoped narrower than DESIGN.md
+  §17's full sketch (Corelli-reviewed choice): `master_transpose` is reserved
+  with no engine backing yet, routing is per-role Arranger routes only (not
+  the general Router thru-matrix/Zones), and `scene_refs[]` (song mode) stays
+  under `8100`, not built.
 - `8300` SetList — ○ SHIPPABLE
 - `8400` Project/Preset manager (slots, defaults) — ○ SHIPPABLE
-- `8500` Versioned binary storage + CRC (save/load round-trip) — ○ SHIPPABLE
+- `8500` Versioned binary storage + CRC (save/load round-trip) — ✅ done
+  (Phase-5 Item #9, commit `e980665`, 2026-07-14):
+  `serialize_performance`/`deserialize_performance`
+  (`components/arrangrr/include/arrangrr/perf/performance.hpp`,
+  `components/arrangrr/src/performance.cpp`) write/read an explicit
+  field-by-field little-endian wire format with `magic`/`format_version`/
+  CRC32 trailer (not a struct memcpy, so `GrooveParams` padding and host/arm
+  layout can't desync) — "the first real exercise of [Architectural Principle
+  #8]" per the header comment. Round-trip proven by
+  `test_performance_wire.cpp`; file I/O is host-only (`perf save`/`perf load`
+  verbs). Scoped to the `Performance` object only — the broader §21
+  multi-table Project binary format (styles/patterns/programs/device
+  profiles/songs) that `8400` would need remains unbuilt.
 - `8600` Diagnostics/MIDI monitor + fault-injection suite — ○ HOST-ONLY
 
 ### 9000 — Style content & tooling — ◑ partial / decided
@@ -477,13 +535,16 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
       (`5000`). Full detail: `docs/phase5-plan.md`. **Deferred out of
       this program:** #3 STM32 bring-up (`12100`), #5 external clock-in (`4500`).
       **Shipped:** the Fuzzing harness — `components/midisrc/fuzz/`,
-      `option(SONOTRON_FUZZ)`, commit `c2251f2`. **In-flight, not yet on this branch:**
-      the corpus-import lowering first slice — see `9420` above (commit `f6611e5`, on
-      sibling worktree branch `worktree-agent-a3f3c787996a2023e`, pending
-      cherry-pick). **Also resolved by this program:** the ABI freeze LIFTED for
-      Phase-5 (see the `11700`/`11720` update above) and Verdi's fork #2 (the
-      `sonotron`/workstation audio destination) answered by including `melodd` (see
-      `0910`).
+      `option(SONOTRON_FUZZ)`, commit `c2251f2`. Pad/Scene (`7200` partial,
+      `8200`/`8500` done, `8100` explicitly not built) — commit `e980665`.
+      MIDI-FX chain core (`5100`) — commit `95f542b`. **In-flight, not yet on
+      this branch:** the corpus-import lowering first slice — see `9420` above
+      (commit `f6611e5`, on sibling worktree branch
+      `worktree-agent-a3f3c787996a2023e`, pending cherry-pick). **Also
+      resolved by this program:** the ABI freeze LIFTED for Phase-5 (see the
+      `11700`/`11720` update above) and Verdi's fork #2 (the
+      `sonotron`/workstation audio destination) answered by including `melodd`
+      (see `0910`).
   *Dual-target note: this whole node is HOST-ONLY by construction — the GUI is a
   desktop client. The STM32 target (`12000`) keeps its OWN separate physical UI
   (`12400`); `11600` is never the device front-end — do not conflate the two
