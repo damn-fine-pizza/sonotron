@@ -104,6 +104,23 @@ target_link_libraries(gui_sonotron_engine PUBLIC gui_sonotron_brain gui_sonotron
   Threads::Threads)
 target_compile_options(gui_sonotron_engine PRIVATE -Wall -Wextra -Werror)
 
+# Host-only, arrangrr-free audio realization library (Phase-6 Theme 2,
+# docs/phase6-design-reviews.md "Audio in the standalone GUI", Decision 2):
+# melodd::Synth + a miniaudio playback device + the AudioMidi ring's
+# consumer + the render/load/panic mutex (AudioEngine, src/audio_engine.hpp).
+# Links ONLY melodd (Synth + find_system_soundfont + the shared MidiMessage
+# -> Synth dispatch), miniaudio, gui_sonotron_ring (the SPSC ring template +
+# the AudioMidiEvent/AudioMidiRing POD src/audio_midi_event.hpp shares with
+# gui_sonotron_engine's producer side) and Threads -- deliberately NOT
+# hostrt/arrangrr/runtime, so this library never includes arrangrr/abi.hpp
+# and never inherits arrangrr's PUBLIC -fno-exceptions -fno-rtti compile
+# flags, keeping gui_sonotron_engine "this library, and only this library,
+# touches arrangrr" true.
+add_library(gui_sonotron_audio STATIC src/audio_engine.cpp)
+target_include_directories(gui_sonotron_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(gui_sonotron_audio PUBLIC melodd gui_sonotron_ring miniaudio Threads::Threads)
+target_compile_options(gui_sonotron_audio PRIVATE -Wall -Wextra -Werror)
+
 # Host-only screenshot helper: a thin wrapper over the stb_image_write.h
 # already vendored under third_party/glfw/deps (no new dependency). Kept in
 # its own target so the not-warning-clean stb implementation can be compiled
@@ -119,7 +136,8 @@ target_compile_options(gui_sonotron_screenshot PRIVATE -w)
 add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
 target_link_libraries(gui_sonotron PRIVATE
-  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine gui_sonotron_screenshot imgui)
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine gui_sonotron_audio
+  gui_sonotron_screenshot imgui)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # Bakes the source-tree assets/ path into the binary so the vendored TTF
 # (see assets/fonts/ARRGRR_VENDOR.md) is found when running straight out of

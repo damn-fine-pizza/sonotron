@@ -21,7 +21,17 @@ namespace {
 // transport_panel.cpp, which owns the whole transport row. A zone id with
 // no matching case falls through to the G1 fallback (title + separator,
 // empty body) — this keeps a stale/hand-edited layout.json safe to render.
+//
+// The ids handled below MUST stay in sync with is_renderable_zone_id()
+// (layout_model.hpp) — the single shared authority layout_json.cpp's
+// loader also consults, so its notion of "valid id" cannot silently drift
+// from what this dispatch can actually draw. The early return below ties
+// the "unknown id -> empty G1 frame" fallback directly to that same
+// predicate rather than duplicating the id list a second time here.
 void render_zone_content(const Zone& zone, WorkstationState& state) {
+  if (!is_renderable_zone_id(zone.id)) {
+    return;
+  }
   if (zone.id == "transport") {
     render_transport_panel(state.app_state, state.brain_session);
   } else if (zone.id == "browser") {

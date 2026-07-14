@@ -1,5 +1,7 @@
 #include "transport_panel.hpp"
 
+#include <string>
+
 #include "imgui.h"
 
 namespace sonotron {
@@ -46,6 +48,19 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
     // the beat boundary.
     ImGui::Text("| bar %d . beat %d .%02d", app_state.bar(), app_state.beat_num(),
                 app_state.pulse());
+  }
+
+  // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-
+  // transpose-scope.md): a small, discoverable global-transpose control --
+  // fire-and-forget over the same BrainSession command path `style load`
+  // uses (in_process_brain_session.cpp's command_line_to_command / hostrt's
+  // Shell both recognize `transpose <-12..12>`). The GUI holds no
+  // authoritative state (app_state.hpp's own design note), so this control's
+  // own value is local UI state only, not re-derived from the event stream.
+  static int transpose_semitones = 0;
+  ImGui::SetNextItemWidth(160.0F);
+  if (ImGui::SliderInt("Transpose", &transpose_semitones, -12, 12)) {
+    brain_session.send("transpose " + std::to_string(transpose_semitones));
   }
 }
 

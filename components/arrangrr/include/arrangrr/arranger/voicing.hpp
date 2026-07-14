@@ -57,6 +57,35 @@ class VoicingState {
     }
   }
 
+  // Phase-6 Theme 3 Item #1 regression fix (Torquato QA pin, test_
+  // master_transpose_voicing_regression.cpp): a LIVE master_transpose change
+  // must keep the per-role "previous register" reference synchronized with
+  // the new transpose, or nearest_octave() computes the wrong side of the
+  // tritone boundary and folds the delta by a spurious octave. Called from
+  // Arranger::set_master_transpose with the SIGNED difference between the
+  // new and old transpose value; shifts every remembered chord-tone register
+  // by that same delta so voice() leads from where those notes WOULD sit
+  // under the new transpose, preserving voice-leading continuity across the
+  // change instead of a register jump. A no-op for a role with no seeded
+  // memory yet (m_count[r] == 0, nothing to shift); the shifted register is
+  // clamped into the MIDI range like every other pitch in this stage.
+  constexpr void shift(int delta) noexcept {
+    if (delta == 0) {
+      return;
+    }
+    for (int r = 0; r < kRoleCount; ++r) {
+      for (int i = 0; i < m_count[r]; ++i) {
+        int note = m_last[r][i] + delta;
+        if (note < 0) {
+          note = 0;
+        } else if (note > 127) {
+          note = 127;
+        }
+        m_last[r][i] = note;
+      }
+    }
+  }
+
   // Reshapes the chord-tone members of reqs[0..n) for `role` under `policy`,
   // updating the remembered voicing. kAsWritten is identity (reproduces today's
   // output exactly); kLead re-octaves each chord tone toward the previous

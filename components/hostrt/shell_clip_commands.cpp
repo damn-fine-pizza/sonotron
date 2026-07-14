@@ -15,36 +15,10 @@ using namespace shell_detail;
 
 namespace {
 
-// Parses an optional trailing `quantize <n>` at token index `at` (one past
-// the id/scene number). Absent -> Boundary::kImmediate. n == 0 -> immediate,
-// n == 1 -> next bar, n > 1 -> next N bars (n_bars clamped to 255, the
-// Command field's own width).
-bool parse_quantize_suffix(const std::vector<std::string>& t, std::size_t at, Boundary& boundary,
-                           std::uint8_t& n_bars, std::string& error) {
-  boundary = Boundary::kImmediate;
-  n_bars = 1;
-  if (at >= t.size()) {
-    return true;
-  }
-  if (t[at] != "quantize" || at + 1 >= t.size()) {
-    error = "usage: ... quantize <n>";
-    return false;
-  }
-  std::uint64_t n = 0;
-  if (!parse_u64(t[at + 1], n)) {
-    error = "bad quantize value: " + t[at + 1];
-    return false;
-  }
-  if (n == 0) {
-    boundary = Boundary::kImmediate;
-  } else if (n == 1) {
-    boundary = Boundary::kNextBar;
-  } else {
-    boundary = Boundary::kNextNBars;
-    n_bars = n > 255 ? static_cast<std::uint8_t>(255) : static_cast<std::uint8_t>(n);
-  }
-  return true;
-}
+// parse_quantize_suffix now lives in shell_internal.hpp/shell_parse.cpp
+// (shell_detail namespace, already `using`-imported below) -- hoisted for
+// Phase-5 Item #9's pad/performance verbs, which share the exact same
+// `quantize <n>` spelling (shell_pad_commands.cpp).
 
 bool parse_clip_id(const std::string& s, std::uint16_t& out, std::string& error) {
   std::uint64_t value = 0;

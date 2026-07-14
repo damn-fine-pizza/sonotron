@@ -40,6 +40,21 @@ class TestEngine {
   const ChordSequencer& sequences() const noexcept { return engine().sequences(); }
   const Arranger& arranger() const noexcept { return engine().arranger(); }
   const ClipMatrix& clips() const noexcept { return engine().clips(); }
+  // Phase-5 Item #9 test seam (Torquato): mirrors clips()' own const+mutable
+  // accessor pair. PadEngine/PerformanceStore state is observed through the
+  // ABI in every functional pad/perf test (test_pad.cpp/test_performance.cpp)
+  // EXCEPT the atomicity tests, which need to inject a deliberately INVALID
+  // Performance directly (capture_performance() can never itself produce an
+  // out-of-range field, so the only way to exercise apply_performance's
+  // validate-first-apply-nothing guard is to bypass capture and write a bad
+  // record straight into the store). Pure forwarding to Engine::performances(),
+  // which is already public production API -- no new logic, no behavior
+  // change; only extends this test-only wrapper's surface.
+  const PerformanceStore& performances() const noexcept { return engine().performances(); }
+  PerformanceStore& performances() noexcept { return engine().performances(); }
+  // Phase-6 Theme 3 Item #4: pure forwarding to Engine::pad_bank(), same
+  // precedent as performances() above.
+  std::uint16_t pad_bank() const noexcept { return engine().pad_bank(); }
 
   void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
     m_runtime.stage().push_midi_in(port, bytes, sink);

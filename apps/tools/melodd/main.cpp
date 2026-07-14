@@ -11,9 +11,12 @@
 //
 // HOST-ONLY. This binary talks to melodd::Synth through raw MIDI bytes only
 // -- it links neither arrangrr nor hostrt (D43: a realizer does not know its
-// callers). The documented in-process follow-up (GUI/daemon feeding
-// arrangrr's OutEvent stream directly to a melodd::Synth, no ALSA
-// round-trip) is not this slice; see components/melodd/README.md.
+// callers). Its own MIDI decode (dispatch_message() below) and
+// apps/gui-sonotron's in-process peer (gui_sonotron_audio::AudioEngine,
+// Phase-6 Theme 2, docs/phase6-design-reviews.md "Audio in the standalone
+// GUI") both funnel into the ONE shared melodd::dispatch_midi_message()
+// entry point (components/melodd/include/melodd/dispatch.hpp) instead of
+// each hand-rolling its own MIDI-status switch.
 
 #include <alsa/asoundlib.h>
 #include <miniaudio.h>
@@ -29,17 +32,12 @@
 #include <vector>
 
 #include "common/midi/message.hpp"
+#include "melodd/dispatch.hpp"
 #include "melodd/soundfont_discovery.hpp"
 #include "melodd/synth.hpp"
 
 namespace {
 
-// Fixed device sample rate: miniaudio resamples internally if the physical
-// device prefers a different native rate, so this stays simple and portable
-// -- there is no realtime scheduling on this path to protect from
-// resampling jitter (unlike the core's MIDI timing, melodd is a downstream
-// audio sink; see docs/backlog/melodd-audio-companion.md).
-constexpr int kSampleRate = 44100;
 constexpr const char* kClientName = "melodd";
 constexpr const char* kPortName = "melodd";
 
@@ -62,46 +60,29 @@ void data_callback(ma_device* device, void* output, const void* /*input*/, ma_ui
   app->synth.render(static_cast<float*>(output), static_cast<int>(frame_count));
 }
 
+// Decodes raw ALSA-delivered bytes into an arrangrr::MidiMessage (dropping
+// anything shorter than its status byte's own data length --
+// arrangrr::midi::data_length, common/midi/message.hpp -- i.e. a malformed/
+// truncated packet, exactly as the previous per-type length guards did) and
+// hands it to melodd::dispatch_midi_message, the shared decode both this
+// binary and gui_sonotron_audio now call (Phase-6 Theme 2 design review,
+// Decision 5).
 void dispatch_message(AppState& app, const std::uint8_t* bytes, long len) {
   if (len < 1 || !arrangrr::midi::is_channel_voice(bytes[0])) {
     return;
   }
-  const int channel = bytes[0] & 0x0F;
-  const std::uint8_t type = static_cast<std::uint8_t>(bytes[0] & 0xF0);
+  const long needed = 1 + arrangrr::midi::data_length(bytes[0]);
+  if (len < needed) {
+    return;
+  }
+  const arrangrr::MidiMessage msg{
+      .status = bytes[0],
+      .d1 = bytes[1],
+      .d2 = needed >= 3 ? bytes[2] : std::uint8_t{0},
+  };
 
   std::lock_guard<std::mutex> lock(app.mutex);
-  switch (type) {
-    case arrangrr::midi::kNoteOn:
-      if (len >= 3) {
-        app.synth.note_on(channel, bytes[1], bytes[2]);
-      }
-      break;
-    case arrangrr::midi::kNoteOff:
-      if (len >= 3) {
-        app.synth.note_off(channel, bytes[1]);
-      }
-      break;
-    case arrangrr::midi::kProgramChange:
-      if (len >= 2) {
-        app.synth.program_change(channel, bytes[1]);
-      }
-      break;
-    case arrangrr::midi::kPitchBend:
-      if (len >= 3) {
-        const int value14 = (static_cast<int>(bytes[2]) << 7) | bytes[1];
-        app.synth.pitch_bend(channel, value14);
-      }
-      break;
-    case arrangrr::midi::kControlChange:
-      // Not required by the first-slice spec, but TinySoundFont routes it
-      // for free (sustain, bank-select, all-notes-off...).
-      if (len >= 3) {
-        app.synth.control_change(channel, bytes[1], bytes[2]);
-      }
-      break;
-    default:
-      break;
-  }
+  melodd::dispatch_midi_message(app.synth, msg);
 }
 
 }  // namespace
@@ -127,7 +108,7 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  AppState app(kSampleRate);
+  AppState app(melodd::kDefaultSampleRate);
   std::string error;
   if (!app.synth.load_soundfont(soundfont, error)) {
     std::fprintf(stderr, "melodd: %s\n", error.c_str());
@@ -162,7 +143,7 @@ int main(int argc, char** argv) {
   ma_device_config config = ma_device_config_init(ma_device_type_playback);
   config.playback.format = ma_format_f32;
   config.playback.channels = 2;
-  config.sampleRate = kSampleRate;
+  config.sampleRate = melodd::kDefaultSampleRate;
   config.dataCallback = data_callback;
   config.pUserData = &app;
 

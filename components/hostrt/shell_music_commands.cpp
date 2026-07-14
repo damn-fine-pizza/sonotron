@@ -465,6 +465,27 @@ bool Shell::cmd_groove(const std::vector<std::string>& t, std::string& error) {
   return true;
 }
 
+// `transpose <-12..12>` — Phase-6 Theme 3 Item #1 (docs/reflections/phase6-
+// theme3-master-transpose-scope.md): the live global transpose, a signed
+// semitone offset applied late (the absolute note number) at both the
+// arranger and the chord engine. The engine itself is the source of truth
+// for the [-12, +12] bound (Engine::cmd_master_transpose); this parse only
+// rejects an unparsable token, matching seq_transpose's own +/-N shape.
+bool Shell::cmd_transpose(const std::vector<std::string>& t, std::string& error) {
+  char* end = nullptr;
+  const long semitones = std::strtol(t[1].c_str(), &end, 10);
+  if (end == nullptr || *end != '\0' || semitones < -12 || semitones > 12) {
+    error = "bad transpose (-12..12): " + t[1];
+    return false;
+  }
+  Command c;
+  c.op = Op::kSet;
+  c.param = Param::kMasterTranspose;
+  c.a = static_cast<std::int32_t>(semitones);
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
 bool Shell::cmd_arp(const std::vector<std::string>& t, std::string& error) {
   const std::string& sub = t[1];
   auto send = [&](ArpField field, std::int32_t value) {

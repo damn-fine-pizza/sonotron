@@ -1,10 +1,19 @@
 #include "arrangrr/engine.hpp"
 
+#include <cstring>  // std::memcpy: PerfInsert::params <-> Insert::Params raw-byte copy (Phase-6
+                    // Theme 3 Item #3) -- Insert::Params is a padding-free 4-byte union
+                    // (insert_chain.hpp's own static_assert(sizeof(Insert) == 6) proves it), so
+                    // this is NOT the "never memcpy the record" case GrooveParams motivates.
+
 // Binary-ABI command handling (D26), split per domain: the dispatch is a
 // ten-line switch, each family owns its validation and warns.
 
 namespace arrangrr {
 
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
 void Engine::push_command(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kTransportTempo:
@@ -71,6 +80,25 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kSceneQuantize:
       cmd_clip(cmd, sink);
       break;
+    case Param::kPadAssign:
+    case Param::kPadTrigger:
+    case Param::kPadRelease:
+    case Param::kPadBankSelect:
+      cmd_pad(cmd, sink);
+      break;
+    case Param::kPerformanceStore:
+    case Param::kPerformanceRecall:
+      cmd_perf(cmd, sink);
+      break;
+    case Param::kFxSet:
+    case Param::kFxParam:
+    case Param::kFxEnable:
+    case Param::kFxClear:
+      cmd_fx(cmd, sink);
+      break;
+    case Param::kMasterTranspose:
+      cmd_master_transpose(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -135,6 +163,21 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
       });
       m_chorddet.clear();  // every key is up now; the latched chord stays (memory)
       m_arp.panic();       // drop any held/latched arp notes
+      // Phase-6 Theme 4 (5220): drop every role's own arp-insert chord too.
+      m_arranger.reset_role_arps();
+      // Torquato finding 3: Panic silences the WIRE via NoteTracker above but
+      // used to never touch m_pads -- a kToggle (or kHold) pad left
+      // PadRuntime::on == true after the wire went silent needed a second
+      // trigger to sound again (kToggle's flip would read the stale `on`
+      // and turn it back OFF instead of sounding). Reset every pad's runtime
+      // on-state here so the bookkeeping matches what Panic just did to the
+      // wire, for every PadType uniformly (not just kDrum/kCC -- any
+      // kToggle/kHold pad's `on` flag is equally stale after a panic).
+      for (std::size_t i = 0; i < kMaxPads; ++i) {
+        if (PadRuntime* rt = m_pads.runtime(i); rt != nullptr) {
+          rt->on = false;
+        }
+      }
       flush(sink);
       break;
     case Param::kRouteAdd: {
@@ -286,6 +329,7 @@ void Engine::chord_input_zone(const Command& cmd, EventSink sink) {
   }
   set_input_zone(static_cast<std::uint8_t>(cmd.a), static_cast<InputZone>(cmd.b));
 }
+// GCOVR_EXCL_STOP
 
 void Engine::chord_play(const Command& cmd, EventSink sink) {
   const auto vel = static_cast<std::uint8_t>(cmd.c);
@@ -362,6 +406,10 @@ void Engine::chord_play(const Command& cmd, EventSink sink) {
   flush(sink);
 }
 
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
 void Engine::cmd_seq(const Command& cmd, EventSink sink) {
   switch (cmd.param) {
     case Param::kSeqNew:
@@ -646,6 +694,27 @@ void Engine::cmd_voice(const Command& cmd, EventSink sink) {
   flush(sink);
 }
 
+// Phase-6 Theme 3 Item #1 (global transpose, docs/reflections/phase6-theme3-
+// master-transpose-scope.md): kMasterTranspose sets a signed semitone offset,
+// validated/rejected outside the owner's locked [-12, +12] UI range (the same
+// reject-not-clamp discipline cmd_voice's port/channel bounds check uses
+// above). Propagated to BOTH note-emitting paths the design traces -- the
+// Arranger's own resolve() (the band) and ChordEngine::sound() (the pressed/
+// pad chord) -- so they move together; the followed/detected chord and
+// Timeline step-track literal notes are untouched by construction (neither
+// reads master_transpose at all).
+void Engine::cmd_master_transpose(const Command& cmd, EventSink sink) {
+  if (cmd.a < -12 || cmd.a > 12) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto semitones = static_cast<std::int8_t>(cmd.a);
+  m_arranger.set_master_transpose(semitones);
+  m_chords.set_master_transpose(semitones);
+  sink(OutEvent::param_state(Param::kMasterTranspose, 0, static_cast<std::uint8_t>(semitones), 0,
+                             m_now));
+}
+
 // Live arpeggiator: kArp sets one field (kEnabled toggles capture on the input
 // port; the rest are engine params); kArpOut sets the output route.
 void Engine::cmd_arp(const Command& cmd, EventSink sink) {
@@ -768,6 +837,7 @@ void Engine::clip_request(std::size_t id, LaunchState target, const Command& cmd
       target == LaunchState::kPlaying ? LaunchState::kArmed : LaunchState::kQueuedStop;
   sink(OutEvent::clip(wire_id, static_cast<std::uint8_t>(pending), m_now));
 }
+// GCOVR_EXCL_STOP
 
 void Engine::apply_clip_content(const Clip& clip, LaunchState target, EventSink sink) {
   switch (clip.kind) {
@@ -816,5 +886,638 @@ void Engine::fire_clips(Tick transport_tick, EventSink sink) {
                         m_now));
   });
 }
+
+// Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+// Performance"): pad banks are WRAPPER-ONLY -- cmd_pad dispatches the 3
+// verbs; fire_pad is the ONE place that translates a fired pad into a call on
+// the verb it wraps (clip_request/clip_scene_launch/Arranger::request/
+// perf_recall), mirroring apply_clip_content's own placement for the clip
+// primitive. PadEngine itself never touches Arranger/ClipMatrix/
+// PerformanceStore (scope tripwire, same discipline as ClipMatrix).
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
+void Engine::cmd_pad(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kPadAssign:
+      pad_assign(cmd, sink);
+      break;
+    case Param::kPadTrigger:
+      pad_trigger(cmd, sink);
+      break;
+    case Param::kPadBankSelect:
+      pad_bank_select(cmd, sink);
+      break;
+    case Param::kPadRelease:
+    default:
+      pad_release(cmd, sink);
+      break;
+  }
+}
+
+// Phase-6 Theme 3 Item #4: mirrors cmd_master_transpose's own validate-or-
+// reject shape (bad_argument, state unchanged on reject).
+void Engine::pad_bank_select(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPadBanks) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  m_pad_bank = static_cast<std::uint16_t>(cmd.a);
+  sink(OutEvent::param_state(Param::kPadBankSelect, 0, static_cast<std::uint8_t>(m_pad_bank), 0,
+                             m_now));
+}
+
+// Host/script-only registration (no L1 grammar of its own beyond `pad
+// assign`, shell_pad_commands.cpp): a = type | (mode << 8) | (sync << 16) |
+// (pitch << 24); b = dest_port | (dest_channel << 8) | (n_bars << 16);
+// c = source_idx | (source_aux << 24).
+void Engine::pad_assign(const Command& cmd, EventSink sink) {
+  const auto packed_a = static_cast<std::uint32_t>(cmd.a);
+  const auto packed_b = static_cast<std::uint32_t>(cmd.b);
+  const auto packed_c = static_cast<std::uint32_t>(cmd.c);
+  const auto type_v = packed_a & 0xFFu;
+  const auto mode_v = (packed_a >> 8) & 0xFFu;
+  const auto sync_v = (packed_a >> 16) & 0xFFu;
+  const auto pitch_v = (packed_a >> 24) & 0xFFu;
+  const auto dest_port = packed_b & 0xFFu;
+  const auto dest_channel = (packed_b >> 8) & 0xFFu;
+  const auto n_bars = (packed_b >> 16) & 0xFFu;
+  const auto source_idx = packed_c & 0xFFFFu;
+  const auto source_aux = (packed_c >> 24) & 0xFFu;
+  const bool ok = type_v < static_cast<std::uint32_t>(kPadTypeCount) &&
+                  mode_v <= static_cast<std::uint32_t>(PadMode::kToggle) &&
+                  sync_v <= static_cast<std::uint32_t>(Boundary::kNextNBars) &&
+                  pitch_v <= static_cast<std::uint32_t>(PadPitch::kTransposeWithChord) &&
+                  dest_port < kMaxPorts && dest_channel <= 15;
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  Pad pad;
+  pad.type = static_cast<PadType>(type_v);
+  pad.mode = static_cast<PadMode>(mode_v);
+  pad.sync = static_cast<Boundary>(sync_v);
+  pad.pitch = static_cast<PadPitch>(pitch_v);
+  pad.n_bars = static_cast<std::uint8_t>(n_bars < 1 ? 1 : n_bars);
+  pad.dest_port = static_cast<std::uint8_t>(dest_port);
+  pad.dest_channel = static_cast<std::uint8_t>(dest_channel);
+  pad.source_idx = static_cast<std::uint16_t>(source_idx);
+  pad.source_aux = static_cast<std::uint8_t>(source_aux);
+  if (!m_pads.assign(cmd.idx, pad)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// Mode dispatch: kToggle flips PadRuntime::on and launches/stops accordingly;
+// every other mode (kOneShot/kLoop/kHold) launches -- kHold's stop half lives
+// in pad_release below.
+void Engine::pad_trigger(const Command& cmd, EventSink sink) {
+  const Pad* pad = m_pads.get(cmd.idx);
+  PadRuntime* rt = m_pads.runtime(cmd.idx);
+  if (pad == nullptr || rt == nullptr) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  if (pad->mode == PadMode::kToggle) {
+    rt->on = !rt->on;
+    fire_pad(*pad, rt->on ? LaunchState::kPlaying : LaunchState::kStopped, cmd.idx, sink);
+    return;
+  }
+  rt->on = true;
+  fire_pad(*pad, LaunchState::kPlaying, cmd.idx, sink);
+}
+
+void Engine::pad_release(const Command& cmd, EventSink sink) {
+  const Pad* pad = m_pads.get(cmd.idx);
+  PadRuntime* rt = m_pads.runtime(cmd.idx);
+  if (pad == nullptr || rt == nullptr) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  if (pad->mode != PadMode::kHold) {
+    return;  // kOneShot/kLoop/kToggle: release is a no-op (toggle already acted at trigger)
+  }
+  rt->on = false;
+  fire_pad(*pad, LaunchState::kStopped, cmd.idx, sink);
+}
+// GCOVR_EXCL_STOP
+
+void Engine::fire_pad(const Pad& pad, LaunchState target, std::uint16_t pad_id, EventSink sink) {
+  // pad.dest_port/dest_channel are RESERVED for every PadType below EXCEPT
+  // kDrum/kCC (see pad_bank.hpp's own header comment): those fan out to an
+  // EXISTING verb that already owns its own destination (a clip's role
+  // route, the arranger's style routes, or a Performance's captured routes).
+  // kDrum/kCC consume dest_port/dest_channel directly -- the pad IS its own
+  // destination (Decision 2, pad-owned, locked by the owner). pad.pitch is
+  // ignored by every PadType, kDrum/kCC included (a raw note/CC has no
+  // "transpose with chord" reading).
+  Command boundary_cmd;
+  boundary_cmd.boundary = pad.sync;
+  boundary_cmd.n_bars = pad.n_bars;
+  switch (pad.type) {
+    case PadType::kPhrase:
+    case PadType::kChord:
+      // Pads that wrap clips reuse ClipMatrix quantization entirely: the SAME
+      // clip_request path clip/launch/stop verbs use, addressed by a physical
+      // pad instead of a GUI cell click.
+      clip_request(pad.source_idx, target, boundary_cmd, sink);
+      break;
+    case PadType::kSceneColumn:
+      if (target == LaunchState::kPlaying) {
+        boundary_cmd.idx = pad.source_idx;
+        clip_scene_launch(boundary_cmd, sink);
+      }
+      // No defined "stop a scene column" effect (clip_scene_launch's own
+      // scope); a kHold/kToggle release is a bookkeeping-only no-op here.
+      break;
+    case PadType::kVariation:
+    case PadType::kFill:
+      if (target == LaunchState::kPlaying) {
+        if (pad.source_idx >= kSectionTypeCount) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+          break;
+        }
+        // Arranger::request has no N-bar quantize primitive (only
+        // immediate-vs-next-bar): kNextNBars degrades to next-bar here,
+        // unlike Phrase/Chord/SceneColumn pads above, which route through
+        // ClipMatrix's own true N-bar boundary window.
+        const bool immediate = pad.sync == Boundary::kImmediate || !m_transport.playing();
+        if (!m_arranger.request(static_cast<SectionType>(pad.source_idx), immediate)) {
+          sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+        } else if (immediate) {
+          sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+        }
+      }
+      break;
+    case PadType::kPerformance:
+      if (target == LaunchState::kPlaying) {
+        boundary_cmd.idx = pad.source_idx;
+        perf_recall(boundary_cmd, sink);
+      }
+      break;
+    // Phase-6 Theme 3 Item #2: direct emission, split into their own
+    // functions below to keep fire_pad's own cognitive complexity under the
+    // clang-tidy gate (same discipline as every other case-handler split in
+    // this class).
+    // Torquato finding 1: pad.sync/pad.n_bars used to be read only by
+    // pad_assign's own structural validation and then silently dropped --
+    // fire_pad_drum/fire_pad_cc consulted `target` alone. Honor it exactly
+    // like kVariation/kFill just above: kImmediate (or transport stopped)
+    // fires now; anything else arms. kNextBar and kNextNBars both arm for
+    // ONE bar -- pad.n_bars is intentionally not read here, matching
+    // kVariation/kFill's own documented kNextNBars-degrades-to-next-bar
+    // behavior (neither Arranger::request nor this direct-emission path has
+    // a true N-bar primitive; "match their exact behavior, don't invent a
+    // third").
+    case PadType::kDrum:
+    case PadType::kCC: {
+      const bool immediate = pad.sync == Boundary::kImmediate || !m_transport.playing();
+      if (immediate) {
+        if (pad.type == PadType::kDrum) {
+          fire_pad_drum(pad, target, sink);
+        } else {
+          fire_pad_cc(pad, target, sink);
+        }
+      } else if (pad_id < kMaxPads) {
+        m_pad_latch[pad_id].arm(1);
+        m_pad_pending_target[pad_id] = target;
+      }
+      break;
+    }
+    case PadType::kNone:
+    default:
+      break;
+  }
+}
+
+// Semantic range checks (note/velocity > 127) happen HERE, at fire time --
+// pad_assign only validates structural bounds, mirroring the kVariation/kFill
+// precedent in fire_pad above. Emits via the SAME schedule_or_warn choke
+// point every other note-emitting path already shares (flush()'s existing
+// NoteTracker::observe + host echo cover panic-safety and echo for free, no
+// bespoke tracking).
+void Engine::fire_pad_drum(const Pad& pad, LaunchState target, EventSink sink) {
+  if (pad.source_idx > 127 || pad.source_aux > 127) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto note = static_cast<std::uint8_t>(pad.source_idx);
+  if (target == LaunchState::kPlaying) {
+    const std::uint8_t vel = pad.source_aux != 0 ? pad.source_aux : kPadDrumDefaultVelocity;
+    // Torquato finding 2: a kOneShot/kLoop retrigger before its own fixed
+    // gate elapses used to be cut short by the FIRST trigger's now-stale
+    // scheduled note-off. cancel_note_off is the scheduler's own dedicated
+    // retrigger primitive (§9.B, out_scheduler.hpp) -- fire_timeline's
+    // schedule_pattern already uses it for exactly this same-note-overlap
+    // case. Tombstone any pending off for this (port, channel, note) due at
+    // or after now and re-anchor it to fire right now, immediately before
+    // the new note-on (D29 sorts NoteOff before NoteOn on the same tick) --
+    // the stale off no longer lands 50-120 ticks late and truncates the
+    // retriggered hit. A first trigger (nothing pending yet) leaves
+    // cancel_note_off a no-op, so this is byte-identical to the pre-fix path
+    // for every non-retrigger case.
+    if ((pad.mode == PadMode::kOneShot || pad.mode == PadMode::kLoop) &&
+        m_scheduler.cancel_note_off(pad.dest_port, pad.dest_channel, note, m_now)) {
+      schedule_or_warn(pad.dest_port, m_now, MidiMessage::note_off(pad.dest_channel, note), sink);
+    }
+    schedule_or_warn(pad.dest_port, m_now, MidiMessage::note_on(pad.dest_channel, note, vel), sink);
+    // kOneShot/kLoop (folded together, Decision 3): pad_release is already a
+    // no-op for both, so nothing else would ever send the matching note-off
+    // -- schedule it here, at the fixed gate. kHold/kToggle's note-off comes
+    // from pad_release/the toggle-off call below instead (target ==
+    // kStopped), no gate needed there.
+    if (pad.mode == PadMode::kOneShot || pad.mode == PadMode::kLoop) {
+      schedule_or_warn(pad.dest_port, m_now + kPadDrumOneShotGateTicks,
+                       MidiMessage::note_off(pad.dest_channel, note), sink);
+    }
+  } else {
+    schedule_or_warn(pad.dest_port, m_now, MidiMessage::note_off(pad.dest_channel, note), sink);
+  }
+  // Immediate echo + panic-safety NOW, mirroring chord_play's own
+  // schedule-then-flush precedent for a "do" verb that sounds on the spot --
+  // the deferred kOneShot note-off (if any) stays queued, it is not yet due.
+  // Localized to kDrum/kCC only: no other PadType's fire_pad case schedules
+  // anything itself, so their behavior/goldens are untouched.
+  flush(sink);
+}
+
+void Engine::fire_pad_cc(const Pad& pad, LaunchState target, EventSink sink) {
+  if (pad.source_idx > 127 || pad.source_aux > 127) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto controller = static_cast<std::uint8_t>(pad.source_idx);
+  // Decision 4: kHold/kToggle send the on-value on kPlaying and a hardcoded 0
+  // on kStopped (no spare Pad byte for a custom off-value); kOneShot/kLoop
+  // only ever reach kPlaying (pad_release is a no-op for both), so they fire
+  // the on-value once and stay there, by design.
+  const std::uint8_t value = target == LaunchState::kPlaying ? pad.source_aux : 0;
+  schedule_or_warn(pad.dest_port, m_now, MidiMessage::cc(pad.dest_channel, controller, value),
+                   sink);
+  flush(sink);  // immediate echo + panic-safety, same reasoning as fire_pad_drum above
+}
+
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention. Phase-5 Item #9: the Performance store/recall primitive.
+// cmd_perf dispatches the 2 verbs; perf_store captures the live rig into a slot; perf_recall
+// validates + applies immediately or arms the shared BoundaryLatch (Corelli fix #2) for a quantized
+// recall.
+void Engine::cmd_perf(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kPerformanceStore:
+      perf_store(cmd, sink);
+      break;
+    case Param::kPerformanceRecall:
+    default:
+      perf_recall(cmd, sink);
+      break;
+  }
+}
+
+void Engine::perf_store(const Command& cmd, EventSink sink) {
+  const Performance perf = capture_performance();
+  if (!m_perfs.store(cmd.idx, perf)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+void Engine::perf_recall(const Command& cmd, EventSink sink) {
+  if (m_perfs.get(cmd.idx) == nullptr) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const bool immediate = cmd.boundary == Boundary::kImmediate || !m_transport.playing();
+  if (immediate) {
+    apply_performance(*m_perfs.get(cmd.idx), sink);
+    return;
+  }
+  const std::uint8_t n_bars = cmd.boundary == Boundary::kNextNBars ? cmd.n_bars : 1;
+  m_perf_recall.arm(n_bars);
+  m_perf_recall_slot = cmd.idx;
+}
+// GCOVR_EXCL_STOP
+
+// Snapshots the live rig into a Performance. Per-role backing reads
+// Arranger::part_info (already-shipped, unchanged) for routing/mute/solo;
+// the rest reads the equivalent live accessor each single-field ABI command
+// already mutates (groove/style_id/tempo/key/chord-mode/chord-follow/the
+// currently-playing chord sequence).
+Performance Engine::capture_performance() const {
+  Performance perf;
+  constexpr std::uint8_t kRoles = static_cast<std::uint8_t>(TrackRole::kCc) + 1;
+  static_assert(kRoles == 10);
+  for (std::uint8_t r = 0; r < kRoles; ++r) {
+    const auto role = static_cast<TrackRole>(r);
+    const Arranger::PartInfo info = m_arranger.part_info(role);
+    if (info.muted) {
+      perf.track_mute_mask |= (1u << r);
+    }
+    if (info.soloed) {
+      perf.track_solo_mask |= (1u << r);
+    }
+    perf.routes[r] = PerfRoute{.port = info.port,
+                               .channel = info.channel,
+                               .enabled = info.routed ? std::uint8_t{1} : std::uint8_t{0}};
+    // Phase-6 Theme 3 Item #3 (P1): snapshot the role's live FX chain, one
+    // PerfInsert per slot. Insert::Params' 4 raw bytes copy verbatim -- see
+    // this file's own top-of-file comment on why memcpy is safe here.
+    const InsertChain& chain = m_arranger.chain(role);
+    for (std::size_t slot = 0; slot < kMaxInserts; ++slot) {
+      const Insert* ins = chain.get(slot);
+      PerfInsert& out = perf.insert_chains[r][slot];
+      out.type = static_cast<std::uint8_t>(ins->type);
+      out.enabled = ins->enabled ? std::uint8_t{1} : std::uint8_t{0};
+      std::memcpy(out.params, &ins->params, sizeof(out.params));
+    }
+  }
+  perf.groove = m_arranger.groove_params();
+  perf.style_id = m_arranger.style_id();
+  perf.tempo_x100 = static_cast<std::uint16_t>(m_transport.bpm());
+  // Phase-6 Theme 3 Item #3 (P3): master_transpose is now a real
+  // std::int16_t field -- a plain widening copy, no reinterpret hack.
+  perf.master_transpose = m_arranger.master_transpose();
+  perf.pad_bank_id = m_pad_bank;
+  perf.chord_sequence_id =
+      m_seq.playing() ? static_cast<std::uint16_t>(m_seq.current_index()) : std::uint16_t{0xFFFF};
+  perf.controller_map_id = 0xFFFF;   // unbuilt today; reserved
+  perf.routing_profile_id = 0xFFFF;  // Phase-6 Theme 3 Item #3 (P2): unbuilt today; reserved
+  perf.variation = static_cast<std::uint8_t>(m_arranger.current());
+  perf.chord_mode = static_cast<std::uint8_t>(m_chords.mode());
+  perf.chord_follow = static_cast<std::uint8_t>(m_chords.follow());
+  perf.key_root = m_chords.key().root_pc;
+  perf.key_mode = static_cast<std::uint8_t>(m_chords.key().mode);
+  // name is left zero-filled: the core ABI never carries a string (D26); a
+  // host tool names a slot through PerformanceStore::get()'s mutable overload.
+  return perf;
+}
+
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention. SEMANTIC ATOMICITY (Corelli recommendation): every
+// referenced id is validated FIRST; apply_performance() below applies NOTHING when this returns
+// false.
+//
+// QA gate restoration (Phase-5 Item #9 follow-up): the actual bounds-check
+// logic moved to the free, pure, Engine-free arrangrr::perf::validate()
+// (arrangrr/perf/performance.hpp, defined in src/performance.cpp) so it is
+// unit-testable in isolation -- this member is now a thin forwarder that
+// supplies the ONE live value that check needs (ChordSequencer::count()).
+// Behavior is byte-identical to the pre-extraction body.
+bool Engine::validate_performance(const Performance& perf) const noexcept {
+  return perf::validate(perf, m_seq.count());
+}
+// GCOVR_EXCL_STOP
+
+// Applies a validated Performance ATOMICALLY: style/variation land together,
+// then routes/mute/solo/groove/tempo/key/chord-mode/chord-follow/
+// chord-sequence, in the order the design spec fixes. Called EITHER
+// immediately (perf_recall's own immediate path) OR from
+// apply_pending_performance_recall exactly at the bar boundary the
+// BoundaryLatch armed for -- either way `true` (immediate, Arranger-side) is
+// always correct here: by the time this runs, the caller is already AT the
+// boundary that matters.
+bool Engine::apply_performance(const Performance& perf, EventSink sink) {
+  if (!validate_performance(perf)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return false;
+  }
+  constexpr std::uint8_t kRoles = static_cast<std::uint8_t>(TrackRole::kCc) + 1;
+  if (perf.style_id != 0xFFFF) {
+    // QA regression fix (test_performance_style_id_regression.cpp): NOT
+    // request_style() -- that entry point only ever receives a raw Style*,
+    // never a table index, so its immediate branch unconditionally resets
+    // Arranger::style_id() to 0xFFFF ("pointer-based, no known index",
+    // Corelli fix #1). That is correct for the live `style switch` verb,
+    // which never had an index to preserve, but WRONG here:
+    // apply_performance already holds the concrete, validate_performance()-
+    // checked index (perf.style_id). Arranger::load(idx) is the ONE entry
+    // point that sets a concrete style_id. Recall is always applied
+    // immediately (see this method's own header comment above), so load()'s
+    // own section/groove reset is overwritten right below by the explicit
+    // request()/set_groove() calls -- byte-identical musical effect to the
+    // old request_style() path, with the style_id metadata now preserved.
+    m_arranger.load(static_cast<std::uint8_t>(perf.style_id));
+    m_arranger.request(static_cast<SectionType>(perf.variation), /*immediate=*/true);
+  } else {
+    m_arranger.request(static_cast<SectionType>(perf.variation), /*immediate=*/true);
+  }
+  for (std::uint8_t r = 0; r < kRoles; ++r) {
+    const auto role = static_cast<TrackRole>(r);
+    const PerfRoute& route = perf.routes[r];
+    m_arranger.set_route(role, route.port, route.channel);
+    m_arranger.set_route_enabled(role, route.enabled != 0);
+    m_arranger.set_mute(role, (perf.track_mute_mask & (1u << r)) != 0);
+    m_arranger.set_solo(role, (perf.track_solo_mask & (1u << r)) != 0);
+    // Phase-6 Theme 3 Item #3 (P1): restore the role's FX chain slot-for-slot,
+    // byte-exact -- validate_performance() above already bounded every
+    // insert_chains[r][slot].type to a real InsertType, so this is a plain
+    // restore, no further clamping (mirrors pad_bank_id's own "validated
+    // above, plain restore here" precedent).
+    for (std::size_t slot = 0; slot < kMaxInserts; ++slot) {
+      const PerfInsert& in = perf.insert_chains[r][slot];
+      Insert ins;
+      ins.type = static_cast<InsertType>(in.type);
+      ins.enabled = in.enabled != 0;
+      std::memcpy(&ins.params, in.params, sizeof(ins.params));
+      m_arranger.restore_fx(role, slot, ins);
+    }
+  }
+  m_arranger.set_groove(perf.groove);
+  apply_arranger_voices(sink);           // the (possibly new) style's voices land with the recall
+  m_transport.set_bpm(perf.tempo_x100);  // out-of-range silently ignored (Transport::set_bpm)
+  // Phase-6 Theme 3 Item #3 (P3): master_transpose is a real std::int16_t,
+  // already bounded to [-12, +12] by validate_performance() above, so the
+  // narrowing cast back to Arranger/ChordEngine's own std::int8_t is safe;
+  // propagated to both note-emitting paths, exactly like cmd_master_transpose.
+  const auto transpose = static_cast<std::int8_t>(perf.master_transpose);
+  m_arranger.set_master_transpose(transpose);
+  m_chords.set_master_transpose(transpose);
+  // Phase-6 Theme 3 Item #4: restore the active pad-bank view cursor.
+  // validate_performance() above already rejected an out-of-range
+  // pad_bank_id, so this is a plain restore, no clamp. No echo event here
+  // (mirrors every other silently-restored field in this function; only
+  // emit_performance_confirmation's own explicit set below produces
+  // events) -- keeps existing recall goldens byte-identical.
+  m_pad_bank = perf.pad_bank_id;
+  const Key key{.root_pc = perf.key_root, .mode = static_cast<Mode>(perf.key_mode)};
+  m_chords.set_key(key);
+  m_chorddet.set_key(key);  // scale-aware single-finger reads the same key
+  m_chords.set_mode(static_cast<ChordMode>(perf.chord_mode));
+  const bool single = static_cast<ChordMode>(perf.chord_mode) == ChordMode::kSingle;
+  m_chorddet.set_min_notes(single ? 1 : kMinChordNotes);
+  m_chorddet.set_single_finger(single);
+  m_chords.set_follow(static_cast<ChordFollow>(perf.chord_follow));
+  if (perf.chord_sequence_id != 0xFFFF) {
+    if (m_seq.use(perf.chord_sequence_id) && m_seq.play(m_transport.tick())) {
+      fire_chord_seq(m_transport.tick(), sink);
+    }
+  }
+  emit_performance_confirmation(perf, sink);
+  flush(sink);
+  return true;
+}
+
+// Compact confirmation (Corelli recommendation): kSection + the SAME
+// kParamState echoes the on-connect state dump replays (apps/sonotron-server/
+// main.cpp's send_state_dump), so a client re-renders every domain a recall
+// just changed without needing a bespoke "performance changed" event.
+void Engine::emit_performance_confirmation(const Performance& perf, EventSink sink) {
+  constexpr std::uint8_t kRoles = static_cast<std::uint8_t>(TrackRole::kCc) + 1;
+  sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+  if (perf.style_id != 0xFFFF) {
+    sink(OutEvent::param_state(Param::kStyleLoad, 0,
+                               static_cast<std::uint8_t>(perf.style_id & 0xFF),
+                               static_cast<std::uint8_t>((perf.style_id >> 8) & 0xFF), m_now));
+  }
+  for (std::uint8_t r = 0; r < kRoles; ++r) {
+    const auto role = static_cast<TrackRole>(r);
+    sink(OutEvent::param_state(Param::kPartMute, r, m_arranger.muted(role) ? 1 : 0, 0, m_now));
+    sink(OutEvent::param_state(Param::kPartSolo, r, m_arranger.soloed(role) ? 1 : 0, 0, m_now));
+  }
+  const GrooveParams& g = m_arranger.groove_params();
+  sink(OutEvent::param_state(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kSwing),
+                             g.swing, 0, m_now));
+  sink(OutEvent::param_state(Param::kGroove,
+                             static_cast<std::uint8_t>(GrooveField::kHumanizeTiming),
+                             g.humanize_timing, 0, m_now));
+  sink(OutEvent::param_state(Param::kGroove,
+                             static_cast<std::uint8_t>(GrooveField::kHumanizeVelocity),
+                             g.humanize_velocity, 0, m_now));
+  sink(OutEvent::param_state(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kAccent),
+                             g.accent, 0, m_now));
+  sink(OutEvent::param_state(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kSwingGrid),
+                             g.swing_grid, 0, m_now));
+  sink(OutEvent::param_state(Param::kGroove, static_cast<std::uint8_t>(GrooveField::kQuantize),
+                             g.quantize, 0, m_now));
+  sink(OutEvent::param_state(Param::kChordMode, 0, perf.chord_mode, 0, m_now));
+  sink(OutEvent::param_state(Param::kChordFollow, 0, perf.chord_follow, 0, m_now));
+  sink(OutEvent::param_state(Param::kKeySet, 0, perf.key_root, perf.key_mode, m_now));
+  // The event payload is a single byte; validate_performance() already
+  // bounded master_transpose to [-12, +12], so the low byte alone is always
+  // the full value -- same low-byte extraction as capture/apply above, just
+  // via an explicit uint16_t reinterpret first (never a signed '&', which
+  // -Wsign-conversion correctly flags).
+  const auto transpose_u16 = static_cast<std::uint16_t>(perf.master_transpose);
+  sink(OutEvent::param_state(Param::kMasterTranspose, 0,
+                             static_cast<std::uint8_t>(transpose_u16 & 0xFFu), 0, m_now));
+}
+
+void Engine::apply_pending_performance_recall(EventSink sink) {
+  if (!m_perf_recall.due(m_transport.tick())) {
+    return;
+  }
+  m_perf_recall.clear();
+  if (const Performance* perf = m_perfs.get(m_perf_recall_slot); perf != nullptr) {
+    apply_performance(*perf, sink);
+  }
+}
+
+// Torquato finding 1: mirrors apply_pending_performance_recall exactly, one
+// BoundaryLatch per flat pad slot instead of the single m_perf_recall
+// instance (several kDrum/kCC pads can be armed concurrently for
+// independent boundaries). A pad reassigned to a different type/id between
+// arming and this bar (or removed) is silently skipped -- pad_assign already
+// drops any stale runtime state on a re-assign (PadEngine::assign), and a
+// dangling arm here would otherwise fire against config that no longer
+// matches what the user actually armed.
+void Engine::apply_pending_pad_fires(EventSink sink) {
+  for (std::uint16_t id = 0; id < kMaxPads; ++id) {
+    if (!m_pad_latch[id].due(m_transport.tick())) {
+      continue;
+    }
+    m_pad_latch[id].clear();
+    const Pad* pad = m_pads.get(id);
+    if (pad == nullptr) {
+      continue;
+    }
+    if (pad->type == PadType::kDrum) {
+      fire_pad_drum(*pad, m_pad_pending_target[id], sink);
+    } else if (pad->type == PadType::kCC) {
+      fire_pad_cc(*pad, m_pad_pending_target[id], sink);
+    }
+  }
+}
+
+// GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
+// already-tested subsystem call, optional echo; no independent per-tick musical decision logic
+// (callees fire_*/apply_*/emit_* remain individually gated). Functional-tested per the project's
+// unit/functional/regression convention.
+void Engine::cmd_fx(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kFxSet:
+      fx_set(cmd, sink);
+      break;
+    case Param::kFxParam:
+      fx_param(cmd, sink);
+      break;
+    case Param::kFxEnable:
+      fx_enable(cmd, sink);
+      break;
+    case Param::kFxClear:
+    default:
+      fx_clear(cmd, sink);
+      break;
+  }
+}
+
+// idx = TrackRole. a = slot (0..kMaxInserts-1), b = InsertType. Re-activates
+// the slot with that type's fresh default params (Arranger::set_fx ->
+// InsertChain::set_type).
+void Engine::fx_set(const Command& cmd, EventSink sink) {
+  // Phase-6 Theme 4 (5210/5220): the valid type range widened from
+  // kNoteRepeat(3) to the full kInsertTypeCount(6) -- kGroove/kArp are now
+  // ABI-settable slot types too (see arrangrr/fx/insert_chain.hpp).
+  const bool ok =
+      cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 && cmd.b >= 0 &&
+      cmd.b < static_cast<std::int32_t>(kInsertTypeCount) &&
+      m_arranger.set_fx(static_cast<TrackRole>(cmd.idx), static_cast<std::size_t>(cmd.a),
+                        static_cast<InsertType>(cmd.b));
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// idx = TrackRole. a = slot, b = param id (meaning depends on the slot's
+// CURRENT type -- see InsertChain::set_param), c = value (clamped to the
+// field's own width there).
+void Engine::fx_param(const Command& cmd, EventSink sink) {
+  const bool ok =
+      cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 && cmd.b >= 0 &&
+      cmd.b <= 255 &&
+      m_arranger.set_fx_param(static_cast<TrackRole>(cmd.idx), static_cast<std::size_t>(cmd.a),
+                              static_cast<std::uint8_t>(cmd.b), cmd.c);
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// idx = TrackRole. a = slot, b = 0/1.
+void Engine::fx_enable(const Command& cmd, EventSink sink) {
+  const bool ok = cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 &&
+                  m_arranger.set_fx_enable(static_cast<TrackRole>(cmd.idx),
+                                           static_cast<std::size_t>(cmd.a), cmd.b != 0);
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// idx = TrackRole. a = slot, or -1 = the whole chain.
+void Engine::fx_clear(const Command& cmd, EventSink sink) {
+  if (cmd.idx > static_cast<std::uint16_t>(TrackRole::kCc)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto role = static_cast<TrackRole>(cmd.idx);
+  const bool ok = cmd.a < 0 ? m_arranger.clear_fx(role)
+                            : m_arranger.clear_fx(role, static_cast<std::size_t>(cmd.a));
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+// GCOVR_EXCL_STOP
 
 }  // namespace arrangrr

@@ -378,6 +378,9 @@ class Shell {
   bool cmd_program(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_part(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_groove(const std::vector<std::string>& tokens, std::string& error);
+  // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+  // scope.md): `transpose <-12..12>`, the live global transpose.
+  bool cmd_transpose(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_arp(const std::vector<std::string>& tokens, std::string& error);
   // Phase-5 Item #2 (docs/design/clip-primitive-design.md): the clip launch
   // primitive's L1 grammar (shell_clip_commands.cpp). `clip add` is
@@ -386,6 +389,27 @@ class Shell {
   bool cmd_clip(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_launch(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_stop_clip(const std::vector<std::string>& tokens, std::string& error);
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): the pad-bank + Performance recall L1 grammar
+  // (shell_pad_commands.cpp). `pad assign` is host/script-only registration
+  // (mirrors `clip add`'s own convention, see kPadAssign's abi.hpp comment);
+  // `pad trigger`/`pad release` and `perf store`/`perf recall` ride the ABI;
+  // `perf save`/`perf load` are HOST-ONLY file I/O (Architectural Principle
+  // #2: the core never touches a filesystem) over performance.hpp's
+  // serialize()/deserialize().
+  bool cmd_pad(const std::vector<std::string>& tokens, std::string& error);
+  // `pad assign ...`'s own token-parsing tail, split out of cmd_pad to keep
+  // its cognitive complexity under the clang-tidy gate (same discipline as
+  // every other case-handler split in this codebase). Needs find_port(), a
+  // Shell member, so it stays a member rather than a free function.
+  bool pad_assign_from_tokens(const std::vector<std::string>& tokens, Command& c,
+                              std::string& error);
+  bool cmd_perf(const std::vector<std::string>& tokens, std::string& error);
+  bool perf_save(const std::string& path, std::string& error);
+  bool perf_load(const std::string& path, std::string& error);
+  // Phase-5 Item #10: `fx set|param|enable|clear` — the per-role MIDI-FX
+  // insert chain (shell_fx_commands.cpp).
+  bool cmd_fx(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);

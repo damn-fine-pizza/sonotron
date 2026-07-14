@@ -678,6 +678,9 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   if (cmd == "groove" && t.size() >= 2) {
     return cmd_groove(t, error);
   }
+  if (cmd == "transpose" && t.size() >= 2) {
+    return cmd_transpose(t, error);
+  }
   if (cmd == "arp" && t.size() >= 2) {
     return cmd_arp(t, error);
   }
@@ -689,6 +692,15 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   }
   if (cmd == "stop" && t.size() >= 2 && t[1] == "clip") {
     return cmd_stop_clip(t, error);
+  }
+  if (cmd == "pad" && t.size() >= 2) {
+    return cmd_pad(t, error);
+  }
+  if (cmd == "perf" && t.size() >= 2) {
+    return cmd_perf(t, error);
+  }
+  if (cmd == "fx" && t.size() >= 2) {
+    return cmd_fx(t, error);
   }
   return std::nullopt;
 }

@@ -3,6 +3,9 @@
 
 #include "src/layout_json.hpp"
 
+#include <cstddef>
+#include <string>
+
 #include "test.hpp"
 
 namespace {
@@ -133,6 +136,45 @@ void test_parse_rejects_missing_top_level_brace() {
   CHECK(!error.empty());
 }
 
+// Schema versioning (host-side analog of docs/DESIGN.md §2 principle #8):
+// write_layout() always emits the current schema_version, first field, and
+// it re-parses cleanly to the same value.
+void test_write_layout_emits_current_schema_version_and_round_trips() {
+  const sonotron::Layout original = sonotron::default_layout();
+  CHECK(original.schema_version == sonotron::kLayoutSchemaVersion);
+
+  const std::string text = sonotron::write_layout(original);
+  const std::size_t schema_pos =
+      text.find("\"schema_version\": " + std::to_string(sonotron::kLayoutSchemaVersion));
+  const std::size_t window_pos = text.find("\"window\"");
+  CHECK(schema_pos != std::string::npos);
+  CHECK(window_pos != std::string::npos);
+  CHECK(schema_pos < window_pos);  // schema_version is the first field, ahead of window
+
+  sonotron::Layout reparsed;
+  std::string error;
+  const bool ok = sonotron::parse_layout(text, reparsed, error);
+  CHECK(ok);
+  CHECK(reparsed.schema_version == sonotron::kLayoutSchemaVersion);
+  CHECK(original == reparsed);
+}
+
+// A file with no "schema_version" key at all (the exact stale shape a
+// pre-versioning layout.json has) parses fine -- parse_layout() never
+// fails a file just because a schema_version is missing -- but the field
+// comes back as legacy (0), not "current by default". Interpreting that
+// value is load_or_create_default()'s job (see test_layout_roundtrip.cpp),
+// not the parser's.
+void test_parse_treats_absent_schema_version_as_legacy() {
+  const std::string text = R"({ "window": "sonotron", "zones": [] })";
+
+  sonotron::Layout layout;
+  std::string error;
+  const bool ok = sonotron::parse_layout(text, layout, error);
+  CHECK(ok);
+  CHECK(layout.schema_version == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -145,5 +187,7 @@ int main() {
   test_write_then_parse_round_trips_custom_font_size();
   test_parse_rejects_malformed_json();
   test_parse_rejects_missing_top_level_brace();
+  test_write_layout_emits_current_schema_version_and_round_trips();
+  test_parse_treats_absent_schema_version_as_legacy();
   return sonotron::test::failures();
 }

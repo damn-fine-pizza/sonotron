@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kSceneQuantize(47). Next free id is 48.
+// kNone(0) .. kPadBankSelect(58). Next free id is 59.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -89,6 +89,26 @@ static_assert(static_cast<std::uint16_t>(Param::kClipAdd) == 44);
 static_assert(static_cast<std::uint16_t>(Param::kClipLaunch) == 45);
 static_assert(static_cast<std::uint16_t>(Param::kClipStop) == 46);
 static_assert(static_cast<std::uint16_t>(Param::kSceneQuantize) == 47);
+// Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+// Performance"): pad banks + the Performance one-button recall.
+static_assert(static_cast<std::uint16_t>(Param::kPadAssign) == 48);
+static_assert(static_cast<std::uint16_t>(Param::kPadTrigger) == 49);
+static_assert(static_cast<std::uint16_t>(Param::kPadRelease) == 50);
+static_assert(static_cast<std::uint16_t>(Param::kPerformanceStore) == 51);
+static_assert(static_cast<std::uint16_t>(Param::kPerformanceRecall) == 52);
+// Phase-5 Item #10 (docs/phase5-design-reviews.md "MIDI-FX insert chain"):
+// the per-role insert chain, moved out of the RESERVED block below now that
+// node 5100 is live.
+static_assert(static_cast<std::uint16_t>(Param::kFxSet) == 53);
+static_assert(static_cast<std::uint16_t>(Param::kFxParam) == 54);
+static_assert(static_cast<std::uint16_t>(Param::kFxEnable) == 55);
+static_assert(static_cast<std::uint16_t>(Param::kFxClear) == 56);
+// Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+// scope.md): the global transpose verb, next free id after kFxClear.
+static_assert(static_cast<std::uint16_t>(Param::kMasterTranspose) == 57);
+// Phase-6 Theme 3 Item #4: the active pad-bank view-cursor verb, next free
+// id after kMasterTranspose.
+static_assert(static_cast<std::uint16_t>(Param::kPadBankSelect) == 58);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kClip(8). Next free id is 9.
@@ -132,7 +152,7 @@ static_assert(sizeof(OutEvent) <= 16);
 // --- Protocol version: still v1 (freezing v1 keeps it v1) -------------------
 static_assert(kProtocolVersion == 1);
 
-// --- Reserved MIDI-FX shape (node 5100): the one committed symbol -----------
+// --- MIDI-FX chain slot cap (node 5100): stable ABI surface, per-role -------
 static_assert(kMaxInserts == 8);
 
 }  // namespace

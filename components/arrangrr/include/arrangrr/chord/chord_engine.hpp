@@ -63,6 +63,18 @@ class ChordEngine {
   constexpr void set_mode(ChordMode mode) noexcept { m_mode = mode; }
   constexpr ChordMode mode() const noexcept { return m_mode; }
 
+  // Phase-6 Theme 3 Item #1 (global transpose, docs/reflections/phase6-
+  // theme3-master-transpose-scope.md Decision 5): the SAME late, absolute-
+  // note-offset treatment resolve() applies, extended to this second note-
+  // emitting path -- sound()'s own note computation adds it before its
+  // existing [0,127] drop-not-fold clamp, so a pressed/pad chord moves WITH
+  // the band. steer_detect()'s pitch-class publish is untouched by design
+  // (Decision 3): the detected chord root stays honest.
+  constexpr void set_master_transpose(std::int8_t semitones) noexcept {
+    m_master_transpose = semitones;
+  }
+  constexpr std::int8_t master_transpose() const noexcept { return m_master_transpose; }
+
   // Interprets `note` in the current key. `override_quality` < 0 means smart
   // (D19). Returns degree -1 without sounding anything when the note is
   // chromatic to the key (D20: strictly diatonic, no surprises).
@@ -151,8 +163,8 @@ class ChordEngine {
     const ChordShape shape = theory::shape_of(quality);
     release(schedule);  // previous chord off first (same tick, D29 orders it)
     for (std::uint8_t i = 0; i < shape.count; ++i) {
-      const int n = root_note + shape.offsets[i];
-      if (n > 127) {
+      const int n = root_note + shape.offsets[i] + m_master_transpose;
+      if (n < 0 || n > 127) {
         continue;  // clamp: drop tones that leave the range
       }
       m_sounding[m_sounding_count++] = static_cast<std::uint8_t>(n);
@@ -215,6 +227,9 @@ class ChordEngine {
  private:
   Key m_key{};
   ChordMode m_mode = ChordMode::kDiatonic;
+  // Phase-6 Theme 3 Item #1: global transpose, semitones, default 0 (no-op).
+  // set_master_transpose()'s doc comment above traces how sound() applies it.
+  std::int8_t m_master_transpose = 0;
   std::uint8_t m_out_port = 0;
   std::uint8_t m_out_channel = 0;
   std::uint8_t m_sounding[4] = {0, 0, 0, 0};

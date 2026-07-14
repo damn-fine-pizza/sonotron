@@ -98,3 +98,109 @@ arrangrr_test(test_motif unit)
 # apply_clip_content/fire_clips cross-producer wiring (Arranger/
 # ChordSequencer/Timeline) -> functional, same precedent as test_input_zone.
 arrangrr_test(test_clip functional)
+# Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+# Performance"). test_boundary_latch: the ONE shared arm-at-boundary
+# primitive (Corelli fix #2) is a pure freestanding POD -> unit, same
+# precedent as test_common.cpp's own common/ primitive coverage.
+arrangrr_test(test_boundary_latch unit)
+# test_pad_bank: PadEngine's own pure bookkeeping (assign/get/runtime), no
+# dispatch logic -> unit, same precedent as test_common.cpp/ClipMatrix's own
+# scope tripwire (dispatch lives in Engine, covered separately below).
+arrangrr_test(test_pad_bank unit)
+# test_pad: the pad-bank WRAPPER dispatch (fire_pad routing each PadType to
+# the verb it wraps, the 4 PadModes, and quantize/BoundaryLatch reuse) only
+# exists through Engine's cmd_pad/fire_pad cross-producer wiring -> functional,
+# same precedent as test_clip.
+arrangrr_test(test_pad functional)
+# test_performance: Performance capture/recall (Engine's cmd_perf/
+# capture_performance/validate_performance/apply_performance), including the
+# Corelli-flagged recall atomicity and bar-gate-ordering properties -- only
+# observable through the Engine's cross-producer wiring -> functional.
+arrangrr_test(test_performance functional)
+# test_performance_wire: the on-disk serialize()/deserialize() byte format +
+# PerformanceStore's own pool bookkeeping -- pure, no Engine -> unit, same
+# precedent as test_common.cpp.
+arrangrr_test(test_performance_wire unit)
+# test_performance_validate: QA gate-restoration follow-up (owner-approved
+# "extract pure logic + unit-test it") -- arrangrr::perf::validate is now a
+# PURE free function (performance.hpp/performance.cpp), exhaustively branch-
+# covered here WITHOUT an Engine instance -> unit, and now counts toward the
+# enforced metric-1 gate (previously only reachable through
+# test_performance.cpp's functional atomicity coverage).
+arrangrr_test(test_performance_validate unit)
+# test_performance_style_id_regression: Torquato QA pin for an open defect in
+# Engine::apply_performance (a recalled CONCRETE style_id degrades to 0xFFFF
+# "unknown", poisoning the metadata AND any later capture) -- written to pin
+# a not-yet-fixed bug, red-before/green-after once Nazzareno lands the fix.
+# Currently RED; do not silence it. Kept in its OWN file/CTest entry (mirrors
+# test_chord_context_diagnosis's own precedent) so its failure never masks
+# the surrounding GREEN test_performance.cpp coverage.
+arrangrr_test(test_performance_style_id_regression regression)
+# Phase-5 Item #10 (docs/phase5-design-reviews.md "MIDI-FX insert chain",
+# node 5100/5200). test_insert_chain: Insert::process's four stateless
+# per-type functions (ScaleLock/VelocityProc/Echo/NoteRepeat) and
+# InsertChain::apply's own single-input-note bookkeeping -- pure,
+# freestanding, no Engine -> unit, same precedent as test_pad_bank.
+arrangrr_test(test_insert_chain unit)
+# test_insert_chain_fan_overflow_regression: Torquato QA lock for
+# InsertChain::apply's overflow guard -- reached whenever a chain stage's
+# COMBINED fan-out across MULTIPLE pending input notes (an earlier stage's
+# own fan-out) exceeds kMaxChainFan. Originally pinned an open crash defect
+# (the guard's assert condition was unconditionally false, trapping via
+# ARR_ASSERT/__builtin_trap() instead of truncating); Nazzareno fixed the
+# guard to break-and-truncate. Now a normal CHECK-based green lock proving
+# the bounded/no-OOB/no-crash contract. Kept in its own minimal target
+# (mirrors test_performance_style_id_regression's isolation precedent) so a
+# future re-break of this specific guard is caught in isolation.
+arrangrr_test(test_insert_chain_fan_overflow_regression regression)
+# test_fx: cmd_fx's (kFxSet/kFxParam/kFxEnable/kFxClear) dispatch/validation
+# and the Corelli must-fix (a chain-produced fan-out note's groove/schedule
+# recomputed at ITS OWN grid position) only exist through Engine's
+# Arranger::on_tick D40-pipeline cross-producer wiring -> functional, same
+# precedent as test_pad/test_clip.
+arrangrr_test(test_fx functional)
+# Phase 6 Theme 1b (Torquato QA, coverage-gate restoration). test_clip_matrix:
+# ClipMatrix's own pure bookkeeping (add/get/arm/force/on_bar promotion) --
+# no dispatch logic lives here (Engine::apply_clip_content/fire_clips, covered
+# by test_clip.cpp, own that) -> unit, same precedent as test_pad_bank.
+arrangrr_test(test_clip_matrix unit)
+# test_function_ref: FunctionRef's own call/rebind/reference-semantics
+# contract -- pure, freestanding, no Engine -> unit, same precedent as
+# test_common.cpp's own common/ primitive coverage.
+arrangrr_test(test_function_ref unit)
+# Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+# scope.md). test_master_transpose: the kMasterTranspose ABI verb's
+# dispatch/validation and its propagation to BOTH note-emitting paths
+# (Arranger's band + ChordEngine's pressed/pad chord) plus the untouched
+# detected-chord root and Timeline step-track literal content -- only
+# observable through Engine's cross-producer wiring -> functional, same
+# precedent as test_fx/test_clip. resolve()'s own single-producer unit
+# coverage lives in test_arranger.cpp (test_master_transpose_resolve).
+arrangrr_test(test_master_transpose functional)
+# test_master_transpose_voicing_regression: Torquato QA pin for an open
+# defect where VoicingState's kLead re-octaving (voicing.hpp) silently folds
+# a LIVE master_transpose change by a whole octave whenever the delta from
+# the previous voicing exceeds a tritone -- Arranger::set_master_transpose
+# never resets/invalidates the per-role voicing memory the way
+# load_style()/on_transport_start() do. Kept in its own file/CTest entry
+# (mirrors test_performance_style_id_regression's own isolation precedent)
+# so its failure never masks the surrounding GREEN test_master_transpose.cpp/
+# test_arranger.cpp/test_voicing.cpp coverage. Currently RED; do not silence
+# it.
+arrangrr_test(test_master_transpose_voicing_regression regression)
+# test_arp_insert_style_switch_stale_regression: Torquato QA heavy-pass pin
+# (Phase-6 Theme 4, target 6) -- Arranger::request_style() (the LIVE
+# style-switch path) never calls reset_role_arps(), unlike load_style();
+# a role's arp-insert keeps arpeggiating a chord resolved under the OLD
+# style after a live switch. Kept in its own file (mirrors
+# test_master_transpose_voicing_regression.cpp's isolation precedent) so its
+# failure never masks test_arranger.cpp's surrounding GREEN coverage.
+# Currently RED; do not silence it.
+arrangrr_test(test_arp_insert_style_switch_stale_regression regression)
+# test_dual_arp_collision: Torquato QA heavy-pass pin (Phase-6 Theme 4, Fork 6)
+# -- see the file's own header comment for the exact collision scenario. RED:
+# a role's kArp insert and the live-keyboard arp sharing one output port/
+# channel/pitch corrupt each other's note-off via the shared scheduler's
+# single-producer retrigger-care logic. GREEN (kept in the same file/target,
+# same collision setup): Panic still drops both arps' held state cleanly.
+arrangrr_test(test_dual_arp_collision regression)

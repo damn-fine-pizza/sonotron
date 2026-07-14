@@ -377,12 +377,13 @@ void test_motif_authored_seed_through_arranger() {
   const ChordState no_chord{};
   StaticVector<Hit, 16> hits;
   for (Tick t = 0; t < 2 * kTicksPerBar; ++t) {
-    a.on_tick(t, c_major, no_chord, [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
-      if (msg.type() != midi::kNoteOn || delay != 0 || msg.channel() != 3) {
-        return;
-      }
-      CHECK(hits.push_back(Hit{.tick = t, .note = msg.d1}));
-    });
+    a.on_tick(t, c_major, no_chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& msg, std::uint8_t) {
+                if (msg.type() != midi::kNoteOn || delay != 0 || msg.channel() != 3) {
+                  return;
+                }
+                CHECK(hits.push_back(Hit{.tick = t, .note = msg.d1}));
+              });
   }
   // The statement bar (repeat 0) plays the two authored onsets verbatim: step
   // 0 -> degree 0 -> C (72), step 8 -> degree 2 -> E (76) over C major.
@@ -401,12 +402,13 @@ StaticVector<Hit, 64> run_lead(std::uint32_t bars) {
   const ChordState no_chord{};
   StaticVector<Hit, 64> hits;
   for (Tick t = 0; t < bars * kTicksPerBar; ++t) {
-    a.on_tick(t, c_major, no_chord, [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
-      if (msg.type() != midi::kNoteOn || delay != 0 || msg.channel() != 3) {
-        return;
-      }
-      CHECK(hits.push_back(Hit{.tick = t, .note = msg.d1}));
-    });
+    a.on_tick(t, c_major, no_chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& msg, std::uint8_t) {
+                if (msg.type() != midi::kNoteOn || delay != 0 || msg.channel() != 3) {
+                  return;
+                }
+                CHECK(hits.push_back(Hit{.tick = t, .note = msg.d1}));
+              });
   }
   return hits;
 }

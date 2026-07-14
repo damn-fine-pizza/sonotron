@@ -43,7 +43,7 @@
     },
     {
       "name": "arm",
-      "displayName": "STM32 anchor (Cortex-M7 cross)",
+      "displayName": "STM32 anchor (Cortex-M7 cross, dev: ARR_ASSERT traps)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/arm",
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm-cortex-m7.cmake",
@@ -51,13 +51,23 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
       }
+    },
+    {
+      "name": "arm-release",
+      "displayName": "STM32 firmware release (ARR_ASSERT compiled out, D-STM32 graceful degradation)",
+      "inherits": "arm",
+      "binaryDir": "${sourceDir}/build/arm-release",
+      "cacheVariables": {
+        "ARRANGRR_FIRMWARE_RELEASE": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "host", "configurePreset": "host" },
     { "name": "host-release", "configurePreset": "host-release" },
     { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "arm", "configurePreset": "arm" }
+    { "name": "arm", "configurePreset": "arm" },
+    { "name": "arm-release", "configurePreset": "arm-release" }
   ],
   "testPresets": [
     {

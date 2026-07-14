@@ -341,6 +341,37 @@ bool parse_int(const std::string& s, int& out) {
   return true;
 }
 
+// Phase-5 Item #2 (docs/design/clip-primitive-design.md), hoisted for Item #9
+// (shell_pad_commands.cpp's `pad assign`/`perf recall` share this exact
+// spelling with the clip-launch verbs, shell_clip_commands.cpp): see the
+// declaration's own comment in shell_internal.hpp for the argument contract.
+bool parse_quantize_suffix(const std::vector<std::string>& t, std::size_t at, Boundary& boundary,
+                           std::uint8_t& n_bars, std::string& error) {
+  boundary = Boundary::kImmediate;
+  n_bars = 1;
+  if (at >= t.size()) {
+    return true;
+  }
+  if (t[at] != "quantize" || at + 1 >= t.size()) {
+    error = "usage: ... quantize <n>";
+    return false;
+  }
+  std::uint64_t n = 0;
+  if (!parse_u64(t[at + 1], n)) {
+    error = "bad quantize value: " + t[at + 1];
+    return false;
+  }
+  if (n == 0) {
+    boundary = Boundary::kImmediate;
+  } else if (n == 1) {
+    boundary = Boundary::kNextBar;
+  } else {
+    boundary = Boundary::kNextNBars;
+    n_bars = n > 255 ? static_cast<std::uint8_t>(255) : static_cast<std::uint8_t>(n);
+  }
+  return true;
+}
+
 }  // namespace shell_detail
 
 }  // namespace arrangrr::host

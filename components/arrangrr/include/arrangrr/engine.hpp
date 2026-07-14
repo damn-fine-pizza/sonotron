@@ -8,9 +8,12 @@
 #include "arrangrr/chord/chord_engine.hpp"
 #include "arrangrr/chord/chord_sequencer.hpp"
 #include "arrangrr/clip/clip_matrix.hpp"
+#include "arrangrr/common/boundary_latch.hpp"
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/config.hpp"
+#include "arrangrr/pad/pad_bank.hpp"
+#include "arrangrr/perf/performance.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
 #include "arrangrr/timeline/timeline.hpp"
@@ -54,6 +57,20 @@ enum class InputZone : std::uint8_t {
   kMelody = 0,   // routes/sounds; observed only as the D34 FullKeyboard branch
   kHarmony = 1,  // observed + suppressed from output (silent chord zone)
 };
+
+// Phase-6 Theme 3 Item #2 (docs/reflections/phase6-theme3-pad-drum-cc-scope.md,
+// Decision 3): a kOneShot/kLoop Drum pad has no gate/duration field of its own
+// (Pad is pinned at 12 bytes, D33) -- this fixed engine-side constant stands
+// in, grounded in the corpus's OWN authored kick/snare gate length
+// (arrangrr/arranger/styles/basic.hpp's kVarBDrums: gate=120 at kPpqn=960,
+// common/time.hpp), not an invented number. Public (not file-local to
+// engine.cpp) so functional tests can assert against it by name instead of a
+// bare literal.
+inline constexpr Tick kPadDrumOneShotGateTicks = 120;
+// Decision 1: source_aux 0 means "use the default" for a Drum pad's velocity
+// (0 is not itself a usable MIDI velocity -- it is indistinguishable from "no
+// note"), matching a mid-range authored velocity in the same corpus table.
+inline constexpr std::uint8_t kPadDrumDefaultVelocity = 100;
 
 // The arrangrr Stage-adapter: the arranger stage that `runtime::Runtime<Engine,
 // N>` drives (docs/design/orchestrator-pipeline-extraction.md §3.5/§14). Phase
@@ -111,6 +128,18 @@ class Engine {
   // cmd_clip in engine.cpp for the ABI path).
   const ClipMatrix& clips() const noexcept { return m_clips; }
   ClipMatrix& clips() noexcept { return m_clips; }
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): pad-bank wrapper bookkeeping and the Performance recall
+  // store, mirroring clips()' own const+mutable accessor pair. Host code
+  // configures pads and (de)serializes the store through the mutable
+  // accessor; the ABI paths are cmd_pad/cmd_perf below.
+  const PadEngine& pads() const noexcept { return m_pads; }
+  PadEngine& pads() noexcept { return m_pads; }
+  // Phase-6 Theme 3 Item #4: the active pad bank (a VIEW CURSOR only, see
+  // kPadBankSelect in abi.hpp) -- 0..kMaxPadBanks-1.
+  std::uint16_t pad_bank() const noexcept { return m_pad_bank; }
+  const PerformanceStore& performances() const noexcept { return m_perfs; }
+  PerformanceStore& performances() noexcept { return m_perfs; }
 
   // Feeds raw MIDI bytes from an input port. Parsed messages are routed and
   // scheduled at the current tick; due events are flushed to the sink at the
@@ -271,6 +300,19 @@ class Engine {
       // whose quantize window closes THIS bar, still BEFORE fire_arranger --
       // same reason the chord commit above precedes it.
       fire_clips(m_transport.tick(), sink);
+      // Phase-5 Item #9 (Corelli fix #3): a pending Performance recall lands
+      // HERE -- after fire_clips, still BEFORE fire_arranger. A mid-bar
+      // recall that changed the style before fire_clips ran would resolve a
+      // clip's content_index against the OLD style; landing after fire_clips
+      // but before fire_arranger keeps both correct for the bar that is
+      // about to play.
+      apply_pending_performance_recall(sink);
+      // Torquato finding 1: any kDrum/kCC pad armed for this bar (see
+      // fire_pad's kDrum/kCC case) fires now -- same bar-boundary point as
+      // the Performance recall promotion right above, order-independent
+      // since a Drum/CC hit has no cross-subsystem read/write the way a
+      // recall's style/section change does.
+      apply_pending_pad_fires(sink);
     }
     fire_arranger(m_transport.tick(), sink);
     fire_arp(m_transport.tick(), sink);
@@ -321,6 +363,10 @@ class Engine {
   void cmd_voice(const Command& cmd, EventSink sink);  // program change (voice select)
   void cmd_arp(const Command& cmd, EventSink sink);    // live arpeggiator
   void cmd_clip(const Command& cmd, EventSink sink);   // Phase-5 Item #2: clip launch primitive
+  void cmd_pad(const Command& cmd, EventSink sink);    // Phase-5 Item #9: pad-bank wrapper dispatch
+  void cmd_perf(const Command& cmd, EventSink sink);   // Phase-5 Item #9: Performance store/recall
+  void cmd_fx(const Command& cmd, EventSink sink);     // Phase-5 Item #10: MIDI-FX insert chain
+  void cmd_master_transpose(const Command& cmd, EventSink sink);  // Phase-6 Theme 3 Item #1
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on
@@ -359,6 +405,65 @@ class Engine {
   // existing tick % kTicksPerBar == 0 gate, decision #2).
   void fire_clips(Tick transport_tick, EventSink sink);
 
+  // cmd_pad case handlers (Phase-5 Item #9), split out for the same reason.
+  void pad_assign(const Command& cmd, EventSink sink);
+  void pad_trigger(const Command& cmd, EventSink sink);
+  void pad_release(const Command& cmd, EventSink sink);
+  // Phase-6 Theme 3 Item #4: kPadBankSelect's own handler, mirroring
+  // cmd_master_transpose's validate-or-reject style.
+  void pad_bank_select(const Command& cmd, EventSink sink);
+  // Fires (or stops) one pad's wrapped content by type -- the ONE place that
+  // translates a Pad into a call on the verb it wraps (clip_request/
+  // clip_scene_launch/Arranger::request/perf_recall), mirroring
+  // apply_clip_content's own placement for the clip primitive. `pad_id` is
+  // the flat pad slot (cmd.idx) -- needed ONLY by the kDrum/kCC arm path
+  // below (Torquato finding 1) to key m_pad_latch/m_pad_pending_target; every
+  // other case ignores it, exactly like ClipMatrix/Arranger's own id-indexed
+  // wrapper verbs.
+  void fire_pad(const Pad& pad, LaunchState target, std::uint16_t pad_id, EventSink sink);
+  // fire_pad's kDrum/kCC cases (Phase-6 Theme 3 Item #2), split out to keep
+  // fire_pad's own cognitive complexity under the clang-tidy gate -- same
+  // discipline as every other case-handler split in this class. Each is the
+  // ONE place that builds a MidiMessage directly (Decision 5, docs/
+  // reflections/phase6-theme3-pad-drum-cc-scope.md), emitting via the SAME
+  // schedule_or_warn choke point every other emission path shares. Called
+  // EITHER immediately from fire_pad's own kImmediate branch, or later from
+  // apply_pending_pad_fires when a kNextBar/kNextNBars arm comes due -- the
+  // pad.sync check that decides which happens lives in fire_pad, not here.
+  void fire_pad_drum(const Pad& pad, LaunchState target, EventSink sink);
+  void fire_pad_cc(const Pad& pad, LaunchState target, EventSink sink);
+  // Promotes any armed kDrum/kCC pad fire (Torquato finding 1: pad.sync was
+  // previously ignored by these two types) whose BoundaryLatch closes THIS
+  // bar -- called from on_tick's existing bar gate, alongside
+  // apply_pending_performance_recall, which it mirrors exactly (one shared
+  // BoundaryLatch instance per pad slot instead of the single m_perf_recall
+  // one, since several pads can be armed concurrently for different
+  // boundaries).
+  void apply_pending_pad_fires(EventSink sink);
+
+  // cmd_perf case handlers (Phase-5 Item #9), split out for the same reason.
+  void perf_store(const Command& cmd, EventSink sink);
+  void perf_recall(const Command& cmd, EventSink sink);
+  // Captures/validates/applies a full rig snapshot -- see performance.hpp's
+  // own header comment for the persisted-format discipline these back.
+  Performance capture_performance() const;
+  bool validate_performance(const Performance& perf) const noexcept;
+  bool apply_performance(const Performance& perf, EventSink sink);
+  void emit_performance_confirmation(const Performance& perf, EventSink sink);
+  // Promotes a pending (armed) Performance recall whose BoundaryLatch closes
+  // THIS bar -- called from on_tick's existing bar gate, AFTER fire_clips and
+  // BEFORE fire_arranger (Corelli fix #3, see on_tick's own comment above).
+  void apply_pending_performance_recall(EventSink sink);
+
+  // cmd_fx case handlers (Phase-5 Item #10), split out for the same reason.
+  // All four are thin ABI-unpack + bounds-check + Arranger-setter forwarders
+  // -- idx = TrackRole in every case (see abi.hpp's kFxSet/kFxParam/
+  // kFxEnable/kFxClear comments for the exact a/b/c packing).
+  void fx_set(const Command& cmd, EventSink sink);
+  void fx_param(const Command& cmd, EventSink sink);
+  void fx_enable(const Command& cmd, EventSink sink);
+  void fx_clear(const Command& cmd, EventSink sink);
+
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
   // is safe to call after a style load, a style switch, or a route change —
@@ -382,8 +487,16 @@ class Engine {
     }
   }
 
-  void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
-    if (!m_scheduler.schedule(port, tick, msg)) {
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): `source` is the
+  // arrangrr::kScheduleSource* producer tag (config.hpp), forwarded into the
+  // scheduler's own entry (OutScheduler::schedule) so cancel_note_off can
+  // later scope its retrigger-care match to the SAME producer. Defaults to
+  // kScheduleSourceCore, so every pre-existing caller that never passes one
+  // (fire_timeline, fire_chord_seq, emit_beat/realtime/clock) keeps landing in
+  // the same undifferentiated shared pool as before this fix, byte-for-byte.
+  void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink,
+                        std::uint8_t source = kScheduleSourceCore) {
+    if (!m_scheduler.schedule(port, tick, msg, source)) {
       sink(OutEvent::warn(WarnCode::kSchedulerFull, m_now));
     }
   }
@@ -441,14 +554,38 @@ class Engine {
   // sub-hit whose gate ends before the next hit keeps its silent gap. For the
   // normal cross-step case delay == 0, so on_tick == m_now and the wire is
   // byte-identical to the pre-fix path (D29 still sorts the off before the on).
-  void schedule_pattern(std::uint8_t port, TickOffset delay, const MidiMessage& msg,
-                        EventSink sink) {
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): `source` (default
+  // kScheduleSourceCore, config.hpp) scopes cancel_note_off's retrigger-care
+  // match to the SAME producer as the incoming note-on -- a pending note-off
+  // from a DIFFERENT producer sharing this exact (port, channel, note) is left
+  // untouched (see out_scheduler.hpp's own cancel_note_off comment). For every
+  // pre-existing caller (all default to kScheduleSourceCore), this is the
+  // SAME shared single-pool match as before this fix, so the on_tick == m_now
+  // byte-identical wire this function's own header comment documents still
+  // holds exactly as before.
+  //
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix), second half: a
+  // role's own kArp insert and the live-keyboard arp can each independently
+  // hold the SAME (port, channel, note) and both retrigger on the SAME tick.
+  // Each producer's OWN same-source dance above already keeps ITS OWN
+  // previous note clean; cancel_off_from_other_producer additionally drops
+  // any OTHER producer's note-off landing at this EXACT same tick -- that
+  // off would otherwise be spurious (the pitch is not really going silent,
+  // a DIFFERENT producer is attacking it again in the very same instant).
+  // Scoped to an exact-tick match against a DIFFERENT source only, so a true
+  // single-producer scenario (every existing golden, and the arp's own
+  // retrigger tests) never has another source present here -- a provable
+  // no-op for that path, unchanged from before this fix.
+  void schedule_pattern(std::uint8_t port, TickOffset delay, const MidiMessage& msg, EventSink sink,
+                        std::uint8_t source = kScheduleSourceCore) {
     const Tick on_tick = m_now + static_cast<Tick>(delay);
-    if (msg.type() == midi::kNoteOn &&
-        m_scheduler.cancel_note_off(port, msg.channel(), msg.d1, on_tick)) {
-      schedule_or_warn(port, on_tick, MidiMessage::note_off(msg.channel(), msg.d1), sink);
+    if (msg.type() == midi::kNoteOn) {
+      if (m_scheduler.cancel_note_off(port, msg.channel(), msg.d1, on_tick, source)) {
+        schedule_or_warn(port, on_tick, MidiMessage::note_off(msg.channel(), msg.d1), sink, source);
+      }
+      m_scheduler.cancel_off_from_other_producer(port, msg.channel(), msg.d1, on_tick, source);
     }
-    schedule_or_warn(port, on_tick, msg, sink);
+    schedule_or_warn(port, on_tick, msg, sink, source);
   }
 
   void fire_timeline(Tick transport_tick, EventSink sink) {
@@ -508,11 +645,15 @@ class Engine {
   }
 
   void fire_arranger(Tick transport_tick, EventSink sink) {
-    const Arranger::TickResult r =
-        m_arranger.on_tick(transport_tick, m_chords.key(), m_chords.state(),
-                           [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
-                             schedule_pattern(port, delay, msg, sink);
-                           });
+    const Arranger::TickResult r = m_arranger.on_tick(
+        transport_tick, m_chords.key(), m_chords.state(),
+        // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): Arranger's
+        // on_tick now carries its own kScheduleSource* producer tag per note
+        // (kScheduleSourceCore for ordinary emissions, kScheduleSourceRoleArpBase
+        // + role index for a role's own arp-insert) -- forward it verbatim.
+        [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg, std::uint8_t source) {
+          schedule_pattern(port, delay, msg, sink, source);
+        });
     if (r.section_changed) {
       sink(OutEvent::section(static_cast<std::uint16_t>(r.section), m_now));
     }
@@ -552,9 +693,15 @@ class Engine {
       return;
     }
     m_arp.on_tick(transport_tick, [&](std::uint8_t note, std::uint8_t velocity, TickOffset gate) {
+      // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): the Engine-
+      // global live-keyboard arp is its own distinct producer -- tag it
+      // kScheduleSourceLiveArp so it never cross-cancels a role's own
+      // arp-insert (or ordinary Arranger/Timeline scheduling) sharing the
+      // same (port, channel, note).
       schedule_pattern(m_arp_out_port, 0, MidiMessage::note_on(m_arp_out_channel, note, velocity),
-                       sink);
-      schedule_pattern(m_arp_out_port, gate, MidiMessage::note_off(m_arp_out_channel, note), sink);
+                       sink, kScheduleSourceLiveArp);
+      schedule_pattern(m_arp_out_port, gate, MidiMessage::note_off(m_arp_out_channel, note), sink,
+                       kScheduleSourceLiveArp);
     });
   }
 
@@ -581,6 +728,38 @@ class Engine {
   // m_arranger/m_seq/m_timeline so a future audit of construction order
   // finds it beside the subsystems it references by index.
   ClipMatrix m_clips;
+  // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
+  // Performance"): pad-bank wrapper bookkeeping (mirrors m_clips' own
+  // placement/rationale -- PadEngine orchestrates subsystems Engine already
+  // owns and shares no raw cross-stage data).
+  PadEngine m_pads;
+  // Performance recall store + its pending-boundary latch (Corelli fix #2:
+  // the ONE shared BoundaryLatch primitive, not a 4th hand-rolled
+  // arm-at-boundary mechanism). ClipMatrix/Arranger/ChordEngine each still
+  // hand-roll their OWN boundary state (LaunchState::kArmed, m_pending_valid,
+  // FollowedContext staging) -- they could adopt BoundaryLatch later; not
+  // retrofitted here so their existing goldens stay byte-identical.
+  PerformanceStore m_perfs;
+  BoundaryLatch m_perf_recall;
+  std::uint16_t m_perf_recall_slot = 0;
+  // Torquato finding 1 (Phase-6 Theme 3 Item #2 hand-off): kDrum/kCC's own
+  // arm-at-boundary state, ONE BoundaryLatch per flat pad slot (unlike
+  // m_perf_recall's single instance -- several pads can be armed
+  // concurrently for independent boundaries). Reuses the SAME shared
+  // BoundaryLatch primitive m_perf_recall already uses (Corelli fix #2),
+  // not a new hand-rolled arm mechanism. m_pad_pending_target holds the
+  // LaunchState (kPlaying/kStopped) the armed pad will fire with once its
+  // latch comes due -- see fire_pad's kDrum/kCC case and
+  // apply_pending_pad_fires below.
+  BoundaryLatch m_pad_latch[kMaxPads]{};
+  LaunchState m_pad_pending_target[kMaxPads]{};
+  // Phase-6 Theme 3 Item #4: the active pad bank, a persisted VIEW CURSOR
+  // (0..kMaxPadBanks-1) selected by the kPadBankSelect ABI verb
+  // (pad_bank_select) and captured/restored via Performance::pad_bank_id
+  // (capture_performance/apply_performance) -- flat pad addressing
+  // (kPadAssign/kPadTrigger/kPadRelease, 0..kMaxPads-1) is unaffected by
+  // this value; the host maps its physical pad surface to flat ids.
+  std::uint16_t m_pad_bank = 0;
   // Phase-4d promotion (§16.1/§16.4/§16.9): the chorddet peer is now a
   // Pipeline-owned SIBLING stage (was an Engine-owned value in 4b), injected
   // here BY REFERENCE for its narrow CONFIG surface only (see the class

@@ -2,6 +2,7 @@ add_library(arrangrr STATIC
   src/version.cpp
   src/common_checks.cpp
   src/engine.cpp
+  src/performance.cpp
 )
 
 target_include_directories(arrangrr PUBLIC include)
