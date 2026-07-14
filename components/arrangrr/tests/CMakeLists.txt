@@ -136,3 +136,26 @@ arrangrr_test(test_performance_validate unit)
 # test_chord_context_diagnosis's own precedent) so its failure never masks
 # the surrounding GREEN test_performance.cpp coverage.
 arrangrr_test(test_performance_style_id_regression regression)
+# Phase-5 Item #10 (docs/phase5-design-reviews.md "MIDI-FX insert chain",
+# node 5100/5200). test_insert_chain: Insert::process's four stateless
+# per-type functions (ScaleLock/VelocityProc/Echo/NoteRepeat) and
+# InsertChain::apply's own single-input-note bookkeeping -- pure,
+# freestanding, no Engine -> unit, same precedent as test_pad_bank.
+arrangrr_test(test_insert_chain unit)
+# test_insert_chain_fan_overflow_regression: Torquato QA lock for
+# InsertChain::apply's overflow guard -- reached whenever a chain stage's
+# COMBINED fan-out across MULTIPLE pending input notes (an earlier stage's
+# own fan-out) exceeds kMaxChainFan. Originally pinned an open crash defect
+# (the guard's assert condition was unconditionally false, trapping via
+# ARR_ASSERT/__builtin_trap() instead of truncating); Nazzareno fixed the
+# guard to break-and-truncate. Now a normal CHECK-based green lock proving
+# the bounded/no-OOB/no-crash contract. Kept in its own minimal target
+# (mirrors test_performance_style_id_regression's isolation precedent) so a
+# future re-break of this specific guard is caught in isolation.
+arrangrr_test(test_insert_chain_fan_overflow_regression regression)
+# test_fx: cmd_fx's (kFxSet/kFxParam/kFxEnable/kFxClear) dispatch/validation
+# and the Corelli must-fix (a chain-produced fan-out note's groove/schedule
+# recomputed at ITS OWN grid position) only exist through Engine's
+# Arranger::on_tick D40-pipeline cross-producer wiring -> functional, same
+# precedent as test_pad/test_clip.
+arrangrr_test(test_fx functional)

@@ -52,4 +52,18 @@ inline constexpr std::size_t kMaxPerformances = 16;
 static_assert(kMaxPerformances <= 256,
               "Performance store: keep the recall-slot pool bounded (D33)");
 
+// MIDI-FX insert chain (Phase-5 Item #10, node 5100): the bounded fan-out
+// buffer one note produces as it flows through a role's InsertChain
+// (arrangrr/fx/insert_chain.hpp) -- an Echo/NoteRepeat insert can multiply
+// one input note into several output notes; kMaxChainFan caps how many a
+// SINGLE insert stage (and the chain's own scratch buffers) may ever hold at
+// once. Budget note: a dense chain multiplies one note's 2 scheduler entries
+// (note-on + note-off) up to kMaxChainFan x 2 against kSchedulerCapacity =
+// 4096 -- 8 is generous headroom (no authored Echo/NoteRepeat preset needs
+// more than a handful of repeats) while keeping that worst case a trivial
+// slice of the scheduler pool.
+inline constexpr int kMaxChainFan = 8;
+static_assert(kMaxChainFan >= 1 && kMaxChainFan <= 32,
+              "InsertChain fan-out: keep one note's chain multiplication bounded (D33)");
+
 }  // namespace arrangrr

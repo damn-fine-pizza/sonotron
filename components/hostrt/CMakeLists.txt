@@ -8,6 +8,7 @@ add_library(hostrt STATIC
   shell_music_commands.cpp
   shell_clip_commands.cpp
   shell_pad_commands.cpp
+  shell_fx_commands.cpp
   shell_input.cpp
   shell_view.cpp
   shell_chooser.cpp

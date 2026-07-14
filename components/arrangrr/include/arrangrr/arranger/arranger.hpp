@@ -9,8 +9,9 @@
 #include "arrangrr/arranger/voicing.hpp"  // NoteReq, VoicingState (voice-leading)
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/config.hpp"
-#include "chorddet/theory.hpp"  // ChordState, ChordShape, theory::shape_of
-#include "common/assert.hpp"    // ARR_ASSERT (voice-group cap net)
+#include "arrangrr/fx/insert_chain.hpp"  // Phase-5 Item #10: per-role MIDI-FX insert chain
+#include "chorddet/theory.hpp"           // ChordState, ChordShape, theory::shape_of
+#include "common/assert.hpp"             // ARR_ASSERT (voice-group cap net)
 #include "common/time.hpp"
 
 // The arranger (second WOW): plays the loaded style's current section on
@@ -132,6 +133,53 @@ class Arranger {
   // Performance carries a whole captured GrooveParams, not one field at a
   // time (unlike the live `groove` panel's set_groove_field above).
   constexpr void set_groove(const GrooveParams& groove) noexcept { m_groove = groove; }
+
+  // Phase-5 Item #10 (MIDI-FX insert chain, node 5100/5200): one InsertChain
+  // per TrackRole (NOT per Timeline Track -- the same ordinal space as
+  // m_routes/m_muted/m_solo). All four setters are thin, bounds-checked
+  // forwarders onto the role's chain; a slot index out of range (checked
+  // inside InsertChain itself) or a role out of range (checked here) both
+  // fail closed (false), never trap -- the same "graceful degradation"
+  // discipline as set_route/set_route_enabled above.
+  bool set_fx(TrackRole role, std::size_t slot, InsertType type) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    return m_chain[idx].set_type(slot, type);
+  }
+  bool set_fx_param(TrackRole role, std::size_t slot, std::uint8_t param_id,
+                    std::int32_t value) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    return m_chain[idx].set_param(slot, param_id, value);
+  }
+  bool set_fx_enable(TrackRole role, std::size_t slot, bool enabled) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    return m_chain[idx].set_enabled(slot, enabled);
+  }
+  // Clears ONE slot of the role's chain.
+  bool clear_fx(TrackRole role, std::size_t slot) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    return m_chain[idx].clear(slot);
+  }
+  // Clears the WHOLE chain of the role (every slot back to the inert default).
+  bool clear_fx(TrackRole role) noexcept {
+    const auto idx = static_cast<std::uint8_t>(role);
+    if (idx >= kRoleCount) {
+      return false;
+    }
+    m_chain[idx].clear_all();
+    return true;
+  }
 
   // A snapshot of one part for the host mixer: its route, its voice in the
   // current section, and its mute/solo state. `present` is false when the
@@ -414,20 +462,47 @@ class Arranger {
       }
       // Voice-leading over the role's chord-tone notes (identity for kAsWritten).
       m_voicing.voice(pattern.role, pattern.voicing, group, count);
+      const std::uint8_t role_idx = static_cast<std::uint8_t>(pattern.role);
+      const FxContext fx_ctx{.key = key, .chord = chord, .step = step, .tick = transport_tick};
       for (int i = 0; i < count; ++i) {
         const NoteReq& nr = group[i];
-        // Groove: swing/accent/humanize reshape timing and velocity
-        // (deterministic; drums swing too, downbeats stay put). The note-off
-        // shifts with the note-on so the gate length is preserved; a gesture
-        // adds its own extra delay on top of the groove offset.
-        const GrooveOut g = groove::apply(m_groove, static_cast<std::uint8_t>(pattern.role), step,
-                                          transport_tick, nr.vel);
-        const TickOffset on = g.timing_offset + nr.gesture_delay;
-        schedule(
-            route.port, on,
-            MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(nr.note), g.velocity));
-        schedule(route.port, static_cast<TickOffset>(nr.gate) + on,
-                 MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(nr.note)));
+        // Phase-5 Item #10 (MIDI-FX insert chain): run the resolved note
+        // through the role's chain BEFORE groove — an Echo/NoteRepeat insert
+        // may fan it into several notes. `seed.offset` starts at 0 (the
+        // chain's OWN, self-relative clock); gesture_delay is a pre-existing,
+        // chain-independent scheduling offset that rides outside the chain
+        // entirely, exactly as it did before this item. An unconfigured /
+        // fully-disabled chain (the default state of every role) is a
+        // provable 1-in/1-out identity (insert_chain.hpp), so fan_count == 1
+        // and fanned[0] == seed for every existing style/track — the loop
+        // below then reproduces the pre-Item-#10 schedule byte-for-byte.
+        const FxNote seed{.note = nr.note, .vel = nr.vel, .gate = nr.gate, .offset = 0};
+        FxNote fanned[kMaxChainFan];
+        const int fan_count = m_chain[role_idx].apply(seed, fanned, kMaxChainFan, fx_ctx);
+        for (int j = 0; j < fan_count; ++j) {
+          const FxNote& fn = fanned[j];
+          if (fn.note < 0 || fn.note > 127) {
+            continue;
+          }
+          // Corelli must-fix: groove is computed at THIS note's OWN grid
+          // position (step/tick advanced by the chain's own offset), never
+          // the seed's — a copy several steps out from an Echo/NoteRepeat
+          // must not sound like it landed on the seed's own beat. Swing/
+          // accent/humanize (deterministic; drums swing too, downbeats stay
+          // put) and the note-off shift with the note-on so gate length is
+          // preserved.
+          const Tick tick_j = transport_tick + static_cast<Tick>(fn.offset);
+          const std::uint16_t step_j = static_cast<std::uint16_t>(
+              step +
+              static_cast<std::uint16_t>(fn.offset / static_cast<TickOffset>(kTicksPerStep)));
+          const GrooveOut g = groove::apply(m_groove, role_idx, step_j, tick_j, fn.vel);
+          const TickOffset on = g.timing_offset + nr.gesture_delay + fn.offset;
+          schedule(
+              route.port, on,
+              MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(fn.note), g.velocity));
+          schedule(route.port, static_cast<TickOffset>(fn.gate) + on,
+                   MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(fn.note)));
+        }
       }
     }
     return result;
@@ -544,6 +619,10 @@ class Arranger {
   std::uint16_t m_solo = 0;   // per-role solo bitmask
   GrooveParams m_groove;      // global groove feel applied to every part
   VoicingState m_voicing;     // per-role voice-leading memory (D40)
+  // Phase-5 Item #10: one MIDI-FX insert chain per role. Default-constructed
+  // (every slot inert/passthrough), so a fresh Arranger's on_tick output is
+  // byte-identical to the pre-Item-#10 schedule until a chain is configured.
+  InsertChain m_chain[kRoleCount];
   // Motif engine (9210): how many times the CURRENT section has looped back
   // to itself (statement=even, answer=odd -- motif.hpp's call-and-response
   // policy). One scalar suffices because every StylePattern in a section

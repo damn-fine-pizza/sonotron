@@ -830,13 +830,17 @@ These bind every node below. They are the "why the schedule is honest" layer.
 *A composable bounded chain (fixed max inserts) of MIDI transforms per track/zone —
 the open/hackable north-star (`0600`) made concrete. Arp/groove/scale-lock become
 INSTANCES of the chain, not disconnected modules.*
-- **5100 Insert-chain framework** (bounded, per-track/zone, POD) — ○ SHIPPABLE,
-  **shape pre-fixed at the GUI freeze line (`11700`)**: `kMaxInserts=8` in the
-  on-disk/ABI format, UI exposes 4; per-track first (per-zone deferred); ABI-none
-  for this data-model increment — locked so the GUI (`11600`) is born aware of
-  this surface and is not rebuilt when `5000` lands. The earlier
-  **NEEDS-DECISION is RESOLVED** by that lock; implementing the framework body +
-  inserts remains ○ planned, behind the freeze line.
+- **5100 Insert-chain framework** (bounded, POD) — ✅ core shipped (Phase-5 Item
+  #10, 2026-07-14): `kMaxInserts=8`, UI exposes 4. **Addressing re-decided by the
+  owner from per-track to per-ROLE** (`kRoleCount=10`, the same ordinal space as
+  `Arranger::m_routes` — the graft point is `Arranger::on_tick`, which is per-role,
+  not per-Timeline-Track); the `kFx…` ABI verbs (`kFxSet/kFxParam/kFxEnable/
+  kFxClear`, Param 53–56) and the reserved block are now written to that decision.
+  v1 ships four stateless per-note stream-transform inserts (scale-lock,
+  velocity-proc, echo, note-repeat) grafted ahead of `groove::apply` with a
+  per-fan-out-note grid recompute (existing goldens byte-identical: an empty chain
+  is passthrough). The chain is live config only — **not** persisted in the
+  `Performance` v1 format yet.
 - **5200 Refactor existing modules into chain instances**
   - `5210` groove as a chain instance — ○ SHIPPABLE
   - `5220` arp as a track MIDI-FX instance — ○ SHIPPABLE *(= 7130)*

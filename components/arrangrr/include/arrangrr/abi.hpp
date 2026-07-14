@@ -245,42 +245,42 @@ enum class Param : std::uint16_t {
                             //     arms a BoundaryLatch that lands the WHOLE
                             //     recall at the bar boundary (Engine::on_tick,
                             //     AFTER fire_clips/BEFORE fire_arranger).
+  // Phase-5 Item #10 (docs/phase5-design-reviews.md "MIDI-FX insert chain",
+  // node 5100/5200): the chain is addressed PER-ROLE (arrangrr/fx/
+  // insert_chain.hpp's InsertChain, one per TrackRole -- the SAME ordinal
+  // space as Arranger::m_routes -- NOT per Timeline Track; the owner's
+  // 2026-07-14 concrete-shape review corrected the RESERVED block below,
+  // which had drafted "per-track"). Grafted into Arranger::on_tick's D40
+  // pipeline BEFORE groove::apply: each chain-produced fan-out note gets
+  // groove recomputed at its OWN grid position, never the seed's (Corelli
+  // must-fix -- preserves D16 determinism, existing goldens stay
+  // byte-identical for an unconfigured/passthrough chain).
+  kFxSet = 53,     // set: idx = TrackRole. a = slot (0..kMaxInserts-1),
+                   //     b = InsertType. Re-activates the slot with that
+                   //     type's fresh default params (drops any stale bits
+                   //     left by a previous type in the slot's union).
+  kFxParam = 54,   // set: idx = TrackRole. a = slot, b = param id (meaning
+                   //     depends on the slot's CURRENT type -- see
+                   //     InsertChain::set_param), c = value (clamped to the
+                   //     field's own width, u8 or u16).
+  kFxEnable = 55,  // set: idx = TrackRole. a = slot, b = 0/1.
+  kFxClear = 56,   // do: idx = TrackRole. a = slot, or -1 = the whole chain.
 };
 
 // ============================================================================
-// RESERVED — MIDI-FX / Transform chain (node 5000/5100). NOT YET IMPLEMENTED.
+// RESERVED — MIDI-FX / Transform chain, FUTURE growth (node 5100/5200).
 // ----------------------------------------------------------------------------
-// The SHAPE of the insert-chain ABI is pre-fixed at the GUI freeze line (node
-// 11720) so the GUI (node 11600) is born aware of this surface and is not
-// rebuilt when node 5000 lands. This increment assigns NO live enum values
-// (ABI-none): kMaxInserts below is the only committed symbol; the kFx... Param
-// ids described here do NOT exist yet and MUST NOT be added until node 5000 is
-// implemented, at which point they are APPENDED as new Param enumerators (next
-// free id = 53, after Phase-5 Item #2's kClipAdd/kClipLaunch/kClipStop/
-// kSceneQuantize and Phase-5 Item #9's kPadAssign/kPadTrigger/kPadRelease/
-// kPerformanceStore/kPerformanceRecall above), honoring the
-// additive-only-per-shipped-value discipline (still in force even though the
-// Phase-5 ABI *shape* freeze is lifted -- see the banner at the top of this
-// file).
-//
-// Chain model: a bounded chain of MIDI transforms, per-track first (per-zone is
-// deferred). On disk / on the ABI the chain holds up to kMaxInserts slots; the
-// UI exposes 4. When the verbs are appended, each future kFx... command is
-// addressed as:
-//     idx = track index
-//     a   = insert slot (0 .. kMaxInserts-1)
-//     b   = insert type + per-insert flags (e.g. on/off, order)
-//     c   = insert parameter value
-// Anticipated (RESERVED, unassigned) verbs, to append when node 5000 lands:
-//     kFxSet    — set the insert type in a slot (a = slot, b = insert type)
-//     kFxParam  — set an insert parameter (a = slot, b = param id, c = value)
-//     kFxEnable — toggle an insert on/off (a = slot, b = 0/1)
-//     kFxClear  — clear a slot / the whole chain (a = slot, -1 = all)
-// These names/argument packings are documentation only for this increment.
+// Phase-5 Item #10 implemented the chain CORE: kFxSet/kFxParam/kFxEnable/
+// kFxClear above are live, addressed PER-ROLE (arrangrr/fx/insert_chain.hpp's
+// InsertChain lives one-per-TrackRole -- corrected from this block's earlier
+// "per-track" draft). STILL deferred by that item's locked v1 scope: FX
+// persistence inside Performance (arrangrr/perf/performance.hpp does not
+// carry the chain), and on_tick capability on Insert (groove-as-insert,
+// arp-as-insert) -- either would land as a future format_version bump /
+// additive ABI append, never a silent reshape of what is live above.
 //
 // kMaxInserts is the on-disk / ABI format maximum number of chain slots per
-// track (the UI intentionally exposes only 4). It is stable ABI surface even
-// though the chain body is unimplemented.
+// role (the UI intentionally exposes only 4). Stable ABI surface.
 inline constexpr std::uint16_t kMaxInserts = 8;
 // ============================================================================
 

@@ -342,6 +342,7 @@ class Engine {
   void cmd_clip(const Command& cmd, EventSink sink);   // Phase-5 Item #2: clip launch primitive
   void cmd_pad(const Command& cmd, EventSink sink);    // Phase-5 Item #9: pad-bank wrapper dispatch
   void cmd_perf(const Command& cmd, EventSink sink);   // Phase-5 Item #9: Performance store/recall
+  void cmd_fx(const Command& cmd, EventSink sink);     // Phase-5 Item #10: MIDI-FX insert chain
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on
@@ -403,6 +404,15 @@ class Engine {
   // THIS bar -- called from on_tick's existing bar gate, AFTER fire_clips and
   // BEFORE fire_arranger (Corelli fix #3, see on_tick's own comment above).
   void apply_pending_performance_recall(EventSink sink);
+
+  // cmd_fx case handlers (Phase-5 Item #10), split out for the same reason.
+  // All four are thin ABI-unpack + bounds-check + Arranger-setter forwarders
+  // -- idx = TrackRole in every case (see abi.hpp's kFxSet/kFxParam/
+  // kFxEnable/kFxClear comments for the exact a/b/c packing).
+  void fx_set(const Command& cmd, EventSink sink);
+  void fx_param(const Command& cmd, EventSink sink);
+  void fx_enable(const Command& cmd, EventSink sink);
+  void fx_clear(const Command& cmd, EventSink sink);
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it

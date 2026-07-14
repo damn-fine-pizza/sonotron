@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kPerformanceRecall(52). Next free id is 53.
+// kNone(0) .. kFxClear(56). Next free id is 57.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -96,6 +96,13 @@ static_assert(static_cast<std::uint16_t>(Param::kPadTrigger) == 49);
 static_assert(static_cast<std::uint16_t>(Param::kPadRelease) == 50);
 static_assert(static_cast<std::uint16_t>(Param::kPerformanceStore) == 51);
 static_assert(static_cast<std::uint16_t>(Param::kPerformanceRecall) == 52);
+// Phase-5 Item #10 (docs/phase5-design-reviews.md "MIDI-FX insert chain"):
+// the per-role insert chain, moved out of the RESERVED block below now that
+// node 5100 is live.
+static_assert(static_cast<std::uint16_t>(Param::kFxSet) == 53);
+static_assert(static_cast<std::uint16_t>(Param::kFxParam) == 54);
+static_assert(static_cast<std::uint16_t>(Param::kFxEnable) == 55);
+static_assert(static_cast<std::uint16_t>(Param::kFxClear) == 56);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kClip(8). Next free id is 9.
@@ -139,7 +146,7 @@ static_assert(sizeof(OutEvent) <= 16);
 // --- Protocol version: still v1 (freezing v1 keeps it v1) -------------------
 static_assert(kProtocolVersion == 1);
 
-// --- Reserved MIDI-FX shape (node 5100): the one committed symbol -----------
+// --- MIDI-FX chain slot cap (node 5100): stable ABI surface, per-role -------
 static_assert(kMaxInserts == 8);
 
 }  // namespace

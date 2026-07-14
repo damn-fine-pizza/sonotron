@@ -398,6 +398,9 @@ class Shell {
   bool cmd_perf(const std::vector<std::string>& tokens, std::string& error);
   bool perf_save(const std::string& path, std::string& error);
   bool perf_load(const std::string& path, std::string& error);
+  // Phase-5 Item #10: `fx set|param|enable|clear` — the per-role MIDI-FX
+  // insert chain (shell_fx_commands.cpp).
+  bool cmd_fx(const std::vector<std::string>& tokens, std::string& error);
   bool track_new(const std::vector<std::string>& tokens, std::string& error);
   bool track_step(const std::vector<std::string>& tokens, int track, std::string& error);
   bool cmd_advance(const std::vector<std::string>& tokens, std::string& error);

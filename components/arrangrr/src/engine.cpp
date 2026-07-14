@@ -80,6 +80,12 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kPerformanceRecall:
       cmd_perf(cmd, sink);
       break;
+    case Param::kFxSet:
+    case Param::kFxParam:
+    case Param::kFxEnable:
+    case Param::kFxClear:
+      cmd_fx(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -1178,6 +1184,76 @@ void Engine::apply_pending_performance_recall(EventSink sink) {
   m_perf_recall.clear();
   if (const Performance* perf = m_perfs.get(m_perf_recall_slot); perf != nullptr) {
     apply_performance(*perf, sink);
+  }
+}
+
+void Engine::cmd_fx(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kFxSet:
+      fx_set(cmd, sink);
+      break;
+    case Param::kFxParam:
+      fx_param(cmd, sink);
+      break;
+    case Param::kFxEnable:
+      fx_enable(cmd, sink);
+      break;
+    case Param::kFxClear:
+    default:
+      fx_clear(cmd, sink);
+      break;
+  }
+}
+
+// idx = TrackRole. a = slot (0..kMaxInserts-1), b = InsertType. Re-activates
+// the slot with that type's fresh default params (Arranger::set_fx ->
+// InsertChain::set_type).
+void Engine::fx_set(const Command& cmd, EventSink sink) {
+  const bool ok =
+      cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 && cmd.b >= 0 &&
+      cmd.b <= static_cast<std::int32_t>(InsertType::kNoteRepeat) &&
+      m_arranger.set_fx(static_cast<TrackRole>(cmd.idx), static_cast<std::size_t>(cmd.a),
+                        static_cast<InsertType>(cmd.b));
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// idx = TrackRole. a = slot, b = param id (meaning depends on the slot's
+// CURRENT type -- see InsertChain::set_param), c = value (clamped to the
+// field's own width there).
+void Engine::fx_param(const Command& cmd, EventSink sink) {
+  const bool ok =
+      cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 && cmd.b >= 0 &&
+      cmd.b <= 255 &&
+      m_arranger.set_fx_param(static_cast<TrackRole>(cmd.idx), static_cast<std::size_t>(cmd.a),
+                              static_cast<std::uint8_t>(cmd.b), cmd.c);
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// idx = TrackRole. a = slot, b = 0/1.
+void Engine::fx_enable(const Command& cmd, EventSink sink) {
+  const bool ok = cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 &&
+                  m_arranger.set_fx_enable(static_cast<TrackRole>(cmd.idx),
+                                           static_cast<std::size_t>(cmd.a), cmd.b != 0);
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+// idx = TrackRole. a = slot, or -1 = the whole chain.
+void Engine::fx_clear(const Command& cmd, EventSink sink) {
+  if (cmd.idx > static_cast<std::uint16_t>(TrackRole::kCc)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto role = static_cast<TrackRole>(cmd.idx);
+  const bool ok = cmd.a < 0 ? m_arranger.clear_fx(role)
+                            : m_arranger.clear_fx(role, static_cast<std::size_t>(cmd.a));
+  if (!ok) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
   }
 }
 
