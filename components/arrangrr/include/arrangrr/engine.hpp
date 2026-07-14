@@ -121,6 +121,9 @@ class Engine {
   // accessor; the ABI paths are cmd_pad/cmd_perf below.
   const PadEngine& pads() const noexcept { return m_pads; }
   PadEngine& pads() noexcept { return m_pads; }
+  // Phase-6 Theme 3 Item #4: the active pad bank (a VIEW CURSOR only, see
+  // kPadBankSelect in abi.hpp) -- 0..kMaxPadBanks-1.
+  std::uint16_t pad_bank() const noexcept { return m_pad_bank; }
   const PerformanceStore& performances() const noexcept { return m_perfs; }
   PerformanceStore& performances() noexcept { return m_perfs; }
 
@@ -386,6 +389,9 @@ class Engine {
   void pad_assign(const Command& cmd, EventSink sink);
   void pad_trigger(const Command& cmd, EventSink sink);
   void pad_release(const Command& cmd, EventSink sink);
+  // Phase-6 Theme 3 Item #4: kPadBankSelect's own handler, mirroring
+  // cmd_master_transpose's validate-or-reject style.
+  void pad_bank_select(const Command& cmd, EventSink sink);
   // Fires (or stops) one pad's wrapped content by type -- the ONE place that
   // translates a Pad into a call on the verb it wraps (clip_request/
   // clip_scene_launch/Arranger::request/perf_recall), mirroring
@@ -651,9 +657,12 @@ class Engine {
   PerformanceStore m_perfs;
   BoundaryLatch m_perf_recall;
   std::uint16_t m_perf_recall_slot = 0;
-  // v1: always bank 0 -- no live "active pad bank" focus concept exists yet
-  // (no ABI verb selects it); Performance::pad_bank_id captures this constant
-  // until a future host UI adds bank switching.
+  // Phase-6 Theme 3 Item #4: the active pad bank, a persisted VIEW CURSOR
+  // (0..kMaxPadBanks-1) selected by the kPadBankSelect ABI verb
+  // (pad_bank_select) and captured/restored via Performance::pad_bank_id
+  // (capture_performance/apply_performance) -- flat pad addressing
+  // (kPadAssign/kPadTrigger/kPadRelease, 0..kMaxPads-1) is unaffected by
+  // this value; the host maps its physical pad surface to flat ids.
   std::uint16_t m_pad_bank = 0;
   // Phase-4d promotion (§16.1/§16.4/§16.9): the chorddet peer is now a
   // Pipeline-owned SIBLING stage (was an Engine-owned value in 4b), injected

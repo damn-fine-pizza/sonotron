@@ -52,6 +52,9 @@ class TestEngine {
   // change; only extends this test-only wrapper's surface.
   const PerformanceStore& performances() const noexcept { return engine().performances(); }
   PerformanceStore& performances() noexcept { return engine().performances(); }
+  // Phase-6 Theme 3 Item #4: pure forwarding to Engine::pad_bank(), same
+  // precedent as performances() above.
+  std::uint16_t pad_bank() const noexcept { return engine().pad_bank(); }
 
   void push_midi_in(std::uint8_t port, Span<const std::uint8_t> bytes, EventSink sink) {
     m_runtime.stage().push_midi_in(port, bytes, sink);

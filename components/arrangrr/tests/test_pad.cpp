@@ -397,6 +397,55 @@ void test_pad_trigger_unassigned_pad_is_silently_inert() {
   CHECK(b.ev.size() == 0);
 }
 
+// ---- Phase-6 Theme 3 Item #4: kPadBankSelect ------------------------------
+
+void test_pad_bank_select_accepts_every_bank() {
+  Band b;
+  CHECK(b.e.pad_bank() == 0);
+  for (std::uint16_t bank = 0; bank < kMaxPadBanks; ++bank) {
+    b.ev.clear();
+    b.cmd(Param::kPadBankSelect, static_cast<std::int32_t>(bank));
+    CHECK(b.warns() == 0);
+    CHECK(b.e.pad_bank() == bank);
+  }
+}
+
+void test_pad_bank_select_rejects_out_of_range() {
+  Band b;
+  b.cmd(Param::kPadBankSelect, 5);  // valid, non-default: proves reject leaves it UNCHANGED
+  CHECK(b.e.pad_bank() == 5);
+  b.ev.clear();
+  b.cmd(Param::kPadBankSelect, static_cast<std::int32_t>(kMaxPadBanks));  // one past the top
+  CHECK(b.warns() == 1);
+  CHECK(b.e.pad_bank() == 5);  // unchanged on reject
+  b.ev.clear();
+  b.cmd(Param::kPadBankSelect, 1000);  // large, still out of range
+  CHECK(b.warns() == 1);
+  CHECK(b.e.pad_bank() == 5);
+  b.ev.clear();
+  b.cmd(Param::kPadBankSelect, -1);  // negative
+  CHECK(b.warns() == 1);
+  CHECK(b.e.pad_bank() == 5);
+}
+
+// The active bank is a persisted VIEW CURSOR only: flat pad addressing
+// (assign/trigger/release, 0..kMaxPads-1) is unaffected by it.
+void test_pad_bank_select_does_not_change_flat_pad_addressing() {
+  Band b;
+  b.setup_basic();
+  b.add_clip(TrackRole::kBass, 0, ContentKind::kStyleSection,
+             static_cast<std::uint16_t>(SectionType::kVarB));
+  b.assign_pad(3, PadType::kPhrase, PadMode::kOneShot, Boundary::kImmediate, /*source_idx=*/0);
+  b.cmd(Param::kPadBankSelect, 6);
+  CHECK(b.e.pad_bank() == 6);
+  b.cmd(Param::kTransportStart);
+  b.ev.clear();
+  b.trigger(3);  // same flat id 3, unaffected by the active bank being 6
+  CHECK(b.warns() == 0);
+  CHECK(b.current_section() == SectionType::kVarB);
+  CHECK(b.e.clips().get(0)->state == LaunchState::kPlaying);
+}
+
 }  // namespace
 
 int main() {
@@ -419,5 +468,8 @@ int main() {
   test_pad_assign_rejects_bad_fields();
   test_pad_trigger_release_bad_id_warns();
   test_pad_trigger_unassigned_pad_is_silently_inert();
+  test_pad_bank_select_accepts_every_bank();
+  test_pad_bank_select_rejects_out_of_range();
+  test_pad_bank_select_does_not_change_flat_pad_addressing();
   return arrangrr::test::failures();
 }

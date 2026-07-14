@@ -115,6 +115,7 @@ void assert_recall_rejected_and_rig_unchanged(Band& b, std::uint16_t slot, const
   const bool drums_soloed_before = b.e.arranger().soloed(TrackRole::kDrums);
   const GrooveParams groove_before = b.e.arranger().groove_params();
   const Key key_before = b.e.chords().key();
+  const std::uint16_t pad_bank_before = b.e.pad_bank();
   b.ev.clear();
   b.cmd(Param::kPerformanceRecall, 0, 0, 0, slot);
   CHECK(b.warns() == 1);
@@ -126,6 +127,7 @@ void assert_recall_rejected_and_rig_unchanged(Band& b, std::uint16_t slot, const
   CHECK(same_groove(b.e.arranger().groove_params(), groove_before));
   CHECK(b.e.chords().key().root_pc == key_before.root_pc);
   CHECK(b.e.chords().key().mode == key_before.mode);
+  CHECK(b.e.pad_bank() == pad_bank_before);  // Phase-6 Theme 3 Item #4
 }
 
 void test_perf_recall_rejects_bad_style_id() {
@@ -213,6 +215,17 @@ void test_perf_recall_rejects_bad_route_channel() {
   b.setup_basic();
   Performance bad = valid_performance();
   bad.routes[0].channel = 16;  // valid range is 0..15
+  assert_recall_rejected_and_rig_unchanged(b, 0, bad);
+}
+
+// Phase-6 Theme 3 Item #4: a malformed record's pad_bank_id must not poison
+// state -- rejected by validate(), never applied (same discipline as every
+// other field above).
+void test_perf_recall_rejects_bad_pad_bank_id() {
+  Band b;
+  b.setup_basic();
+  Performance bad = valid_performance();
+  bad.pad_bank_id = static_cast<std::uint16_t>(kMaxPadBanks);  // one past the last valid bank
   assert_recall_rejected_and_rig_unchanged(b, 0, bad);
 }
 
@@ -349,6 +362,28 @@ void test_perf_master_transpose_round_trips_across_the_full_value_set() {
   }
 }
 
+// Phase-6 Theme 3 Item #4: a NON-zero active pad bank survives the
+// capture -> store -> drift -> recall round trip, mirroring master
+// transpose's own -7 round-trip test above.
+void test_perf_pad_bank_round_trips_a_nonzero_value() {
+  Band b;
+  b.setup_basic();
+  b.cmd(Param::kPadBankSelect, 5);
+  CHECK(b.e.pad_bank() == 5);
+
+  b.cmd(Param::kPerformanceStore, 0, 0, 0, /*idx=*/0);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.performances().get(0)->pad_bank_id == 5);
+
+  b.cmd(Param::kPadBankSelect, 0);  // drift away
+  CHECK(b.e.pad_bank() == 0);
+
+  b.ev.clear();
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.pad_bank() == 5);  // restored
+}
+
 // ---- item 8: recall bar-gate ordering (Corelli fix #3) --------------------
 
 void test_perf_recall_bar_gate_lands_after_clip_promotion() {
@@ -434,9 +469,11 @@ int main() {
   test_perf_recall_rejects_bad_chord_follow();
   test_perf_recall_rejects_bad_route_port();
   test_perf_recall_rejects_bad_route_channel();
+  test_perf_recall_rejects_bad_pad_bank_id();
   test_perf_capture_recall_round_trip_restores_everything();
   test_perf_zero_transpose_round_trips_as_no_transpose();
   test_perf_master_transpose_round_trips_across_the_full_value_set();
+  test_perf_pad_bank_round_trips_a_nonzero_value();
   test_perf_recall_bar_gate_lands_after_clip_promotion();
   return arrangrr::test::failures();
 }

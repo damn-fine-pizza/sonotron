@@ -78,6 +78,7 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kPadAssign:
     case Param::kPadTrigger:
     case Param::kPadRelease:
+    case Param::kPadBankSelect:
       cmd_pad(cmd, sink);
       break;
     case Param::kPerformanceStore:
@@ -885,11 +886,26 @@ void Engine::cmd_pad(const Command& cmd, EventSink sink) {
     case Param::kPadTrigger:
       pad_trigger(cmd, sink);
       break;
+    case Param::kPadBankSelect:
+      pad_bank_select(cmd, sink);
+      break;
     case Param::kPadRelease:
     default:
       pad_release(cmd, sink);
       break;
   }
+}
+
+// Phase-6 Theme 3 Item #4: mirrors cmd_master_transpose's own validate-or-
+// reject shape (bad_argument, state unchanged on reject).
+void Engine::pad_bank_select(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPadBanks) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  m_pad_bank = static_cast<std::uint16_t>(cmd.a);
+  sink(OutEvent::param_state(Param::kPadBankSelect, 0, static_cast<std::uint8_t>(m_pad_bank), 0,
+                             m_now));
 }
 
 // Host/script-only registration (no L1 grammar of its own beyond `pad
@@ -1179,6 +1195,13 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
   const auto transpose = static_cast<std::int8_t>(perf.master_transpose & 0xFFu);
   m_arranger.set_master_transpose(transpose);
   m_chords.set_master_transpose(transpose);
+  // Phase-6 Theme 3 Item #4: restore the active pad-bank view cursor.
+  // validate_performance() above already rejected an out-of-range
+  // pad_bank_id, so this is a plain restore, no clamp. No echo event here
+  // (mirrors every other silently-restored field in this function; only
+  // emit_performance_confirmation's own explicit set below produces
+  // events) -- keeps existing recall goldens byte-identical.
+  m_pad_bank = perf.pad_bank_id;
   const Key key{.root_pc = perf.key_root, .mode = static_cast<Mode>(perf.key_mode)};
   m_chords.set_key(key);
   m_chorddet.set_key(key);  // scale-aware single-finger reads the same key

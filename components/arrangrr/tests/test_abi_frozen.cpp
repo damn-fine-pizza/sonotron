@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kMasterTranspose(57). Next free id is 58.
+// kNone(0) .. kPadBankSelect(58). Next free id is 59.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -106,6 +106,9 @@ static_assert(static_cast<std::uint16_t>(Param::kFxClear) == 56);
 // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
 // scope.md): the global transpose verb, next free id after kFxClear.
 static_assert(static_cast<std::uint16_t>(Param::kMasterTranspose) == 57);
+// Phase-6 Theme 3 Item #4: the active pad-bank view-cursor verb, next free
+// id after kMasterTranspose.
+static_assert(static_cast<std::uint16_t>(Param::kPadBankSelect) == 58);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kClip(8). Next free id is 9.

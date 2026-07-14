@@ -222,6 +222,21 @@ void test_master_transpose_minus_13_is_invalid() {
   CHECK(!perf::validate(p, kNoSequences));
 }
 
+// ---- pad_bank_id (Phase-6 Theme 3 Item #4): plain index into the fixed
+// 8-bank layout (arrangrr/config.hpp's kMaxPadBanks) -----------------------
+
+void test_pad_bank_id_last_bank_is_valid() {
+  Performance p = valid_performance();
+  p.pad_bank_id = static_cast<std::uint16_t>(kMaxPadBanks - 1);
+  CHECK(perf::validate(p, kNoSequences));
+}
+
+void test_pad_bank_id_one_past_kmaxpadbanks_is_invalid() {
+  Performance p = valid_performance();
+  p.pad_bank_id = static_cast<std::uint16_t>(kMaxPadBanks);
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
 // ---- routes[] ---------------------------------------------------------
 
 void test_route_port_and_channel_at_max_is_valid() {
@@ -273,6 +288,8 @@ int main() {
   test_master_transpose_plus_13_is_invalid();
   test_master_transpose_minus_12_is_valid();
   test_master_transpose_minus_13_is_invalid();
+  test_pad_bank_id_last_bank_is_valid();
+  test_pad_bank_id_one_past_kmaxpadbanks_is_invalid();
   test_route_port_and_channel_at_max_is_valid();
   test_route_port_one_past_kmaxports_is_invalid();
   test_route_channel_16_is_invalid();

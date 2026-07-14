@@ -275,6 +275,18 @@ enum class Param : std::uint16_t {
   // by design.
   kMasterTranspose = 57,  // set: a = semitones, clamped/rejected outside
                           //     [-12, +12]. 0 is a no-op (the default).
+  // Phase-6 Theme 3 Item #4: the active pad bank -- a persisted VIEW CURSOR
+  // over the existing 8-bank x 4-pad layout (arrangrr/config.hpp's
+  // kMaxPadBanks/kMaxPadsPerBank), NOT a change to pad addressing:
+  // kPadAssign/kPadTrigger/kPadRelease above still address pads by their
+  // FLAT id (0..kMaxPads-1) regardless of this value. Engine::m_pad_bank
+  // is captured into Performance::pad_bank_id on store and restored on
+  // recall (Engine::capture_performance/apply_performance); the host maps
+  // its physical pad surface to flat ids using this cursor.
+  kPadBankSelect = 58,  // set: a = bank (0..kMaxPadBanks-1), rejected
+                        //     (kBadArgument) outside that range -- state
+                        //     unchanged on reject, matching
+                        //     kMasterTranspose's own discipline.
 };
 
 // ============================================================================
