@@ -94,15 +94,24 @@ Original scope notes (for reference):
   `Router` thru-matrix, with an explicit migrator from v1 (Principle #8).
 - "Active pad bank" ABI verb (`m_pad_bank` is fixed 0 in v1).
 
-## Theme 4 — Deeper MIDI-FX (`5210`/`5220`)
+## Theme 4 — Deeper MIDI-FX (`5210`/`5220`) — ✅ SHIPPED (`8428a4d`)
 
-The biggest architectural fork — do it deliberately, last.
-- Decide the `Insert` interface: pure stream-transform vs a capability-probed
-  optional `on_tick` hook (Corelli's option 1 vs 2) — this decides the signature
-  for all slots.
-- `5210` groove-as-insert: bit-identity discipline (graft at the same D40 point
-  or accept the pitch-overlap edge-case golden risk).
-- `5220` arp-as-insert: per-role instances vs the `on_tick` capability.
+The biggest architectural fork — done deliberately, last. Closes Phase 6.
+- `Insert` interface: **Option 2** adopted — optional, switch-dispatched
+  `ingest`/`on_tick` capabilities, a genuine no-op for the five stateless
+  types (one runtime-tagged type, not SFINAE).
+- `5210` groove-as-insert: shipped as `InsertType::kGroove`, auto-present and
+  pinned effectively last, reproducing `groove::apply` inside the chain — all
+  22 goldens byte-identical; genuinely reorderable, fan-order footgun
+  documented.
+- `5220` arp-as-insert: shipped as `InsertType::kArp` (slim 4-byte config in
+  the union) with a per-role `ArpeggiatorEngine m_role_arp[kRoleCount]`
+  (session-only) and a new ungated per-role-per-tick pass in
+  `Arranger::on_tick`.
+- QA (Torquato) found and Nazzareno fixed two defects before landing: stale
+  arp on live style switch (`request_style` now resets), and a dual-arp
+  output collision (`OutScheduler` retrigger-care now scoped per-producer).
+  Design source of truth: `docs/reflections/phase6-theme4-insert-interface-fork.md`.
 
 ---
 

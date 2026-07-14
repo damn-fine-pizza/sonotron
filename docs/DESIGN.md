@@ -854,8 +854,8 @@ INSTANCES of the chain, not disconnected modules.*
   is passthrough). The chain is live config only — **not** persisted in the
   `Performance` v1 format yet.
 - **5200 Refactor existing modules into chain instances**
-  - `5210` groove as a chain instance — ○ SHIPPABLE
-  - `5220` arp as a track MIDI-FX instance — ○ SHIPPABLE *(= 7130)*
+  - `5210` groove as a chain instance — ✅ DONE (`8428a4d`, Phase-6 Theme 4)
+  - `5220` arp as a track MIDI-FX instance — ✅ DONE (`8428a4d`, Phase-6 Theme 4) *(= 7130)*
   - `5230` scale-lock / scale-filter as a chain instance — ○ SHIPPABLE
 - **5300 New inserts (SHIPPABLE)**
   - `5310` echo / MIDI-delay — ○
@@ -878,7 +878,7 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
 - **7100 Arpeggiator engine**
   - `7110` Live-keyboard arp (rate/dir/octaves/gate/latch/seed) — ✅
   - `7120` Arp as a style part (replace hand-written kArp patterns) — ○ SHIPPABLE
-  - `7130` Arp as a track MIDI-FX — ○ SHIPPABLE *(= 5220)*
+  - `7130` Arp as a track MIDI-FX — ✅ DONE (`8428a4d`, Phase-6 Theme 4) *(= 5220)*
 - **7200 Phrase/Pad engine** (banks of 4; one-shot/loop/hold/toggle) — ◑ partial
   (Phase-5 Item #9, commit `e980665`, 2026-07-14): `PadEngine`
   (`components/arrangrr/include/arrangrr/pad/pad_bank.hpp`) ships 8 banks × 4 =
