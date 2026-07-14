@@ -204,3 +204,16 @@ arrangrr_test(test_arp_insert_style_switch_stale_regression regression)
 # single-producer retrigger-care logic. GREEN (kept in the same file/target,
 # same collision setup): Panic still drops both arps' held state cleanly.
 arrangrr_test(test_dual_arp_collision regression)
+# test_clip_matrix_live_meter_change_regression: Torquato QA pin (Phase 7,
+# node T0 hardening) -- ClipMatrix::on_bar recomputes its quantize window
+# FRESH from whatever live ticks_per_bar Engine threads in on each call,
+# unlike the sibling BoundaryLatch primitive (Corelli fix #2), which
+# snapshots its window ONCE at arm() time (see test_boundary_latch.cpp's own
+# frozen-window test for the contrast). A clip armed for "the next N bars"
+# while the meter is stable silently retunes to a DIFFERENT fire tick the
+# moment the live time signature changes mid-count-down. See the file's own
+# header comment for the exact minimized reproducer. Kept in its own file/
+# CTest entry (mirrors test_performance_style_id_regression's own isolation
+# precedent) so its failure never masks test_clip_matrix.cpp's surrounding
+# GREEN coverage. Currently RED; do not silence it.
+arrangrr_test(test_clip_matrix_live_meter_change_regression regression)

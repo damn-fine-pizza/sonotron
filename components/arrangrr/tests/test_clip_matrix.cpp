@@ -175,6 +175,31 @@ void test_on_bar_respects_n_bars_multi_bar_window() {
   CHECK(clips.get(0)->state == LaunchState::kPlaying);
 }
 
+// --- Phase 7 (node T0): the threaded ticks_per_bar parameter ----------------
+
+// on_bar()'s third argument is the LIVE bar length (Engine::fire_clips threads
+// m_transport.ticks_per_bar() here every tick). A genuine non-4/4 value (a
+// 3-beat bar, 3 * kTicksPerBeat = 2880) changes the quantize window exactly
+// like the default kTicksPerBar case does, AS LONG AS the same value is
+// passed on every call between arm and fire (the stable-meter case) --
+// test_clip_matrix_live_meter_change_regression.cpp pins the DIFFERENT,
+// live-recomputed-window behavior once the value passed actually CHANGES
+// mid-flight.
+void test_on_bar_with_explicit_non_default_ticks_per_bar() {
+  ClipMatrix clips;
+  constexpr Tick kThreeBeatBar = 3 * kTicksPerBeat;  // 2880: a genuine 3/4 bar
+  CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
+  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/2));
+  OnBarRecorder rec_one_bar;
+  clips.on_bar(kThreeBeatBar, rec_one_bar, kThreeBeatBar);
+  CHECK(rec_one_bar.calls == 0);  // 1 bar (of 3 beats) is not yet the 2-bar window
+  CHECK(clips.get(0)->state == LaunchState::kArmed);
+  OnBarRecorder rec_two_bars;
+  clips.on_bar(2 * kThreeBeatBar, rec_two_bars, kThreeBeatBar);
+  CHECK(rec_two_bars.calls == 1);
+  CHECK(clips.get(0)->state == LaunchState::kPlaying);
+}
+
 void test_on_bar_promotes_multiple_independent_clips_in_one_call() {
   ClipMatrix clips;
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
@@ -209,6 +234,7 @@ int main() {
   test_on_bar_promotes_queued_stop_to_stopped();
   test_on_bar_ignores_already_settled_clips();
   test_on_bar_respects_n_bars_multi_bar_window();
+  test_on_bar_with_explicit_non_default_ticks_per_bar();
   test_on_bar_promotes_multiple_independent_clips_in_one_call();
 
   return arrangrr::test::failures();

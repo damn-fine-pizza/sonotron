@@ -337,6 +337,62 @@ static void test_restyle_stage_target_role_overrides_anchor() {
   CHECK(saw_on);
 }
 
+// --- Phase 7 (node T0): the injected Transport& / live meter ----------------
+
+// RestyleStage::note_on's step computation (restyle_stage.hpp) now reads
+// `m_transport.ticks_per_bar()` instead of the compile-time kTicksPerBar
+// constant. This is a regression check for item 8 of the T0 hardening pass:
+// a genuinely non-4/4 transport meter must not corrupt the harmony-
+// preservation property the rest of this file already pins (test_
+// restyle_stage_preserves_harmony_of_every_note) -- the step value only ever
+// feeds groove::apply's OWN offset/step-lock lookup, never the classify/
+// voice pipeline, so a wrong or wrapped step could silently only ever show
+// up as a timing/groove artifact, not a wrong note -- but it must not crash
+// or produce an out-of-range access either, including at tick values well
+// past the OLD (4/4) bar length.
+static void test_restyle_stage_preserves_harmony_under_a_non_default_time_signature() {
+  Harness h;
+  h.transport.set_time_sig(3);  // a genuine 3/4: ticks_per_bar() == 2880, not 3840
+  CHECK(h.transport.ticks_per_bar() == 3 * kTicksPerBeat);
+  CHECK(h.stage.load_style(styles::kBuiltins[0]));
+  h.followed.establish_default(kCMajor);
+
+  // Drive the SAME chord-tone/scale-degree sequence as
+  // test_restyle_stage_preserves_harmony_of_every_note, but starting well
+  // past the OLD 4/4 bar length (3840) -- exercising the modulo against the
+  // NEW, smaller bar length rather than ticks near zero, where a wraparound
+  // bug would be easiest to miss.
+  const std::vector<std::uint8_t> inputs = {60, 64, 67, 62,
+                                            65};  // C E G (chord tones), D, F (degrees)
+  Tick t = 4000;
+  h.tick(t);
+  for (std::uint8_t note : inputs) {
+    h.feed(0, {0x90, note, 100});
+    ++t;
+    h.tick(t);
+    h.feed(0, {0x80, note, 0});
+    ++t;
+    h.tick(t);
+  }
+
+  const std::vector<ScheduledEvent> events = h.drain(200000);
+  CHECK(events.size() == inputs.size() * 2);  // one on + one off per input note, nothing dropped
+
+  std::size_t checked = 0;
+  for (std::size_t i = 0; i < events.size() && checked < inputs.size(); ++i) {
+    if (events[i].msg.type() != midi::kNoteOn) {
+      continue;
+    }
+    const std::uint8_t input_note = inputs[checked];
+    const Classification before = restyle::classify(kCMajor, kCMaj, input_note);
+    const Classification after = restyle::classify(kCMajor, kCMaj, events[i].msg.d1);
+    CHECK(before.kind == after.kind);
+    CHECK(before.index == after.index);
+    ++checked;
+  }
+  CHECK(checked == inputs.size());
+}
+
 int main() {
   test_classify_chord_tones();
   test_classify_scale_degree();
@@ -352,6 +408,7 @@ int main() {
   test_restyle_stage_in_mask_channel_still_transforms();
   test_restyle_stage_channel_mask_is_overridable();
   test_restyle_stage_target_role_overrides_anchor();
+  test_restyle_stage_preserves_harmony_under_a_non_default_time_signature();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_restyle: all OK\n");
   }

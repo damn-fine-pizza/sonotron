@@ -683,6 +683,153 @@ void test_perf_recall_bar_gate_lands_after_clip_promotion() {
   CHECK(b.e.arranger().current() == SectionType::kVarC);
 }
 
+// ---- Phase 7 (node T0): OutEvent::kTimeSig emission discipline ------------
+
+int count_time_sig_events(const Events& ev) {
+  int n = 0;
+  for (const OutEvent& o : ev) {
+    if (o.kind == OutEvent::Kind::kTimeSig) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+// apply_style_time_sig's gate (engine.cpp) only emits kTimeSig when the
+// style's beats_per_bar actually DIFFERS from the live value -- every
+// builtin style keeps the default 4/4 (docs/reflections/
+// phase7-design-variable-timesig-engine.md's own byte-identity gate), so
+// switching between ANY two builtins (kStyleLoad, then an immediate
+// kStyleSwitch) must never emit a spurious kTimeSig.
+void test_time_sig_event_not_emitted_on_style_reload_with_unchanged_meter() {
+  Band b;
+  b.setup_basic();  // style 0 "basic", 4/4
+  b.ev.clear();
+  b.cmd(Param::kStyleLoad, 1);  // a different builtin -- still 4/4
+  CHECK(count_time_sig_events(b.ev) == 0);
+  b.ev.clear();
+  b.cmd(Param::kStyleSwitch, 2,
+        static_cast<std::int32_t>(SectionType::kVarA));  // immediate (default boundary)
+  CHECK(count_time_sig_events(b.ev) == 0);
+}
+
+// A Performance recall that GENUINELY changes beats_per_bar (Transport::
+// set_time_sig actually flips) emits exactly one kTimeSig event carrying the
+// new value in `code` -- the ONE Engine-reachable path (via the ABI) that
+// exercises a real, non-4/4 meter change end to end, since no builtin style
+// authors one (see this file's sibling gap noted in the QA handoff report).
+void test_perf_recall_immediate_changes_time_sig_and_emits_event() {
+  Band b;
+  b.setup_basic();
+  CHECK(b.e.transport().time_sig().beats_per_bar == kBeatsPerBar);
+  Performance p = valid_performance();
+  p.beats_per_bar = 3;  // a genuine 3/4
+  CHECK(b.e.performances().store(0, p));
+  b.ev.clear();
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
+  CHECK(b.e.transport().time_sig().beats_per_bar == 3);
+  CHECK(b.e.transport().ticks_per_bar() == 3 * kTicksPerBeat);
+  int n = 0;
+  std::uint16_t code = 0;
+  for (const OutEvent& o : b.ev) {
+    if (o.kind == OutEvent::Kind::kTimeSig) {
+      ++n;
+      code = o.code;
+    }
+  }
+  CHECK(n == 1);
+  CHECK(code == 3);
+}
+
+// emit_performance_confirmation's own kTimeSig re-announce is UNCONDITIONAL
+// (mirrors kSection's own unconditional confirm, engine.cpp's comment) -- a
+// recall whose beats_per_bar equals the CURRENT live value still emits
+// kTimeSig on every single recall, exactly like every other confirmation
+// field. This is the documented exception to "only on a genuine change"
+// (abi.hpp's own kTimeSig comment): pinned here as INTENDED behavior, not a
+// defect.
+void test_perf_recall_confirmation_emits_time_sig_unconditionally_even_when_unchanged() {
+  Band b;
+  b.setup_basic();                      // live meter is the default 4/4
+  Performance p = valid_performance();  // beats_per_bar left at its default (4): no genuine change
+  CHECK(p.beats_per_bar == kBeatsPerBar);
+  CHECK(b.e.performances().store(0, p));
+  b.ev.clear();
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
+  CHECK(count_time_sig_events(b.ev) == 1);  // confirmed anyway, unconditionally
+  b.ev.clear();
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);  // a SECOND, identical recall
+  CHECK(count_time_sig_events(b.ev) == 1);               // re-confirms again, every time
+}
+
+// kTimeSig is a change-announce, not a per-tick heartbeat (unlike kBeat) --
+// advancing the transport with no style/perf change in force must never
+// produce one, across several bars.
+void test_time_sig_event_never_fires_on_ordinary_ticks() {
+  Band b;
+  b.setup_basic();
+  b.cmd(Param::kTransportStart);
+  // Advance one bar at a time, checking + clearing between chunks: a single
+  // 4-bar advance() would overflow the fixed 512-slot Events buffer with
+  // ordinary kBeat/note traffic long before this assertion is ever reached
+  // -- the point here is the ABSENCE of kTimeSig, not the note content, so
+  // clearing between chunks is a harness-capacity accommodation, not a
+  // behavior change.
+  for (int bar = 0; bar < 4; ++bar) {
+    b.ev.clear();
+    b.advance(kTicksPerBar);
+    CHECK(count_time_sig_events(b.ev) == 0);
+  }
+}
+
+// ---- Phase 7 (node T0), item 2: clip-launch quantization follows the LIVE
+// meter, not the stale 4/4 constant, once a recall has genuinely changed it.
+
+void test_clip_launch_next_bar_quantizes_to_the_new_meter_after_recall() {
+  Band b;
+  b.setup_basic();
+  Performance p = valid_performance();
+  p.beats_per_bar = 3;
+  CHECK(b.e.performances().store(0, p));
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0,
+        /*idx=*/0);  // immediate: live meter is 3/4 from here on
+  CHECK(b.e.transport().ticks_per_bar() == 3 * kTicksPerBeat);
+
+  b.add_clip(TrackRole::kBass, 0, ContentKind::kStyleSection,
+             static_cast<std::uint16_t>(SectionType::kVarB));
+  b.cmd(Param::kTransportStart);
+  b.ev.clear();
+  b.cmd(Param::kClipLaunch, 0, 0, 0, /*idx=*/0, Boundary::kNextBar);
+  CHECK(b.e.clips().get(0)->state == LaunchState::kArmed);
+
+  b.advance(3 * kTicksPerBeat - 1);  // one tick short of the NEW (3-beat) bar boundary
+  CHECK(b.e.clips().get(0)->state == LaunchState::kArmed);
+  b.advance(1);  // crosses it -- the clip fires against the NEW bar length, not the old 3840
+  CHECK(b.e.clips().get(0)->state == LaunchState::kPlaying);
+}
+
+// ---- Phase 7 (node T0), item 5: capture_performance() round-trips the LIVE
+// transport meter, not just a stored/recalled one (closes the capture half
+// of the wire-level round trip test_performance_wire.cpp already covers).
+
+void test_capture_performance_round_trips_live_beats_per_bar() {
+  Band b;
+  b.setup_basic();
+  Performance seed = valid_performance();
+  seed.beats_per_bar = 3;
+  // PerformanceStore::store() only overwrites an existing slot or grows the
+  // pool by exactly one (slot == size()) -- a fresh store's first slot is 0.
+  CHECK(b.e.performances().store(0, seed));
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);  // live transport is now 3/4
+  CHECK(b.e.transport().time_sig().beats_per_bar == 3);
+
+  b.cmd(Param::kPerformanceStore, 0, 0, 0, /*idx=*/1);  // captures the LIVE rig into slot 1
+  const Performance* captured = b.e.performances().get(1);
+  CHECK(captured != nullptr);
+  CHECK(captured->beats_per_bar ==
+        3);  // capture_performance() read the live transport, not a stale 4
+}
+
 }  // namespace
 
 int main() {
@@ -707,5 +854,11 @@ int main() {
   test_perf_capture_recall_round_trip_fully_populates_all_80_fx_slots();
   test_perf_capture_recall_round_trip_all_empty_chains();
   test_perf_recall_bar_gate_lands_after_clip_promotion();
+  test_time_sig_event_not_emitted_on_style_reload_with_unchanged_meter();
+  test_perf_recall_immediate_changes_time_sig_and_emits_event();
+  test_perf_recall_confirmation_emits_time_sig_unconditionally_even_when_unchanged();
+  test_time_sig_event_never_fires_on_ordinary_ticks();
+  test_clip_launch_next_bar_quantizes_to_the_new_meter_after_recall();
+  test_capture_performance_round_trips_live_beats_per_bar();
   return arrangrr::test::failures();
 }

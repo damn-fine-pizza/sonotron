@@ -762,6 +762,77 @@ void test_style_beats_per_bar_field_and_explicit_ticks_per_bar_change_wrap() {
   CHECK(hits.size() == 2 && hits[0] == 0 && hits[1] == three_beat_bar);
 }
 
+namespace fourbeat {
+// A sibling of threebeat::kStyle sharing the SAME section shape/patterns but
+// the default (4-beat) time signature -- lets the two request_style tests
+// below assert a genuine FIELD SWITCH (4 -> 3 and back) rather than reading
+// an unrelated style's default.
+constexpr Style kStyle{.name = "fourbeat",
+                       .sections = Span<const StyleSection>(threebeat::kSections)};
+static_assert(kStyle.beats_per_bar == kBeatsPerBar);
+}  // namespace fourbeat
+
+// Phase 7 (node T0), item 4 (Style -> Arranger data plumbing): an IMMEDIATE
+// live style switch (request_style(..., /*immediate=*/true)) swaps
+// current_style() to the new pointer AT ONCE -- Style::beats_per_bar is part
+// of that same pointer swap, so the new style's authored time signature is
+// visible the instant the switch lands, mirroring Style::tempo's own
+// immediate-switch precedent (test_style_switch_seeds_groove above).
+// Arranger itself never reads this field (Engine::apply_style_time_sig does,
+// production-side) -- this pins the DATA the field-switch mechanism itself
+// exposes to that caller.
+void test_request_style_immediate_swaps_beats_per_bar_field() {
+  Arranger a;
+  CHECK(a.load_style(&fourbeat::kStyle));
+  CHECK(a.current_style()->beats_per_bar == 4);
+  CHECK(a.request_style(&threebeat::kStyle, SectionType::kVarA, /*immediate=*/true));
+  CHECK(a.current_style()->beats_per_bar == 3);
+  // And back, proving this is a genuine two-way field swap, not a one-shot.
+  CHECK(a.request_style(&fourbeat::kStyle, SectionType::kVarA, /*immediate=*/true));
+  CHECK(a.current_style()->beats_per_bar == 4);
+}
+
+// Phase 7 (node T0), item 4: a DEFERRED live style switch (queued while
+// playing) does NOT swap current_style() until the bar boundary it was
+// queued for -- Style::beats_per_bar rides the SAME m_pending_style pointer
+// every other deferred field does (Style::tempo's own deferred-switch
+// precedent, test_deferred_style_switch_seeds_tempo, engine.hpp). Driven at
+// the Arranger unit level with the OLD style's own bar length threaded
+// through on_tick (matching production: Engine::fire_arranger reads
+// m_transport.ticks_per_bar() BEFORE apply_style_time_sig ever runs for this
+// bar -- the switch's OWN new time signature only takes musical effect from
+// the NEXT bar on, exactly like a deferred tempo change).
+void test_request_style_deferred_swaps_beats_per_bar_field_at_bar_boundary() {
+  Arranger a;
+  CHECK(a.load_style(&fourbeat::kStyle));
+  CHECK(a.set_route(TrackRole::kDrums, 0, 9));
+  a.on_transport_start();
+  const ChordState no_chord{};
+  auto tick_fourbeat = [&](Tick t) {
+    return a.on_tick(
+        t, Key{}, no_chord, [](std::uint8_t, TickOffset, const MidiMessage&, std::uint8_t) {},
+        kTicksPerBar);
+  };
+  // Mid-bar: queue the switch (transport playing -> immediate == false).
+  tick_fourbeat(0);
+  CHECK(a.request_style(&threebeat::kStyle, SectionType::kVarA, /*immediate=*/false));
+  CHECK(a.current_style()->beats_per_bar == 4);  // NOT yet -- still the OLD style
+  for (Tick t = 1; t < kTicksPerBar; ++t) {
+    tick_fourbeat(t);
+    CHECK(a.current_style()->beats_per_bar == 4);  // unchanged until the boundary
+  }
+  // The bar boundary itself: still threaded with the OLD (4/4) bar length --
+  // production mirrors this exactly (Engine::fire_arranger passes the
+  // pre-switch m_transport.ticks_per_bar(); apply_style_time_sig only runs
+  // AFTER on_tick reports style_changed, seeding the transport for bars
+  // after this one).
+  const Arranger::TickResult r = a.on_tick(
+      kTicksPerBar, Key{}, no_chord,
+      [](std::uint8_t, TickOffset, const MidiMessage&, std::uint8_t) {}, kTicksPerBar);
+  CHECK(r.style_changed);
+  CHECK(a.current_style()->beats_per_bar == 3);  // landed: the new style's field is now live
+}
+
 void test_immediate_switch_when_stopped() {
   Band b;
   b.setup_basic();
@@ -1083,6 +1154,8 @@ int main() {
   test_style_warns();
   test_multibar_section_plays_bar_two();
   test_style_beats_per_bar_field_and_explicit_ticks_per_bar_change_wrap();
+  test_request_style_immediate_swaps_beats_per_bar_field();
+  test_request_style_deferred_swaps_beats_per_bar_field_at_bar_boundary();
   test_immediate_switch_when_stopped();
   test_seamless_style_switch();
   test_style_switch_immediate_when_stopped();

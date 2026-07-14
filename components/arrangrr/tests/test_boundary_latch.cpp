@@ -87,6 +87,47 @@ void test_rearm_replaces_the_previous_window() {
   CHECK(latch.due(kTicksPerBar));
 }
 
+// --- Phase 7 (node T0): the threaded ticks_per_bar parameter ----------------
+
+// arm()'s second argument is the LIVE bar length (Engine threads
+// m_transport.ticks_per_bar() at arm time, e.g. Engine::perf_recall /
+// apply_pending_pad_fires's own arming call). A genuine non-4/4 value (a
+// 3-beat bar, 3 * kTicksPerBeat = 2880) changes the window exactly as the
+// default (kTicksPerBar) case does -- the SAME arithmetic, a different
+// divisor.
+void test_arm_with_explicit_non_default_ticks_per_bar() {
+  BoundaryLatch latch;
+  constexpr Tick kThreeBeatBar = 3 * kTicksPerBeat;  // 2880: a genuine 3/4 bar
+  CHECK(kThreeBeatBar != kTicksPerBar);              // sanity: really a different meter
+  latch.arm(2, kThreeBeatBar);
+  CHECK(latch.window == 2 * kThreeBeatBar);  // 5760, NOT 2 * kTicksPerBar (7680)
+  CHECK(!latch.due(kThreeBeatBar));          // 1 bar in: not yet
+  CHECK(latch.due(2 * kThreeBeatBar));       // 2nd 3-beat bar: due
+  CHECK(!latch.due(2 * kTicksPerBar));       // the OLD 4/4 window's tick is NOT a hit
+}
+
+// The window is a SNAPSHOT taken at arm() time, not re-derived from a later
+// ticks_per_bar value on every due() check -- due() only ever reads the
+// already-computed `window` field (see the struct itself: due() takes no
+// ticks_per_bar parameter at all). This is BoundaryLatch's own documented
+// contract (Engine::m_perf_recall/m_pad_latch rely on it: a Performance
+// recall armed under one meter must still land on the bar it was actually
+// quantized to, even if the SAME recall it is waiting for is what changes
+// the meter). Torquato QA (Phase 7, node T0): this is the baseline this
+// pin proves for CONTRAST against ClipMatrix::on_bar's own DIFFERENT
+// (live-recomputed, not snapshotted) behavior under the identical scenario
+// -- see test_clip_matrix_live_meter_change_regression.cpp.
+void test_arm_window_is_frozen_at_arm_time_immune_to_a_later_meter_change() {
+  BoundaryLatch latch;
+  latch.arm(2, kTicksPerBar);  // armed while the meter is still 4/4
+  CHECK(latch.window == 2 * kTicksPerBar);
+  // The "meter changes" here is simulated by simply never re-arming: due()
+  // has no ticks_per_bar parameter to feed a new value through, by design.
+  CHECK(!latch.due(kTicksPerBar));             // 1 bar in: not yet
+  CHECK(!latch.due(2 * (3 * kTicksPerBeat)));  // a 3/4-bar-window tick: NOT a hit
+  CHECK(latch.due(2 * kTicksPerBar));          // fires exactly where it was armed to
+}
+
 }  // namespace
 
 int main() {
@@ -97,5 +138,7 @@ int main() {
   test_arm_clamps_n_bars_below_one();
   test_clear_consumes_the_arm();
   test_rearm_replaces_the_previous_window();
+  test_arm_with_explicit_non_default_ticks_per_bar();
+  test_arm_window_is_frozen_at_arm_time_immune_to_a_later_meter_change();
   return arrangrr::test::failures();
 }
