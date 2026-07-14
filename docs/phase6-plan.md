@@ -37,10 +37,24 @@ Land everything on an honest baseline before feature work.
   trap-when-hit sites (`Arranger::kMaxVoiceNotes` uses the same idiom — harmless
   today but same class).
 
-## Theme 2 — Audio in the standalone GUI (node `0910` follow-on)
+## Theme 2 — Audio in the standalone GUI (node `0910` follow-on) — ✅ SHIPPED (4f97af5)
 
 Make `gui-sonotron` audible on its own (today sound only comes from
 `apps/tools/melodd`, `apps/demo`, or an external synth over ALSA).
+
+Shipped 2026-07-14 (commit `4f97af5`): new arrangrr-free `gui_sonotron_audio`
+library (`AudioEngine` = `melodd::Synth` + miniaudio + a lock-free SPSC note
+ring + a narrow render/soundfont/panic mutex); `OutEvent → AudioMidiEvent`
+translation gated to `kPrimaryAudioOutPort == 0` at `run_engine()`'s existing
+`kMidi` filter; shared `melodd::dispatch_midi_message()`; `load_soundfont()`
+split (disk-read vs state-swap); "Load SoundFont…" field auto-prefilled via
+`find_system_soundfont()`. Reachability gap closed: `InProcessBrainSession`
+auto-routes the default band to `out0` on `style load` (reusing
+`apps/demo/jam/setup.acmd`'s canonical map) — zero new UI. Shape review:
+`docs/phase6-design-reviews.md`. Deferred (NEEDS-DECISION): audio in
+`--control`/external-server mode (JSONL wire addition); `OutEvent.port`
+filtering once multiple output ports exist. Owner chose load-from-path only
+(no bundled `.sf2`) and filter-by-port.
 - Wire `melodd::Synth` into `gui-sonotron`'s in-process brain session: a
   dedicated audio thread consuming the engine's `OutEvent` MIDI stream →
   `Synth.render()` → miniaudio device. `Synth` already exists
