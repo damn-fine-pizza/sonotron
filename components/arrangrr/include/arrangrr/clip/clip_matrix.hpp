@@ -110,20 +110,24 @@ class ClipMatrix {
     return true;
   }
 
-  // Called from Engine::on_tick's EXISTING `tick % kTicksPerBar == 0` block,
+  // Called from Engine::on_tick's EXISTING `tick % ticks_per_bar == 0` block,
   // BEFORE fire_arranger (decision #2). Promotes every armed/queued-stop
   // clip whose quantize window closes on `transport_tick` (kArmed ->
   // kPlaying, kQueuedStop -> kStopped) and invokes `on_due(id, clip)` -- with
   // the NEW state already applied -- so the caller can trigger the
-  // underlying content and emit the wire event.
+  // underlying content and emit the wire event. `ticks_per_bar` (Phase 7,
+  // node T0) is the CURRENT bar length; ClipMatrix holds no Transport&, so
+  // Engine threads it explicitly (defaults to the compile-time kTicksPerBar
+  // so every pre-existing 2-arg caller, e.g. unit tests, keeps computing the
+  // exact same window).
   template <typename Fn>
-  void on_bar(Tick transport_tick, Fn&& on_due) {
+  void on_bar(Tick transport_tick, Fn&& on_due, Tick ticks_per_bar = kTicksPerBar) {
     for (std::size_t id = 0; id < m_clips.size(); ++id) {
       Clip& c = m_clips[id];
       if (c.state != LaunchState::kArmed && c.state != LaunchState::kQueuedStop) {
         continue;
       }
-      const Tick window = static_cast<Tick>(c.n_bars) * kTicksPerBar;
+      const Tick window = static_cast<Tick>(c.n_bars) * ticks_per_bar;
       if (transport_tick % window != 0) {
         continue;
       }

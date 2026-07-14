@@ -101,6 +101,50 @@ void test_transport_position_and_bounds() {
   CHECK(t.playing());
 }
 
+// Phase 7 (node T0): the variable time-signature engine's byte-identity gate
+// -- TimeSig{}'s default member initializers are the LITERAL two constants
+// whose product already defined kTicksPerBar, so a default-constructed
+// Transport computes the identical numeric value, bit-for-bit, until
+// set_time_sig ever moves it.
+void test_time_sig_default_is_byte_identical_to_legacy_constants() {
+  constexpr TimeSig sig;
+  CHECK(sig.beats_per_bar == kBeatsPerBar);
+  CHECK(sig.ticks_per_beat == kTicksPerBeat);
+  CHECK(sig.ticks_per_bar() == kTicksPerBar);
+
+  Transport t;
+  CHECK(t.time_sig().beats_per_bar == kBeatsPerBar);
+  CHECK(t.time_sig().ticks_per_beat == kTicksPerBeat);
+  CHECK(t.ticks_per_bar() == kTicksPerBar);
+}
+
+// Phase 7 (node T0): set_time_sig mirrors set_bpm's own validated-setter
+// discipline exactly -- rejects out of [kMinBeatsPerBar, kMaxBeatsPerBar],
+// state unchanged on reject; a genuine non-4/4 value changes ticks_per_bar()
+// (and therefore position()'s own bar-length math) accordingly.
+void test_set_time_sig_bounds_and_bar_length() {
+  Transport t;
+  CHECK(!t.set_time_sig(0));                    // below kMinBeatsPerBar
+  CHECK(!t.set_time_sig(kMaxBeatsPerBar + 1));  // above kMaxBeatsPerBar
+  CHECK(t.ticks_per_bar() == kTicksPerBar);     // both rejects: state unchanged
+  CHECK(t.set_time_sig(kMinBeatsPerBar));       // boundary: valid
+  CHECK(t.ticks_per_bar() == kMinBeatsPerBar * kTicksPerBeat);
+  CHECK(t.set_time_sig(kMaxBeatsPerBar));  // boundary: valid
+  CHECK(t.ticks_per_bar() == kMaxBeatsPerBar * kTicksPerBeat);
+
+  // A genuine 3/4 bar: ticks_per_bar shrinks to 3 beats, and position()'s own
+  // bar/beat derivation (Transport::position()) follows it, not the old 4/4
+  // compile-time constant.
+  CHECK(t.set_time_sig(3));
+  CHECK(t.ticks_per_bar() == 3 * kTicksPerBeat);
+  t.start();
+  for (Tick i = 0; i < 3 * kTicksPerBeat + kTicksPerBeat + 5; ++i) {
+    t.advance_one();
+  }
+  const Position p = t.position();  // bar 2 (3-beat bars), beat 2, tick 5
+  CHECK(p.bar == 2 && p.beat == 2 && p.tick == 5);
+}
+
 // P0-2 determinism proof: kBeat fires exactly on the 24-PPQN pulses with a
 // deterministic bar/beat/pulse sequence, ONLY while playing, and -- unlike
 // the F8 clock byte -- regardless of the clock-out mask (default 0/disabled
@@ -207,6 +251,8 @@ int main() {
   test_transport_clock_emission();
   test_beat_heartbeat_cadence();
   test_transport_position_and_bounds();
+  test_time_sig_default_is_byte_identical_to_legacy_constants();
+  test_set_time_sig_bounds_and_bar_length();
   test_clock_on_two_ports_and_continue();
   test_schedule_at_already_due();
   if (arrangrr::test::failures() == 0) {

@@ -210,8 +210,8 @@ bool restyle_link_gate() {
       runtime::Pipeline<ChorddetStage<kMaxPorts>, RestyleStage<kMaxPorts>, Engine>,
       kSchedulerCapacity>
       rt([](auto&, auto&) { return ChorddetStage<kMaxPorts>(followed); },
-         [](auto& sched, auto&, auto& chorddet) {
-           return RestyleStage<kMaxPorts>(sched, chorddet, followed, /*port=*/2);
+         [](auto& sched, auto& transport, auto& chorddet) {
+           return RestyleStage<kMaxPorts>(sched, transport, chorddet, followed, /*port=*/2);
          },
          [](auto& sched, auto& transport, auto& chorddet, auto&) {
            return Engine(sched, transport, followed, chorddet);

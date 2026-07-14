@@ -285,7 +285,12 @@ class Engine {
     // followed context BEFORE the arranger fires the bar — the same
     // bar-boundary point at which the arranger applies pending style/section
     // switches, ordered so the arranger reads the freshly-committed chord.
-    if (m_transport.tick() % kTicksPerBar == 0) {
+    // Phase 7 (node T0): the bar-boundary gate reads the LIVE Transport time
+    // signature instead of the compile-time kTicksPerBar constant -- a
+    // default-constructed Transport computes the identical value (common/
+    // time.hpp's own byte-identity gate), so this is byte-identical until
+    // something genuinely calls set_time_sig with a non-4/4 value.
+    if (m_transport.tick() % m_transport.ticks_per_bar() == 0) {
       const bool had_pending = m_chords.pending().valid;
       const Producer promoted_by = m_chords.pending_source();
       m_chords.commit_bar();
@@ -487,6 +492,21 @@ class Engine {
     }
   }
 
+  // Sibling to apply_style_tempo (Phase 7, node T0): seeds the transport time
+  // signature from the loaded style's default, called at the EXACT SAME three
+  // call sites (an explicit load, an immediate live switch, or a deferred
+  // switch landing at the bar boundary). Emits OutEvent::kTimeSig ONLY when
+  // the value actually changes -- every existing builtin style keeps the
+  // default kBeatsPerBar, so this never emits on any existing golden path.
+  void apply_style_time_sig(EventSink sink) {
+    if (const Style* style = m_arranger.current_style(); style != nullptr) {
+      const std::uint8_t before = m_transport.time_sig().beats_per_bar;
+      if (style->beats_per_bar != before && m_transport.set_time_sig(style->beats_per_bar)) {
+        sink(OutEvent::time_sig(m_transport.time_sig().beats_per_bar, m_now));
+      }
+    }
+  }
+
   // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): `source` is the
   // arrangrr::kScheduleSource* producer tag (config.hpp), forwarded into the
   // scheduler's own entry (OutScheduler::schedule) so cancel_note_off can
@@ -653,12 +673,17 @@ class Engine {
         // + role index for a role's own arp-insert) -- forward it verbatim.
         [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg, std::uint8_t source) {
           schedule_pattern(port, delay, msg, sink, source);
-        });
+        },
+        // Phase 7 (node T0): thread the LIVE bar length down explicitly --
+        // Arranger holds no Transport&. Byte-identical to the pre-T0 default
+        // (kTicksPerBar) until set_time_sig ever moves it.
+        m_transport.ticks_per_bar());
     if (r.section_changed) {
       sink(OutEvent::section(static_cast<std::uint16_t>(r.section), m_now));
     }
     if (r.style_changed) {
       apply_style_tempo();  // 9120: a deferred live style switch adopts the new tempo at the bar
+      apply_style_time_sig(sink);  // T0: ... and the new style's time signature, at the same bar
     }
     if (r.stop_transport) {
       m_transport.stop();

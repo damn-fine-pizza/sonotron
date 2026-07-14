@@ -217,8 +217,10 @@ bool key_prefers_flats(std::uint8_t root_pc, Mode mode) {
   return parent == 5 || parent == 10 || parent == 3 || parent == 8 || parent == 1 || parent == 6;
 }
 
-// "2bars" / "1bar" / "4beats" / "1beat" -> ticks.
-bool parse_duration(const std::string& s, std::uint64_t& out_ticks) {
+// "2bars" / "1bar" / "4beats" / "1beat" -> ticks. `ticks_per_bar` (Phase 7,
+// node T0) is the CURRENT live bar length; "beats" stays kTicksPerBeat (F1:
+// the beat unit is pinned for v1, never variable).
+bool parse_duration(const std::string& s, Tick ticks_per_bar, std::uint64_t& out_ticks) {
   auto strip = [&](const char* suffix, std::uint64_t mult) {
     const std::size_t n = std::string(suffix).size();
     if (s.size() <= n || s.substr(s.size() - n) != suffix) {
@@ -231,7 +233,7 @@ bool parse_duration(const std::string& s, std::uint64_t& out_ticks) {
     out_ticks = v * mult;
     return true;
   };
-  return strip("bars", kTicksPerBar) || strip("bar", kTicksPerBar) ||
+  return strip("bars", ticks_per_bar) || strip("bar", ticks_per_bar) ||
          strip("beats", kTicksPerBeat) || strip("beat", kTicksPerBeat);
 }
 

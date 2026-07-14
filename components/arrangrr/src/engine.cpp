@@ -470,7 +470,10 @@ void Engine::cmd_seq(const Command& cmd, EventSink sink) {
 
 void Engine::seq_stop(const Command& cmd, EventSink sink) {
   if (m_seq.recording()) {
-    (void)m_seq.stop_record(m_now, cmd.a > 0 ? static_cast<Tick>(cmd.a) : kTicksPerBar);
+    // Phase 7 (node T0): the "one bar" fallback grid reads the LIVE Transport
+    // bar length instead of the compile-time kTicksPerBar constant.
+    (void)m_seq.stop_record(m_now,
+                            cmd.a > 0 ? static_cast<Tick>(cmd.a) : m_transport.ticks_per_bar());
     return;
   }
   m_seq.stop_playback([&] {
@@ -583,6 +586,7 @@ void Engine::cmd_style(const Command& cmd, EventSink sink) {
       } else {
         apply_arranger_voices(sink);  // pick the style's default voices
         apply_style_tempo();          // 9120: adopt the style's default tempo
+        apply_style_time_sig(sink);   // T0: ... and the style's default time signature
         // Owner decision: loading a style changes the BAND, keeps the HARMONY.
         // establish_default seeds the home key only when nothing explicit is in
         // force, so a chord the user steered persists across a style load; the
@@ -662,6 +666,7 @@ void Engine::style_switch(const Command& cmd, EventSink sink) {
     sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
     apply_arranger_voices(sink);  // the new style's voices land with the cut
     apply_style_tempo();          // 9120: the new style's tempo lands with the cut
+    apply_style_time_sig(sink);   // T0: ... and the new style's time signature
   }
 }
 
@@ -880,11 +885,16 @@ void Engine::apply_clip_content(const Clip& clip, LaunchState target, EventSink 
 }
 
 void Engine::fire_clips(Tick transport_tick, EventSink sink) {
-  m_clips.on_bar(transport_tick, [&](std::size_t id, const Clip& clip) {
-    apply_clip_content(clip, clip.state, sink);
-    sink(OutEvent::clip(static_cast<std::uint16_t>(id), static_cast<std::uint8_t>(clip.state),
-                        m_now));
-  });
+  m_clips.on_bar(
+      transport_tick,
+      [&](std::size_t id, const Clip& clip) {
+        apply_clip_content(clip, clip.state, sink);
+        sink(OutEvent::clip(static_cast<std::uint16_t>(id), static_cast<std::uint8_t>(clip.state),
+                            m_now));
+      },
+      // Phase 7 (node T0): the LIVE bar length -- ClipMatrix holds no
+      // Transport&, so Engine threads it explicitly at this call boundary.
+      m_transport.ticks_per_bar());
 }
 
 // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
@@ -1080,7 +1090,8 @@ void Engine::fire_pad(const Pad& pad, LaunchState target, std::uint16_t pad_id, 
           fire_pad_cc(pad, target, sink);
         }
       } else if (pad_id < kMaxPads) {
-        m_pad_latch[pad_id].arm(1);
+        // Phase 7 (node T0): the LIVE bar length.
+        m_pad_latch[pad_id].arm(1, m_transport.ticks_per_bar());
         m_pad_pending_target[pad_id] = target;
       }
       break;
@@ -1195,7 +1206,8 @@ void Engine::perf_recall(const Command& cmd, EventSink sink) {
     return;
   }
   const std::uint8_t n_bars = cmd.boundary == Boundary::kNextNBars ? cmd.n_bars : 1;
-  m_perf_recall.arm(n_bars);
+  // Phase 7 (node T0): the LIVE bar length.
+  m_perf_recall.arm(n_bars, m_transport.ticks_per_bar());
   m_perf_recall_slot = cmd.idx;
 }
 // GCOVR_EXCL_STOP
@@ -1236,6 +1248,8 @@ Performance Engine::capture_performance() const {
   perf.groove = m_arranger.groove_params();
   perf.style_id = m_arranger.style_id();
   perf.tempo_x100 = static_cast<std::uint16_t>(m_transport.bpm());
+  // Phase 7 (node T0): the live time signature (numerator only, F1).
+  perf.beats_per_bar = m_transport.time_sig().beats_per_bar;
   // Phase-6 Theme 3 Item #3 (P3): master_transpose is now a real
   // std::int16_t field -- a plain widening copy, no reinterpret hack.
   perf.master_transpose = m_arranger.master_transpose();
@@ -1329,6 +1343,11 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
   m_arranger.set_groove(perf.groove);
   apply_arranger_voices(sink);           // the (possibly new) style's voices land with the recall
   m_transport.set_bpm(perf.tempo_x100);  // out-of-range silently ignored (Transport::set_bpm)
+  // Phase 7 (node T0): the recalled time signature -- already bounded to
+  // [kMinBeatsPerBar, kMaxBeatsPerBar] by validate_performance() above, so
+  // this is a plain restore (out-of-range would be silently ignored by
+  // set_time_sig too, mirroring set_bpm's own discipline right above).
+  m_transport.set_time_sig(perf.beats_per_bar);
   // Phase-6 Theme 3 Item #3 (P3): master_transpose is a real std::int16_t,
   // already bounded to [-12, +12] by validate_performance() above, so the
   // narrowing cast back to Arranger/ChordEngine's own std::int8_t is safe;
@@ -1368,6 +1387,11 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
 void Engine::emit_performance_confirmation(const Performance& perf, EventSink sink) {
   constexpr std::uint8_t kRoles = static_cast<std::uint8_t>(TrackRole::kCc) + 1;
   sink(OutEvent::section(static_cast<std::uint16_t>(m_arranger.current()), m_now));
+  // Phase 7 (node T0): unconditional re-announce, mirroring kSection's own
+  // unconditional confirm right above -- a recall's confirmation dump gives
+  // the client a fresh, authoritative value for every domain it may have
+  // changed, whether or not this particular recall actually moved it.
+  sink(OutEvent::time_sig(m_transport.time_sig().beats_per_bar, m_now));
   if (perf.style_id != 0xFFFF) {
     sink(OutEvent::param_state(Param::kStyleLoad, 0,
                                static_cast<std::uint8_t>(perf.style_id & 0xFF),

@@ -34,9 +34,13 @@ struct BoundaryLatch {
   bool pending = false;
 
   // Arms the latch for the next `n_bars`-bar boundary (n_bars < 1 clamped to
-  // 1, mirroring ClipMatrix::arm's own clamp).
-  void arm(std::uint8_t n_bars) noexcept {
-    window = static_cast<Tick>(n_bars < 1 ? 1 : n_bars) * kTicksPerBar;
+  // 1, mirroring ClipMatrix::arm's own clamp). `ticks_per_bar` (Phase 7, node
+  // T0) is the CURRENT bar length, threaded explicitly by callers that hold a
+  // live Transport (BoundaryLatch itself holds none) -- defaults to the
+  // compile-time kTicksPerBar so every pre-existing 1-arg caller (tests, and
+  // any not-yet-updated production site) keeps arming the exact same window.
+  void arm(std::uint8_t n_bars, Tick ticks_per_bar = kTicksPerBar) noexcept {
+    window = static_cast<Tick>(n_bars < 1 ? 1 : n_bars) * ticks_per_bar;
     pending = true;
   }
   // True exactly on the tick this latch's window closes, while armed.

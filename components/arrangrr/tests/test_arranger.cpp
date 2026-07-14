@@ -709,6 +709,59 @@ void test_multibar_section_plays_bar_two() {
   CHECK(hits36[1] == 3 * kTicksPerBar);  // and again on the wrap
 }
 
+namespace threebeat {
+// Phase 7 (node T0): a 1-bar section authored in 3/4 (F4's Style/beats_per_bar
+// field, mirroring Style::tempo). The style field only states the AUTHORED
+// intent -- Arranger holds no Transport&, so it never reads beats_per_bar
+// itself; the actual bar-length math on_tick uses is whatever
+// `ticks_per_bar` the caller threads in (Engine::fire_arranger, in
+// production). This fixture drives on_tick directly with an explicit 3-beat
+// value, exercising the SAME threading mechanism at the unit level.
+constexpr StyleEvent kDrums[] = {
+    {.step = 0, .tone = 38, .octave = 0, .vel = 90, .gate = 120},  // step 0 of every bar
+};
+constexpr StylePattern kPatterns[] = {
+    {.role = TrackRole::kDrums,
+     .policy = RolePolicy::kFixed,
+     .events = Span<const StyleEvent>(kDrums)},
+};
+constexpr StyleSection kSections[] = {
+    {.type = SectionType::kVarA, .bars = 1, .patterns = Span<const StylePattern>(kPatterns)},
+};
+constexpr Style kStyle{
+    .name = "threebeat", .sections = Span<const StyleSection>(kSections), .beats_per_bar = 3};
+}  // namespace threebeat
+
+// Phase 7 (node T0): Style::beats_per_bar carries the style's own authored
+// time signature, and Arranger::on_tick's threaded `ticks_per_bar` parameter
+// is the mechanism that actually varies the bar length the section-wrap math
+// uses (a non-4/4 set genuinely changes bar length, the T0 acceptance gate).
+void test_style_beats_per_bar_field_and_explicit_ticks_per_bar_change_wrap() {
+  Arranger a;
+  CHECK(a.load_style(&threebeat::kStyle));
+  CHECK(a.current_style()->beats_per_bar == 3);
+  CHECK(a.set_route(TrackRole::kDrums, 0, 9));
+  a.on_transport_start();
+  const ChordState no_chord{};
+  const Tick three_beat_bar = 3 * kTicksPerBeat;
+  CHECK(three_beat_bar < kTicksPerBar);  // sanity: genuinely shorter than 4/4
+  StaticVector<Tick, 8> hits;
+  for (Tick t = 0; t < 2 * three_beat_bar; ++t) {
+    a.on_tick(
+        t, Key{}, no_chord,
+        [&](std::uint8_t, TickOffset delay, const MidiMessage& msg, std::uint8_t) {
+          if (msg.type() == midi::kNoteOn && delay == 0 && msg.d1 == 38) {
+            CHECK(hits.push_back(t));
+          }
+        },
+        three_beat_bar);
+  }
+  // Two 1-bar cycles of a 3-beat bar: the section wraps at tick 2880 (3*960),
+  // NOT at 3840 (the default 4/4 kTicksPerBar) -- proving the threaded
+  // ticks_per_bar, not the compile-time constant, drives the wrap.
+  CHECK(hits.size() == 2 && hits[0] == 0 && hits[1] == three_beat_bar);
+}
+
 void test_immediate_switch_when_stopped() {
   Band b;
   b.setup_basic();
@@ -1029,6 +1082,7 @@ int main() {
   test_triad_wrap_and_route_gating();
   test_style_warns();
   test_multibar_section_plays_bar_two();
+  test_style_beats_per_bar_field_and_explicit_ticks_per_bar_change_wrap();
   test_immediate_switch_when_stopped();
   test_seamless_style_switch();
   test_style_switch_immediate_when_stopped();

@@ -44,6 +44,23 @@ class Transport {
     return true;
   }
 
+  // Phase 7 (node T0): the variable time-signature engine, mirroring the
+  // EXACT pattern above for tempo -- a small, bounded, runtime-mutable
+  // musical parameter that changes rarely (style load / scene change) and is
+  // read often. set_time_sig validates like set_bpm (rejects out-of-range,
+  // state unchanged on reject); ticks_per_bar() is a convenience forwarder
+  // used at every threaded call boundary (Arranger::on_tick, ClipMatrix::
+  // on_bar, BoundaryLatch::arm, ...).
+  constexpr const TimeSig& time_sig() const noexcept { return m_time_sig; }
+  constexpr bool set_time_sig(std::uint8_t beats_per_bar) noexcept {
+    if (beats_per_bar < kMinBeatsPerBar || beats_per_bar > kMaxBeatsPerBar) {
+      return false;
+    }
+    m_time_sig.beats_per_bar = beats_per_bar;
+    return true;
+  }
+  constexpr Tick ticks_per_bar() const noexcept { return m_time_sig.ticks_per_bar(); }
+
   // MIDI Start semantics: rewind to zero and play.
   constexpr void start() noexcept {
     m_tick = 0;
@@ -61,17 +78,25 @@ class Transport {
   // True when a MIDI clock byte (F8) belongs on this tick (960/24 = 40).
   static constexpr bool is_midi_clock_tick(Tick t) noexcept { return t % kMidiClockDivider == 0; }
 
+  // Phase 7 (node T0): derives bar/beat/tick from the LIVE time signature
+  // (m_time_sig), not the two compile-time constants -- a default-constructed
+  // TimeSig computes the identical numeric value (common/time.hpp's own
+  // byte-identity gate), so this is unchanged for every caller that never
+  // touches set_time_sig.
   constexpr Position position() const noexcept {
+    const Tick tpbar = m_time_sig.ticks_per_bar();
+    const Tick tpbeat = m_time_sig.ticks_per_beat;
     return Position{
-        .bar = m_tick / kTicksPerBar + 1,
-        .beat = static_cast<std::uint8_t>((m_tick % kTicksPerBar) / kTicksPerBeat + 1),
-        .tick = static_cast<std::uint16_t>(m_tick % kTicksPerBeat),
+        .bar = m_tick / tpbar + 1,
+        .beat = static_cast<std::uint8_t>((m_tick % tpbar) / tpbeat + 1),
+        .tick = static_cast<std::uint16_t>(m_tick % tpbeat),
     };
   }
 
  private:
   Tick m_tick = 0;
   BpmX100 m_bpm = kDefaultBpm;
+  TimeSig m_time_sig{};
   TransportState m_state = TransportState::kStopped;
 };
 

@@ -411,6 +411,19 @@ struct OutEvent {
     //   code       = clip id (ClipMatrix slot)
     //   msg.status = LaunchState (0 stopped, 1 armed, 2 playing, 3 queued-stop)
     kClip = 8,
+    // Phase 7 (node T0, F3 owner-locked fork): the CURRENT time signature
+    // changed (numerator only, F1) -- mirrors kSection's own echo-on-change
+    // shape. Emitted whenever a style load/switch or a Performance recall
+    // actually changes Transport::time_sig().beats_per_bar (Engine::
+    // apply_style_time_sig / apply_performance), and unconditionally as part
+    // of a Performance recall's confirmation dump (emit_performance_
+    // confirmation, mirroring kSection's own unconditional re-announce
+    // there). Additive-only: a client that does not yet decode this kind can
+    // safely ignore it (see abi.hpp's own kBeat comment on the "hole in the
+    // wire" this closes -- a client had no channel telling it the CURRENT
+    // beats_per_bar before this).
+    //   code = beats_per_bar (1..kMaxBeatsPerBar)
+    kTimeSig = 9,
   };
 
   Kind kind = Kind::kMidi;
@@ -519,6 +532,15 @@ struct OutEvent {
     e.kind = Kind::kClip;
     e.code = id;
     e.msg = MidiMessage{.status = state, .d1 = 0, .d2 = 0};
+    e.tick = t;
+    return e;
+  }
+  // Packs a kTimeSig announce (Phase 7, node T0): beats_per_bar rides `code`,
+  // numeric packing like every other factory here.
+  static constexpr OutEvent time_sig(std::uint8_t beats_per_bar, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kTimeSig;
+    e.code = beats_per_bar;
     e.tick = t;
     return e;
   }

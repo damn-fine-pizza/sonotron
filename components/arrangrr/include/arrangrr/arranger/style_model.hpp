@@ -3,10 +3,10 @@
 #include <cstdint>
 
 #include "arrangrr/arranger/groove.hpp"  // GrooveParams (per-style default feel, 9110)
-#include "chorddet/theory.hpp"
 #include "arrangrr/common/span.hpp"
-#include "common/time.hpp"  // BpmX100, kDefaultBpm (per-style default tempo, 9120)
 #include "arrangrr/timeline/timeline.hpp"
+#include "chorddet/theory.hpp"
+#include "common/time.hpp"  // BpmX100, kDefaultBpm (per-style default tempo, 9120)
 
 // Style model (D24 groundwork): sections hold DEGREE-RELATIVE patterns per
 // role, resolved against the live chord at playback — the NTT idea in its
@@ -187,6 +187,14 @@ struct Style {
   // tick positions. Defaulted to kDefaultBpm and kept last so existing tables
   // are unchanged; a style load/switch seeds the transport bpm from it.
   BpmX100 tempo = kDefaultBpm;
+  // Default time signature this style loads with (Phase 7, node T0; F1
+  // owner-locked, numerator-only for v1 -- the beat unit stays pinned to
+  // kTicksPerBeat). Mirrors `tempo` above exactly: a style load/switch seeds
+  // the transport's time signature from it (Engine::apply_style_time_sig).
+  // Defaulted to kBeatsPerBar and kept last so every existing constexpr style
+  // table stays valid AND -- while every builtin keeps the default 4/4 --
+  // the arranger output stays byte-identical.
+  std::uint8_t beats_per_bar = kBeatsPerBar;
 
   constexpr const StyleSection* find(SectionType t) const noexcept {
     for (const StyleSection& s : sections) {

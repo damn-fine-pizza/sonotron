@@ -111,7 +111,7 @@ static_assert(static_cast<std::uint16_t>(Param::kMasterTranspose) == 57);
 static_assert(static_cast<std::uint16_t>(Param::kPadBankSelect) == 58);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
-// kMidi(0) .. kClip(8). Next free id is 9.
+// kMidi(0) .. kTimeSig(9). Next free id is 10.
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kMidi) == 0);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTransport) == 1);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kWarn) == 2);
@@ -126,6 +126,9 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kParamState) == 7);
 // Phase-5 Item #2: kClip is the clip-primitive launch-state echo -- rides the
 // SAME 16-byte OutEvent layout unchanged (no new field, no resize).
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kClip) == 8);
+// Phase 7 (node T0): kTimeSig is a NEW appended enumerator (F3), rides the
+// SAME 16-byte OutEvent layout unchanged (no new field, no resize).
+static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTimeSig) == 9);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
 // kNone(0) .. kUnsupported(9), kWarnCodeCount == 10 (next free id).

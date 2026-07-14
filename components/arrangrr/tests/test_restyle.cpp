@@ -98,7 +98,12 @@ struct Harness {
   FollowedContext followed;
   ChorddetStage<kPorts> chorddet{followed};
   OutScheduler<kSchedulerCapacity> scheduler;
-  RestyleStage<kPorts> stage{scheduler, chorddet, followed, static_cast<std::uint8_t>(2),
+  Transport transport;
+  RestyleStage<kPorts> stage{scheduler,
+                             transport,
+                             chorddet,
+                             followed,
+                             static_cast<std::uint8_t>(2),
                              static_cast<std::uint8_t>(0)};
 
   void feed(std::uint8_t port, std::initializer_list<std::uint8_t> bytes) {

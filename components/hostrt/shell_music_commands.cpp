@@ -696,12 +696,13 @@ bool Shell::seq_add(const std::vector<std::string>& t, std::string& error) {
     return false;
   }
   std::int8_t quality = -1;
-  std::uint64_t dur = kTicksPerBar;
+  // Phase 7 (node T0): the live bar length, not the compile-time kTicksPerBar.
+  std::uint64_t dur = m_engine.transport().ticks_per_bar();
   std::size_t next = 3;
   if (next < t.size() && parse_quality(t[next], quality)) {
     ++next;
   }
-  if (next < t.size() && !parse_duration(t[next], dur)) {
+  if (next < t.size() && !parse_duration(t[next], m_engine.transport().ticks_per_bar(), dur)) {
     error = "bad duration (Nbars/Nbeats): " + t[next];
     return false;
   }

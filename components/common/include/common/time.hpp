@@ -33,6 +33,39 @@ using Tick = std::uint32_t;
 // Signed tick arithmetic (offsets, swing, humanize).
 using TickOffset = std::int32_t;
 
+// Phase 7 (node T0, prerequisite for 6000/8100): the variable time-signature
+// engine. F1 (owner-locked, numerator-only for v1): only `beats_per_bar`
+// (the numerator) varies at runtime; the beat UNIT stays pinned to
+// kTicksPerBeat (== kPpqn, a quarter-note beat) for every time signature --
+// true compound meters (6/8 felt as 2 dotted-quarter beats, not 6) would need
+// `ticks_per_beat` to vary too, which touches the kPpqn/kGridPpqn compile-time
+// relationship above and is deliberately out of scope here.
+//
+// Byte-identity gate: the default member initializers below are the LITERAL
+// two constants whose product already defined kTicksPerBar -- a
+// default-constructed TimeSig therefore computes ticks_per_bar() ==
+// kBeatsPerBar * kTicksPerBeat == kTicksPerBar, bit-for-bit, not
+// approximately. Every one of the ~13 production sites that used to read the
+// compile-time kTicksPerBar/kTicksPerBeat constants directly now reads this
+// struct's (or a threaded copy of its) runtime value instead, so every
+// existing golden stays byte-identical for free until something genuinely
+// calls Transport::set_time_sig with a non-4/4 value.
+struct TimeSig {
+  std::uint8_t beats_per_bar = kBeatsPerBar;     // numerator; runtime-variable, T0
+  std::uint32_t ticks_per_beat = kTicksPerBeat;  // denominator granularity; PINNED
+                                                 // to kPpqn for v1 (F1)
+  constexpr Tick ticks_per_bar() const noexcept {
+    return static_cast<Tick>(beats_per_bar) * ticks_per_beat;
+  }
+};
+inline constexpr std::uint8_t kMinBeatsPerBar = 1;
+// F2 (owner-locked): a small, honest cap living beside the carrier's own
+// default/definition (common/time.hpp), NOT arrangrr/config.hpp -- the
+// dependency runs arrangrr -> runtime -> common, never the reverse
+// (runtime/transport.hpp, the carrier, depends only on common/time.hpp), so a
+// bound for the carrier's own validated setter belongs down here.
+inline constexpr std::uint8_t kMaxBeatsPerBar = 16;
+
 // Tempo as beats-per-minute x100: 12000 = 120.00 BPM (D3/D27).
 using BpmX100 = std::uint32_t;
 inline constexpr BpmX100 kDefaultBpm = 12000;

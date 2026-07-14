@@ -15,6 +15,7 @@
 #include "runtime/midi_parser.hpp"
 #include "runtime/out_scheduler.hpp"
 #include "runtime/stage.hpp"
+#include "runtime/transport.hpp"  // Phase 7 (node T0): live ticks_per_bar()
 
 // Restyle (roadmap 9320), first slice. Read the two design reviews before
 // touching this file: docs/design/restyle-musical-scope.md (Ottorino, musical
@@ -202,10 +203,16 @@ class RestyleStage {
   // header comment); RestyleStage is constructed AFTER ChorddetStage in the
   // Pipeline's declared order, so it may reference the already-built peer
   // (the same "declare A, construct B referencing A" idiom runtime/
-  // pipeline.hpp documents).
-  RestyleStage(OutScheduler<kSchedulerCapacity>& scheduler, ChorddetStage<kPorts>& chorddet,
-               FollowedContext& followed, std::uint8_t port = 0, std::uint8_t channel = 0) noexcept
+  // pipeline.hpp documents). `transport` (Phase 7, node T0): the SAME shared
+  // Transport& every stage factory already receives (runtime/pipeline.hpp's
+  // `(scheduler, transport, ...)` convention) -- was previously unnamed/
+  // unused here; needed now so push_midi_in's step-grid math (below) reads
+  // the LIVE bar length instead of the compile-time kTicksPerBar constant.
+  RestyleStage(OutScheduler<kSchedulerCapacity>& scheduler, Transport& transport,
+               ChorddetStage<kPorts>& chorddet, FollowedContext& followed, std::uint8_t port = 0,
+               std::uint8_t channel = 0) noexcept
       : m_scheduler(scheduler),
+        m_transport(transport),
         m_chorddet(chorddet),
         m_followed(followed),
         m_port(port),
@@ -368,7 +375,10 @@ class RestyleStage {
     // pitch (no octave move, no reharmonization), per the scope gate.
 
     const Tick snapped = restyle::snap_to_grid(m_now);
-    const auto step = static_cast<std::uint16_t>((snapped % kTicksPerBar) / kTicksPerStep);
+    // Phase 7 (node T0): the LIVE bar length, not the compile-time
+    // kTicksPerBar constant -- byte-identical until set_time_sig moves it.
+    const auto step =
+        static_cast<std::uint16_t>((snapped % m_transport.ticks_per_bar()) / kTicksPerStep);
     const GrooveOut g = groove::apply(m_style->groove, static_cast<std::uint8_t>(m_target_role),
                                       step, snapped, vel);
     const Tick final_on = static_cast<Tick>(snapped + static_cast<Tick>(g.timing_offset));
@@ -413,6 +423,7 @@ class RestyleStage {
   }
 
   OutScheduler<kSchedulerCapacity>& m_scheduler;
+  Transport& m_transport;  // Phase 7 (node T0): injected by reference, mirrors Engine's own idiom
   ChorddetStage<kPorts>& m_chorddet;
   FollowedContext& m_followed;
   std::uint8_t m_port;

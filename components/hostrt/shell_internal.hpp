@@ -90,7 +90,11 @@ bool parse_pc(const std::string& s, std::uint8_t& out);
 bool parse_mode(const std::string& s, Mode& out);
 bool parse_quality(const std::string& s, std::int8_t& out);
 bool key_prefers_flats(std::uint8_t root_pc, Mode mode);
-bool parse_duration(const std::string& s, std::uint64_t& out_ticks);
+// `ticks_per_bar` (Phase 7, node T0): the CURRENT live bar length -- the
+// caller reads it from `shell.engine().transport().ticks_per_bar()` so a
+// "bars" duration literal parses against whatever time signature is actually
+// loaded, never the compile-time kTicksPerBar constant.
+bool parse_duration(const std::string& s, Tick ticks_per_bar, std::uint64_t& out_ticks);
 bool parse_section(const std::string& s, SectionType& out);
 bool iequals(const char* a, const std::string& b);
 int find_builtin_style(const std::string& name);

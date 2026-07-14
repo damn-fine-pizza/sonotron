@@ -16,6 +16,11 @@
 namespace arrangrr {
 namespace perf {
 
+// A long but FLAT sequence of independent field-bound checks, each an
+// early-return guard clause -- splitting it would scatter one cohesive
+// validation pass across several functions for no readability gain (same
+// rationale as Arranger::on_tick's own NOLINT, arranger.hpp).
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool validate(const Performance& p, std::size_t chord_sequence_count) noexcept {
   if (p.style_id != 0xFFFF && p.style_id >= styles::kBuiltinCount) {
     return false;
@@ -38,6 +43,12 @@ bool validate(const Performance& p, std::size_t chord_sequence_count) noexcept {
     return false;
   }
   if (p.chord_follow > static_cast<std::uint8_t>(ChordFollow::kLivePriority)) {
+    return false;
+  }
+  // Phase 7 (node T0): beats_per_bar is a real runtime-variable numerator
+  // (F1) -- reject a corrupt/out-of-range record the same way every other
+  // field here does, matching Transport::set_time_sig's own bound.
+  if (p.beats_per_bar < kMinBeatsPerBar || p.beats_per_bar > kMaxBeatsPerBar) {
     return false;
   }
   // Phase-6 Theme 3 Item #1/#3: master_transpose is a real std::int16_t as of

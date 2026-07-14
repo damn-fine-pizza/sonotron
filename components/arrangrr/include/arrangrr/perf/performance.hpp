@@ -8,6 +8,7 @@
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/config.hpp"  // kMaxPerformances
+#include "common/time.hpp"      // kBeatsPerBar (Phase 7, node T0)
 
 // Performance (Phase-5 Item #9, docs/phase5-design-reviews.md "Pad/Scene live
 // -> Performance"): the one-button full-state recall preset (DESIGN.md
@@ -72,7 +73,8 @@ static_assert(sizeof(PerfInsert) == 6, "PerfInsert mirrors Insert's own 6 B budg
 // Field order is alignment-optimal (widest members first): char[24], the two
 // u32 masks, GrooveParams (alignof 4), the u16 cluster, the PerfRoute[10] and
 // PerfInsert[10][8] tables (alignof 1), then the trailing u8 cluster +
-// reserved pad. sizeof(Performance) == 576 is a RAM/flash BUDGET check ONLY
+// reserved pad. sizeof(Performance) == 580 (format_version 3, Phase 7 node
+// T0's beats_per_bar addition) is a RAM/flash BUDGET check ONLY
 // -- the ON-DISK format is the EXPLICIT field-by-field little-endian byte
 // stream serialize()/deserialize() below produce, never a memcpy/
 // reinterpret_cast of this struct: GrooveParams carries 2 bytes of implicit
@@ -88,6 +90,12 @@ struct Performance {
   GrooveParams groove{};
   std::uint16_t style_id = 0xFFFF;  // builtin style index, or 0xFFFF = keep current
   std::uint16_t tempo_x100 = 0;
+  // Phase 7 (node T0, F4 owner-locked fork): the recalled time signature's
+  // beats-per-bar (numerator only, F1) -- mirrors tempo_x100's own placement/
+  // role exactly, one field earlier than master_transpose. Defaulted to
+  // kBeatsPerBar (not 0) so a not-yet-captured Performance slot reads as an
+  // honest 4/4 rather than a nonsensical 0-beat bar.
+  std::uint8_t beats_per_bar = kBeatsPerBar;
   // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
   // scope.md), formalized into its real signed type by Item #3's
   // format_version 2 bump (P3, the header comment above): a real semitone
@@ -119,12 +127,14 @@ struct Performance {
   std::uint8_t key_root = 0;      // pitch class 0..11
   std::uint8_t key_mode = 0;      // Mode
   // Shrunk from 5 -> 3 B by format_version 2 to fund routing_profile_id's 2 B
-  // (P2) without moving any other field's offset or growing the record's own
-  // alignment -- future growth still bumps format_version, adds a migrator.
-  std::uint8_t reserved[3]{};
+  // (P2), then 3 -> 2 B by format_version 3 (Phase 7, node T0) to fund
+  // beats_per_bar's 1 B above -- neither growing the record's own wire size
+  // (still 574 B tight, see kPerformanceRecordWireSize below) nor moving any
+  // FOLLOWING field's offset; future growth still bumps format_version.
+  std::uint8_t reserved[2]{};
 };
-static_assert(sizeof(Performance) == 576,
-              "Performance RAM/flash budget pin (D33), format_version 2");
+static_assert(sizeof(Performance) == 580,
+              "Performance RAM/flash budget pin (D33), format_version 3");
 
 struct PerformanceStoreHeader {
   std::uint32_t magic = 0;
@@ -151,21 +161,30 @@ inline constexpr std::uint32_t kPerformanceMagic =
 // discipline it always applied to v1 (Architectural Principle #8 /
 // docs/DESIGN.md line 588: the DEVICE never migrates). A v1 file's own
 // migration to v2 lives HOST-ONLY, in components/hostrt's
-// migrate_performance_v1_to_v2 (P4) -- NOT here.
-inline constexpr std::uint16_t kPerformanceFormatVersion = 2;
+// migrate_performance_v1_to_v2 (P4) -- NOT here. format_version 3 (Phase 7,
+// node T0) appends beats_per_bar, funded by shrinking `reserved` by one more
+// byte (5 -> 3 -> 2) -- ANOTHER real bump (a genuine new field, not a
+// reinterpretation), same discipline: deserialize() hard-rejects anything
+// != 3. No v2->v3 migrator is written (owner directive): the device never
+// migrates regardless, and no v2 on-disk records are known to exist outside
+// this same in-tree recompile.
+inline constexpr std::uint16_t kPerformanceFormatVersion = 3;
 
 // Explicit TIGHT (no padding) wire size of one Performance record: the sum of
-// its LOGICAL field widths. Deliberately SMALLER than sizeof(Performance) ==
-// 576 because it drops GrooveParams' 2 bytes of implicit in-memory padding
-// (see the struct comment above) -- the wire format is not required to match
-// the in-memory layout.
+// its LOGICAL field widths. Deliberately SMALLER than sizeof(Performance)
+// because it drops GrooveParams' 2 bytes of implicit in-memory padding (see
+// the struct comment above) -- the wire format is not required to match the
+// in-memory layout. Phase 7 (node T0): beats_per_bar's new 1 B is funded by
+// `reserved` shrinking by exactly 1 B in the same bump, so the TOTAL wire
+// size is unchanged (574, still tight) even though the record grew a field.
 inline constexpr std::size_t kPerformanceRecordWireSize =
     24 /* name */ + 4 /* track_mute_mask */ + 4 /* track_solo_mask */ +
     10 /* groove: 6 u8 fields + u32 seed */ + 2 /* style_id */ + 2 /* tempo_x100 */ +
-    2 /* master_transpose */ + 2 /* pad_bank_id */ + 2 /* chord_sequence_id */ +
-    2 /* controller_map_id */ + 2 /* routing_profile_id */ + 10 * 3 /* routes[10] */ +
-    10 * 8 * 6 /* insert_chains[10][8], 6 B/PerfInsert */ + 1 /* variation */ + 1 /* chord_mode */ +
-    1 /* chord_follow */ + 1 /* key_root */ + 1 /* key_mode */ + 3 /* reserved */;
+    1 /* beats_per_bar */ + 2 /* master_transpose */ + 2 /* pad_bank_id */ +
+    2 /* chord_sequence_id */ + 2 /* controller_map_id */ + 2 /* routing_profile_id */ +
+    10 * 3 /* routes[10] */ + 10 * 8 * 6 /* insert_chains[10][8], 6 B/PerfInsert */ +
+    1 /* variation */ + 1 /* chord_mode */ + 1 /* chord_follow */ + 1 /* key_root */ +
+    1 /* key_mode */ + 2 /* reserved */;
 static_assert(kPerformanceRecordWireSize == 574);
 
 // Bounded pool of Performance slots, addressed directly by slot number (NOT a
@@ -291,6 +310,7 @@ inline void put_record(Span<std::uint8_t> out, std::size_t& off, const Performan
   put_u32(out, off, p.groove.seed);
   put_u16(out, off, p.style_id);
   put_u16(out, off, p.tempo_x100);
+  put_u8(out, off, p.beats_per_bar);  // Phase 7 (node T0)
   // P3: master_transpose is now a real std::int16_t; the cast to uint16_t
   // preserves the exact two's-complement bit pattern (well-defined, C++20
   // mandates two's complement for signed integers).
@@ -334,6 +354,7 @@ inline void get_record(Span<const std::uint8_t> in, std::size_t& off, Performanc
   p.groove.seed = get_u32(in, off);
   p.style_id = get_u16(in, off);
   p.tempo_x100 = get_u16(in, off);
+  p.beats_per_bar = get_u8(in, off);  // Phase 7 (node T0)
   p.master_transpose = static_cast<std::int16_t>(get_u16(in, off));
   p.pad_bank_id = get_u16(in, off);
   p.chord_sequence_id = get_u16(in, off);

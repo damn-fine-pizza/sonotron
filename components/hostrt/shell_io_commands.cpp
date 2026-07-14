@@ -532,7 +532,7 @@ bool Shell::cmd_advance(const std::vector<std::string>& t, std::string& error) {
   std::uint64_t n = 0;
   std::uint64_t mult = 1;
   if (arg.size() > 4 && arg.substr(arg.size() - 4) == "bars") {
-    mult = kTicksPerBar;
+    mult = m_engine.transport().ticks_per_bar();  // Phase 7 (node T0): the live bar length
     arg = arg.substr(0, arg.size() - 4);
   }
   if (!parse_u64(arg, n)) {

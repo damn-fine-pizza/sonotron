@@ -393,13 +393,21 @@ class Arranger {
   // AFTER the chord sequencer has fired this tick, so bar downbeats resolve
   // against the fresh chord.
   //
+  // `ticks_per_bar` (Phase 7, node T0): the CURRENT bar length in ticks,
+  // threaded down from Transport::ticks_per_bar() by Engine::fire_arranger --
+  // Arranger holds no Transport&, so this is passed explicitly at this call
+  // boundary, mirroring how `key`/`chord` already travel. Defaults to the
+  // compile-time kTicksPerBar so every pre-existing caller (unit tests, the
+  // arm-smoke link gates) that never threads a live Transport keeps computing
+  // the exact same value it always has.
+  //
   // Deliberately over the cognitive-complexity threshold: this is the realtime
   // core heartbeat (bar-boundary detection, pending style/section switches,
   // one-shot transitions, grid firing). Splitting it would scatter the tight
   // timing logic across functions for no readability gain and real risk.
   // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   TickResult on_tick(Tick transport_tick, const Key& key, const ChordState& chord,
-                     NoteScheduleFn schedule) {
+                     NoteScheduleFn schedule, Tick ticks_per_bar = kTicksPerBar) {
     TickResult result;
     if (m_style == nullptr) {
       return result;
@@ -412,8 +420,8 @@ class Arranger {
     // Bar boundary: apply pending switches / one-shot transitions.
     if (transport_tick > 0 || m_section_start == transport_tick) {
       const Tick pos = transport_tick - m_section_start;
-      const Tick len = static_cast<Tick>(section->bars) * kTicksPerBar;
-      const bool bar_boundary = pos != 0 && pos % kTicksPerBar == 0;
+      const Tick len = static_cast<Tick>(section->bars) * ticks_per_bar;
+      const bool bar_boundary = pos != 0 && pos % ticks_per_bar == 0;
       const bool section_end = pos == len;
       if (bar_boundary || section_end) {
         SectionType next = m_current;

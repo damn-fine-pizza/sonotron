@@ -73,6 +73,9 @@ bool same_performance(const Performance& a, const Performance& b) {
   if (a.style_id != b.style_id || a.tempo_x100 != b.tempo_x100) {
     return false;
   }
+  if (a.beats_per_bar != b.beats_per_bar) {  // Phase 7 (node T0)
+    return false;
+  }
   if (a.master_transpose != b.master_transpose || a.pad_bank_id != b.pad_bank_id) {
     return false;
   }
@@ -92,7 +95,7 @@ bool same_performance(const Performance& a, const Performance& b) {
   if (a.key_root != b.key_root || a.key_mode != b.key_mode) {
     return false;
   }
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < 2; ++i) {  // Phase 7 (node T0): reserved shrunk 3 -> 2
     if (a.reserved[i] != b.reserved[i]) {
       return false;
     }
@@ -115,6 +118,10 @@ Performance distinctive_performance(std::uint8_t salt) {
                           .seed = 0x11223344u + salt};
   p.style_id = static_cast<std::uint16_t>(3 + salt);
   p.tempo_x100 = static_cast<std::uint16_t>(9000 + salt);
+  // Phase 7 (node T0): exercise a genuine non-4/4 value, bounded to
+  // [kMinBeatsPerBar, kMaxBeatsPerBar].
+  p.beats_per_bar =
+      static_cast<std::uint8_t>(kMinBeatsPerBar + (salt % (kMaxBeatsPerBar - kMinBeatsPerBar + 1)));
   // Alternates sign so every distinctive_performance() exercises the full
   // two's-complement wire pattern, not just non-negative values.
   p.master_transpose = static_cast<std::int16_t>((salt % 2 == 0) ? (salt % 13) : -(salt % 13) - 1);
@@ -145,7 +152,7 @@ Performance distinctive_performance(std::uint8_t salt) {
   p.chord_follow = static_cast<std::uint8_t>(salt % 5);
   p.key_root = static_cast<std::uint8_t>(salt % 12);
   p.key_mode = static_cast<std::uint8_t>(salt % 7);
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < 2; ++i) {  // Phase 7 (node T0): reserved shrunk 3 -> 2
     p.reserved[i] = static_cast<std::uint8_t>(0xA0 + i + salt);
   }
   return p;
@@ -190,6 +197,8 @@ void test_multi_record_round_trip() {
 // tight bytes (480 of it the FX-chain snapshot, 2 the reserved
 // routing_profile_id field) -- pinned here so a future accidental layout
 // drift is caught immediately, exactly like v1's own 94-byte pin was.
+// format_version 3 (Phase 7, node T0) added beats_per_bar funded by shrinking
+// `reserved` by the same 1 B, so the total stays 574 -- still pinned here.
 void test_wire_record_is_574_bytes_tight_no_struct_padding() {
   CHECK(kPerformanceRecordWireSize == 574);
   CHECK(kPerformanceRecordWireSize <
@@ -264,9 +273,10 @@ void test_master_transpose_wire_byte_pattern_signed_round_trip() {
 
     // Same field-offset arithmetic as test_explicit_little_endian_encoding_
     // no_padding_gap above, extended two u16 fields further (style_id,
-    // tempo_x100) to reach master_transpose.
+    // tempo_x100) plus beats_per_bar's new 1 B (Phase 7, node T0) to reach
+    // master_transpose.
     const std::size_t rec = sizeof(PerformanceStoreHeader);
-    const std::size_t transpose_off = rec + 24 + 4 + 4 + 10 + 2 + 2;
+    const std::size_t transpose_off = rec + 24 + 4 + 4 + 10 + 2 + 2 + 1;
     CHECK(buf[transpose_off] == c.low_byte);
     CHECK(buf[transpose_off + 1] == c.high_byte);
 
@@ -326,10 +336,11 @@ void test_insert_chain_wire_round_trip_is_byte_exact() {
   CHECK(n > 0);
 
   // insert_chains starts right after routes[10] on the wire: name(24) +
-  // masks(8) + groove(10) + 7 u16 fields (style/tempo/transpose/pad_bank/
-  // chord_seq/controller_map/routing_profile, 14 B) + routes(30) = 86 bytes
-  // into the record, plus the 8-byte header in front of the record itself.
-  const std::size_t insert_chains_off = sizeof(PerformanceStoreHeader) + 86;
+  // masks(8) + groove(10) + beats_per_bar(1, Phase 7 node T0) + 7 u16 fields
+  // (style/tempo/transpose/pad_bank/chord_seq/controller_map/
+  // routing_profile, 14 B) + routes(30) = 87 bytes into the record, plus the
+  // 8-byte header in front of the record itself.
+  const std::size_t insert_chains_off = sizeof(PerformanceStoreHeader) + 87;
   const std::size_t target_off = insert_chains_off + (2 * 8 + 3) * 6;  // role 2, slot 3
   CHECK(buf[target_off] == 2);                                         // type
   CHECK(buf[target_off + 1] == 0);                                     // enabled
@@ -367,10 +378,10 @@ void test_deserialize_rejects_fx_region_byte_flip_via_crc() {
   const std::size_t n = serialize(store, Span<std::uint8_t>(buf.data(), buf.size()));
   CHECK(n > 0);
 
-  // insert_chains starts at header(8) + 86 bytes into the record (same offset
+  // insert_chains starts at header(8) + 87 bytes into the record (same offset
   // arithmetic as test_insert_chain_wire_round_trip_is_byte_exact above);
   // flip a byte squarely inside it -- role 5, slot 4's `type` byte.
-  const std::size_t insert_chains_off = sizeof(PerformanceStoreHeader) + 86;
+  const std::size_t insert_chains_off = sizeof(PerformanceStoreHeader) + 87;
   const std::size_t victim_off = insert_chains_off + (5 * 8 + 4) * 6;
   CHECK(victim_off < n - sizeof(std::uint32_t));  // still inside the record, before the CRC
   buf[victim_off] ^= 0xFF;
@@ -395,14 +406,14 @@ void test_deserialize_rejects_wrong_magic() {
   CHECK(same_performance(*sentinel.get(0), distinctive_performance(9)));
 }
 
-// format_version 2 (Phase-6 Theme 3 Item #3): the core's own deserialize()
-// hard-rejects ANY version != 2 -- a wrong/future version.
+// format_version 3 (Phase 7, node T0): the core's own deserialize()
+// hard-rejects ANY version != 3 -- a wrong/future version.
 void test_deserialize_rejects_wrong_format_version() {
   PerformanceStore store;
   CHECK(store.store(0, distinctive_performance(1)));
   std::vector<std::uint8_t> buf(4096);
   const std::size_t n = serialize(store, Span<std::uint8_t>(buf.data(), buf.size()));
-  buf[4] = 3;  // format_version low byte (right after the 4-byte magic): neither 1 nor 2
+  buf[4] = 4;  // format_version low byte (right after the 4-byte magic): neither 1 nor 3
   buf[5] = 0;
   PerformanceStore sentinel;
   CHECK(sentinel.store(0, distinctive_performance(9)));

@@ -125,8 +125,8 @@ Shell::Shell(EventSink sink)
             return midisrc::MidiSourceStage<kSchedulerCapacity>(sched, kMidiSourcePort);
           },
           [this](auto&, auto&, auto&) { return ChorddetStage<kMaxPorts>(m_followed); },
-          [this](auto& sched, auto&, auto&, auto& chorddet) {
-            return RestyleStage<kMaxPorts>(sched, chorddet, m_followed, kRestylePort);
+          [this](auto& sched, auto& transport, auto&, auto& chorddet) {
+            return RestyleStage<kMaxPorts>(sched, transport, chorddet, m_followed, kRestylePort);
           },
           [this](auto& sched, auto& transport, auto&, auto& chorddet, auto&) {
             return Engine(sched, transport, m_followed, chorddet);
