@@ -64,11 +64,30 @@ filtering once multiple output ports exist. Owner chose load-from-path only
   not on the arm target). Corelli/Prospero review the thread + realtime seam
   before code.
 
-## Theme 3 — Complete the #9 rig
+## Theme 3 — Complete the #9 rig — ✅ SHIPPED
 
-- `master_transpose`: add the missing engine backing state (musical-scope
-  decision on what "global transpose" shifts — Ottorino/owner), then wire the
-  reserved `Performance.master_transpose` field.
+All four items landed 2026-07-14 (each Corelli/Ottorino design → implement →
+Torquato QA → gates → commit):
+- **#1 `master_transpose`** (`27e437a`): signed ±12 semitone offset applied
+  "late" (absolute note) in `resolve()` + `ChordEngine::sound()`, drums exempt
+  via `RolePolicy::kFixed`, drop-not-fold. Live-change safety: voicing memory
+  delta-shifted so `nearest_octave()` doesn't fold. Scope doc:
+  `docs/reflections/phase6-theme3-master-transpose-scope.md`. DEFERRED: the
+  "early"/re-key transpose (needs an octave-carry + voicing-history redesign).
+- **#4 active pad bank** (`83a8ade`): `Param::kPadBankSelect` (58) + `pad_bank_id`
+  capture/recall round-trip; flat pad addressing unchanged (persisted view cursor).
+- **#2 Drum/CC pads** (`c316a1d`): `PadType::kDrum`/`kCC` emit note/CC directly
+  in `fire_pad` via the existing choke point (pad-owned dest, ~120-tick drum
+  gate, sync-boundary honored via per-slot `BoundaryLatch`, panic resyncs pad
+  state). NoteRepeat NOT a pad type — folds into Theme 4's FX note-repeat insert.
+- **#3 Performance format v2** (`d242348`): per-role FX-chain snapshot restored
+  on recall; `routing_profile_id` RESERVED (0xFFFF-only) awaiting a future
+  RoutingProfileStore; `master_transpose` widened to native int16. `sizeof`
+  96→576, wire 94→574, `format_version`→2; host-only v1→v2 migrator
+  (`components/hostrt/perf_v1_migrate`), core still refuses non-current versions.
+  Design: `docs/reflections/phase6-theme3-performance-format-v2-review.md`.
+
+Original scope notes (for reference):
 - Pad types Drum/CC (need new note/CC emission in the pad layer — the piece #9
   deferred). NoteRepeat likely folds into the FX note-repeat insert.
 - `Performance format_version 2`: add the FX chain snapshot + the general
