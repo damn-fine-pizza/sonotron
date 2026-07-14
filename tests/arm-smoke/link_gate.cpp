@@ -149,11 +149,12 @@ bool motif_link_gate() {
   // Two bars: repeat 0 (the generated statement) and repeat 1 (the
   // kDisplacement-transformed answer) both actually fire.
   for (Tick t = 0; t < 2 * kTicksPerBar; ++t) {
-    arr.on_tick(t, c_major, no_chord, [&](std::uint8_t, TickOffset, const MidiMessage& msg) {
-      if (msg.type() == midi::kNoteOn && msg.channel() == 3) {
-        ++lead_notes;
-      }
-    });
+    arr.on_tick(t, c_major, no_chord,
+                [&](std::uint8_t, TickOffset, const MidiMessage& msg, std::uint8_t) {
+                  if (msg.type() == midi::kNoteOn && msg.channel() == 3) {
+                    ++lead_notes;
+                  }
+                });
   }
   return lead_notes > 0;
 }

@@ -560,6 +560,13 @@ void test_perf_capture_recall_round_trip_fully_populates_all_80_fx_slots() {
           CHECK(ins->params.note_repeat.count == exp.a);
           CHECK(ins->params.note_repeat.rate_ticks == exp.c);
           break;
+        case InsertType::kGroove:
+        case InsertType::kArp:
+          // Unreachable here: this test's own type_i cycles (r + s) % 4, the
+          // ORIGINAL 4 InsertType values only (Phase-6 Theme 4's kGroove/
+          // kArp are exercised elsewhere -- test_fx.cpp/test_insert_chain.cpp).
+          // Listed so the switch stays exhaustive (-Werror=switch).
+          break;
       }
     }
   }
@@ -570,7 +577,10 @@ void test_perf_capture_recall_round_trip_fully_populates_all_80_fx_slots() {
 // recalls to the SAME inert default on every one of the 80 slots -- proves
 // the empty case is not merely "untested" but explicitly byte/field-exact,
 // even after the live rig is deliberately drifted to something non-default
-// before the recall.
+// before the recall. Phase-6 Theme 4 (5210): the chain's own "inert default"
+// is kScaleLock/strength==0 for slots 0..kMaxInserts-2, but kGroove (also a
+// provable identity, see insert_chain.hpp's default_slot()) for the LAST
+// slot -- Corelli's pinned-last, auto-present resolution.
 void test_perf_capture_recall_round_trip_all_empty_chains() {
   Band b;
   b.setup_basic();
@@ -592,9 +602,13 @@ void test_perf_capture_recall_round_trip_all_empty_chains() {
     for (int s = 0; s < 8; ++s) {
       const Insert* ins = b.e.arranger().chain(role).get(static_cast<std::size_t>(s));
       CHECK(ins != nullptr);
-      CHECK(ins->type == InsertType::kScaleLock);  // Insert{}'s own default
       CHECK(ins->enabled);
-      CHECK(ins->params.scale_lock.strength == 0);
+      if (s == kMaxInserts - 1) {
+        CHECK(ins->type == InsertType::kGroove);  // the LAST slot's own inert default (5210)
+      } else {
+        CHECK(ins->type == InsertType::kScaleLock);  // Insert{}'s own default
+        CHECK(ins->params.scale_lock.strength == 0);
+      }
     }
   }
 }

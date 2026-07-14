@@ -74,7 +74,7 @@ constexpr Style kLeadVoicedStyle{.name = "probe_lead_voicing",
 StaticVector<std::uint8_t, 8> notes_on(Arranger& a, Tick tick, const Key& key,
                                        const ChordState& chord) {
   StaticVector<std::uint8_t, 8> out;
-  a.on_tick(tick, key, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
+  a.on_tick(tick, key, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m, std::uint8_t) {
     if (m.type() == midi::kNoteOn) {
       CHECK(out.push_back(m.d1));
     }

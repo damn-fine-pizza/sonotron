@@ -487,8 +487,16 @@ class Engine {
     }
   }
 
-  void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink) {
-    if (!m_scheduler.schedule(port, tick, msg)) {
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): `source` is the
+  // arrangrr::kScheduleSource* producer tag (config.hpp), forwarded into the
+  // scheduler's own entry (OutScheduler::schedule) so cancel_note_off can
+  // later scope its retrigger-care match to the SAME producer. Defaults to
+  // kScheduleSourceCore, so every pre-existing caller that never passes one
+  // (fire_timeline, fire_chord_seq, emit_beat/realtime/clock) keeps landing in
+  // the same undifferentiated shared pool as before this fix, byte-for-byte.
+  void schedule_or_warn(std::uint8_t port, Tick tick, const MidiMessage& msg, EventSink sink,
+                        std::uint8_t source = kScheduleSourceCore) {
+    if (!m_scheduler.schedule(port, tick, msg, source)) {
       sink(OutEvent::warn(WarnCode::kSchedulerFull, m_now));
     }
   }
@@ -546,14 +554,38 @@ class Engine {
   // sub-hit whose gate ends before the next hit keeps its silent gap. For the
   // normal cross-step case delay == 0, so on_tick == m_now and the wire is
   // byte-identical to the pre-fix path (D29 still sorts the off before the on).
-  void schedule_pattern(std::uint8_t port, TickOffset delay, const MidiMessage& msg,
-                        EventSink sink) {
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): `source` (default
+  // kScheduleSourceCore, config.hpp) scopes cancel_note_off's retrigger-care
+  // match to the SAME producer as the incoming note-on -- a pending note-off
+  // from a DIFFERENT producer sharing this exact (port, channel, note) is left
+  // untouched (see out_scheduler.hpp's own cancel_note_off comment). For every
+  // pre-existing caller (all default to kScheduleSourceCore), this is the
+  // SAME shared single-pool match as before this fix, so the on_tick == m_now
+  // byte-identical wire this function's own header comment documents still
+  // holds exactly as before.
+  //
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix), second half: a
+  // role's own kArp insert and the live-keyboard arp can each independently
+  // hold the SAME (port, channel, note) and both retrigger on the SAME tick.
+  // Each producer's OWN same-source dance above already keeps ITS OWN
+  // previous note clean; cancel_off_from_other_producer additionally drops
+  // any OTHER producer's note-off landing at this EXACT same tick -- that
+  // off would otherwise be spurious (the pitch is not really going silent,
+  // a DIFFERENT producer is attacking it again in the very same instant).
+  // Scoped to an exact-tick match against a DIFFERENT source only, so a true
+  // single-producer scenario (every existing golden, and the arp's own
+  // retrigger tests) never has another source present here -- a provable
+  // no-op for that path, unchanged from before this fix.
+  void schedule_pattern(std::uint8_t port, TickOffset delay, const MidiMessage& msg, EventSink sink,
+                        std::uint8_t source = kScheduleSourceCore) {
     const Tick on_tick = m_now + static_cast<Tick>(delay);
-    if (msg.type() == midi::kNoteOn &&
-        m_scheduler.cancel_note_off(port, msg.channel(), msg.d1, on_tick)) {
-      schedule_or_warn(port, on_tick, MidiMessage::note_off(msg.channel(), msg.d1), sink);
+    if (msg.type() == midi::kNoteOn) {
+      if (m_scheduler.cancel_note_off(port, msg.channel(), msg.d1, on_tick, source)) {
+        schedule_or_warn(port, on_tick, MidiMessage::note_off(msg.channel(), msg.d1), sink, source);
+      }
+      m_scheduler.cancel_off_from_other_producer(port, msg.channel(), msg.d1, on_tick, source);
     }
-    schedule_or_warn(port, on_tick, msg, sink);
+    schedule_or_warn(port, on_tick, msg, sink, source);
   }
 
   void fire_timeline(Tick transport_tick, EventSink sink) {
@@ -613,11 +645,15 @@ class Engine {
   }
 
   void fire_arranger(Tick transport_tick, EventSink sink) {
-    const Arranger::TickResult r =
-        m_arranger.on_tick(transport_tick, m_chords.key(), m_chords.state(),
-                           [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg) {
-                             schedule_pattern(port, delay, msg, sink);
-                           });
+    const Arranger::TickResult r = m_arranger.on_tick(
+        transport_tick, m_chords.key(), m_chords.state(),
+        // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): Arranger's
+        // on_tick now carries its own kScheduleSource* producer tag per note
+        // (kScheduleSourceCore for ordinary emissions, kScheduleSourceRoleArpBase
+        // + role index for a role's own arp-insert) -- forward it verbatim.
+        [&](std::uint8_t port, TickOffset delay, const MidiMessage& msg, std::uint8_t source) {
+          schedule_pattern(port, delay, msg, sink, source);
+        });
     if (r.section_changed) {
       sink(OutEvent::section(static_cast<std::uint16_t>(r.section), m_now));
     }
@@ -657,9 +693,15 @@ class Engine {
       return;
     }
     m_arp.on_tick(transport_tick, [&](std::uint8_t note, std::uint8_t velocity, TickOffset gate) {
+      // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): the Engine-
+      // global live-keyboard arp is its own distinct producer -- tag it
+      // kScheduleSourceLiveArp so it never cross-cancels a role's own
+      // arp-insert (or ordinary Arranger/Timeline scheduling) sharing the
+      // same (port, channel, note).
       schedule_pattern(m_arp_out_port, 0, MidiMessage::note_on(m_arp_out_channel, note, velocity),
-                       sink);
-      schedule_pattern(m_arp_out_port, gate, MidiMessage::note_off(m_arp_out_channel, note), sink);
+                       sink, kScheduleSourceLiveArp);
+      schedule_pattern(m_arp_out_port, gate, MidiMessage::note_off(m_arp_out_channel, note), sink,
+                       kScheduleSourceLiveArp);
     });
   }
 

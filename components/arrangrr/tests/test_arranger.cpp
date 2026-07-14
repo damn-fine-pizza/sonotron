@@ -43,6 +43,30 @@ constexpr Style kFeelTestStyle{.name = "feeltest",
                                .groove = kFeelGroove,
                                .tempo = 15000};
 
+// Torquato QA heavy-pass (Phase-6 Theme 4, target 4 -- owner decision 5, the
+// arp-insert held-chord model): a 2-tone "chord" at step 0 (tones 0 and 2,
+// i.e. root+fifth over Cmaj -> 36 and 43), NOTHING for 7 straight steps
+// (silence), then a single DIFFERENT tone (tone 1, the third -> 40) at
+// step 8. Exercises both halves of decision 5 in one fixture: the held chord
+// must survive the silent steps unchanged (hold-through-silence), and the
+// step-8 group must REPLACE it outright, not accumulate on top of it.
+constexpr StyleEvent kArpHoldBass[] = {
+    {.step = 0, .tone = 0, .octave = 0, .vel = 100, .gate = 200},
+    {.step = 0, .tone = 2, .octave = 0, .vel = 100, .gate = 200},
+    {.step = 8, .tone = 1, .octave = 0, .vel = 100, .gate = 200},
+};
+constexpr StylePattern kArpHoldPatterns[] = {
+    {.role = TrackRole::kBass,
+     .policy = RolePolicy::kChordTone,
+     .events = Span<const StyleEvent>(kArpHoldBass)},
+};
+constexpr StyleSection kArpHoldSections[] = {
+    {.type = SectionType::kVarA,
+     .bars = 1,
+     .patterns = Span<const StylePattern>(kArpHoldPatterns)}};
+constexpr Style kArpHoldStyle{.name = "arpholdtest",
+                              .sections = Span<const StyleSection>(kArpHoldSections)};
+
 void test_role_anchor_and_gm_voices() {
   Arranger arr;
   CHECK(arr.load_style(&kVoiceTestStyle));
@@ -71,7 +95,7 @@ void test_role_anchor_and_gm_voices() {
   arr.on_transport_start();
   bool bass_c2 = false;
   bool pad_c3 = false;
-  arr.on_tick(0, Key{}, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
+  arr.on_tick(0, Key{}, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m, std::uint8_t) {
     if (m.type() == midi::kNoteOn) {
       if (m.channel() == 0 && m.d1 == 36) {
         bass_c2 = true;
@@ -321,6 +345,167 @@ void test_groove_apply() {
   CHECK(groove::apply(p, 0, 2, 0, 100).timing_offset == base_off * 50 / 100);
 }
 
+// ---- Phase-6 Theme 4 (5210/5220): groove-as-insert / arp-as-insert, driven
+// directly through Arranger::on_tick (no Engine needed) ---------------------
+
+// Bit-identity proof for the auto-present, pinned-last kGroove slot (Fork 2):
+// the chain-driven schedule must reproduce groove::apply()'s OWN independent
+// computation for the exact same (params, role, step, tick, vel) inputs --
+// the same guarantee feel_swing/feel_blues/feel_shuffle's goldens pin at a
+// higher level, checked here directly against the pure function.
+void test_groove_insert_reproduces_groove_apply_math_at_default_last_slot() {
+  Arranger arr;
+  CHECK(arr.load_style(&kFeelTestStyle));  // kFeelGroove{swing=40, accent=12, swing_grid=16}
+  CHECK(arr.set_route(TrackRole::kBass, 0, 0));
+  const ChordState chord{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  arr.on_transport_start();
+
+  TickOffset on_delay = -1;
+  std::uint8_t on_vel = 0;
+  arr.on_tick(0, Key{}, chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& m, std::uint8_t) {
+                if (m.channel() == 0 && m.type() == midi::kNoteOn) {
+                  on_delay = delay;
+                  on_vel = m.d2;
+                }
+              });
+  const auto bass_role_idx = static_cast<std::uint8_t>(TrackRole::kBass);
+  const GrooveOut expected = groove::apply(kFeelGroove, bass_role_idx, /*step=*/0, /*tick=*/0,
+                                           /*base_vel=*/100);  // kVoiceBass's own vel
+  CHECK(on_delay == expected.timing_offset);
+  CHECK(on_vel == expected.velocity);
+}
+
+// Fork 1: a role's arp-insert swallows its own resolved block note (never
+// scheduled directly) and instead plays it from the SAME on_tick call's P5
+// pass, which fires immediately (transport_tick 0 is always a rate-grid
+// boundary).
+void test_arp_insert_swallows_direct_note_and_plays_from_the_p5_pass() {
+  Arranger arr;
+  CHECK(arr.load_style(&kVoiceTestStyle));  // kBass: tone 0, step 0, vel 100, gate 200
+  CHECK(arr.set_route(TrackRole::kBass, 0, 0));
+  CHECK(arr.set_fx(TrackRole::kBass, 0, InsertType::kArp));
+  CHECK(arr.set_fx_param(TrackRole::kBass, 0, /*rate=*/0,
+                         static_cast<std::int32_t>(ArpRate::kSixteenth)));
+  CHECK(arr.set_fx_param(TrackRole::kBass, 0, /*gate=*/3, 75));
+
+  const ChordState chord{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  arr.on_transport_start();
+
+  int note_on_count = 0;
+  int note_off_count = 0;
+  std::uint8_t seen_note = 0;
+  TickOffset off_delay = -1;
+  arr.on_tick(0, Key{}, chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& m, std::uint8_t) {
+                if (m.channel() != 0) {
+                  return;
+                }
+                if (m.type() == midi::kNoteOn) {
+                  ++note_on_count;
+                  seen_note = m.d1;
+                  CHECK(delay == 0);
+                } else if (m.type() == midi::kNoteOff) {
+                  ++note_off_count;
+                  off_delay = delay;
+                }
+              });
+  CHECK(note_on_count == 1);  // the raw block note never sounds -- only the arp's own emission
+  CHECK(seen_note == 36);     // bass anchor 36 + chord root 0 == C2, the SAME note the arp holds
+  CHECK(note_off_count == 1);
+  CHECK(off_delay == 180);  // step_ticks(240) * gate(75) / 100
+}
+
+// P5's own structural claim: the arp-insert pass is UNGATED, not a drop-in
+// addition to the grid-gated per-step loop -- it must fire even on a tick
+// that is NOT a multiple of kTicksPerStep(240), when the arp's own rate is
+// finer than the style's own grid.
+void test_arp_insert_fires_on_own_rate_grid_even_off_the_style_step_grid() {
+  Arranger arr;
+  CHECK(arr.load_style(&kVoiceTestStyle));
+  CHECK(arr.set_route(TrackRole::kBass, 0, 0));
+  CHECK(arr.set_fx(TrackRole::kBass, 0, InsertType::kArp));
+  CHECK(arr.set_fx_param(TrackRole::kBass, 0, /*rate=*/0,
+                         static_cast<std::int32_t>(ArpRate::kThirtySecond)));  // 120 ticks
+
+  const ChordState chord{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  arr.on_transport_start();
+
+  int note_ons_at_0 = 0;
+  arr.on_tick(0, Key{}, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m, std::uint8_t) {
+    if (m.channel() == 0 && m.type() == midi::kNoteOn) {
+      ++note_ons_at_0;
+    }
+  });
+  CHECK(note_ons_at_0 == 1);
+
+  // Tick 120 is NOT a multiple of kTicksPerStep(240) -- the style's own grid
+  // produces nothing here (the grid-gated loop never even runs its body),
+  // yet the arp-insert's own 32nd-note rate (120 ticks) fires anyway.
+  int note_ons_at_120 = 0;
+  arr.on_tick(120, Key{}, chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& m, std::uint8_t) {
+                if (m.channel() == 0 && m.type() == midi::kNoteOn) {
+                  ++note_ons_at_120;
+                  CHECK(delay == 0);
+                }
+              });
+  CHECK(note_ons_at_120 == 1);
+}
+
+// Target 4 (owner decision 5): the arp-insert's held-chord model is REPLACE,
+// not accumulate, on each fresh non-empty resolved group, and the held chord
+// survives every silent step in between unchanged.
+void test_arp_insert_holds_chord_through_silence_and_replaces_not_accumulates() {
+  Arranger arr;
+  CHECK(arr.load_style(&kArpHoldStyle));
+  CHECK(arr.set_route(TrackRole::kBass, 0, 0));
+  CHECK(arr.set_fx(TrackRole::kBass, 0, InsertType::kArp));
+  CHECK(arr.set_fx_param(TrackRole::kBass, 0, /*rate=*/0,
+                         static_cast<std::int32_t>(ArpRate::kSixteenth)));  // 240 ticks: lockstep
+                                                                            // with the style grid
+  CHECK(arr.set_fx_param(TrackRole::kBass, 0, /*direction=*/1,
+                         static_cast<std::int32_t>(ArpDirection::kUp)));
+  CHECK(arr.set_fx_param(TrackRole::kBass, 0, /*gate=*/3, 100));
+
+  const ChordState chord{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  arr.on_transport_start();
+
+  auto fire = [&](Tick t) {
+    std::uint8_t seen = 255;
+    arr.on_tick(t, Key{}, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m, std::uint8_t) {
+      if (m.channel() == 0 && m.type() == midi::kNoteOn) {
+        seen = m.d1;
+      }
+    });
+    return seen;
+  };
+
+  // Step 0 (tick 0): the 2-note chord {36, 43} (root+fifth) is freshly
+  // ingested (a clear-then-ingest on a non-empty group) -- kUp cycles
+  // ascending, so THIS SAME tick's own P5 emission is the lowest note.
+  CHECK(fire(0) == 36);
+  // Steps 1..7 (ticks 240..1680): the style has NO bass event here at all --
+  // hold-through-silence means the arp-insert must keep cycling the SAME
+  // 2-note chord the entire way, never falling silent and never resetting.
+  CHECK(fire(240) == 43);
+  CHECK(fire(480) == 36);
+  CHECK(fire(720) == 43);
+  CHECK(fire(960) == 36);
+  CHECK(fire(1200) == 43);
+  CHECK(fire(1440) == 36);
+  CHECK(fire(1680) == 43);
+  // Step 8 (tick 1920): a FRESH single-tone group (the third, 40) replaces
+  // the held chord outright -- decision 5's "replace, not accumulate": the
+  // emission is the new tone ALONE, never a 3-note mix with the old 36/43.
+  CHECK(fire(1920) == 40);
+  // Step 9 (tick 2160): silence again -- a length-1 held sequence always
+  // re-emits the same single note, proving the old 2-note chord is genuinely
+  // gone (a leftover 2-note cycle would have alternated back to 36 or 43
+  // here, not repeated 40).
+  CHECK(fire(2160) == 40);
+}
+
 void test_groove_command() {
   Band b;
   b.setup_basic();
@@ -504,17 +689,18 @@ void test_multibar_section_plays_bar_two() {
   const ChordState no_chord{};
   StaticVector<std::uint32_t, 8> hits36, hits38;
   for (Tick t = 0; t < 4 * kTicksPerBar; ++t) {
-    a.on_tick(t, Key{}, no_chord, [&](std::uint8_t, TickOffset delay, const MidiMessage& msg) {
-      if (msg.type() != midi::kNoteOn || delay != 0) {
-        return;
-      }
-      if (msg.d1 == 36) {
-        CHECK(hits36.push_back(t));
-      }
-      if (msg.d1 == 38) {
-        CHECK(hits38.push_back(t));
-      }
-    });
+    a.on_tick(t, Key{}, no_chord,
+              [&](std::uint8_t, TickOffset delay, const MidiMessage& msg, std::uint8_t) {
+                if (msg.type() != midi::kNoteOn || delay != 0) {
+                  return;
+                }
+                if (msg.d1 == 36) {
+                  CHECK(hits36.push_back(t));
+                }
+                if (msg.d1 == 38) {
+                  CHECK(hits38.push_back(t));
+                }
+              });
   }
   // Two full cycles of a 2-bar section over 4 bars.
   CHECK(hits38.size() == 2 && hits38[0] == 0 && hits38[1] == 2 * kTicksPerBar);
@@ -538,7 +724,7 @@ void test_seamless_style_switch() {
   CHECK(a.load_style(&styles::basic::kStyle));
   a.on_transport_start();
   const ChordState no_chord{};
-  auto sink = [](std::uint8_t, TickOffset, const MidiMessage&) {};
+  auto sink = [](std::uint8_t, TickOffset, const MidiMessage&, std::uint8_t) {};
 
   // Queue a live switch to a different style (both define varA). It must land
   // TOGETHER on the next bar downbeat, never mid-bar.
@@ -703,7 +889,7 @@ int resolve_one(TrackRole role, RolePolicy policy, NoteSource src, std::int8_t t
   a.set_master_transpose(transpose);
   a.on_transport_start();
   int note = -1;
-  a.on_tick(0, key, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
+  a.on_tick(0, key, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m, std::uint8_t) {
     if (m.type() == midi::kNoteOn) {
       note = m.d1;
     }
@@ -829,6 +1015,10 @@ int main() {
   test_ntt_resolution_follows_chord();
   test_role_anchor_and_gm_voices();
   test_groove_apply();
+  test_groove_insert_reproduces_groove_apply_math_at_default_last_slot();
+  test_arp_insert_swallows_direct_note_and_plays_from_the_p5_pass();
+  test_arp_insert_fires_on_own_rate_grid_even_off_the_style_step_grid();
+  test_arp_insert_holds_chord_through_silence_and_replaces_not_accumulates();
   test_groove_command();
   test_groove_set_field_all();
   test_part_mute_solo();

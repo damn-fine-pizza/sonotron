@@ -188,3 +188,19 @@ arrangrr_test(test_master_transpose functional)
 # test_arranger.cpp/test_voicing.cpp coverage. Currently RED; do not silence
 # it.
 arrangrr_test(test_master_transpose_voicing_regression regression)
+# test_arp_insert_style_switch_stale_regression: Torquato QA heavy-pass pin
+# (Phase-6 Theme 4, target 6) -- Arranger::request_style() (the LIVE
+# style-switch path) never calls reset_role_arps(), unlike load_style();
+# a role's arp-insert keeps arpeggiating a chord resolved under the OLD
+# style after a live switch. Kept in its own file (mirrors
+# test_master_transpose_voicing_regression.cpp's isolation precedent) so its
+# failure never masks test_arranger.cpp's surrounding GREEN coverage.
+# Currently RED; do not silence it.
+arrangrr_test(test_arp_insert_style_switch_stale_regression regression)
+# test_dual_arp_collision: Torquato QA heavy-pass pin (Phase-6 Theme 4, Fork 6)
+# -- see the file's own header comment for the exact collision scenario. RED:
+# a role's kArp insert and the live-keyboard arp sharing one output port/
+# channel/pitch corrupt each other's note-off via the shared scheduler's
+# single-producer retrigger-care logic. GREEN (kept in the same file/target,
+# same collision setup): Panic still drops both arps' held state cleanly.
+arrangrr_test(test_dual_arp_collision regression)

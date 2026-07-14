@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 // Bounded-capacity configuration, anchored to the STM32H743 512 KB pool
 // envelope (D33). Every MAX here is a compile-time constant; static_asserts
@@ -66,5 +67,37 @@ static_assert(kMaxPerformances <= 256,
 inline constexpr int kMaxChainFan = 8;
 static_assert(kMaxChainFan >= 1 && kMaxChainFan <= 32,
               "InsertChain fan-out: keep one note's chain multiplication bounded (D33)");
+
+// Retrigger-care PRODUCER tags (Torquato QA heavy pass, Phase-6 Theme 4
+// dual-arp collision fix): runtime::OutScheduler::cancel_note_off is scoped
+// to (port, channel, note, source) so a pending note-off is only ever
+// cancelled by a NEW note-on from the SAME producer -- two INDEPENDENT
+// producers sharing a (port, channel, note) triple at the same tick (e.g.
+// the Engine-global live-keyboard arpeggiator and a role's own kArp insert)
+// must never tombstone each other's legitimate note-off. `source` is a plain
+// runtime scheduler-bookkeeping byte -- it never rides the wire (OutEvent
+// carries the resulting MidiMessage only, never this tag) and never touches
+// ScheduledEvent's own persistence (it has none: OutScheduler is an
+// in-process priority queue, not an ABI/wire shape).
+//   kScheduleSourceCore     -- Timeline + ordinary (non-arp-insert) Arranger
+//                              scheduling: the historical, UNDIFFERENTIATED
+//                              shared pool every existing golden already
+//                              exercises. No producer distinction existed at
+//                              all before this fix, so lumping these
+//                              together reproduces the OLD single-pool
+//                              behavior bit-for-bit -- zero behavior change
+//                              for any style/track that never configures an
+//                              arp-insert (i.e. every current golden).
+//   kScheduleSourceLiveArp  -- Engine::fire_arp, the global live-keyboard
+//                              arpeggiator (Engine::m_arp).
+//   kScheduleSourceRoleArpBase -- BASE id for a role's own arp-insert
+//                              (Arranger's P5 on_tick pass): the actual tag
+//                              is kScheduleSourceRoleArpBase + the TrackRole
+//                              index (0..9), so two DIFFERENT roles' own
+//                              arp-inserts never cancel each other's
+//                              note-offs either.
+inline constexpr std::uint8_t kScheduleSourceCore = 0;
+inline constexpr std::uint8_t kScheduleSourceLiveArp = 1;
+inline constexpr std::uint8_t kScheduleSourceRoleArpBase = 2;
 
 }  // namespace arrangrr

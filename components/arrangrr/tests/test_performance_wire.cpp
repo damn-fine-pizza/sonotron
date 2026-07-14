@@ -11,6 +11,7 @@
 #include <cstring>
 #include <vector>
 
+#include "arrangrr/fx/insert_chain.hpp"  // kInsertTypeCount (Phase-6 Theme 4: now 6, was 4)
 #include "test.hpp"
 
 namespace {
@@ -131,7 +132,7 @@ Performance distinctive_performance(std::uint8_t salt) {
   for (int r = 0; r < 10; ++r) {
     for (int s = 0; s < 8; ++s) {
       PerfInsert& ins = p.insert_chains[r][s];
-      ins.type = static_cast<std::uint8_t>((r + s + salt) % 4);  // 4 == kInsertTypeCount
+      ins.type = static_cast<std::uint8_t>((r + s + salt) % kInsertTypeCount);
       ins.enabled = static_cast<std::uint8_t>((r + s + salt) % 2);
       ins.params[0] = static_cast<std::uint8_t>(0x10 + r);
       ins.params[1] = static_cast<std::uint8_t>(0x20 + s);
@@ -568,8 +569,8 @@ int main() {
   test_deserialize_rejects_v1_format_version();
   test_deserialize_rejects_corrupted_crc();
   test_deserialize_rejects_truncated_buffer();
-  test_deserialize_rejects_oversized_buffer_with_trailing_garbage();  // regression: exact-length required
-                                                                      // above
+  test_deserialize_rejects_oversized_buffer_with_trailing_garbage();  // regression: exact-length
+                                                                      // required above
   test_deserialize_rejects_count_beyond_pool_bound();
   test_serialize_into_undersized_buffer_returns_zero();
   test_serialize_empty_store_round_trips();

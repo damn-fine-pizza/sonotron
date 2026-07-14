@@ -163,6 +163,8 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
       });
       m_chorddet.clear();  // every key is up now; the latched chord stays (memory)
       m_arp.panic();       // drop any held/latched arp notes
+      // Phase-6 Theme 4 (5220): drop every role's own arp-insert chord too.
+      m_arranger.reset_role_arps();
       // Torquato finding 3: Panic silences the WIRE via NoteTracker above but
       // used to never touch m_pads -- a kToggle (or kHold) pad left
       // PadRuntime::on == true after the wire went silent needed a second
@@ -1466,9 +1468,12 @@ void Engine::cmd_fx(const Command& cmd, EventSink sink) {
 // the slot with that type's fresh default params (Arranger::set_fx ->
 // InsertChain::set_type).
 void Engine::fx_set(const Command& cmd, EventSink sink) {
+  // Phase-6 Theme 4 (5210/5220): the valid type range widened from
+  // kNoteRepeat(3) to the full kInsertTypeCount(6) -- kGroove/kArp are now
+  // ABI-settable slot types too (see arrangrr/fx/insert_chain.hpp).
   const bool ok =
       cmd.idx <= static_cast<std::uint16_t>(TrackRole::kCc) && cmd.a >= 0 && cmd.b >= 0 &&
-      cmd.b <= static_cast<std::int32_t>(InsertType::kNoteRepeat) &&
+      cmd.b < static_cast<std::int32_t>(kInsertTypeCount) &&
       m_arranger.set_fx(static_cast<TrackRole>(cmd.idx), static_cast<std::size_t>(cmd.a),
                         static_cast<InsertType>(cmd.b));
   if (!ok) {

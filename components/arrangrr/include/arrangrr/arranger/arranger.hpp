@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "arrangrr/arp/arpeggiator.hpp"   // Phase-6 Theme 4 (5220): per-role arp-insert engine
 #include "arrangrr/arranger/gesture.hpp"  // gesture::expand (per-event note fan-out)
 #include "arrangrr/arranger/groove.hpp"
 #include "arrangrr/arranger/motif.hpp"  // motif engine (9210): gather-phase seed/transform producer
@@ -26,6 +27,17 @@ namespace arrangrr {
 class Arranger {
  public:
   using ScheduleFn = FunctionRef<void(std::uint8_t port, TickOffset delay, const MidiMessage& msg)>;
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): on_tick's OWN
+  // schedule callback additionally carries the arrangrr::kScheduleSource*
+  // producer tag (config.hpp) for every note it emits -- ordinary/non-arp
+  // notes are tagged kScheduleSourceCore, a role's own arp-insert emissions
+  // (the P5 pass) are tagged kScheduleSourceRoleArpBase + the role index, so
+  // Engine::schedule_pattern's retrigger-care never cancels one producer's
+  // note-off with another's note-on. emit_voices() below has no note/
+  // retrigger concern (Program Change only), so it keeps the narrower,
+  // UNCHANGED 3-arg ScheduleFn above.
+  using NoteScheduleFn = FunctionRef<void(std::uint8_t port, TickOffset delay,
+                                          const MidiMessage& msg, std::uint8_t source)>;
 
   struct TickResult {
     bool section_changed = false;
@@ -75,6 +87,7 @@ class Arranger {
     m_voicing.reset();   // a new style must not voice-lead from the old one
     m_motif_repeat = 0;  // 9210: a new style's motif call-and-response restarts at the statement
     m_groove = style->groove;  // 9110: adopt the style's default feel (user edits re-apply after)
+    reset_role_arps();  // Phase-6 Theme 4 (5220): a new style must not arpeggiate a stale chord
     return true;
   }
 
@@ -232,6 +245,20 @@ class Arranger {
     return m_chain[idx].restore(slot, ins);
   }
 
+  // Phase-6 Theme 4 (5220): drops every role's held arp-insert chord --
+  // mirrors the live-keyboard arp's own reset points (Engine::set_arp_
+  // enabled/panic calling m_arp.panic()/clear()), keeping the two
+  // independent arp instances (Fork 3's own flagged item) equally free of
+  // stale state at the same boundaries: a fresh style load (load_style()
+  // above), a transport (re)start (on_transport_start() below), and a
+  // Panic (Engine::cmd_routing's kPanic case). Session-only bookkeeping --
+  // never captured by Performance, so there is nothing to restore here.
+  void reset_role_arps() noexcept {
+    for (ArpeggiatorEngine& a : m_role_arp) {
+      a.panic();
+    }
+  }
+
   // A snapshot of one part for the host mixer: its route, its voice in the
   // current section, and its mute/solo state. `present` is false when the
   // current section has no pattern for this role (e.g. arp only in varC/varD).
@@ -314,6 +341,13 @@ class Arranger {
       m_pending_valid = false;
       m_pending_style = nullptr;
       m_groove = style->groove;  // 9110: a live style switch adopts the new style's feel
+      // Torquato QA (Phase-6 Theme 4 target 6): request_style() is a SEPARATE
+      // entry point from load_style() and must reset every role's arp-insert
+      // held chord exactly like it does -- otherwise a role's kArp slot keeps
+      // arpeggiating a chord resolved under the OLD style even after a live
+      // switch to a style that never resolves that role again (the P5
+      // per-role-per-tick pass has no other signal that the style changed).
+      reset_role_arps();
       return true;
     }
 
@@ -327,6 +361,7 @@ class Arranger {
     m_section_start = 0;
     m_voicing.reset();   // start each run with a clean voice-leading history
     m_motif_repeat = 0;  // 9210: every fresh run restarts the call-and-response at the statement
+    reset_role_arps();   // Phase-6 Theme 4 (5220): a fresh run starts with no held arp chord
     if (section_is_variation(m_current)) {
       m_return_to = m_current;
     }
@@ -364,7 +399,7 @@ class Arranger {
   // timing logic across functions for no readability gain and real risk.
   // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   TickResult on_tick(Tick transport_tick, const Key& key, const ChordState& chord,
-                     ScheduleFn schedule) {
+                     NoteScheduleFn schedule) {
     TickResult result;
     if (m_style == nullptr) {
       return result;
@@ -391,6 +426,13 @@ class Arranger {
             m_style_id = 0xFFFF;  // Corelli fix #1: same "unknown" convention as the immediate path
             style_switched = true;
             m_groove = m_style->groove;  // 9110: deferred switch adopts the new style's feel
+            // Torquato QA (Phase-6 Theme 4 target 6): the DEFERRED half of
+            // request_style()'s own fix above -- the switch only really takes
+            // effect HERE, at the bar boundary it was queued for, so this is
+            // where a stale held arp-insert chord must actually be dropped
+            // (resetting it at request_style()'s own call time would be too
+            // early: the OLD style is still playing until this commits).
+            reset_role_arps();
           }
           m_pending_style = nullptr;
           next = m_pending;
@@ -434,126 +476,171 @@ class Arranger {
       }
     }
 
-    // Fire the grid slots of this tick.
+    // Fire the grid slots of this tick. `step`/`rel` are computed
+    // UNCONDITIONALLY now (Phase-6 Theme 4, P5): the arp-insert pass below
+    // must run on every tick regardless of whether this tick lands on the
+    // style's own step grid (an arp-insert's own rate can be finer than
+    // kTicksPerStep, e.g. a 32nd-note rate at 120 ticks vs the grid's 240) --
+    // the OLD early return here would have skipped it entirely on most
+    // ticks. The grid-gated per-role step loop below is now an `if` block
+    // instead of an early return, so both passes always run to completion.
     const Tick rel = transport_tick - m_section_start;
-    if (rel % kTicksPerStep != 0) {
-      return result;
-    }
     const std::uint16_t step = static_cast<std::uint16_t>(rel / kTicksPerStep);
     const bool solo_active = any_solo();
-    for (const StylePattern& pattern : section->patterns) {
-      const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
-      if (!route.enabled || part_silenced(pattern.role, solo_active)) {
-        continue;
-      }
-      // Per-role, per-step resolution pipeline (D40):
-      //   gather this step's events -> gesture::expand (1 event -> N specs)
-      //   -> resolve() each (unchanged NTT kernel) into a bounded voice group
-      //   -> m_voicing.voice() (voice-leading) -> groove + schedule per note.
-      // With the default kNone gestures and kAsWritten voicing this emits, in
-      // the same order and with the same timing, exactly what the former
-      // one-note-per-event loop did — byte-for-byte up to kMaxVoiceNotes notes
-      // per role per step; a step denser than that truncates (bounded, D32; no
-      // real style reaches it — the ARR_ASSERT below turns the drop into a
-      // debug signal rather than silence).
-      NoteReq group[kMaxVoiceNotes];
-      int count = 0;
-
-      // Motif engine (9210): a gather-phase producer occupying the same slot
-      // gesture::expand does, one level upstream. When this pattern names a
-      // MotifSpec, its per-step events are GENERATED here (from an authored
-      // seed in `pattern.events`, or motif::generate() when that is empty)
-      // and the repeat-keyed call-and-response transform is applied, rather
-      // than reading `pattern.events` literally below. `generated_motif`'s
-      // backing array is a stack local (no heap); `source` aliases either it
-      // or the pattern's own authored span unchanged, so a pattern with no
-      // motif (motif == nullptr, the default) is byte-for-byte identical to
-      // the historical behavior.
-      Motif generated_motif;
-      Span<const StyleEvent> source = pattern.events;
-      if (pattern.motif != nullptr) {
-        const Motif seed =
-            pattern.events.empty()
-                ? motif::generate(
-                      pattern.motif->seed, pattern.motif->length,
-                      motif::idiom_onset_mask(section->patterns, pattern.motif->idiom_role),
-                      pattern.motif->center_degree, pattern.motif->vel, pattern.motif->gate)
-                : motif::from_span(pattern.events);
-        generated_motif = motif::apply_repeat(seed, *pattern.motif, m_motif_repeat);
-        source = Span<const StyleEvent>(generated_motif.events, generated_motif.count);
-      }
-
-      for (const StyleEvent& ev : source) {
-        if (ev.step != step) {
+    if (rel % kTicksPerStep == 0) {
+      for (const StylePattern& pattern : section->patterns) {
+        const Route& route = m_routes[static_cast<std::uint8_t>(pattern.role)];
+        if (!route.enabled || part_silenced(pattern.role, solo_active)) {
           continue;
         }
-        StyleEvent specs[gesture::kMaxGestureFan];
-        TickOffset delays[gesture::kMaxGestureFan];
-        const int produced = gesture::expand(pattern, ev, chord, specs, delays);
-        for (int i = 0; i < produced; ++i) {
-          const int note = resolve(pattern, specs[i], key, chord, m_master_transpose);
-          if (note < 0) {
+        // Per-role, per-step resolution pipeline (D40):
+        //   gather this step's events -> gesture::expand (1 event -> N specs)
+        //   -> resolve() each (unchanged NTT kernel) into a bounded voice group
+        //   -> m_voicing.voice() (voice-leading) -> groove + schedule per note.
+        // With the default kNone gestures and kAsWritten voicing this emits, in
+        // the same order and with the same timing, exactly what the former
+        // one-note-per-event loop did — byte-for-byte up to kMaxVoiceNotes notes
+        // per role per step; a step denser than that truncates (bounded, D32; no
+        // real style reaches it — the ARR_ASSERT below turns the drop into a
+        // debug signal rather than silence).
+        NoteReq group[kMaxVoiceNotes];
+        int count = 0;
+
+        // Motif engine (9210): a gather-phase producer occupying the same slot
+        // gesture::expand does, one level upstream. When this pattern names a
+        // MotifSpec, its per-step events are GENERATED here (from an authored
+        // seed in `pattern.events`, or motif::generate() when that is empty)
+        // and the repeat-keyed call-and-response transform is applied, rather
+        // than reading `pattern.events` literally below. `generated_motif`'s
+        // backing array is a stack local (no heap); `source` aliases either it
+        // or the pattern's own authored span unchanged, so a pattern with no
+        // motif (motif == nullptr, the default) is byte-for-byte identical to
+        // the historical behavior.
+        Motif generated_motif;
+        Span<const StyleEvent> source = pattern.events;
+        if (pattern.motif != nullptr) {
+          const Motif seed =
+              pattern.events.empty()
+                  ? motif::generate(
+                        pattern.motif->seed, pattern.motif->length,
+                        motif::idiom_onset_mask(section->patterns, pattern.motif->idiom_role),
+                        pattern.motif->center_degree, pattern.motif->vel, pattern.motif->gate)
+                  : motif::from_span(pattern.events);
+          generated_motif = motif::apply_repeat(seed, *pattern.motif, m_motif_repeat);
+          source = Span<const StyleEvent>(generated_motif.events, generated_motif.count);
+        }
+
+        for (const StyleEvent& ev : source) {
+          if (ev.step != step) {
             continue;
           }
-          if (count >= kMaxVoiceNotes) {
-            ARR_ASSERT(count < kMaxVoiceNotes);  // a step exceeded the cap
-            break;
+          StyleEvent specs[gesture::kMaxGestureFan];
+          TickOffset delays[gesture::kMaxGestureFan];
+          const int produced = gesture::expand(pattern, ev, chord, specs, delays);
+          for (int i = 0; i < produced; ++i) {
+            const int note = resolve(pattern, specs[i], key, chord, m_master_transpose);
+            if (note < 0) {
+              continue;
+            }
+            if (count >= kMaxVoiceNotes) {
+              ARR_ASSERT(count < kMaxVoiceNotes);  // a step exceeded the cap
+              break;
+            }
+            const bool is_chord_tone =
+                pattern.policy == RolePolicy::kChordTone && specs[i].src == NoteSource::kChordTone;
+            group[count++] = NoteReq{.note = note,
+                                     .vel = specs[i].vel,
+                                     .gate = specs[i].gate,
+                                     .gesture_delay = delays[i],
+                                     .chord_tone = is_chord_tone};
           }
-          const bool is_chord_tone =
-              pattern.policy == RolePolicy::kChordTone && specs[i].src == NoteSource::kChordTone;
-          group[count++] = NoteReq{.note = note,
-                                   .vel = specs[i].vel,
-                                   .gate = specs[i].gate,
-                                   .gesture_delay = delays[i],
-                                   .chord_tone = is_chord_tone};
+        }
+        if (count == 0) {
+          continue;
+        }
+        // Voice-leading over the role's chord-tone notes (identity for kAsWritten).
+        m_voicing.voice(pattern.role, pattern.voicing, group, count);
+        const std::uint8_t role_idx = static_cast<std::uint8_t>(pattern.role);
+        const FxContext fx_ctx{.key = key,
+                               .chord = chord,
+                               .step = step,
+                               .tick = transport_tick,
+                               .role = role_idx,
+                               .groove = m_groove};
+        // Phase-6 Theme 4 (5220, decision 5): a role's arp-insert (if any) has
+        // its held chord REPLACED by this step's freshly-resolved group, not a
+        // literal note_on/note_off mirror of a live-keyboard session -- clear
+        // once per non-empty group, then ingest() every note of it below
+        // (has_arp() gates this so a chain with no arp slot never touches the
+        // role's ArpeggiatorEngine at all).
+        if (m_chain[role_idx].has_arp()) {
+          m_role_arp[role_idx].clear();
+        }
+        for (int i = 0; i < count; ++i) {
+          const NoteReq& nr = group[i];
+          // Phase-5 Item #10 (MIDI-FX insert chain): run the resolved note
+          // through the role's chain — `seed.offset` starts at 0 (the chain's
+          // OWN, self-relative clock); gesture_delay is a pre-existing,
+          // chain-independent scheduling offset that rides outside the chain
+          // entirely, exactly as it did before this item. An unconfigured /
+          // fully-disabled chain (the default state of every role, aside from
+          // the auto-present kGroove slot -- Phase-6 Theme 4, 5210) is a
+          // provable 1-in/1-out identity (insert_chain.hpp), so fan_count == 1
+          // and fanned[0] == seed for every existing style/track — the loop
+          // below then reproduces the pre-Item-#10 schedule byte-for-byte.
+          const FxNote seed{.note = nr.note, .vel = nr.vel, .gate = nr.gate, .offset = 0};
+          // Phase-6 Theme 4 (5220): feed the SAME seed into the role's
+          // arp-insert (a genuine no-op unless an enabled kArp slot exists) —
+          // per Fork 1's decision, a role with an active kArp slot never
+          // schedules its resolved notes directly (apply() below returns 0 for
+          // them, since Insert::process's kArp case always swallows), so the
+          // block chord and the arp's own rhythm never sound together.
+          m_chain[role_idx].ingest(seed, m_role_arp[role_idx]);
+          FxNote fanned[kMaxChainFan];
+          const int fan_count = m_chain[role_idx].apply(seed, fanned, kMaxChainFan, fx_ctx);
+          for (int j = 0; j < fan_count; ++j) {
+            // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): ordinary
+            // per-role/per-step emissions are the historical, undifferentiated
+            // shared pool -- tag them kScheduleSourceCore so their retrigger-
+            // care behavior stays byte-for-byte identical to before this fix.
+            schedule_fanned_note(route, nr.gesture_delay, fanned[j], schedule, kScheduleSourceCore);
+          }
         }
       }
-      if (count == 0) {
+    }
+    // Phase-6 Theme 4 (5220) P5: a SECOND, UNGATED pass over every role, once
+    // per tick -- unlike the grid-gated loop above (bar/step-locked), an
+    // arp-insert must fire on its OWN rate grid, which is independent of
+    // whether THIS tick is one of the style's own step boundaries. Placed
+    // AFTER the grid-gated loop so a role's arp-insert reflects the
+    // freshest resolved chord ingested THIS SAME tick, not last tick's, when
+    // both grids happen to coincide.
+    for (std::uint8_t r = 0; r < kRoleCount; ++r) {
+      const Route& route = m_routes[r];
+      if (!route.enabled || part_silenced(static_cast<TrackRole>(r), solo_active)) {
         continue;
       }
-      // Voice-leading over the role's chord-tone notes (identity for kAsWritten).
-      m_voicing.voice(pattern.role, pattern.voicing, group, count);
-      const std::uint8_t role_idx = static_cast<std::uint8_t>(pattern.role);
-      const FxContext fx_ctx{.key = key, .chord = chord, .step = step, .tick = transport_tick};
-      for (int i = 0; i < count; ++i) {
-        const NoteReq& nr = group[i];
-        // Phase-5 Item #10 (MIDI-FX insert chain): run the resolved note
-        // through the role's chain BEFORE groove — an Echo/NoteRepeat insert
-        // may fan it into several notes. `seed.offset` starts at 0 (the
-        // chain's OWN, self-relative clock); gesture_delay is a pre-existing,
-        // chain-independent scheduling offset that rides outside the chain
-        // entirely, exactly as it did before this item. An unconfigured /
-        // fully-disabled chain (the default state of every role) is a
-        // provable 1-in/1-out identity (insert_chain.hpp), so fan_count == 1
-        // and fanned[0] == seed for every existing style/track — the loop
-        // below then reproduces the pre-Item-#10 schedule byte-for-byte.
-        const FxNote seed{.note = nr.note, .vel = nr.vel, .gate = nr.gate, .offset = 0};
-        FxNote fanned[kMaxChainFan];
-        const int fan_count = m_chain[role_idx].apply(seed, fanned, kMaxChainFan, fx_ctx);
-        for (int j = 0; j < fan_count; ++j) {
-          const FxNote& fn = fanned[j];
-          if (fn.note < 0 || fn.note > 127) {
-            continue;
-          }
-          // Corelli must-fix: groove is computed at THIS note's OWN grid
-          // position (step/tick advanced by the chain's own offset), never
-          // the seed's — a copy several steps out from an Echo/NoteRepeat
-          // must not sound like it landed on the seed's own beat. Swing/
-          // accent/humanize (deterministic; drums swing too, downbeats stay
-          // put) and the note-off shift with the note-on so gate length is
-          // preserved.
-          const Tick tick_j = transport_tick + static_cast<Tick>(fn.offset);
-          const std::uint16_t step_j = static_cast<std::uint16_t>(
-              step +
-              static_cast<std::uint16_t>(fn.offset / static_cast<TickOffset>(kTicksPerStep)));
-          const GrooveOut g = groove::apply(m_groove, role_idx, step_j, tick_j, fn.vel);
-          const TickOffset on = g.timing_offset + nr.gesture_delay + fn.offset;
-          schedule(
-              route.port, on,
-              MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(fn.note), g.velocity));
-          schedule(route.port, static_cast<TickOffset>(fn.gate) + on,
-                   MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(fn.note)));
-        }
+      const FxContext fx_ctx{.key = key,
+                             .chord = chord,
+                             .step = step,
+                             .tick = transport_tick,
+                             .role = r,
+                             .groove = m_groove};
+      FxNote emitted[kMaxChainFan];
+      const int n =
+          m_chain[r].on_tick(transport_tick, m_role_arp[r], fx_ctx, emitted, kMaxChainFan);
+      for (int i = 0; i < n; ++i) {
+        // No gesture_delay for an arp-emitted note -- it has no upstream
+        // NoteReq of its own (simplest faithful model, Fork 1's own open
+        // question; flagged in the implementation report).
+        //
+        // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): tag this
+        // role's own arp-insert emissions with a per-role source id (BASE +
+        // role index) so they never cross-cancel a DIFFERENT producer's
+        // (the live-keyboard arp's, or a DIFFERENT role's own arp-insert's)
+        // pending note-off sharing the same (port, channel, note).
+        schedule_fanned_note(route, /*extra_delay=*/0, emitted[i], schedule,
+                             static_cast<std::uint8_t>(kScheduleSourceRoleArpBase + r));
       }
     }
     return result;
@@ -577,6 +664,33 @@ class Arranger {
   bool part_silenced(TrackRole role, bool solo_active) const noexcept {
     const auto idx = static_cast<std::uint8_t>(role);
     return bit(m_muted, idx) || (solo_active && !bit(m_solo, idx));
+  }
+
+  // Phase-6 Theme 4 (5210): the FINAL schedule step, shared by the grid-gated
+  // per-step loop and the P5 arp-tick pass -- reads `fn.groove_offset`
+  // (written by a kGroove-typed slot's own process(), 0 if the chain has no
+  // such slot) instead of calling groove::apply() itself, now that groove is
+  // a chain slot rather than a hardcoded call here. `extra_delay` is
+  // `nr.gesture_delay` for a resolved-group note, or 0 for an arp-emitted one
+  // (an arp-emitted note has no upstream NoteReq of its own).
+  //
+  // Torquato QA (Phase-6 Theme 4 dual-arp collision fix): `source` is the
+  // arrangrr::kScheduleSource* producer tag (config.hpp) this note's emission
+  // belongs to -- forwarded verbatim into the 4-arg NoteScheduleFn callback
+  // so Engine::schedule_pattern's retrigger-care (out_scheduler.hpp's
+  // cancel_note_off) never lets one producer's note-on cancel a DIFFERENT
+  // producer's pending note-off on the same (port, channel, note).
+  static void schedule_fanned_note(const Route& route, TickOffset extra_delay, const FxNote& fn,
+                                   NoteScheduleFn schedule, std::uint8_t source) {
+    if (fn.note < 0 || fn.note > 127) {
+      return;
+    }
+    const TickOffset on = fn.groove_offset + extra_delay + fn.offset;
+    schedule(route.port, on,
+             MidiMessage::note_on(route.channel, static_cast<std::uint8_t>(fn.note), fn.vel),
+             source);
+    schedule(route.port, static_cast<TickOffset>(fn.gate) + on,
+             MidiMessage::note_off(route.channel, static_cast<std::uint8_t>(fn.note)), source);
   }
   static constexpr bool bit(std::uint16_t mask, std::uint8_t i) noexcept {
     return (mask & static_cast<std::uint16_t>(1u << i)) != 0;
@@ -685,6 +799,14 @@ class Arranger {
   // (every slot inert/passthrough), so a fresh Arranger's on_tick output is
   // byte-identical to the pre-Item-#10 schedule until a chain is configured.
   InsertChain m_chain[kRoleCount];
+  // Phase-6 Theme 4 (5220, Fork 3/4): one arp-insert engine per ROLE, beside
+  // m_chain -- NOT one per slot (a role plays ONE arpeggiated pattern, not
+  // several independently-clocked ones). SESSION-ONLY: never captured by
+  // Performance (mirrors the live-keyboard arp's own m_arp, engine.hpp, which
+  // is equally never captured) -- a kArp-typed slot's wire-persisted CONFIG
+  // (rate/direction/octaves/gate) rides the existing PerfInsert bytes
+  // automatically; this array's held notes/step counter do not.
+  ArpeggiatorEngine m_role_arp[kRoleCount];
   // Motif engine (9210): how many times the CURRENT section has looped back
   // to itself (statement=even, answer=odd -- motif.hpp's call-and-response
   // policy). One scalar suffices because every StylePattern in a section

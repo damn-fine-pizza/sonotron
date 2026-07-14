@@ -93,9 +93,13 @@ void test_fx_set_rejects_out_of_range_slot() {
   CHECK(b.warns() == 1);
 }
 
+// Phase-6 Theme 4 (5210/5220): the valid type range widened to admit
+// kGroove/kArp (kInsertTypeCount is now 6, not 4) -- the boundary this test
+// exercises moved with it; kInsertTypeCount itself is always the first
+// genuinely out-of-range value, regardless of how many types exist.
 void test_fx_set_rejects_out_of_range_type() {
   Band b;
-  b.cmd(Param::kFxSet, 0, /*b=type*/ static_cast<std::int32_t>(InsertType::kNoteRepeat) + 1, 0,
+  b.cmd(Param::kFxSet, 0, /*b=type*/ static_cast<std::int32_t>(kInsertTypeCount), 0,
         static_cast<std::uint16_t>(TrackRole::kBass));
   CHECK(b.warns() == 1);
 }
@@ -243,6 +247,38 @@ void test_fx_default_chain_does_not_alter_the_existing_schedule() {
   CHECK(kicks[0].first == 0 && kicks[0].second == 110);
 }
 
+// ---- Phase-6 Theme 4 (5210/5220): kFxSet/kFxParam admit the two new types --
+
+void test_fx_set_accepts_groove_type_but_rejects_its_params() {
+  Band b;
+  const auto bass = static_cast<std::uint16_t>(TrackRole::kBass);
+  b.cmd(Param::kFxSet, 0, static_cast<std::int32_t>(InsertType::kGroove), 0, bass);
+  CHECK(b.warns() == 0);
+  const Insert* ins = b.e.arranger().chain(TrackRole::kBass).get(0);
+  CHECK(ins != nullptr && ins->type == InsertType::kGroove);
+
+  b.ev.clear();
+  b.cmd(Param::kFxParam, 0, /*param_id*/ 0, 1, bass);
+  CHECK(b.warns() == 1);  // Fork 2/3: kGroove has no per-slot params
+}
+
+void test_fx_set_and_param_accept_arp_type_and_its_slim_config() {
+  Band b;
+  const auto bass = static_cast<std::uint16_t>(TrackRole::kBass);
+  b.cmd(Param::kFxSet, 0, static_cast<std::int32_t>(InsertType::kArp), 0, bass);
+  b.cmd(Param::kFxParam, 0, /*rate*/ 0, static_cast<std::int32_t>(ArpRate::kEighth), bass);
+  b.cmd(Param::kFxParam, 0, /*direction*/ 1, static_cast<std::int32_t>(ArpDirection::kDown), bass);
+  b.cmd(Param::kFxParam, 0, /*octaves*/ 2, 3, bass);
+  b.cmd(Param::kFxParam, 0, /*gate*/ 3, 50, bass);
+  CHECK(b.warns() == 0);
+  const Insert* ins = b.e.arranger().chain(TrackRole::kBass).get(0);
+  CHECK(ins != nullptr && ins->type == InsertType::kArp);
+  CHECK(ins->params.arp.rate == static_cast<std::uint8_t>(ArpRate::kEighth));
+  CHECK(ins->params.arp.direction == static_cast<std::uint8_t>(ArpDirection::kDown));
+  CHECK(ins->params.arp.octaves == 3);
+  CHECK(ins->params.arp.gate == 50);
+}
+
 }  // namespace
 
 int main() {
@@ -262,5 +298,8 @@ int main() {
 
   test_fx_echo_replicas_schedule_at_own_beat_not_the_seeds();
   test_fx_default_chain_does_not_alter_the_existing_schedule();
+
+  test_fx_set_accepts_groove_type_but_rejects_its_params();
+  test_fx_set_and_param_accept_arp_type_and_its_slim_config();
   return arrangrr::test::failures();
 }
