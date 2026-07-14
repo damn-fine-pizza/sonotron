@@ -6,6 +6,7 @@
 
 #include "browser_model.hpp"
 #include "imgui.h"
+#include "theme.hpp"
 
 // Default launch quantize (ux-workstation.md §5 "1 bar / 2 bars / instant"):
 // a bare click launches quantized to the next bar, not instant -- matches
@@ -16,20 +17,37 @@ namespace sonotron {
 namespace {
 
 constexpr int kDefaultLaunchQuantizeBars = 1;
+constexpr float kRoleSwatchSize = 6.0F;
 
-const char* cell_display_text(const GridCell& cell) {
-  return cell.kind == GridCellKind::kEmpty ? "." : cell.label.c_str();
+// Part row label (components.jsx's LaunchGrid): a small tone swatch + the
+// part name, colored per the ROLE_TONES ramp (theme.hpp's kRoleTint).
+void render_part_row_label(GridModel& model, std::size_t part_index) {
+  const ImVec4& tone = theme::kRoleTint[part_index % theme::kRoleTint.size()];
+  const float line_height = ImGui::GetTextLineHeight();
+  const ImVec2 pos = ImGui::GetCursorScreenPos();
+  const float swatch_y = pos.y + (line_height - kRoleSwatchSize) * 0.5F;
+  ImGui::GetWindowDrawList()->AddRectFilled(
+      ImVec2(pos.x, swatch_y), ImVec2(pos.x + kRoleSwatchSize, swatch_y + kRoleSwatchSize),
+      ImGui::ColorConvertFloat4ToU32(tone));
+  ImGui::Dummy(ImVec2(kRoleSwatchSize + 4.0F, line_height));
+  ImGui::SameLine(0.0F, 4.0F);
+  ImGui::TextColored(theme::kTextSecondary, "%s",
+                     std::string(model.part_label(part_index)).c_str());
 }
 
 void render_scene_header(std::size_t scene_index, BrainSession& brain_session) {
   ImGui::TableSetColumnIndex(static_cast<int>(scene_index) + 1);
   ImGui::PushID(static_cast<int>(scene_index));
-  ImGui::Text("Scene%zu", scene_index + 1);
+  ImGui::TextColored(theme::kTextSecondary, "Scene%zu", scene_index + 1);
   ImGui::SameLine();
   // "Scene ▶ all" (§3 wireframe): fans a column's launches out through the
   // real core clip primitive (`launch scene <n> quantize <q>`,
-  // docs/design/clip-primitive-design.md).
-  if (ImGui::SmallButton(">")) {
+  // docs/design/clip-primitive-design.md). Green launch glyph
+  // (readme.md's iconography: ▶ is the launch/scene marker).
+  ImGui::PushStyleColor(ImGuiCol_Text, theme::kGreen);
+  const bool clicked = ImGui::SmallButton("\xE2\x96\xB6");  // ▶
+  ImGui::PopStyleColor();
+  if (clicked) {
     brain_session.send("launch scene " + std::to_string(scene_index) + " quantize " +
                        std::to_string(kDefaultLaunchQuantizeBars));
   }
@@ -39,6 +57,14 @@ void render_scene_header(std::size_t scene_index, BrainSession& brain_session) {
   ImGui::PopID();
 }
 
+// LaunchCell (components.jsx): a square tile per-role tinted when filled,
+// a dim "·" empty-cell drop target otherwise. NOTE: there is no per-cell
+// armed/playing runtime signal on the wire yet -- GridModel only holds
+// authored content (grid_model.hpp's own header comment: "a live per-cell
+// armed/playing indicator ... is follow-up work", app_state.cpp's kClip
+// case). So the "playing" tone/border and the sweeping-playhead line
+// components.jsx also describes for LaunchCell are NOT rendered here --
+// this is a known, already-documented gap, not something faked.
 void render_cell(GridModel& model, std::size_t part_index, std::size_t scene_index,
                  BrainSession& brain_session) {
   ImGui::TableSetColumnIndex(static_cast<int>(scene_index) + 1);
@@ -46,7 +72,30 @@ void render_cell(GridModel& model, std::size_t part_index, std::size_t scene_ind
   ImGui::PushID(static_cast<int>(id));
 
   const GridCell& cell = model.cell(part_index, scene_index);
-  if (ImGui::Button(cell_display_text(cell), ImVec2(-FLT_MIN, 0))) {
+  const bool filled = cell.kind != GridCellKind::kEmpty;
+  const ImVec4& tone = theme::kRoleTint[part_index % theme::kRoleTint.size()];
+
+  if (filled) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(tone.x, tone.y, tone.z, 0.12F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(tone.x, tone.y, tone.z, 0.30F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(tone.x, tone.y, tone.z, 0.45F));
+    ImGui::PushStyleColor(ImGuiCol_Border, tone);
+  } else {
+    ImGui::PushStyleColor(ImGuiCol_Button, theme::kWindowBg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          ImVec4(theme::kAccent.x, theme::kAccent.y, theme::kAccent.z, 0.15F));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                          ImVec4(theme::kAccent.x, theme::kAccent.y, theme::kAccent.z, 0.25F));
+    ImGui::PushStyleColor(ImGuiCol_Border, theme::kBorder);
+  }
+  ImGui::PushStyleColor(ImGuiCol_Text, filled ? theme::kText : theme::kTextDim);
+
+  // Filled: "▶ <label>" (readme.md's launch glyph); empty: the dim leaf
+  // glyph "·", read as a drop target for a dragged browser style.
+  const std::string label = filled ? ("\xE2\x96\xB6 " + cell.label) : "\xC2\xB7";
+  const bool clicked = ImGui::Button(label.c_str(), ImVec2(-FLT_MIN, 0));
+  ImGui::PopStyleColor(5);
+  if (clicked) {
     // Real core clip primitive (Phase-5 Item #2): `id` addresses a ClipMatrix
     // slot the same way this cell's own ImGui PushID does.
     brain_session.send("launch clip " + std::to_string(id) + " quantize " +
@@ -93,7 +142,7 @@ void render_grid_panel(GridModel& model, BrainSession& brain_session) {
   for (std::size_t part = 0; part < model.part_count(); ++part) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
-    ImGui::TextUnformatted(std::string(model.part_label(part)).c_str());
+    render_part_row_label(model, part);
     for (std::size_t scene = 0; scene < model.scene_count(); ++scene) {
       render_cell(model, part, scene, brain_session);
     }

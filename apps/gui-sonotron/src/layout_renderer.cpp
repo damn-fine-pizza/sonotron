@@ -1,6 +1,9 @@
 #include "layout_renderer.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cfloat>
+#include <string>
 
 #include "browser_panel.hpp"
 #include "grid_panel.hpp"
@@ -8,11 +11,23 @@
 #include "intention_panel.hpp"
 #include "parts_panel.hpp"
 #include "seqedit_panel.hpp"
+#include "theme.hpp"
 #include "transport_panel.hpp"
 
 namespace sonotron {
 
 namespace {
+
+// Zone titles render cyan, UPPERCASE, bold (Panel, components.jsx;
+// readme.md's CONTENT FUNDAMENTALS: "Zone titles are UPPERCASE"). Zone::title
+// stays plain Title Case in the model/JSON file (layout_model.cpp) -- this is
+// a render-time transform only, not a persisted change.
+std::string uppercase(std::string_view text) {
+  std::string result(text);
+  std::transform(result.begin(), result.end(), result.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+  return result;
+}
 
 // Dispatches a zone to its live panel by id (G3, docs/design/
 // gui-fase2-mechanical-plan.md). The abandoned concept panels (arrangement/
@@ -67,7 +82,9 @@ void render_zone_frame(const Zone& zone, const ImVec2& size, WorkstationState& s
   if (zone.id == "transport") {
     render_zone_content(zone, state);
   } else {
-    ImGui::TextUnformatted(zone.title.c_str());
+    // Panel (components.jsx): cyan, UPPERCASE, bold title + a 1px separator
+    // (ImGuiCol_Separator is already themed to --sn-border, theme.cpp).
+    theme::text_bold_colored(theme::kCyan, "%s", uppercase(zone.title).c_str());
     ImGui::Separator();
     render_zone_content(zone, state);
   }

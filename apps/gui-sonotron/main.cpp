@@ -72,6 +72,7 @@
 #include "src/parts_model.hpp"
 #include "src/screenshot.hpp"
 #include "src/seqedit_model.hpp"
+#include "src/theme.hpp"
 #include "src/uds_brain_session.hpp"
 #include "src/workstation_state.hpp"
 
@@ -403,7 +404,8 @@ void present_frame(GLFWwindow* window, const char* screenshot_path) {
   int display_h = 0;
   glfwGetFramebufferSize(window, &display_w, &display_h);
   glViewport(0, 0, display_w, display_h);
-  glClearColor(0.10F, 0.10F, 0.12F, 1.0F);
+  glClearColor(sonotron::theme::kAppBg.x, sonotron::theme::kAppBg.y, sonotron::theme::kAppBg.z,
+               sonotron::theme::kAppBg.w);
   glClear(GL_COLOR_BUFFER_BIT);
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
   if (screenshot_path != nullptr) {
@@ -437,6 +439,10 @@ int main(int argc, char** argv) {
   // not let ImGui write an imgui.ini next to wherever this is launched from.
   io.IniFilename = nullptr;
   ImGui::StyleColorsDark();
+  // sonotron's own token-based theme (src/theme.hpp) overwrites the dark
+  // baseline above with the resolved design-system colors/geometry -- see
+  // that header for the token->ImGuiCol_/ImGuiStyle mapping as-built.
+  sonotron::theme::apply();
 
   // Layout is loaded before the font because it carries the configurable
   // logical font-size knob (Layout::font_size_px, the JSON "font_size"

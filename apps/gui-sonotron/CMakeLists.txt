@@ -58,16 +58,20 @@ add_library(gui_sonotron_brain STATIC
 target_include_directories(gui_sonotron_brain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(gui_sonotron_brain PRIVATE -Wall -Wextra -Werror)
 
-# Layout engine + zone panels. The zone panels (G3) are ImGui-rendering code
-# (transport/browser/grid/seqedit/parts/intention), so they live in this
-# ImGui-linked library alongside layout_renderer.cpp -- the *_panel/*_model
-# split invariant is about which .cpp files include ImGui, not which CMake
-# target compiles them (docs/design/gui-fase2-mechanical-plan.md's
-# Invariants). Needs gui_sonotron_models for the model types the panels
-# render/mutate (BrowserModel/GridModel/SeqEditModel); AppState/BrainSession
-# usage stays header-only (inline getters, a pure-virtual interface) so no
-# link dependency on gui_sonotron_brain is required.
+# Layout engine + zone panels + the sonotron theme. The zone panels (G3) are
+# ImGui-rendering code (transport/browser/grid/seqedit/parts/intention), so
+# they live in this ImGui-linked library alongside layout_renderer.cpp -- the
+# *_panel/*_model split invariant is about which .cpp files include ImGui,
+# not which CMake target compiles them (docs/design/gui-fase2-mechanical-
+# plan.md's Invariants). theme.cpp (src/theme.hpp) is pure ImGuiStyle/ImVec4
+# data with no widget calls and no BrainSession sends, so it sits here too
+# rather than needing a target of its own. Needs gui_sonotron_models for the
+# model types the panels render/mutate (BrowserModel/GridModel/SeqEditModel)
+# and for track_roles.hpp (theme.hpp's per-role tint ramp); AppState/
+# BrainSession usage stays header-only (inline getters, a pure-virtual
+# interface) so no link dependency on gui_sonotron_brain is required.
 add_library(gui_sonotron_layout STATIC
+  src/theme.cpp
   src/layout_model.cpp
   src/layout_json.cpp
   src/layout_renderer.cpp

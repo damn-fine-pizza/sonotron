@@ -4,28 +4,82 @@
 #include <string>
 
 #include "imgui.h"
+#include "theme.hpp"
 
 namespace sonotron {
 
-void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
-  if (app_state.connected()) {
-    ImGui::TextColored(ImVec4(0.25F, 0.85F, 0.35F, 1.0F), "* Connected");
-  } else {
-    ImGui::TextColored(ImVec4(0.85F, 0.30F, 0.30F, 1.0F), "* Disconnected");
-  }
+namespace {
 
+// Ghost-variant button chrome (components.jsx's Button `ghost`): a
+// transparent rest fill (FrameBorderSize=1 + ImGuiCol_Border already draws
+// the `--sn-border` outline globally, theme.cpp), a translucent-accent
+// hover/press wash, and a secondary-gray label -- used for Stop, the
+// non-primary transport verb on this row. Caller must PopStyleColor(4)
+// after the widget.
+void push_ghost_button_style() {
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                        ImVec4(theme::kAccent.x, theme::kAccent.y, theme::kAccent.z, 0.18F));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                        ImVec4(theme::kAccent.x, theme::kAccent.y, theme::kAccent.z, 0.30F));
+  ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextSecondary);
+}
+
+// Danger-variant button chrome (components.jsx's Button `danger`): a
+// translucent-red rest fill strengthening to solid red on hover and a
+// darkened red on press -- used for Panic, the one destructive verb here.
+// Caller must PopStyleColor(3) after the widget.
+void push_danger_button_style() {
+  ImGui::PushStyleColor(ImGuiCol_Button,
+                        ImVec4(theme::kRed.x, theme::kRed.y, theme::kRed.z, 0.34F));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme::kRed);
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(theme::kRed.x * 0.55F, theme::kRed.y * 0.55F,
+                                                      theme::kRed.z * 0.55F, 1.0F));
+}
+
+// StatusDot (components.jsx): a filled circular dot -- the design's one
+// deliberately non-square shape -- plus a colored connection label.
+void render_status_dot(bool connected) {
+  const ImVec4& color = connected ? theme::kGreenConnected : theme::kRed;
+  const float line_height = ImGui::GetTextLineHeight();
+  const float radius = line_height * 0.22F;
+  const ImVec2 cursor = ImGui::GetCursorScreenPos();
+  const ImVec2 center(cursor.x + radius, cursor.y + line_height * 0.5F);
+  ImGui::GetWindowDrawList()->AddCircleFilled(center, radius,
+                                              ImGui::ColorConvertFloat4ToU32(color));
+  ImGui::Dummy(ImVec2(radius * 2.0F + 6.0F, line_height));
+  ImGui::SameLine(0.0F, 4.0F);
+  ImGui::TextColored(color, "%s", connected ? "Connected" : "Disconnected");
+}
+
+}  // namespace
+
+void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
+  render_status_dot(app_state.connected());
+
+  // Play (default accent chrome, from the global theme) / Stop (ghost) /
+  // Panic (danger) -- components.jsx's Button variants, iconography from
+  // readme.md's glyph set (play/stop markers).
   ImGui::SameLine();
-  if (ImGui::Button("Play")) {
+  if (ImGui::Button("\xE2\x96\xB6 Play")) {
     brain_session.send("transport start");
     app_state.note_transport_sent(true);
   }
+
   ImGui::SameLine();
-  if (ImGui::Button("Stop")) {
+  push_ghost_button_style();
+  const bool stop_clicked = ImGui::Button("\xE2\x96\xA0 Stop");
+  ImGui::PopStyleColor(4);
+  if (stop_clicked) {
     brain_session.send("transport stop");
     app_state.note_transport_sent(false);
   }
+
   ImGui::SameLine();
-  if (ImGui::Button("Panic")) {
+  push_danger_button_style();
+  const bool panic_clicked = ImGui::Button("Panic");
+  ImGui::PopStyleColor(3);
+  if (panic_clicked) {
     brain_session.send("panic");
   }
 
@@ -36,19 +90,22 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
   } else if (app_state.transport() == AppState::Transport::kPaused) {
     transport_label = "paused";
   }
-  ImGui::Text("| %s | Section: %s", transport_label, app_state.section().c_str());
+  ImGui::TextColored(theme::kTextSecondary, "| %s | Section: %s", transport_label,
+                     app_state.section().c_str());
 
+  // BeatReadout (components.jsx): "bar N . beat M .PP" -- bar/beat bold in
+  // text, the sub-beat pulse dimmed to secondary; parked to a disabled
+  // "bar -- . beat --" placeholder at rest.
   ImGui::SameLine();
   if (app_state.bar() == 0) {
-    // No position yet: never played, or Stop parked the playhead (app_state
-    // resets bar/beat/pulse to 0 on a "stopped" transport event).
-    ImGui::TextDisabled("| bar -- . beat --");
+    ImGui::TextColored(theme::kTextMuted, "| bar -- . beat --");
   } else {
-    // Live playhead (P0-2): bar/beat from the core's kBeat heartbeat, plus a
-    // sub-beat pulse count so movement is visible WITHIN a beat, not only on
-    // the beat boundary.
-    ImGui::Text("| bar %d . beat %d .%02d", app_state.bar(), app_state.beat_num(),
-                app_state.pulse());
+    ImGui::TextColored(theme::kTextSecondary, "|");
+    ImGui::SameLine(0.0F, 4.0F);
+    theme::text_bold_colored(theme::kText, "bar %d . beat %d", app_state.bar(),
+                             app_state.beat_num());
+    ImGui::SameLine(0.0F, 2.0F);
+    ImGui::TextColored(theme::kTextSecondary, ".%02d", app_state.pulse());
   }
 
   // Tempo nudge (user request): the BPM readout IS the control -- while
@@ -59,9 +116,17 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
   // holds no authoritative state (app_state.hpp), so this value is local UI
   // intent only -- it can drift from the tempo a `style load` sets until a
   // live-bpm event is wired (follow-up). Clamped to the engine's 20..400 range.
+  // Styled as a Slider-like readout (components.jsx's Slider: bold value,
+  // secondary-gray unit label) even though it is not a drag/track control.
   static int bpm = 120;
   ImGui::SameLine();
-  ImGui::TextColored(ImVec4(0.55F, 0.75F, 1.0F, 1.0F), "| %d BPM", bpm);
+  ImGui::BeginGroup();
+  ImGui::TextColored(theme::kTextSecondary, "|");
+  ImGui::SameLine(0.0F, 4.0F);
+  theme::text_bold_colored(theme::kAccent, "%d", bpm);
+  ImGui::SameLine(0.0F, 2.0F);
+  ImGui::TextColored(theme::kTextSecondary, "BPM");
+  ImGui::EndGroup();
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip("Tempo -- scroll the wheel or press Up/Down to nudge BPM");
     int delta = 0;
@@ -90,6 +155,7 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
   // Shell both recognize `transpose <-12..12>`). The GUI holds no
   // authoritative state (app_state.hpp's own design note), so this control's
   // own value is local UI state only, not re-derived from the event stream.
+  // Track/grab colors come from the global theme (FrameBg/SliderGrab).
   static int transpose_semitones = 0;
   ImGui::SetNextItemWidth(160.0F);
   if (ImGui::SliderInt("Transpose", &transpose_semitones, -12, 12)) {
