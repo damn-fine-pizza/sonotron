@@ -240,6 +240,12 @@ void test_perf_capture_recall_round_trip_restores_everything() {
   b.cmd(Param::kChordMode, static_cast<std::int32_t>(ChordMode::kShell));
   b.cmd(Param::kChordFollow, static_cast<std::int32_t>(ChordFollow::kManual));
   b.cmd(Param::kTransportTempo, 13350);
+  // Phase-6 Theme 3 Item #1: a NEGATIVE transpose, to exercise the low-byte
+  // int8_t reinterpret round-trip (docs/reflections/phase6-theme3-master-
+  // transpose-scope.md Decision 4a) end to end, not just a positive value.
+  b.cmd(Param::kMasterTranspose, -7);
+  CHECK(b.e.arranger().master_transpose() == -7);
+  CHECK(b.e.chords().master_transpose() == -7);
 
   b.cmd(Param::kPerformanceStore, 0, 0, 0, /*idx=*/0);
   CHECK(b.warns() == 0);
@@ -258,6 +264,7 @@ void test_perf_capture_recall_round_trip_restores_everything() {
   b.cmd(Param::kChordMode, static_cast<std::int32_t>(ChordMode::kDiatonic));
   b.cmd(Param::kChordFollow, static_cast<std::int32_t>(ChordFollow::kAuto));
   b.cmd(Param::kTransportTempo, 9000);
+  b.cmd(Param::kMasterTranspose, 5);  // drifted to a different (positive) value
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord2), 0 | (5 << 8));
   CHECK(b.e.arranger().part_info(TrackRole::kChord2).routed);  // drifted: now enabled
 
@@ -281,6 +288,65 @@ void test_perf_capture_recall_round_trip_restores_everything() {
   CHECK(b.e.chords().key().mode == Mode::kDorian);
   CHECK(b.e.chords().mode() == ChordMode::kShell);
   CHECK(b.e.chords().follow() == ChordFollow::kManual);
+  // Phase-6 Theme 3 Item #1: the negative transpose survives the wire's
+  // int8_t-low-byte reinterpret round-trip, and BOTH note-emitting paths
+  // (Arranger + ChordEngine) are restored together.
+  CHECK(b.e.arranger().master_transpose() == -7);
+  CHECK(b.e.chords().master_transpose() == -7);
+}
+
+// A default (never-touched) live rig captures master_transpose == 0, and an
+// existing on-disk record whose reserved field was always 0 (every record
+// written before this item) still means "no transpose" once applied -- the
+// exact backward-compatibility guarantee docs/reflections/phase6-theme3-
+// master-transpose-scope.md Decision 4a locks.
+void test_perf_zero_transpose_round_trips_as_no_transpose() {
+  Band b;
+  b.setup_basic();
+  CHECK(b.e.arranger().master_transpose() == 0);
+  CHECK(b.e.chords().master_transpose() == 0);
+
+  b.cmd(Param::kPerformanceStore, 0, 0, 0, /*idx=*/0);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.performances().get(0)->master_transpose == 0);
+
+  // Drift away, then recall: both paths return to "no transpose".
+  b.cmd(Param::kMasterTranspose, 9);
+  CHECK(b.e.arranger().master_transpose() == 9);
+  b.ev.clear();
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.arranger().master_transpose() == 0);
+  CHECK(b.e.chords().master_transpose() == 0);
+}
+
+// Engine-level round trip across the specific value set this item's own QA
+// mandate calls out (-1, -12, +12, +7): a fresh capture -> store -> drift ->
+// recall cycle per value, hitting BOTH note-emitting paths (Arranger AND
+// ChordEngine) exactly like the -7 case above, complementing test_
+// performance_wire.cpp's own byte-level coverage of the same value set.
+void test_perf_master_transpose_round_trips_across_the_full_value_set() {
+  const std::int32_t values[] = {-1, -12, 12, 7};
+  for (std::int32_t v : values) {
+    Band b;
+    b.setup_basic();
+    b.cmd(Param::kMasterTranspose, v);
+    CHECK(b.warns() == 0);
+
+    b.cmd(Param::kPerformanceStore, 0, 0, 0, /*idx=*/0);
+    CHECK(b.warns() == 0);
+    CHECK(b.e.performances().get(0)->master_transpose ==
+          static_cast<std::uint16_t>(static_cast<std::uint8_t>(v)));
+
+    b.cmd(Param::kMasterTranspose, 0);  // drift away to the no-op value
+    CHECK(b.e.arranger().master_transpose() == 0);
+
+    b.ev.clear();
+    b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
+    CHECK(b.warns() == 0);
+    CHECK(b.e.arranger().master_transpose() == v);
+    CHECK(b.e.chords().master_transpose() == v);
+  }
 }
 
 // ---- item 8: recall bar-gate ordering (Corelli fix #3) --------------------
@@ -369,6 +435,8 @@ int main() {
   test_perf_recall_rejects_bad_route_port();
   test_perf_recall_rejects_bad_route_channel();
   test_perf_capture_recall_round_trip_restores_everything();
+  test_perf_zero_transpose_round_trips_as_no_transpose();
+  test_perf_master_transpose_round_trips_across_the_full_value_set();
   test_perf_recall_bar_gate_lands_after_clip_promotion();
   return arrangrr::test::failures();
 }

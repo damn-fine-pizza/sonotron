@@ -134,6 +134,32 @@ class Arranger {
   // time (unlike the live `groove` panel's set_groove_field above).
   constexpr void set_groove(const GrooveParams& groove) noexcept { m_groove = groove; }
 
+  // Phase-6 Theme 3 Item #1 (global transpose, docs/reflections/phase6-
+  // theme3-master-transpose-scope.md Decision 2 "late"): a signed semitone
+  // offset added to the ABSOLUTE note number resolve() computes, applied
+  // right before its own [0,127] drop-not-fold clamp. kFixed (drums/perc)
+  // patterns short-circuit before this ever applies -- they are exempt for
+  // free, the same way they are exempt from the NTT chord-follow.
+  //
+  // Regression fix (Torquato QA pin, test_master_transpose_voicing_
+  // regression.cpp): resolve() runs BEFORE m_voicing.voice() in on_tick's
+  // D40 pipeline (see the comment there), so a kLead-voiced role's per-role
+  // "previous register" memory (VoicingState::m_last) is recorded under
+  // whatever transpose was in effect the last time that role sounded. Left
+  // untouched, a live transpose delta beyond nearest_octave()'s tritone
+  // threshold gets silently folded by a spurious octave one bar later. Shift
+  // that memory by the SAME delta being applied here so it stays centered on
+  // the new transpose -- voice-leading continuity is preserved (no register
+  // jump from the player's own nudge) and nearest_octave() never sees a
+  // stale reference. root_pc and the late-offset placement itself are
+  // untouched.
+  constexpr void set_master_transpose(std::int8_t semitones) noexcept {
+    const int delta = static_cast<int>(semitones) - static_cast<int>(m_master_transpose);
+    m_voicing.shift(delta);
+    m_master_transpose = semitones;
+  }
+  constexpr std::int8_t master_transpose() const noexcept { return m_master_transpose; }
+
   // Phase-5 Item #10 (MIDI-FX insert chain, node 5100/5200): one InsertChain
   // per TrackRole (NOT per Timeline Track -- the same ordinal space as
   // m_routes/m_muted/m_solo). All four setters are thin, bounds-checked
@@ -440,7 +466,7 @@ class Arranger {
         TickOffset delays[gesture::kMaxGestureFan];
         const int produced = gesture::expand(pattern, ev, chord, specs, delays);
         for (int i = 0; i < produced; ++i) {
-          const int note = resolve(pattern, specs[i], key, chord);
+          const int note = resolve(pattern, specs[i], key, chord, m_master_transpose);
           if (note < 0) {
             continue;
           }
@@ -545,8 +571,16 @@ class Arranger {
   // The per-event NoteSource selects how `tone` is read (kChordTone keeps this
   // exact historical computation). kFixed roles short-circuit to the literal
   // note REGARDLESS of src — drums never transpose.
+  //
+  // Phase-6 Theme 3 Item #1: `transpose` (Arranger::m_master_transpose, a
+  // signed semitone offset, default 0) is added to the ABSOLUTE note in the
+  // kInterval/kScaleDegree/kChordTone branches ONLY, right before each
+  // branch's own [0,127] drop-not-fold clamp -- the kFixed short-circuit
+  // above returns before `transpose` is ever consulted, so drums/perc stay
+  // exempt for free (docs/reflections/phase6-theme3-master-transpose-
+  // scope.md Decisions 1/2).
   static int resolve(const StylePattern& pattern, const StyleEvent& ev, const Key& key,
-                     const ChordState& chord) noexcept {
+                     const ChordState& chord, std::int8_t transpose) noexcept {
     if (pattern.policy == RolePolicy::kFixed) {
       return ev.tone;
     }
@@ -557,13 +591,13 @@ class Arranger {
         if (!chord.valid) {
           return -1;  // silent until a chord exists
         }
-        const int note = anchor + chord.root_pc + ev.tone + 12 * ev.octave;
+        const int note = anchor + chord.root_pc + ev.tone + 12 * ev.octave + transpose;
         return (note < 0 || note > 127) ? -1 : note;
       }
       case NoteSource::kScaleDegree: {
         // Key-diatonic: independent of the chord (the key always exists).
-        const int note =
-            anchor + key.root_pc + theory::degree_to_semitones(key.mode, ev.tone) + 12 * ev.octave;
+        const int note = anchor + key.root_pc + theory::degree_to_semitones(key.mode, ev.tone) +
+                         12 * ev.octave + transpose;
         return (note < 0 || note > 127) ? -1 : note;
       }
       case NoteSource::kChordTone:
@@ -577,7 +611,7 @@ class Arranger {
         }
         const std::uint8_t wrap = static_cast<std::uint8_t>(ev.tone / shape.count);
         const std::uint8_t offset = shape.offsets[ev.tone % shape.count];
-        const int note = anchor + chord.root_pc + offset + 12 * (ev.octave + wrap);
+        const int note = anchor + chord.root_pc + offset + 12 * (ev.octave + wrap) + transpose;
         return (note < 0 || note > 127) ? -1 : note;
       }
     }
@@ -618,7 +652,10 @@ class Arranger {
   std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
   std::uint16_t m_solo = 0;   // per-role solo bitmask
   GrooveParams m_groove;      // global groove feel applied to every part
-  VoicingState m_voicing;     // per-role voice-leading memory (D40)
+  // Phase-6 Theme 3 Item #1: global transpose, semitones, default 0 (no-op).
+  // set_master_transpose()'s doc comment above traces how resolve() applies it.
+  std::int8_t m_master_transpose = 0;
+  VoicingState m_voicing;  // per-role voice-leading memory (D40)
   // Phase-5 Item #10: one MIDI-FX insert chain per role. Default-constructed
   // (every slot inert/passthrough), so a fresh Arranger's on_tick output is
   // byte-identical to the pre-Item-#10 schedule until a chain is configured.

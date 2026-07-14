@@ -145,6 +145,24 @@ bool parse_uint(std::string_view s, std::uint64_t& out) {
   return true;
 }
 
+// A signed decimal integer with an optional leading '-' (Phase-6 Theme 3
+// Item #1's `transpose <-12..12>` line) -- parse_uint's twin, kept as a
+// small separate helper rather than widening parse_uint's own no-sign
+// contract (every OTHER caller here relies on that never accepting '-').
+bool parse_int(std::string_view s, std::int64_t& out) {
+  if (s.empty()) {
+    return false;
+  }
+  const bool negative = s[0] == '-';
+  const std::string_view digits = negative ? s.substr(1) : s;
+  std::uint64_t magnitude = 0;
+  if (!parse_uint(digits, magnitude)) {
+    return false;
+  }
+  out = negative ? -static_cast<std::int64_t>(magnitude) : static_cast<std::int64_t>(magnitude);
+  return true;
+}
+
 // Decodes an optional trailing `quantize <n>` starting at token index `at` in
 // a `launch clip/scene ...` or `stop clip ...` line (mirrors
 // components/hostrt/shell_clip_commands.cpp's own parse_quantize_suffix --
@@ -243,6 +261,24 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     }
     out.param = Param::kStyleLoad;
     out.a = index;
+    return TranslateOutcome::kOk;
+  }
+
+  // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+  // scope.md): `transpose <-12..12>`, the live global transpose -- mirrors
+  // components/hostrt/shell_music_commands.cpp's own `transpose` L1 verb.
+  // The engine itself is the source of truth for the bound
+  // (Engine::cmd_master_transpose rejects outside [-12, +12]); this parse
+  // only rejects an unparsable token.
+  if (t.size() == 2 && t[0] == "transpose") {
+    std::int64_t semitones = 0;
+    if (!parse_int(t[1], semitones) || semitones < -12 || semitones > 12) {
+      detail = "bad transpose (-12..12): " + std::string(t[1]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = Param::kMasterTranspose;
+    out.a = static_cast<std::int32_t>(semitones);
     return TranslateOutcome::kOk;
   }
 

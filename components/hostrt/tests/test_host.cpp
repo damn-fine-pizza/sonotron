@@ -181,6 +181,27 @@ void test_shell_bpm_command() {
   CHECK(f.shell.engine().transport().bpm() == 12000);
 }
 
+// Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+// scope.md): `transpose <-12..12>`, the live global transpose.
+void test_shell_transpose_command() {
+  ShellFixture f;
+  CHECK(f.run("transpose 5"));
+  CHECK(f.shell.engine().arranger().master_transpose() == 5);
+  CHECK(f.shell.engine().chords().master_transpose() == 5);
+
+  CHECK(f.run("transpose -12"));
+  CHECK(f.shell.engine().arranger().master_transpose() == -12);
+
+  // Out of the shell's own [-12, +12] parse bound: rejected, state unchanged.
+  CHECK(!f.run("transpose 13"));
+  CHECK(!f.err.empty());
+  CHECK(f.shell.engine().arranger().master_transpose() == -12);
+
+  // Unparsable token: rejected the same way.
+  CHECK(!f.run("transpose banana"));
+  CHECK(!f.err.empty());
+}
+
 void test_shell_transport_and_clock() {
   ShellFixture f;
   CHECK(f.run("port open out synth"));
@@ -2388,6 +2409,7 @@ int main() {
   test_shell_happy_path();
   test_shell_tempo_and_bars();
   test_shell_bpm_command();
+  test_shell_transpose_command();
   test_shell_transport_and_clock();
   test_shell_route_channel_remap();
   test_shell_error_paths();

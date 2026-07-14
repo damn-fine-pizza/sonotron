@@ -171,6 +171,80 @@ void test_explicit_little_endian_encoding_no_padding_gap() {
   CHECK(buf[tempo_off + 1] == 0xAB);
 }
 
+// Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+// scope.md Decision 4a): the low byte of master_transpose reinterprets as a
+// signed int8_t semitone offset. This exercises the RAW wire bytes across
+// the mandate's own adversarial-hardening list (-1, -12, +12, +7, plus 0):
+// (a) the low byte carries the correct two's-complement pattern, (b) the
+// high byte stays 0 -- RESERVED, per performance.hpp's own field comment --
+// for every value a live capture can ever produce, and (c) the neighboring
+// fields (tempo_x100 right before, pad_bank_id right after, on the wire) are
+// never corrupted by the reinterpret.
+void test_master_transpose_wire_byte_pattern_signed_round_trip() {
+  struct Case {
+    std::int8_t semitones;
+    std::uint8_t low_byte;
+  };
+  const Case cases[] = {
+      {.semitones = 0, .low_byte = 0x00},   {.semitones = -1, .low_byte = 0xFF},
+      {.semitones = -12, .low_byte = 0xF4}, {.semitones = 12, .low_byte = 0x0C},
+      {.semitones = 7, .low_byte = 0x07},
+  };
+  for (const Case& c : cases) {
+    PerformanceStore store;
+    Performance p;
+    p.tempo_x100 = 0xBEEF;  // sentinel: proves the field right before is untouched
+    p.master_transpose = static_cast<std::uint16_t>(static_cast<std::uint8_t>(c.semitones));
+    p.pad_bank_id = 0xCAFE;  // sentinel: proves the field right after is untouched
+    CHECK(store.store(0, p));
+
+    std::vector<std::uint8_t> buf(256, 0xAA);
+    const std::size_t n = serialize(store, Span<std::uint8_t>(buf.data(), buf.size()));
+    CHECK(n > 0);
+
+    // Same field-offset arithmetic as test_explicit_little_endian_encoding_
+    // no_padding_gap above, extended two u16 fields further (style_id,
+    // tempo_x100) to reach master_transpose.
+    const std::size_t rec = sizeof(PerformanceStoreHeader);
+    const std::size_t transpose_off = rec + 24 + 4 + 4 + 10 + 2 + 2;
+    CHECK(buf[transpose_off] == c.low_byte);
+    CHECK(buf[transpose_off + 1] == 0x00);  // high byte: reserved, always 0 on a live capture
+
+    PerformanceStore loaded;
+    CHECK(deserialize(Span<const std::uint8_t>(buf.data(), n), loaded));
+    const Performance* got = loaded.get(0);
+    CHECK(got != nullptr);
+    const auto round_tripped = static_cast<std::int8_t>(got->master_transpose & 0xFFu);
+    CHECK(round_tripped == c.semitones);
+    CHECK(got->tempo_x100 == p.tempo_x100);    // neighboring field untouched
+    CHECK(got->pad_bank_id == p.pad_bank_id);  // neighboring field untouched
+  }
+}
+
+// The reserved high byte is NOT enforced to be zero by validate() -- the same
+// convention as Performance::reserved[5] (never checked either): a nonzero
+// high byte round-trips losslessly on the wire (a plain 16-bit copy) and is
+// silently ignored at every point-of-use (perf::validate/apply_performance/
+// capture_performance all mask to the low byte). Documented here as CURRENT,
+// INTENTIONAL behavior (forward-compatible reserved bits), not a defect --
+// a future format_version bump that gives the high byte real meaning would
+// need to revisit this test, not silently break it.
+void test_master_transpose_high_byte_is_not_enforced_reserved_zero() {
+  PerformanceStore store;
+  Performance p;
+  // low byte = 5 (a valid, in-range transpose); high byte = 0x01 (garbage in
+  // the still-reserved half of the field).
+  p.master_transpose = 0x0105;
+  CHECK(store.store(0, p));
+
+  std::vector<std::uint8_t> buf(256, 0);
+  const std::size_t n = serialize(store, Span<std::uint8_t>(buf.data(), buf.size()));
+  CHECK(n > 0);
+  PerformanceStore loaded;
+  CHECK(deserialize(Span<const std::uint8_t>(buf.data(), n), loaded));
+  CHECK(loaded.get(0)->master_transpose == 0x0105);  // the full 16 bits survive, garbage and all
+}
+
 void test_deserialize_rejects_wrong_magic() {
   PerformanceStore store;
   CHECK(store.store(0, distinctive_performance(1)));
@@ -292,6 +366,8 @@ int main() {
   test_multi_record_round_trip();
   test_wire_record_is_94_bytes_tight_no_struct_padding();
   test_explicit_little_endian_encoding_no_padding_gap();
+  test_master_transpose_wire_byte_pattern_signed_round_trip();
+  test_master_transpose_high_byte_is_not_enforced_reserved_zero();
   test_deserialize_rejects_wrong_magic();
   test_deserialize_rejects_wrong_format_version();
   test_deserialize_rejects_corrupted_crc();

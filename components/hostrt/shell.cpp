@@ -678,6 +678,9 @@ std::optional<bool> Shell::dispatch_music(const std::vector<std::string>& t, con
   if (cmd == "groove" && t.size() >= 2) {
     return cmd_groove(t, error);
   }
+  if (cmd == "transpose" && t.size() >= 2) {
+    return cmd_transpose(t, error);
+  }
   if (cmd == "arp" && t.size() >= 2) {
     return cmd_arp(t, error);
   }

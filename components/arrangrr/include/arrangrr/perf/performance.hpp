@@ -64,9 +64,15 @@ struct Performance {
   GrooveParams groove{};
   std::uint16_t style_id = 0xFFFF;  // builtin style index, or 0xFFFF = keep current
   std::uint16_t tempo_x100 = 0;
-  std::uint16_t master_transpose = 0;  // RESERVED: no engine backing yet -- ALWAYS 0
-                                       // (locked decision; do not wire without an
-                                       // explicit owner/musical-scope decision)
+  // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+  // scope.md): the LOW byte reinterprets as a signed std::int8_t semitone
+  // offset ([-12, +12], perf::validate() below rejects anything outside that
+  // range), matching the live kMasterTranspose ABI command's own encoding
+  // (Engine::capture_performance/apply_performance). The high byte stays
+  // reserved. 0 still means "no transpose" -- every pre-existing on-disk
+  // record (where this field was always 0) keeps that meaning unchanged, no
+  // format_version bump needed.
+  std::uint16_t master_transpose = 0;
   std::uint16_t pad_bank_id = 0;
   std::uint16_t chord_sequence_id = 0xFFFF;  // 0xFFFF = none
   std::uint16_t controller_map_id = 0xFFFF;  // 0xFFFF = none (unbuilt today; reserved)
@@ -95,8 +101,10 @@ inline constexpr std::uint32_t kPerformanceMagic =
     (static_cast<std::uint32_t>('P') << 16) | (static_cast<std::uint32_t>('F') << 24);
 
 // format_version 1 is the subset shipped now (Phase-5 Item #9): every field
-// above. A future version that adds the general Router snapshot or a real
-// master_transpose bumps this and gets an explicit migrator in deserialize()
+// above. master_transpose (Phase-6 Theme 3 Item #1) wired WITHOUT a bump --
+// a pure semantic reinterpretation of already-reserved bits at the same
+// byte position/width. A future version that adds the general Router
+// snapshot bumps this and gets an explicit migrator in deserialize()
 // (Architectural Principle #8's own discipline -- a persisted format's
 // version bump is visible and versioned, unlike the live wire ABI's
 // same-recompile discipline).

@@ -176,6 +176,7 @@ std::vector<std::string> Shell::build_help(const std::string& topic) const {
       "  style  - the arranger band         (help style)",
       "  parts  - band mixer (mute/solo)    (help parts)",
       "  groove - feel: swing/humanize      (help groove)",
+      "  transpose <-12..12>                global transpose (semitones)",
       "  arp    - live arpeggiator          (help arp)",
       "  track  - step sequencer            (help track)",
       "  program- pick the GM voice         (help program)",

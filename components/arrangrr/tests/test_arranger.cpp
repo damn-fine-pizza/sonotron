@@ -684,9 +684,12 @@ void test_builtin_styles_play_roles() {
 // Resolve a single tonal event through the normal on_tick path and return the
 // MIDI note it produced (or -1 if it was skipped/clamped). Builds a throwaway
 // one-event style so we can probe NoteSource resolution directly, chord- and
-// key-aware, without leaning on any builtin's pattern data.
+// key-aware, without leaning on any builtin's pattern data. `transpose`
+// defaults to 0 (Phase-6 Theme 3 Item #1) so every pre-existing call site
+// stays byte-identical.
 int resolve_one(TrackRole role, RolePolicy policy, NoteSource src, std::int8_t tone,
-                std::int8_t octave, const Key& key, const ChordState& chord) {
+                std::int8_t octave, const Key& key, const ChordState& chord,
+                std::int8_t transpose = 0) {
   const StyleEvent ev[] = {
       {.step = 0, .tone = tone, .octave = octave, .vel = 100, .gate = 100, .src = src}};
   const StylePattern pat[] = {
@@ -697,6 +700,7 @@ int resolve_one(TrackRole role, RolePolicy policy, NoteSource src, std::int8_t t
   Arranger a;
   CHECK(a.load_style(&style));
   CHECK(a.set_route(role, 0, 0));
+  a.set_master_transpose(transpose);
   a.on_transport_start();
   int note = -1;
   a.on_tick(0, key, chord, [&](std::uint8_t, TickOffset, const MidiMessage& m) {
@@ -761,6 +765,59 @@ void test_note_source_vocabulary() {
                     c_min) == 42);
 }
 
+// Phase-6 Theme 3 Item #1 (global transpose, docs/reflections/phase6-theme3-
+// master-transpose-scope.md, Decisions 1/2/3/5): resolve()'s own
+// `transpose` parameter, threaded through Arranger::set_master_transpose ->
+// on_tick -> resolve(), added to the ABSOLUTE note in the kInterval/
+// kScaleDegree/kChordTone branches, kFixed exempt, drop-not-fold at the
+// [0,127] boundary -- the same convention as every other clamp on these
+// lines.
+void test_master_transpose_resolve() {
+  const Key c_major{.root_pc = 0, .mode = Mode::kMajor};
+  const Key a_minor{.root_pc = 9, .mode = Mode::kMinor};
+  const ChordState c_maj{.root_pc = 0, .quality = ChordQuality::kMaj, .valid = true};
+  const ChordState c_min{.root_pc = 0, .quality = ChordQuality::kMin, .valid = true};
+  constexpr int kLeadAnchor = 72;  // kRoleAnchor[kLead]
+  const auto lead = [&](NoteSource src, std::int8_t tone, std::int8_t octave, const Key& key,
+                        const ChordState& chord, std::int8_t transpose) {
+    return resolve_one(TrackRole::kLead, RolePolicy::kChordTone, src, tone, octave, key, chord,
+                       transpose);
+  };
+
+  // kChordTone: transpose lands on top of the resolved chord tone.
+  CHECK(lead(NoteSource::kChordTone, 0, 0, c_major, c_maj, /*transpose=*/5) ==
+        kLeadAnchor + 0 + 5);  // 77
+  CHECK(lead(NoteSource::kChordTone, 1, 0, c_major, c_maj, /*transpose=*/-4) ==
+        kLeadAnchor + 4 - 4);  // 72
+
+  // kInterval: transpose lands on top of the signed semitone offset.
+  CHECK(lead(NoteSource::kInterval, 14, 0, c_major, c_maj, /*transpose=*/-3) ==
+        kLeadAnchor + 14 - 3);  // 83
+
+  // kScaleDegree: transpose lands on top of the diatonic pitch.
+  CHECK(lead(NoteSource::kScaleDegree, 1, 0, c_major, c_maj, /*transpose=*/2) ==
+        kLeadAnchor + 2 + 2);  // 76
+
+  // kFixed (drums/perc) is exempt REGARDLESS of transpose: resolve() returns
+  // before `transpose` is ever consulted.
+  CHECK(resolve_one(TrackRole::kDrums, RolePolicy::kFixed, NoteSource::kInterval, 38, 0, a_minor,
+                    c_min, /*transpose=*/12) == 38);
+  CHECK(resolve_one(TrackRole::kDrums, RolePolicy::kFixed, NoteSource::kInterval, 38, 0, a_minor,
+                    c_min, /*transpose=*/-12) == 38);
+
+  // Drop, don't fold, at the boundary: a note that lands exactly in range
+  // WITHOUT transpose still resolves; adding a transpose that pushes it past
+  // 0 or 127 drops it (-1), never wraps/clamps to the edge.
+  CHECK(lead(NoteSource::kInterval, 0, -6, c_major, c_maj, /*transpose=*/0) ==
+        0);  // 72 - 72 + 0 = 0, exactly in range
+  CHECK(lead(NoteSource::kInterval, 0, -6, c_major, c_maj, /*transpose=*/-1) ==
+        -1);  // one semitone of transpose pushes it below 0: dropped
+  CHECK(lead(NoteSource::kInterval, 0, 4, c_major, c_maj, /*transpose=*/0) ==
+        120);  // 72 + 48 + 0 = 120, exactly in range
+  CHECK(lead(NoteSource::kInterval, 0, 4, c_major, c_maj, /*transpose=*/8) ==
+        -1);  // 120 + 8 = 128: dropped, not folded back into range
+}
+
 }  // namespace
 
 int main() {
@@ -791,6 +848,7 @@ int main() {
   test_builtin_styles_registered();
   test_builtin_styles_play_roles();
   test_note_source_vocabulary();
+  test_master_transpose_resolve();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_arranger: all OK\n");
   }

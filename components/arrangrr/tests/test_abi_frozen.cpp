@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kFxClear(56). Next free id is 57.
+// kNone(0) .. kMasterTranspose(57). Next free id is 58.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -103,6 +103,9 @@ static_assert(static_cast<std::uint16_t>(Param::kFxSet) == 53);
 static_assert(static_cast<std::uint16_t>(Param::kFxParam) == 54);
 static_assert(static_cast<std::uint16_t>(Param::kFxEnable) == 55);
 static_assert(static_cast<std::uint16_t>(Param::kFxClear) == 56);
+// Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+// scope.md): the global transpose verb, next free id after kFxClear.
+static_assert(static_cast<std::uint16_t>(Param::kMasterTranspose) == 57);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kClip(8). Next free id is 9.

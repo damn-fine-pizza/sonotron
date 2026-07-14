@@ -192,6 +192,45 @@ void test_part_invalid_role_surfaces_clean_error() {
   session.stop();
 }
 
+// Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+// scope.md): `transpose <-12..12>` translates and reaches the engine as a
+// real kMasterTranspose Command -- same success shape as `style load`/
+// `part ...` above (no kError on a valid value).
+void test_transpose_valid_value_is_accepted_without_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("transpose -5");
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; }));
+
+  session.send("transport start");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kTransport && ev.transport_state == "playing";
+  }));
+
+  session.stop();
+}
+
+// A value outside [-12, +12] must still surface a clean kError -- the
+// translator's own bound check fails BEFORE a Command is ever built, so
+// nothing reaches the engine's push_command path.
+void test_transpose_out_of_range_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("transpose 13");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("bad transpose") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 // GUI refinement (Accompany, Phase 4d): `midi-source load <path>` now
 // round-trips through a dedicated path-carrying ring straight to
 // Shell::load_midi_source() on the engine thread (Command's own POD has no
@@ -296,6 +335,8 @@ int main() {
   test_style_load_invalid_name_surfaces_clean_error();
   test_part_mute_and_solo_valid_role_is_accepted_without_error();
   test_part_invalid_role_surfaces_clean_error();
+  test_transpose_valid_value_is_accepted_without_error();
+  test_transpose_out_of_range_surfaces_clean_error();
   test_midi_source_load_valid_path_is_accepted_without_error();
   test_midi_source_load_invalid_path_surfaces_clean_error();
   test_launch_clip_translates_and_reaches_engine();

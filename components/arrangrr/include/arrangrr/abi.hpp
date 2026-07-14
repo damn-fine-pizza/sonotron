@@ -265,6 +265,16 @@ enum class Param : std::uint16_t {
                    //     field's own width, u8 or u16).
   kFxEnable = 55,  // set: idx = TrackRole. a = slot, b = 0/1.
   kFxClear = 56,   // do: idx = TrackRole. a = slot, or -1 = the whole chain.
+  // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+  // scope.md, Decisions 1/2/3/5): a signed semitone offset applied LATE, to
+  // the already-resolved ABSOLUTE note number, at the two places an absolute
+  // note is born -- Arranger::resolve()'s kInterval/kScaleDegree/kChordTone
+  // branches (kFixed roles/drums stay exempt for free) and ChordEngine::
+  // sound() (so the band and the chord you press move together). The
+  // detected chord root and Timeline step-track literal notes are untouched
+  // by design.
+  kMasterTranspose = 57,  // set: a = semitones, clamped/rejected outside
+                          //     [-12, +12]. 0 is a no-op (the default).
 };
 
 // ============================================================================

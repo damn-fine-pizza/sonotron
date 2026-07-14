@@ -343,6 +343,7 @@ class Engine {
   void cmd_pad(const Command& cmd, EventSink sink);    // Phase-5 Item #9: pad-bank wrapper dispatch
   void cmd_perf(const Command& cmd, EventSink sink);   // Phase-5 Item #9: Performance store/recall
   void cmd_fx(const Command& cmd, EventSink sink);     // Phase-5 Item #10: MIDI-FX insert chain
+  void cmd_master_transpose(const Command& cmd, EventSink sink);  // Phase-6 Theme 3 Item #1
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on

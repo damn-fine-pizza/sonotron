@@ -185,6 +185,43 @@ void test_chord_follow_one_past_live_priority_is_invalid() {
   CHECK(!perf::validate(p, kNoSequences));
 }
 
+// ---- master_transpose (Phase-6 Theme 3 Item #1): low byte reinterprets as a
+// signed int8_t semitone offset, validated to [-12, +12] --------------------
+
+std::uint16_t encode_transpose(std::int8_t semitones) {
+  return static_cast<std::uint16_t>(static_cast<std::uint8_t>(semitones));
+}
+
+void test_master_transpose_zero_is_valid() {
+  Performance p = valid_performance();
+  p.master_transpose = encode_transpose(0);
+  CHECK(perf::validate(p, kNoSequences));
+}
+
+void test_master_transpose_plus_12_is_valid() {
+  Performance p = valid_performance();
+  p.master_transpose = encode_transpose(12);
+  CHECK(perf::validate(p, kNoSequences));
+}
+
+void test_master_transpose_plus_13_is_invalid() {
+  Performance p = valid_performance();
+  p.master_transpose = encode_transpose(13);
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
+void test_master_transpose_minus_12_is_valid() {
+  Performance p = valid_performance();
+  p.master_transpose = encode_transpose(-12);
+  CHECK(perf::validate(p, kNoSequences));
+}
+
+void test_master_transpose_minus_13_is_invalid() {
+  Performance p = valid_performance();
+  p.master_transpose = encode_transpose(-13);
+  CHECK(!perf::validate(p, kNoSequences));
+}
+
 // ---- routes[] ---------------------------------------------------------
 
 void test_route_port_and_channel_at_max_is_valid() {
@@ -231,6 +268,11 @@ int main() {
   test_chord_mode_one_past_chord_mode_count_is_invalid();
   test_chord_follow_live_priority_is_valid();
   test_chord_follow_one_past_live_priority_is_invalid();
+  test_master_transpose_zero_is_valid();
+  test_master_transpose_plus_12_is_valid();
+  test_master_transpose_plus_13_is_invalid();
+  test_master_transpose_minus_12_is_valid();
+  test_master_transpose_minus_13_is_invalid();
   test_route_port_and_channel_at_max_is_valid();
   test_route_port_one_past_kmaxports_is_invalid();
   test_route_channel_16_is_invalid();

@@ -90,6 +90,9 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kFxClear:
       cmd_fx(cmd, sink);
       break;
+    case Param::kMasterTranspose:
+      cmd_master_transpose(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -670,6 +673,27 @@ void Engine::cmd_voice(const Command& cmd, EventSink sink) {
   flush(sink);
 }
 
+// Phase-6 Theme 3 Item #1 (global transpose, docs/reflections/phase6-theme3-
+// master-transpose-scope.md): kMasterTranspose sets a signed semitone offset,
+// validated/rejected outside the owner's locked [-12, +12] UI range (the same
+// reject-not-clamp discipline cmd_voice's port/channel bounds check uses
+// above). Propagated to BOTH note-emitting paths the design traces -- the
+// Arranger's own resolve() (the band) and ChordEngine::sound() (the pressed/
+// pad chord) -- so they move together; the followed/detected chord and
+// Timeline step-track literal notes are untouched by construction (neither
+// reads master_transpose at all).
+void Engine::cmd_master_transpose(const Command& cmd, EventSink sink) {
+  if (cmd.a < -12 || cmd.a > 12) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto semitones = static_cast<std::int8_t>(cmd.a);
+  m_arranger.set_master_transpose(semitones);
+  m_chords.set_master_transpose(semitones);
+  sink(OutEvent::param_state(Param::kMasterTranspose, 0, static_cast<std::uint8_t>(semitones), 0,
+                             m_now));
+}
+
 // Live arpeggiator: kArp sets one field (kEnabled toggles capture on the input
 // port; the rest are engine params); kArpOut sets the output route.
 void Engine::cmd_arp(const Command& cmd, EventSink sink) {
@@ -1068,7 +1092,11 @@ Performance Engine::capture_performance() const {
   perf.groove = m_arranger.groove_params();
   perf.style_id = m_arranger.style_id();
   perf.tempo_x100 = static_cast<std::uint16_t>(m_transport.bpm());
-  perf.master_transpose = 0;  // RESERVED (locked decision): no engine backing yet
+  // Phase-6 Theme 3 Item #1: the low byte reinterpreted as a signed int8_t
+  // semitone offset (owner-locked encoding, no format_version bump -- see
+  // performance.hpp's field comment); the high byte stays reserved/0.
+  perf.master_transpose =
+      static_cast<std::uint16_t>(static_cast<std::uint8_t>(m_arranger.master_transpose()));
   perf.pad_bank_id = m_pad_bank;
   perf.chord_sequence_id =
       m_seq.playing() ? static_cast<std::uint16_t>(m_seq.current_index()) : std::uint16_t{0xFFFF};
@@ -1145,6 +1173,12 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
   m_arranger.set_groove(perf.groove);
   apply_arranger_voices(sink);           // the (possibly new) style's voices land with the recall
   m_transport.set_bpm(perf.tempo_x100);  // out-of-range silently ignored (Transport::set_bpm)
+  // Phase-6 Theme 3 Item #1: the low byte reinterpreted back into a signed
+  // int8_t semitone offset (mirrors capture_performance's own encoding);
+  // propagated to both note-emitting paths, exactly like cmd_master_transpose.
+  const auto transpose = static_cast<std::int8_t>(perf.master_transpose & 0xFFu);
+  m_arranger.set_master_transpose(transpose);
+  m_chords.set_master_transpose(transpose);
   const Key key{.root_pc = perf.key_root, .mode = static_cast<Mode>(perf.key_mode)};
   m_chords.set_key(key);
   m_chorddet.set_key(key);  // scale-aware single-finger reads the same key
@@ -1198,6 +1232,8 @@ void Engine::emit_performance_confirmation(const Performance& perf, EventSink si
   sink(OutEvent::param_state(Param::kChordMode, 0, perf.chord_mode, 0, m_now));
   sink(OutEvent::param_state(Param::kChordFollow, 0, perf.chord_follow, 0, m_now));
   sink(OutEvent::param_state(Param::kKeySet, 0, perf.key_root, perf.key_mode, m_now));
+  sink(OutEvent::param_state(Param::kMasterTranspose, 0,
+                             static_cast<std::uint8_t>(perf.master_transpose & 0xFFu), 0, m_now));
 }
 
 void Engine::apply_pending_performance_recall(EventSink sink) {

@@ -168,3 +168,23 @@ arrangrr_test(test_clip_matrix unit)
 # contract -- pure, freestanding, no Engine -> unit, same precedent as
 # test_common.cpp's own common/ primitive coverage.
 arrangrr_test(test_function_ref unit)
+# Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+# scope.md). test_master_transpose: the kMasterTranspose ABI verb's
+# dispatch/validation and its propagation to BOTH note-emitting paths
+# (Arranger's band + ChordEngine's pressed/pad chord) plus the untouched
+# detected-chord root and Timeline step-track literal content -- only
+# observable through Engine's cross-producer wiring -> functional, same
+# precedent as test_fx/test_clip. resolve()'s own single-producer unit
+# coverage lives in test_arranger.cpp (test_master_transpose_resolve).
+arrangrr_test(test_master_transpose functional)
+# test_master_transpose_voicing_regression: Torquato QA pin for an open
+# defect where VoicingState's kLead re-octaving (voicing.hpp) silently folds
+# a LIVE master_transpose change by a whole octave whenever the delta from
+# the previous voicing exceeds a tritone -- Arranger::set_master_transpose
+# never resets/invalidates the per-role voicing memory the way
+# load_style()/on_transport_start() do. Kept in its own file/CTest entry
+# (mirrors test_performance_style_id_regression's own isolation precedent)
+# so its failure never masks the surrounding GREEN test_master_transpose.cpp/
+# test_arranger.cpp/test_voicing.cpp coverage. Currently RED; do not silence
+# it.
+arrangrr_test(test_master_transpose_voicing_regression regression)

@@ -378,6 +378,9 @@ class Shell {
   bool cmd_program(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_part(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_groove(const std::vector<std::string>& tokens, std::string& error);
+  // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
+  // scope.md): `transpose <-12..12>`, the live global transpose.
+  bool cmd_transpose(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_arp(const std::vector<std::string>& tokens, std::string& error);
   // Phase-5 Item #2 (docs/design/clip-primitive-design.md): the clip launch
   // primitive's L1 grammar (shell_clip_commands.cpp). `clip add` is
