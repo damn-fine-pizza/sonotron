@@ -1,5 +1,6 @@
 #include "transport_panel.hpp"
 
+#include <algorithm>
 #include <string>
 
 #include "imgui.h"
@@ -48,6 +49,38 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session) {
     // the beat boundary.
     ImGui::Text("| bar %d . beat %d .%02d", app_state.bar(), app_state.beat_num(),
                 app_state.pulse());
+  }
+
+  // Tempo nudge (user request): the BPM readout IS the control -- while
+  // hovering it, the mouse wheel or the Up/Down arrows nudge the tempo by 1
+  // BPM, sent as the `bpm <N>` L1 verb over the same BrainSession path (see
+  // in_process_brain_session.cpp's command_line_to_command, mirroring hostrt's
+  // own `bpm` verb for --control). Like the Transpose control below, the GUI
+  // holds no authoritative state (app_state.hpp), so this value is local UI
+  // intent only -- it can drift from the tempo a `style load` sets until a
+  // live-bpm event is wired (follow-up). Clamped to the engine's 20..400 range.
+  static int bpm = 120;
+  ImGui::SameLine();
+  ImGui::TextColored(ImVec4(0.55F, 0.75F, 1.0F, 1.0F), "| %d BPM", bpm);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Tempo -- scroll the wheel or press Up/Down to nudge BPM");
+    int delta = 0;
+    const float wheel = ImGui::GetIO().MouseWheel;
+    if (wheel > 0.0F) {
+      delta += 1;
+    } else if (wheel < 0.0F) {
+      delta -= 1;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, /*repeat=*/true)) {
+      delta += 1;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, /*repeat=*/true)) {
+      delta -= 1;
+    }
+    if (delta != 0) {
+      bpm = std::clamp(bpm + delta, 20, 400);
+      brain_session.send("bpm " + std::to_string(bpm));
+    }
   }
 
   // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-

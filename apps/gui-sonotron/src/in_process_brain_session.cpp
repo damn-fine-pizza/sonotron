@@ -304,6 +304,24 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     return TranslateOutcome::kOk;
   }
 
+  // Tempo nudge (transport_panel.cpp's BPM label): `bpm <N>` sets the global
+  // tempo, mirroring components/hostrt/shell.cpp's own `bpm` L1 verb. The GUI
+  // widget only ever emits an integer BPM; the engine is the source of truth
+  // for the range (it clamps to 20..400, shell_parse.cpp), so we reject only an
+  // unparsable/out-of-range token here for a clean error. a = bpm_x100
+  // (abi.hpp Param::kTransportTempo).
+  if (t.size() == 2 && t[0] == "bpm") {
+    std::int64_t bpm = 0;
+    if (!parse_int(t[1], bpm) || bpm < 20 || bpm > 400) {
+      detail = "bad bpm (20..400): " + std::string(t[1]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = Param::kTransportTempo;
+    out.a = static_cast<std::int32_t>(bpm * 100);
+    return TranslateOutcome::kOk;
+  }
+
   if (t.size() == 3 && t[0] == "pad" && t[1] == "bank") {
     return translate_pad_bank(t, out, detail);
   }
