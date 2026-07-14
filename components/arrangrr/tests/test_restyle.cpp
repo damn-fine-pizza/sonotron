@@ -227,6 +227,111 @@ static void test_restyle_stage_preserves_harmony_of_every_note() {
   CHECK(checked == inputs.size());
 }
 
+// --- Channel filter (roadmap 9320, second slice) ----------------------------
+
+// Default mask excludes the GM drum channel (9, 0-based): a chord-tone note
+// arriving on that channel is forwarded VERBATIM (original pitch, original
+// channel, no octave anchor) instead of being musically transformed -- the
+// real-bug fix (restyle-musical-scope.md/-placement.md's first slice was
+// channel-blind).
+static void test_restyle_stage_default_mask_passes_drum_channel_through_unchanged() {
+  Harness h;
+  CHECK(h.stage.load_style(styles::kBuiltins[0]));
+  h.followed.establish_default(kCMajor);
+  CHECK(h.stage.channel_mask() == restyle::kDefaultChannelMask);
+
+  h.tick(1);
+  h.feed(0, {0x99, 60, 100});  // C4 on channel 9 (0-based): a chord tone, but drum channel
+  h.tick(2);
+  h.feed(0, {0x89, 60, 0});
+
+  const std::vector<ScheduledEvent> events = h.drain(100000);
+  CHECK(events.size() == 2);
+  for (const ScheduledEvent& ev : events) {
+    CHECK(ev.msg.channel() == 9);  // untouched: original channel, not the fixed output one
+    CHECK(ev.msg.d1 == 60);        // untouched: original pitch, no anchor move
+  }
+}
+
+// A channel INSIDE the mask keeps the ORIGINAL transformed behavior (same
+// anchored register the first-slice test above already pins) -- the filter
+// only carves out excluded channels, it does not change in-mask behavior.
+static void test_restyle_stage_in_mask_channel_still_transforms() {
+  Harness h;
+  CHECK(h.stage.load_style(styles::kBuiltins[0]));
+  h.followed.establish_default(kCMajor);
+
+  h.tick(1);
+  h.feed(0, {0x90, 60, 100});  // C4 on channel 0: inside the default mask
+  h.tick(2);
+  h.feed(0, {0x80, 60, 0});
+
+  const std::vector<ScheduledEvent> events = h.drain(100000);
+  bool saw_on = false;
+  for (const ScheduledEvent& ev : events) {
+    if (ev.msg.type() == midi::kNoteOn) {
+      saw_on = true;
+      CHECK(ev.msg.channel() == 0);  // the stage's fixed OUTPUT channel
+      CHECK(ev.msg.d1 == 72);        // anchored to kLead's register
+    }
+  }
+  CHECK(saw_on);
+}
+
+// The mask is overridable: widening it to include the drum channel makes
+// that channel's chord tones transform exactly like any other.
+static void test_restyle_stage_channel_mask_is_overridable() {
+  Harness h;
+  CHECK(h.stage.load_style(styles::kBuiltins[0]));
+  h.followed.establish_default(kCMajor);
+  h.stage.set_channel_mask(restyle::kAllChannels);
+  CHECK(h.stage.channel_mask() == restyle::kAllChannels);
+
+  h.tick(1);
+  h.feed(0, {0x99, 60, 100});  // C4 on channel 9, now inside the widened mask
+  h.tick(2);
+  h.feed(0, {0x89, 60, 0});
+
+  const std::vector<ScheduledEvent> events = h.drain(100000);
+  bool saw_on = false;
+  for (const ScheduledEvent& ev : events) {
+    if (ev.msg.type() == midi::kNoteOn) {
+      saw_on = true;
+      CHECK(ev.msg.channel() == 0);  // the stage's fixed OUTPUT channel, not channel 9 anymore
+      CHECK(ev.msg.d1 == 72);        // anchored, same as any other in-mask chord tone
+    }
+  }
+  CHECK(saw_on);
+}
+
+// --- Target role argument (roadmap 9320, second slice) ----------------------
+
+// `load_style`'s optional role parameter changes the register anchor / policy
+// read (role_anchor/target_voicing_policy) away from the ORIGINAL fixed
+// kLead default; omitting it (test_restyle_stage_schedules_anchored_chord_tone
+// above) keeps the exact prior behavior.
+static void test_restyle_stage_target_role_overrides_anchor() {
+  Harness h;
+  CHECK(h.stage.load_style(styles::kBuiltins[0], TrackRole::kBass));
+  CHECK(h.stage.target_role() == TrackRole::kBass);
+  h.followed.establish_default(kCMajor);
+
+  h.tick(1);
+  h.feed(0, {0x90, 60, 100});  // C4, a chord tone (root)
+  h.tick(2);
+  h.feed(0, {0x80, 60, 0});
+
+  const std::vector<ScheduledEvent> events = h.drain(100000);
+  bool saw_on = false;
+  for (const ScheduledEvent& ev : events) {
+    if (ev.msg.type() == midi::kNoteOn) {
+      saw_on = true;
+      CHECK(ev.msg.d1 == restyle::role_anchor(TrackRole::kBass));  // 36, not kLead's 72
+    }
+  }
+  CHECK(saw_on);
+}
+
 int main() {
   test_classify_chord_tones();
   test_classify_scale_degree();
@@ -238,6 +343,10 @@ int main() {
   test_restyle_stage_schedules_anchored_chord_tone();
   test_restyle_stage_passes_scale_degree_through_unchanged_pitch();
   test_restyle_stage_preserves_harmony_of_every_note();
+  test_restyle_stage_default_mask_passes_drum_channel_through_unchanged();
+  test_restyle_stage_in_mask_channel_still_transforms();
+  test_restyle_stage_channel_mask_is_overridable();
+  test_restyle_stage_target_role_overrides_anchor();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_restyle: all OK\n");
   }

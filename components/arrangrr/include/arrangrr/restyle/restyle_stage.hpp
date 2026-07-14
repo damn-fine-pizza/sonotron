@@ -168,6 +168,26 @@ constexpr int nearest_octave_to(int note, int anchor) noexcept {
   return note;
 }
 
+// Channel filter (roadmap 9320, second slice): restyle-musical-scope.md/
+// -placement.md's first slice was deliberately channel-blind (see
+// RestyleStage's own header comment history) -- a real bug, since a drum hit
+// sharing a pitch class with a chord tone got musically reharmonized right
+// alongside actual melody notes. One bit per MIDI channel (0..15); a set bit
+// means "this channel is transformed by the style idiom", a clear bit means
+// "pass this channel through verbatim" (RestyleStage still owns its routing
+// once loaded -- the double-note guard disables the raw thru wholesale -- so
+// an excluded channel is forwarded unmodified rather than silently dropped).
+// Default excludes MIDI channel 9 (0-based; GM's standard percussion
+// channel), the same channel the shared `tiny.mid` fixture's drum hit rides.
+inline constexpr std::uint16_t kAllChannels = 0xFFFF;
+inline constexpr std::uint8_t kDefaultExcludedChannel = 9;  // GM drum channel, 0-based
+inline constexpr std::uint16_t kDefaultChannelMask =
+    static_cast<std::uint16_t>(kAllChannels & ~(1u << kDefaultExcludedChannel));
+
+constexpr bool channel_selected(std::uint16_t mask, std::uint8_t channel) noexcept {
+  return (mask & static_cast<std::uint16_t>(1u << (channel & 0x0F))) != 0;
+}
+
 }  // namespace arrangrr::restyle
 
 namespace arrangrr {
@@ -195,16 +215,32 @@ class RestyleStage {
   // Arranger::load_style): resets the voicing memory so a style switch never
   // leads from a stale voicing. This stage stays INERT (push_midi_in a
   // no-op) until this succeeds -- the `restyle <style>` L1 verb, host-side.
-  bool load_style(const Style* style) noexcept {
+  // `target_role` (roadmap 9320, second slice) is the role whose authored
+  // VoicingPolicy/register anchor the transform reads -- optional at the
+  // verb level (`restyle <style> [role]`), defaulting to the ORIGINAL fixed
+  // kLead behavior when omitted, so every existing call site (and golden)
+  // that never named a role keeps its exact prior meaning.
+  bool load_style(const Style* style, TrackRole target_role = TrackRole::kLead) noexcept {
     if (style == nullptr) {
       return false;
     }
     m_style = style;
+    m_target_role = target_role;
     m_voicing.reset();
     return true;
   }
   constexpr bool loaded() const noexcept { return m_style != nullptr; }
   constexpr const Style* current_style() const noexcept { return m_style; }
+  constexpr TrackRole target_role() const noexcept { return m_target_role; }
+
+  // Channel filter (roadmap 9320, second slice, see restyle::kDefaultChannelMask's
+  // own comment above): which input MIDI channels this stage transforms.
+  // Settable independent of load_style() -- the `restyle <style> [role]` L1
+  // verb resets it to the sensible default on every call (host-side, see
+  // shell_music_commands.cpp), but this stays a distinct setter so a future
+  // caller can override the mask without forcing a style/role change too.
+  void set_channel_mask(std::uint16_t mask) noexcept { m_channel_mask = mask; }
+  constexpr std::uint16_t channel_mask() const noexcept { return m_channel_mask; }
 
   // Seam-C-shaped fan-out hook (the SAME shape ChorddetStage/the forward-flow
   // fan-out expect, runtime/pipeline.hpp): fed the raw wire bytes
@@ -251,25 +287,26 @@ class RestyleStage {
   // input rarely retriggers a held pitch without an intervening release).
   struct Pending {
     bool active = false;
-    int voiced_note = -1;    // the post-anchor/voicing pitch actually scheduled
-    Tick on_arrival = 0;     // the input's own (trailing, see on_tick) tick
-    Tick final_on_tick = 0;  // where the restyled note-on landed
+    bool passthrough = false;      // roadmap 9320, channel filter: emitted verbatim, no transform
+    int voiced_note = -1;          // the post-anchor/voicing pitch actually scheduled (or the
+                                   // ORIGINAL pitch, unchanged, when passthrough)
+    std::uint8_t out_channel = 0;  // the channel the note-on was actually scheduled on
+    Tick on_arrival = 0;           // the input's own (trailing, see on_tick) tick
+    Tick final_on_tick = 0;        // where the (restyled or passthrough) note-on landed
   };
-
-  static constexpr TrackRole kTargetRole = TrackRole::kLead;  // Ottorino's reasoned default
 
   void observe(const MidiMessage& msg) {
     if (!loaded()) {
       return;  // inert by default
     }
     if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
-      note_on(msg.d1, msg.d2);
+      note_on(msg.d1, msg.d2, msg.channel());
     } else if (msg.type() == midi::kNoteOff || (msg.type() == midi::kNoteOn && msg.d2 == 0)) {
       note_off(msg.d1);
     }
   }
 
-  // Reads the target style's OWN authored VoicingPolicy for kTargetRole
+  // Reads the target style's OWN authored VoicingPolicy for m_target_role
   // (restyle-musical-scope.md §3.3: "run them through the target style's own
   // VoicingState ... under that role's authored VoicingPolicy"). Scans every
   // section for the FIRST pattern matching the role -- a deliberate first-
@@ -284,7 +321,7 @@ class RestyleStage {
     }
     for (const StyleSection& section : m_style->sections) {
       for (const StylePattern& pattern : section.patterns) {
-        if (pattern.role == kTargetRole) {
+        if (pattern.role == m_target_role) {
           return pattern.voicing;
         }
       }
@@ -292,7 +329,26 @@ class RestyleStage {
     return VoicingPolicy::kAsWritten;
   }
 
-  void note_on(std::uint8_t pitch, std::uint8_t vel) {
+  void note_on(std::uint8_t pitch, std::uint8_t vel, std::uint8_t channel) {
+    Pending& p = m_pending[pitch];
+    if (!restyle::channel_selected(m_channel_mask, channel)) {
+      // Channel filter (roadmap 9320, second slice): this channel is outside
+      // the mask (e.g. the drum channel by default) -- RestyleStage is still
+      // the sole forwarder once loaded (the double-note guard disables the
+      // raw thru wholesale), so the note is forwarded VERBATIM: original
+      // pitch, original channel, original (unsnapped, un-grooved) tick. No
+      // classification, no octave anchor, no groove -- exactly what the raw
+      // melody-thru would have produced for this note.
+      p.active = true;
+      p.passthrough = true;
+      p.voiced_note = pitch;
+      p.out_channel = channel;
+      p.on_arrival = m_now;
+      p.final_on_tick = m_now;
+      (void)m_scheduler.schedule(m_port, m_now, MidiMessage::note_on(channel, pitch, vel));
+      return;
+    }
+
     const Key& key = m_chorddet.key();
     const ChordState& chord = m_followed.state();
     const restyle::Classification c = restyle::classify(key, chord, pitch);
@@ -303,9 +359,9 @@ class RestyleStage {
       // scope.md §3.3): anchor-snap to the role's characteristic register
       // FIRST (VoicingState has nothing to establish it on the very first
       // note), then let the style's own VoicingPolicy refine continuity.
-      voiced = restyle::nearest_octave_to(pitch, restyle::role_anchor(kTargetRole));
+      voiced = restyle::nearest_octave_to(pitch, restyle::role_anchor(m_target_role));
       NoteReq req{.note = voiced, .vel = vel, .gate = 0, .gesture_delay = 0, .chord_tone = true};
-      m_voicing.voice(kTargetRole, target_voicing_policy(), &req, 1);
+      m_voicing.voice(m_target_role, target_voicing_policy(), &req, 1);
       voiced = req.note;
     }
     // else: kScaleDegree / kNonChordTone -- pass through at the ORIGINAL
@@ -313,13 +369,14 @@ class RestyleStage {
 
     const Tick snapped = restyle::snap_to_grid(m_now);
     const auto step = static_cast<std::uint16_t>((snapped % kTicksPerBar) / kTicksPerStep);
-    const GrooveOut g =
-        groove::apply(m_style->groove, static_cast<std::uint8_t>(kTargetRole), step, snapped, vel);
+    const GrooveOut g = groove::apply(m_style->groove, static_cast<std::uint8_t>(m_target_role),
+                                      step, snapped, vel);
     const Tick final_on = static_cast<Tick>(snapped + static_cast<Tick>(g.timing_offset));
 
-    Pending& p = m_pending[pitch];
     p.active = true;
+    p.passthrough = false;
     p.voiced_note = voiced;
+    p.out_channel = m_channel;
     p.on_arrival = m_now;
     p.final_on_tick = final_on;
 
@@ -334,6 +391,15 @@ class RestyleStage {
       return;  // no matching note-on (e.g. arrived before load_style(), or already closed)
     }
     p.active = false;
+    if (p.passthrough) {
+      // Verbatim close, same channel filter reasoning as note_on above: the
+      // ORIGINAL arrival tick, no gate recomputation (there is no snap to
+      // preserve a gate through).
+      (void)m_scheduler.schedule(
+          m_port, m_now,
+          MidiMessage::note_off(p.out_channel, static_cast<std::uint8_t>(p.voiced_note)));
+      return;
+    }
     // Gate preserved through the snap (groove::apply's own "note-on and
     // note-off share one offset" contract, groove.hpp): the ORIGINAL gate
     // rides the SAME final_on_tick. Clamped to at least 1 tick so a same-
@@ -352,6 +418,8 @@ class RestyleStage {
   std::uint8_t m_port;
   std::uint8_t m_channel;
   const Style* m_style = nullptr;
+  TrackRole m_target_role = TrackRole::kLead;  // roadmap 9320, second slice: `restyle`'s [role] arg
+  std::uint16_t m_channel_mask = restyle::kDefaultChannelMask;  // roadmap 9320, channel filter
   VoicingState m_voicing;  // this stage's OWN voice-leading lineage (D40, distinct from Arranger's)
   MidiParser m_parsers[kPorts];
   Pending m_pending[128]{};
