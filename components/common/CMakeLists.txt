@@ -11,3 +11,8 @@ target_compile_options(common INTERFACE
   -fno-rtti
   -fno-threadsafe-statics
 )
+
+# See CMakeLists.txt (top level) for the ARRANGRR_FIRMWARE_RELEASE rationale.
+if(ARRANGRR_FIRMWARE_RELEASE)
+  target_compile_definitions(common INTERFACE ARRANGRR_NO_ASSERT)
+endif()

@@ -26,6 +26,18 @@ else()
   set(ARRANGRR_FIRMWARE OFF)
 endif()
 
+# Firmware-release path (Phase 6 Theme 1c): ARR_ASSERT is __builtin_trap() on
+# failure everywhere by default (the dev/CI cross build net stays asserting).
+# A genuine release firmware image must never trap on a REACHABLE runtime
+# condition (D-STM32: graceful degradation, never crash) -- every ARR_ASSERT
+# site in the core that guards a bounded-cap drop already degrades on its own
+# once the assert itself is compiled out (the surrounding `if (cap) { ...;
+# break; }` / `return false;` still runs); see the audit in the Phase 6 Theme
+# 1c task notes. Opting into this flag is a deliberate, separate build (a new
+# preset), not the default `arm` preset.
+option(ARRANGRR_FIRMWARE_RELEASE
+       "Compile ARR_ASSERT to a no-op (defines ARRANGRR_NO_ASSERT); firmware release builds only, dev arm preset stays asserting" OFF)
+
 # Phase-1 runtime extraction (docs/design/orchestrator-pipeline-extraction.md):
 # components/common (the base, dependency-free layer) and components/runtime
 # (the dual-target kernel: Transport + OutScheduler + the Stage port) are
