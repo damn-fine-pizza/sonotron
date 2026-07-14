@@ -58,6 +58,20 @@ enum class InputZone : std::uint8_t {
   kHarmony = 1,  // observed + suppressed from output (silent chord zone)
 };
 
+// Phase-6 Theme 3 Item #2 (docs/reflections/phase6-theme3-pad-drum-cc-scope.md,
+// Decision 3): a kOneShot/kLoop Drum pad has no gate/duration field of its own
+// (Pad is pinned at 12 bytes, D33) -- this fixed engine-side constant stands
+// in, grounded in the corpus's OWN authored kick/snare gate length
+// (arrangrr/arranger/styles/basic.hpp's kVarBDrums: gate=120 at kPpqn=960,
+// common/time.hpp), not an invented number. Public (not file-local to
+// engine.cpp) so functional tests can assert against it by name instead of a
+// bare literal.
+inline constexpr Tick kPadDrumOneShotGateTicks = 120;
+// Decision 1: source_aux 0 means "use the default" for a Drum pad's velocity
+// (0 is not itself a usable MIDI velocity -- it is indistinguishable from "no
+// note"), matching a mid-range authored velocity in the same corpus table.
+inline constexpr std::uint8_t kPadDrumDefaultVelocity = 100;
+
 // The arrangrr Stage-adapter: the arranger stage that `runtime::Runtime<Engine,
 // N>` drives (docs/design/orchestrator-pipeline-extraction.md §3.5/§14). Phase
 // 1 runtime extraction: `Transport`/`OutScheduler` no longer live here as VALUE
@@ -293,6 +307,12 @@ class Engine {
       // but before fire_arranger keeps both correct for the bar that is
       // about to play.
       apply_pending_performance_recall(sink);
+      // Torquato finding 1: any kDrum/kCC pad armed for this bar (see
+      // fire_pad's kDrum/kCC case) fires now -- same bar-boundary point as
+      // the Performance recall promotion right above, order-independent
+      // since a Drum/CC hit has no cross-subsystem read/write the way a
+      // recall's style/section change does.
+      apply_pending_pad_fires(sink);
     }
     fire_arranger(m_transport.tick(), sink);
     fire_arp(m_transport.tick(), sink);
@@ -395,8 +415,31 @@ class Engine {
   // Fires (or stops) one pad's wrapped content by type -- the ONE place that
   // translates a Pad into a call on the verb it wraps (clip_request/
   // clip_scene_launch/Arranger::request/perf_recall), mirroring
-  // apply_clip_content's own placement for the clip primitive.
-  void fire_pad(const Pad& pad, LaunchState target, EventSink sink);
+  // apply_clip_content's own placement for the clip primitive. `pad_id` is
+  // the flat pad slot (cmd.idx) -- needed ONLY by the kDrum/kCC arm path
+  // below (Torquato finding 1) to key m_pad_latch/m_pad_pending_target; every
+  // other case ignores it, exactly like ClipMatrix/Arranger's own id-indexed
+  // wrapper verbs.
+  void fire_pad(const Pad& pad, LaunchState target, std::uint16_t pad_id, EventSink sink);
+  // fire_pad's kDrum/kCC cases (Phase-6 Theme 3 Item #2), split out to keep
+  // fire_pad's own cognitive complexity under the clang-tidy gate -- same
+  // discipline as every other case-handler split in this class. Each is the
+  // ONE place that builds a MidiMessage directly (Decision 5, docs/
+  // reflections/phase6-theme3-pad-drum-cc-scope.md), emitting via the SAME
+  // schedule_or_warn choke point every other emission path shares. Called
+  // EITHER immediately from fire_pad's own kImmediate branch, or later from
+  // apply_pending_pad_fires when a kNextBar/kNextNBars arm comes due -- the
+  // pad.sync check that decides which happens lives in fire_pad, not here.
+  void fire_pad_drum(const Pad& pad, LaunchState target, EventSink sink);
+  void fire_pad_cc(const Pad& pad, LaunchState target, EventSink sink);
+  // Promotes any armed kDrum/kCC pad fire (Torquato finding 1: pad.sync was
+  // previously ignored by these two types) whose BoundaryLatch closes THIS
+  // bar -- called from on_tick's existing bar gate, alongside
+  // apply_pending_performance_recall, which it mirrors exactly (one shared
+  // BoundaryLatch instance per pad slot instead of the single m_perf_recall
+  // one, since several pads can be armed concurrently for different
+  // boundaries).
+  void apply_pending_pad_fires(EventSink sink);
 
   // cmd_perf case handlers (Phase-5 Item #9), split out for the same reason.
   void perf_store(const Command& cmd, EventSink sink);
@@ -657,6 +700,17 @@ class Engine {
   PerformanceStore m_perfs;
   BoundaryLatch m_perf_recall;
   std::uint16_t m_perf_recall_slot = 0;
+  // Torquato finding 1 (Phase-6 Theme 3 Item #2 hand-off): kDrum/kCC's own
+  // arm-at-boundary state, ONE BoundaryLatch per flat pad slot (unlike
+  // m_perf_recall's single instance -- several pads can be armed
+  // concurrently for independent boundaries). Reuses the SAME shared
+  // BoundaryLatch primitive m_perf_recall already uses (Corelli fix #2),
+  // not a new hand-rolled arm mechanism. m_pad_pending_target holds the
+  // LaunchState (kPlaying/kStopped) the armed pad will fire with once its
+  // latch comes due -- see fire_pad's kDrum/kCC case and
+  // apply_pending_pad_fires below.
+  BoundaryLatch m_pad_latch[kMaxPads]{};
+  LaunchState m_pad_pending_target[kMaxPads]{};
   // Phase-6 Theme 3 Item #4: the active pad bank, a persisted VIEW CURSOR
   // (0..kMaxPadBanks-1) selected by the kPadBankSelect ABI verb
   // (pad_bank_select) and captured/restored via Performance::pad_bank_id

@@ -76,6 +76,27 @@ bool parse_perf_slot(const std::string& s, std::uint16_t& out, std::string& erro
   return true;
 }
 
+// Phase-6 Theme 3 Item #4 (companion to Item #2): the host L1 hook for
+// kPadBankSelect -- left undriven from the host when Item #4 shipped the
+// engine-side verb. Mirrors cmd_transpose's own validate-parse-only style
+// (shell_music_commands.cpp): the engine is the source of truth for the
+// [0, kMaxPadBanks) bound (Engine::pad_bank_select rejects outside it), this
+// parse only rejects an unparsable token. Split out of cmd_pad (rather than
+// inlined there) to keep cmd_pad's own cognitive complexity under the
+// clang-tidy gate, same discipline as every other case-handler split in this
+// codebase.
+bool build_pad_bank_command(const std::string& token, Command& c, std::string& error) {
+  std::uint64_t bank = 0;
+  if (!parse_u64(token, bank) || bank > 0xFFFFFFFFu) {
+    error = "bad pad bank: " + token;
+    return false;
+  }
+  c.op = Op::kSet;
+  c.param = Param::kPadBankSelect;
+  c.a = static_cast<std::int32_t>(bank);
+  return true;
+}
+
 // The whole-file buffer size: header + every possible slot's tight wire
 // record + the trailing CRC-32. Sized exactly (not a magic guess) so
 // perf_save() never has to grow-and-retry.
@@ -86,14 +107,22 @@ constexpr std::size_t kPerfFileBufferSize = sizeof(PerformanceStoreHeader) +
 }  // namespace
 
 // `pad assign <id> <type> <mode> <dest>[:ch] <source> [aux] [quantize <n>]`
-// | `pad trigger <id>` | `pad release <id>`.
+// | `pad trigger <id>` | `pad release <id>` | `pad bank <n>`.
 bool Shell::cmd_pad(const std::vector<std::string>& t, std::string& error) {
   static const char* kUsage =
       "usage: pad assign <id> <type> <mode> <dest>[:ch] <source> [aux] [quantize <n>] | "
-      "pad trigger <id> | pad release <id>";
+      "pad trigger <id> | pad release <id> | pad bank <n>";
   if (t.size() < 2) {
     error = kUsage;
     return false;
+  }
+  if (t[1] == "bank" && t.size() >= 3) {
+    Command c;
+    if (!build_pad_bank_command(t[2], c, error)) {
+      return false;
+    }
+    m_engine.push_command(c, m_sink);
+    return true;
   }
   if ((t[1] == "trigger" || t[1] == "release") && t.size() >= 3) {
     std::uint16_t id = 0;
@@ -110,6 +139,19 @@ bool Shell::cmd_pad(const std::vector<std::string>& t, std::string& error) {
     error = kUsage;
     return false;
   }
+  Command c;
+  if (!pad_assign_from_tokens(t, c, error)) {
+    return false;
+  }
+  m_engine.push_command(c, m_sink);
+  return true;
+}
+
+// `pad assign <id> <type> <mode> <dest>[:ch] <source> [aux] [quantize <n>]`'s
+// own token parsing, split out of cmd_pad (see shell.hpp's own comment) --
+// `t[1] == "assign"` and `t.size() >= 7` are already checked by the caller.
+bool Shell::pad_assign_from_tokens(const std::vector<std::string>& t, Command& c,
+                                   std::string& error) {
   std::uint16_t id = 0;
   if (!parse_flat_pad_id(t[2], id, error)) {
     return false;
@@ -154,7 +196,6 @@ bool Shell::cmd_pad(const std::vector<std::string>& t, std::string& error) {
   if (!parse_quantize_suffix(t, at, boundary, n_bars, error)) {
     return false;
   }
-  Command c;
   c.param = Param::kPadAssign;
   c.idx = id;
   c.a = static_cast<std::int32_t>(type) | (static_cast<std::int32_t>(mode) << 8) |
@@ -163,7 +204,6 @@ bool Shell::cmd_pad(const std::vector<std::string>& t, std::string& error) {
   c.b = dest_port | ((dest_ch < 0 ? 0 : dest_ch) << 8) | (static_cast<std::int32_t>(n_bars) << 16);
   c.c = static_cast<std::int32_t>(static_cast<std::uint32_t>(source_idx) |
                                   (static_cast<std::uint32_t>(aux) << 24));
-  m_engine.push_command(c, m_sink);
   return true;
 }
 

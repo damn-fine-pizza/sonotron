@@ -398,6 +398,12 @@ class Shell {
   // #2: the core never touches a filesystem) over performance.hpp's
   // serialize()/deserialize().
   bool cmd_pad(const std::vector<std::string>& tokens, std::string& error);
+  // `pad assign ...`'s own token-parsing tail, split out of cmd_pad to keep
+  // its cognitive complexity under the clang-tidy gate (same discipline as
+  // every other case-handler split in this codebase). Needs find_port(), a
+  // Shell member, so it stays a member rather than a free function.
+  bool pad_assign_from_tokens(const std::vector<std::string>& tokens, Command& c,
+                              std::string& error);
   bool cmd_perf(const std::vector<std::string>& tokens, std::string& error);
   bool perf_save(const std::string& path, std::string& error);
   bool perf_load(const std::string& path, std::string& error);

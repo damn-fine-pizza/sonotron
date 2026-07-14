@@ -206,24 +206,34 @@ enum class Param : std::uint16_t {
                         //     scene_index matches (`launch scene <n>
                         //     quantize <q>`).
   // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
-  // Performance"): pad banks (arrangrr/pad/pad_bank.hpp) are WRAPPER-ONLY --
-  // each PadType fans out to an EXISTING verb (clip launch, an Arranger
-  // section request, or a Performance recall); there is no new note/CC
-  // emission engine. kPadAssign is host/script-only registration, mirroring
-  // kClipAdd's own convention.
+  // Performance"): pad banks (arrangrr/pad/pad_bank.hpp) are WRAPPER-ONLY for
+  // every PadType except kDrum/kCC -- those fan out to an EXISTING verb (clip
+  // launch, an Arranger section request, or a Performance recall). kDrum/kCC
+  // (Phase-6 Theme 3 Item #2, docs/reflections/phase6-theme3-pad-drum-cc-
+  // scope.md) are the one deliberate, surgical exception: fire_pad emits a
+  // MidiMessage directly on the pad's OWN dest_port/dest_channel, via the
+  // SAME schedule_or_warn choke point every other emission path already
+  // shares -- not a new emission engine. kPadAssign is host/script-only
+  // registration, mirroring kClipAdd's own convention.
   kPadAssign = 48,          // do: idx = flat pad id (0..kMaxPads-1)
                             //     a = type | (mode << 8) | (sync << 16) | (pitch << 24)
                             //       (type: PadType, mode: PadMode, sync: Boundary,
                             //        pitch: PadPitch)
                             //     b = dest_port | (dest_channel << 8) | (n_bars << 16)
-                            //       (dest_port/channel: RESERVED, not yet consumed by
-                            //        any wrapper dispatch, see pad_bank.hpp; n_bars is
-                            //        meaningful only when sync == kNextNBars)
+                            //       (dest_port/channel: RESERVED for every PadType but
+                            //        kDrum/kCC, not yet consumed by their wrapper
+                            //        dispatch, see pad_bank.hpp; kDrum/kCC consume
+                            //        dest_port/channel directly as their OWN output
+                            //        destination; n_bars is meaningful only when
+                            //        sync == kNextNBars)
                             //     c = source_idx | (source_aux << 24)
                             //       (source_idx meaning depends on `type`: ClipMatrix
                             //        clip id for kPhrase/kChord, scene index for
                             //        kSceneColumn, SectionType for kVariation/kFill,
-                            //        PerformanceStore slot for kPerformance)
+                            //        PerformanceStore slot for kPerformance, MIDI note
+                            //        number for kDrum, CC controller number for kCC;
+                            //        source_aux is velocity for kDrum, on-value for
+                            //        kCC -- both 0..127, checked at fire time)
   kPadTrigger = 49,         // do: idx = flat pad id. Fires the pad per its OWN
                             //     assigned sync/n_bars (NOT this Command's own
                             //     boundary/n_bars, which are unused here) --

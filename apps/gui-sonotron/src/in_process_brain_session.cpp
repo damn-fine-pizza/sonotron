@@ -221,6 +221,28 @@ enum class TranslateOutcome {
                      // `detail` holds a human-readable reason.
 };
 
+// Phase-6 Theme 3 Item #2's companion (docs/reflections/phase6-theme3-pad-
+// drum-cc-scope.md): `pad bank <n>` -- the kPadBankSelect host hook Item #4
+// left undriven from either host, mirrors components/hostrt/
+// shell_pad_commands.cpp's own `pad bank` verb. The engine is the source of
+// truth for the [0, kMaxPadBanks) bound (Engine::pad_bank_select rejects
+// outside it); this parse only rejects an unparsable token. Split out of
+// command_line_to_command (rather than inlined there) to keep that already
+// large dispatch's cognitive complexity from growing further, same
+// discipline as hostrt's own case-handler splits.
+TranslateOutcome translate_pad_bank(const std::vector<std::string_view>& t, Command& out,
+                                    std::string& detail) {
+  std::uint64_t bank = 0;
+  if (!parse_uint(t[2], bank) || bank > 0xFFFFFFFFu) {
+    detail = "bad pad bank: " + std::string(t[2]);
+    return TranslateOutcome::kInvalidArgument;
+  }
+  out.op = Op::kSet;
+  out.param = Param::kPadBankSelect;
+  out.a = static_cast<std::int32_t>(bank);
+  return TranslateOutcome::kOk;
+}
+
 // Translates the L1 command lines gui-sonotron's panels currently send
 // (transport_panel.cpp, main.cpp's Transport menu, browser_panel.cpp's style
 // tree, parts_panel.cpp's mute/solo checkboxes) directly into the ABI
@@ -280,6 +302,10 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.param = Param::kMasterTranspose;
     out.a = static_cast<std::int32_t>(semitones);
     return TranslateOutcome::kOk;
+  }
+
+  if (t.size() == 3 && t[0] == "pad" && t[1] == "bank") {
+    return translate_pad_bank(t, out, detail);
   }
 
   if (t.size() == 4 && t[0] == "part" && (t[2] == "mute" || t[2] == "solo") &&

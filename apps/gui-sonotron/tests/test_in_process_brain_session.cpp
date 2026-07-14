@@ -231,6 +231,43 @@ void test_transpose_out_of_range_surfaces_clean_error() {
   session.stop();
 }
 
+// Phase-6 Theme 3 Item #2's companion (docs/reflections/phase6-theme3-pad-
+// drum-cc-scope.md): `pad bank <n>` translates and reaches the engine as a
+// real kPadBankSelect Command -- same success shape as `transpose` above (no
+// kError on a valid value); the engine warns (kWarn, not kError -- the
+// translator's own bound is unparsable-token-only) on an out-of-range bank.
+void test_pad_bank_valid_value_is_accepted_without_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("pad bank 3");
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; }));
+
+  session.send("transport start");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kTransport && ev.transport_state == "playing";
+  }));
+
+  session.stop();
+}
+
+void test_pad_bank_unparsable_token_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("pad bank nope");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("bad pad bank") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 // GUI refinement (Accompany, Phase 4d): `midi-source load <path>` now
 // round-trips through a dedicated path-carrying ring straight to
 // Shell::load_midi_source() on the engine thread (Command's own POD has no
@@ -337,6 +374,8 @@ int main() {
   test_part_invalid_role_surfaces_clean_error();
   test_transpose_valid_value_is_accepted_without_error();
   test_transpose_out_of_range_surfaces_clean_error();
+  test_pad_bank_valid_value_is_accepted_without_error();
+  test_pad_bank_unparsable_token_surfaces_clean_error();
   test_midi_source_load_valid_path_is_accepted_without_error();
   test_midi_source_load_invalid_path_surfaces_clean_error();
   test_launch_clip_translates_and_reaches_engine();

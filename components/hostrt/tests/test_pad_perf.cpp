@@ -71,6 +71,26 @@ void test_pad_quantized_assign_and_trigger() {
   CHECK(f.shell.engine().clips().get(0)->state == LaunchState::kPlaying);
 }
 
+// Phase-6 Theme 3 Item #2's companion: `pad bank <n>` -- the kPadBankSelect
+// host hook Item #4 shipped engine-side but left undriven from hostrt.
+void test_pad_bank_grammar() {
+  ShellFixture f;
+  CHECK(f.shell.engine().pad_bank() == 0);
+  CHECK(f.run("pad bank 3"));
+  CHECK(f.warns() == 0);
+  CHECK(f.shell.engine().pad_bank() == 3);
+
+  // Out-of-range is rejected at the ENGINE (parse only rejects an unparsable
+  // token, mirroring `transpose`'s own division of labor) -- exec_line still
+  // returns true (the command reached the engine), unlike a malformed line.
+  CHECK(f.run("pad bank 8"));  // == kMaxPadBanks, one past the top
+  CHECK(f.warns() == 1);
+  CHECK(f.shell.engine().pad_bank() == 3);  // unchanged on reject
+
+  CHECK(!f.run("pad bank nope"));  // unparsable token: rejected at PARSE time
+  CHECK(!f.run("pad bank"));       // missing argument
+}
+
 void test_perf_store_recall_grammar() {
   ShellFixture f;
   CHECK(f.run("port open out synth"));
@@ -151,6 +171,7 @@ void test_perf_load_rejects_malformed_file() {
 int main() {
   test_pad_grammar_smoke();
   test_pad_quantized_assign_and_trigger();
+  test_pad_bank_grammar();
   test_perf_store_recall_grammar();
   test_perf_save_load_round_trip();
   test_perf_load_rejects_malformed_file();

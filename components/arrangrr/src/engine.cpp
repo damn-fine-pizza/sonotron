@@ -158,6 +158,19 @@ void Engine::cmd_routing(const Command& cmd, EventSink sink) {
       });
       m_chorddet.clear();  // every key is up now; the latched chord stays (memory)
       m_arp.panic();       // drop any held/latched arp notes
+      // Torquato finding 3: Panic silences the WIRE via NoteTracker above but
+      // used to never touch m_pads -- a kToggle (or kHold) pad left
+      // PadRuntime::on == true after the wire went silent needed a second
+      // trigger to sound again (kToggle's flip would read the stale `on`
+      // and turn it back OFF instead of sounding). Reset every pad's runtime
+      // on-state here so the bookkeeping matches what Panic just did to the
+      // wire, for every PadType uniformly (not just kDrum/kCC -- any
+      // kToggle/kHold pad's `on` flag is equally stale after a panic).
+      for (std::size_t i = 0; i < kMaxPads; ++i) {
+        if (PadRuntime* rt = m_pads.runtime(i); rt != nullptr) {
+          rt->on = false;
+        }
+      }
       flush(sink);
       break;
     case Param::kRouteAdd: {
@@ -925,7 +938,7 @@ void Engine::pad_assign(const Command& cmd, EventSink sink) {
   const auto n_bars = (packed_b >> 16) & 0xFFu;
   const auto source_idx = packed_c & 0xFFFFu;
   const auto source_aux = (packed_c >> 24) & 0xFFu;
-  const bool ok = type_v <= static_cast<std::uint32_t>(PadType::kPerformance) &&
+  const bool ok = type_v < static_cast<std::uint32_t>(kPadTypeCount) &&
                   mode_v <= static_cast<std::uint32_t>(PadMode::kToggle) &&
                   sync_v <= static_cast<std::uint32_t>(Boundary::kNextNBars) &&
                   pitch_v <= static_cast<std::uint32_t>(PadPitch::kTransposeWithChord) &&
@@ -961,11 +974,11 @@ void Engine::pad_trigger(const Command& cmd, EventSink sink) {
   }
   if (pad->mode == PadMode::kToggle) {
     rt->on = !rt->on;
-    fire_pad(*pad, rt->on ? LaunchState::kPlaying : LaunchState::kStopped, sink);
+    fire_pad(*pad, rt->on ? LaunchState::kPlaying : LaunchState::kStopped, cmd.idx, sink);
     return;
   }
   rt->on = true;
-  fire_pad(*pad, LaunchState::kPlaying, sink);
+  fire_pad(*pad, LaunchState::kPlaying, cmd.idx, sink);
 }
 
 void Engine::pad_release(const Command& cmd, EventSink sink) {
@@ -979,18 +992,19 @@ void Engine::pad_release(const Command& cmd, EventSink sink) {
     return;  // kOneShot/kLoop/kToggle: release is a no-op (toggle already acted at trigger)
   }
   rt->on = false;
-  fire_pad(*pad, LaunchState::kStopped, sink);
+  fire_pad(*pad, LaunchState::kStopped, cmd.idx, sink);
 }
 // GCOVR_EXCL_STOP
 
-void Engine::fire_pad(const Pad& pad, LaunchState target, EventSink sink) {
-  // pad.dest_port/dest_channel are RESERVED (see pad_bank.hpp's own header
-  // comment): every PadType below fans out to an EXISTING verb that already
-  // owns its own destination (a clip's role route, the arranger's style
-  // routes, or a Performance's captured routes) -- wiring a pad's own
-  // dest_port/channel would need a new emission path, which the wrapper-only
-  // scope tripwire forbids. pad.pitch is likewise captured but not yet
-  // consumed here.
+void Engine::fire_pad(const Pad& pad, LaunchState target, std::uint16_t pad_id, EventSink sink) {
+  // pad.dest_port/dest_channel are RESERVED for every PadType below EXCEPT
+  // kDrum/kCC (see pad_bank.hpp's own header comment): those fan out to an
+  // EXISTING verb that already owns its own destination (a clip's role
+  // route, the arranger's style routes, or a Performance's captured routes).
+  // kDrum/kCC consume dest_port/dest_channel directly -- the pad IS its own
+  // destination (Decision 2, pad-owned, locked by the owner). pad.pitch is
+  // ignored by every PadType, kDrum/kCC included (a raw note/CC has no
+  // "transpose with chord" reading).
   Command boundary_cmd;
   boundary_cmd.boundary = pad.sync;
   boundary_cmd.n_bars = pad.n_bars;
@@ -1035,10 +1049,106 @@ void Engine::fire_pad(const Pad& pad, LaunchState target, EventSink sink) {
         perf_recall(boundary_cmd, sink);
       }
       break;
+    // Phase-6 Theme 3 Item #2: direct emission, split into their own
+    // functions below to keep fire_pad's own cognitive complexity under the
+    // clang-tidy gate (same discipline as every other case-handler split in
+    // this class).
+    // Torquato finding 1: pad.sync/pad.n_bars used to be read only by
+    // pad_assign's own structural validation and then silently dropped --
+    // fire_pad_drum/fire_pad_cc consulted `target` alone. Honor it exactly
+    // like kVariation/kFill just above: kImmediate (or transport stopped)
+    // fires now; anything else arms. kNextBar and kNextNBars both arm for
+    // ONE bar -- pad.n_bars is intentionally not read here, matching
+    // kVariation/kFill's own documented kNextNBars-degrades-to-next-bar
+    // behavior (neither Arranger::request nor this direct-emission path has
+    // a true N-bar primitive; "match their exact behavior, don't invent a
+    // third").
+    case PadType::kDrum:
+    case PadType::kCC: {
+      const bool immediate = pad.sync == Boundary::kImmediate || !m_transport.playing();
+      if (immediate) {
+        if (pad.type == PadType::kDrum) {
+          fire_pad_drum(pad, target, sink);
+        } else {
+          fire_pad_cc(pad, target, sink);
+        }
+      } else if (pad_id < kMaxPads) {
+        m_pad_latch[pad_id].arm(1);
+        m_pad_pending_target[pad_id] = target;
+      }
+      break;
+    }
     case PadType::kNone:
     default:
       break;
   }
+}
+
+// Semantic range checks (note/velocity > 127) happen HERE, at fire time --
+// pad_assign only validates structural bounds, mirroring the kVariation/kFill
+// precedent in fire_pad above. Emits via the SAME schedule_or_warn choke
+// point every other note-emitting path already shares (flush()'s existing
+// NoteTracker::observe + host echo cover panic-safety and echo for free, no
+// bespoke tracking).
+void Engine::fire_pad_drum(const Pad& pad, LaunchState target, EventSink sink) {
+  if (pad.source_idx > 127 || pad.source_aux > 127) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto note = static_cast<std::uint8_t>(pad.source_idx);
+  if (target == LaunchState::kPlaying) {
+    const std::uint8_t vel = pad.source_aux != 0 ? pad.source_aux : kPadDrumDefaultVelocity;
+    // Torquato finding 2: a kOneShot/kLoop retrigger before its own fixed
+    // gate elapses used to be cut short by the FIRST trigger's now-stale
+    // scheduled note-off. cancel_note_off is the scheduler's own dedicated
+    // retrigger primitive (§9.B, out_scheduler.hpp) -- fire_timeline's
+    // schedule_pattern already uses it for exactly this same-note-overlap
+    // case. Tombstone any pending off for this (port, channel, note) due at
+    // or after now and re-anchor it to fire right now, immediately before
+    // the new note-on (D29 sorts NoteOff before NoteOn on the same tick) --
+    // the stale off no longer lands 50-120 ticks late and truncates the
+    // retriggered hit. A first trigger (nothing pending yet) leaves
+    // cancel_note_off a no-op, so this is byte-identical to the pre-fix path
+    // for every non-retrigger case.
+    if ((pad.mode == PadMode::kOneShot || pad.mode == PadMode::kLoop) &&
+        m_scheduler.cancel_note_off(pad.dest_port, pad.dest_channel, note, m_now)) {
+      schedule_or_warn(pad.dest_port, m_now, MidiMessage::note_off(pad.dest_channel, note), sink);
+    }
+    schedule_or_warn(pad.dest_port, m_now, MidiMessage::note_on(pad.dest_channel, note, vel), sink);
+    // kOneShot/kLoop (folded together, Decision 3): pad_release is already a
+    // no-op for both, so nothing else would ever send the matching note-off
+    // -- schedule it here, at the fixed gate. kHold/kToggle's note-off comes
+    // from pad_release/the toggle-off call below instead (target ==
+    // kStopped), no gate needed there.
+    if (pad.mode == PadMode::kOneShot || pad.mode == PadMode::kLoop) {
+      schedule_or_warn(pad.dest_port, m_now + kPadDrumOneShotGateTicks,
+                       MidiMessage::note_off(pad.dest_channel, note), sink);
+    }
+  } else {
+    schedule_or_warn(pad.dest_port, m_now, MidiMessage::note_off(pad.dest_channel, note), sink);
+  }
+  // Immediate echo + panic-safety NOW, mirroring chord_play's own
+  // schedule-then-flush precedent for a "do" verb that sounds on the spot --
+  // the deferred kOneShot note-off (if any) stays queued, it is not yet due.
+  // Localized to kDrum/kCC only: no other PadType's fire_pad case schedules
+  // anything itself, so their behavior/goldens are untouched.
+  flush(sink);
+}
+
+void Engine::fire_pad_cc(const Pad& pad, LaunchState target, EventSink sink) {
+  if (pad.source_idx > 127 || pad.source_aux > 127) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto controller = static_cast<std::uint8_t>(pad.source_idx);
+  // Decision 4: kHold/kToggle send the on-value on kPlaying and a hardcoded 0
+  // on kStopped (no spare Pad byte for a custom off-value); kOneShot/kLoop
+  // only ever reach kPlaying (pad_release is a no-op for both), so they fire
+  // the on-value once and stay there, by design.
+  const std::uint8_t value = target == LaunchState::kPlaying ? pad.source_aux : 0;
+  schedule_or_warn(pad.dest_port, m_now, MidiMessage::cc(pad.dest_channel, controller, value),
+                   sink);
+  flush(sink);  // immediate echo + panic-safety, same reasoning as fire_pad_drum above
 }
 
 // GCOVR_EXCL_START -- thin ABI dispatch glue (Phase 6 Theme 1b): validate args, route to ONE
@@ -1266,6 +1376,32 @@ void Engine::apply_pending_performance_recall(EventSink sink) {
   m_perf_recall.clear();
   if (const Performance* perf = m_perfs.get(m_perf_recall_slot); perf != nullptr) {
     apply_performance(*perf, sink);
+  }
+}
+
+// Torquato finding 1: mirrors apply_pending_performance_recall exactly, one
+// BoundaryLatch per flat pad slot instead of the single m_perf_recall
+// instance (several kDrum/kCC pads can be armed concurrently for
+// independent boundaries). A pad reassigned to a different type/id between
+// arming and this bar (or removed) is silently skipped -- pad_assign already
+// drops any stale runtime state on a re-assign (PadEngine::assign), and a
+// dangling arm here would otherwise fire against config that no longer
+// matches what the user actually armed.
+void Engine::apply_pending_pad_fires(EventSink sink) {
+  for (std::uint16_t id = 0; id < kMaxPads; ++id) {
+    if (!m_pad_latch[id].due(m_transport.tick())) {
+      continue;
+    }
+    m_pad_latch[id].clear();
+    const Pad* pad = m_pads.get(id);
+    if (pad == nullptr) {
+      continue;
+    }
+    if (pad->type == PadType::kDrum) {
+      fire_pad_drum(*pad, m_pad_pending_target[id], sink);
+    } else if (pad->type == PadType::kCC) {
+      fire_pad_cc(*pad, m_pad_pending_target[id], sink);
+    }
   }
 }
 
