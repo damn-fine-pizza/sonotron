@@ -78,7 +78,18 @@ namespace {
 // whole line instead of sharing it with a title + separator that would not
 // fit.
 void render_zone_frame(const Zone& zone, const ImVec2& size, WorkstationState& state) {
-  ImGui::BeginChild(zone.id.c_str(), size, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
+  // Fixed-content zones must not wheel-scroll the few pixels their padded
+  // content overflows the zone: transport (a single-line strip), intention
+  // (chord readout + fixed meters) and seqedit (toolbar + fill canvas) all fit
+  // their zone, so NoScrollbar alone isn't enough -- they also get
+  // NoScrollWithMouse and forward the wheel to the parent. Browser / grid /
+  // parts keep a genuinely scrollable body (trees, the launch grid, the mixer
+  // list).
+  ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoScrollbar;
+  if (zone.id == "transport" || zone.id == "intention" || zone.id == "seqedit") {
+    window_flags |= ImGuiWindowFlags_NoScrollWithMouse;
+  }
+  ImGui::BeginChild(zone.id.c_str(), size, ImGuiChildFlags_Borders, window_flags);
   if (zone.id == "transport") {
     render_zone_content(zone, state);
   } else {

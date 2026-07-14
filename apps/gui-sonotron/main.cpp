@@ -165,7 +165,14 @@ GLFWwindow* create_window() {
   // the window in scaled pixels right away, instead of only finding out
   // about HiDPI after a content-scale-changed event fires post-creation.
   glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
-  return glfwCreateWindow(1280, 800, "sonotron", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1280, 800, "sonotron", nullptr, nullptr);
+  if (window != nullptr) {
+    // Floor the window at a size where the dense 6-zone layout stays usable.
+    // Below this, zones overflow their allotment and content gets clipped /
+    // starts eating the scroll wheel; no maximum (GLFW_DONT_CARE).
+    glfwSetWindowSizeLimits(window, 1024, 640, GLFW_DONT_CARE, GLFW_DONT_CARE);
+  }
+  return window;
 }
 
 // Queries the window's content (DPI) scale via GLFW. GLFW can report a
