@@ -61,6 +61,10 @@ inline constexpr StyleEvent kLeadHook[] = {
     {.step=12, .tone=7, .octave=0, .vel=96, .gate=kGate8th,  .src=NoteSource::kScaleDegree},   // up to the octave
     {.step=14, .tone=4, .octave=0, .vel=88, .gate=kGateBeat, .src=NoteSource::kScaleDegree},   // settle on the 5th
 };
+// Motif engine (9210, Ottorino RANK 11): the pop synth hook, wired only into
+// varD — pop is the most genre-generic style in the corpus, so this is the
+// smallest per-effort payoff among the safe Option-1 styles, but real.
+inline constexpr MotifSpec kLeadHookMotif{.transform = MotifTransform::kDiatonicTranspose, .seed = 1101};
 
 inline constexpr StyleEvent kVarADrums[] = {
     {.step=0, .tone=kKick, .octave=0, .vel=102, .gate=kGateHat},  {.step=8, .tone=kKick, .octave=0, .vel=98, .gate=kGateHat},
@@ -141,9 +145,12 @@ inline constexpr StyleEvent kFillDrums[] = {
 inline constexpr StyleEvent kFillBass[] = {
     {.step=0, .tone=kRoot, .octave=0, .vel=98, .gate=kGate8th}, {.step=8, .tone=kFifth, .octave=0, .vel=88, .gate=kGate8th},
 };
+// The flat FILL bass, reused identically across all 4 fills; the Var bass
+// (kVarABass..kVarDBass) is already 4 distinct hand-authored ideas.
+inline constexpr MotifSpec kFillBassMotif{.transform = MotifTransform::kRetrograde, .seed = 1102};
 inline constexpr StylePattern kFillPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kFillDrums)},
-    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass), .motif=&kFillBassMotif},
 };
 
 inline constexpr StyleEvent kEndDrums[] = {
@@ -196,15 +203,15 @@ inline constexpr StyleEvent kFillDDrums[] = {
 };
 inline constexpr StylePattern kFillBPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kFillBDrums)},
-    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass), .motif=&kFillBassMotif},
 };
 inline constexpr StylePattern kFillCPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kFillCDrums)},
-    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass), .motif=&kFillBassMotif},
 };
 inline constexpr StylePattern kFillDPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kFillDDrums)},
-    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass)},
+    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kFillBass), .motif=&kFillBassMotif},
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercShake)},
 };
 
@@ -239,7 +246,7 @@ inline constexpr StylePattern kVarDPatterns[] = {{.role=TrackRole::kDrums, .poli
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRehit), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2On), .gm_program=kChord2Voice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kArp, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kArp8), .gm_program=kArpVoice},
-    {.role=TrackRole::kLead, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kLeadHook), .gm_program=kLeadVoice},
+    {.role=TrackRole::kLead, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kLeadHook), .gm_program=kLeadVoice, .motif=&kLeadHookMotif},
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercShake)}};
 
 inline constexpr StyleSection kSections[] = {
