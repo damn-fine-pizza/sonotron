@@ -3,10 +3,16 @@
 // fire when a boundary tick arrives" primitive Engine::m_perf_recall reuses.
 // Pure freestanding POD -- no Engine harness needed, mirroring test_common.cpp's
 // own treatment of a common/ primitive in isolation.
+//
+// Phase 7 (node 8100 hardening, Torquato QA F1/F2): rewritten for the
+// bar-COUNT-based shape (due_bar_index, arm(n_bars, bar_index_now),
+// due(bar_index_now)) that replaced the old tick-window/absolute-modulo
+// shape -- see boundary_latch.hpp's own header comment for why the old shape
+// could permanently miss its own promotion the instant a meter change landed
+// between arm() and due().
 
 #include "arrangrr/common/boundary_latch.hpp"
 
-#include "common/time.hpp"
 #include "test.hpp"
 
 namespace {
@@ -16,129 +22,111 @@ using namespace arrangrr;
 void test_default_latch_is_inert() {
   BoundaryLatch latch;
   CHECK(!latch.pending);
-  CHECK(latch.window == 0);
-  // A default-constructed (never armed) latch never fires, at any tick --
-  // including tick 0, where a naive `t % window == 0` without the `pending`
+  CHECK(latch.due_bar_index == 0);
+  // A default-constructed (never armed) latch never fires, at any bar index
+  // -- including bar index 0, where a naive check without the `pending`
   // guard would look due.
   CHECK(!latch.due(0));
-  CHECK(!latch.due(kTicksPerBar));
+  CHECK(!latch.due(1));
   CHECK(!latch.due(12345));
 }
 
-void test_window_zero_guard_no_div_by_zero() {
-  // A latch somehow left `pending` with `window == 0` (the documented
-  // sentinel) must not attempt t % 0 -- due() short-circuits on
-  // `window != 0` BEFORE the modulo. If that guard were ever dropped this
-  // would be undefined behavior, not just a wrong answer.
+void test_arm_one_bar_due_at_the_next_bar_only() {
   BoundaryLatch latch;
-  latch.pending = true;
-  latch.window = 0;
-  CHECK(!latch.due(0));
-  CHECK(!latch.due(1));
-}
-
-void test_arm_one_bar_due_at_exact_multiples() {
-  BoundaryLatch latch;
-  latch.arm(1);
+  latch.arm(1, /*bar_index_now=*/0);
   CHECK(latch.pending);
-  CHECK(latch.window == kTicksPerBar);
+  CHECK(latch.due_bar_index == 0);  // n_bars=1 from bar 0 -> due AT bar 0
+  CHECK(latch.due(0));
+  // Unlike the old tick-window shape (which matched every SUBSEQUENT
+  // multiple of the window forever), a bar-count due() fires EXACTLY once,
+  // at its own due_bar_index -- a later bar index is simply not a match
+  // (production always clear()s right after firing, so this never mattered
+  // operationally; it is a cleaner contract than "matches every multiple").
   CHECK(!latch.due(1));
-  CHECK(!latch.due(kTicksPerBar - 1));
-  CHECK(latch.due(kTicksPerBar));  // exact 1-bar boundary
-  CHECK(!latch.due(kTicksPerBar + 1));
-  CHECK(latch.due(2 * kTicksPerBar));  // every subsequent bar multiple also matches
+  CHECK(!latch.due(2));
 }
 
-void test_arm_n_bars_due_only_at_the_n_bar_window() {
+void test_arm_n_bars_due_only_at_the_nth_upcoming_bar() {
   BoundaryLatch latch;
-  latch.arm(3);
-  CHECK(latch.window == 3 * kTicksPerBar);
-  CHECK(!latch.due(kTicksPerBar));      // 1 bar in: not yet
-  CHECK(!latch.due(2 * kTicksPerBar));  // 2 bars in: not yet
-  CHECK(latch.due(3 * kTicksPerBar));   // 3rd bar: due
+  latch.arm(3, /*bar_index_now=*/5);
+  CHECK(latch.due_bar_index == 5 + 2);  // the 3rd upcoming bar: 5, 6, [7]
+  CHECK(!latch.due(5));                 // 1 bar in: not yet
+  CHECK(!latch.due(6));                 // 2 bars in: not yet
+  CHECK(latch.due(7));                  // 3rd bar: due
 }
 
 void test_arm_clamps_n_bars_below_one() {
   BoundaryLatch latch;
-  latch.arm(0);
-  CHECK(latch.window == kTicksPerBar);  // clamped to 1, mirrors ClipMatrix::arm's own clamp
+  latch.arm(0, /*bar_index_now=*/10);
+  CHECK(latch.due_bar_index == 10);  // clamped to 1, mirrors ClipMatrix::arm's own clamp
   BoundaryLatch latch2;
-  latch2.arm(1);
-  CHECK(latch2.window == latch.window);
+  latch2.arm(1, /*bar_index_now=*/10);
+  CHECK(latch2.due_bar_index == latch.due_bar_index);
 }
 
 void test_clear_consumes_the_arm() {
   BoundaryLatch latch;
-  latch.arm(1);
-  CHECK(latch.due(kTicksPerBar));
+  latch.arm(1, /*bar_index_now=*/0);
+  CHECK(latch.due(0));
   latch.clear();
   CHECK(!latch.pending);
-  CHECK(!latch.due(kTicksPerBar));      // no longer due once cleared
-  CHECK(!latch.due(2 * kTicksPerBar));  // nor at any later multiple
+  CHECK(!latch.due(0));  // no longer due once cleared
+  CHECK(!latch.due(1));
 }
 
-void test_rearm_replaces_the_previous_window() {
+void test_rearm_replaces_the_previous_target() {
   // A second arm() call before the first fires REPLACES it (last-writer-
   // wins) -- there is only ONE shared latch, by design, not a queue.
   BoundaryLatch latch;
-  latch.arm(4);
-  latch.arm(1);
-  CHECK(latch.window == kTicksPerBar);
-  CHECK(latch.due(kTicksPerBar));
+  latch.arm(4, /*bar_index_now=*/0);
+  latch.arm(1, /*bar_index_now=*/0);
+  CHECK(latch.due_bar_index == 0);
+  CHECK(latch.due(0));
 }
 
-// --- Phase 7 (node T0): the threaded ticks_per_bar parameter ----------------
+// --- Phase 7 (node 8100 hardening): meter-change immunity -------------------
 
-// arm()'s second argument is the LIVE bar length (Engine threads
-// m_transport.ticks_per_bar() at arm time, e.g. Engine::perf_recall /
-// apply_pending_pad_fires's own arming call). A genuine non-4/4 value (a
-// 3-beat bar, 3 * kTicksPerBeat = 2880) changes the window exactly as the
-// default (kTicksPerBar) case does -- the SAME arithmetic, a different
-// divisor.
-void test_arm_with_explicit_non_default_ticks_per_bar() {
+// arm()'s second argument is Transport::bar_index() AT ARM TIME -- a
+// discrete COUNT of bar boundaries the re-anchored Transport gate has
+// closed, never a tick window. Arming mid-song (a nonzero bar_index_now)
+// works exactly like arming at the start: the due point is always
+// bar_index_now + (n_bars - 1), regardless of what meter was, is, or later
+// becomes live in between.
+void test_arm_mid_song_counts_from_the_live_bar_index() {
   BoundaryLatch latch;
-  constexpr Tick kThreeBeatBar = 3 * kTicksPerBeat;  // 2880: a genuine 3/4 bar
-  CHECK(kThreeBeatBar != kTicksPerBar);              // sanity: really a different meter
-  latch.arm(2, kThreeBeatBar);
-  CHECK(latch.window == 2 * kThreeBeatBar);  // 5760, NOT 2 * kTicksPerBar (7680)
-  CHECK(!latch.due(kThreeBeatBar));          // 1 bar in: not yet
-  CHECK(latch.due(2 * kThreeBeatBar));       // 2nd 3-beat bar: due
-  CHECK(!latch.due(2 * kTicksPerBar));       // the OLD 4/4 window's tick is NOT a hit
+  latch.arm(2, /*bar_index_now=*/41);
+  CHECK(latch.due_bar_index == 42);
+  CHECK(!latch.due(41));
+  CHECK(latch.due(42));
 }
 
-// The window is a SNAPSHOT taken at arm() time, not re-derived from a later
-// ticks_per_bar value on every due() check -- due() only ever reads the
-// already-computed `window` field (see the struct itself: due() takes no
-// ticks_per_bar parameter at all). This is BoundaryLatch's own documented
-// contract (Engine::m_perf_recall/m_pad_latch rely on it: a Performance
-// recall armed under one meter must still land on the bar it was actually
-// quantized to, even if the SAME recall it is waiting for is what changes
-// the meter). Torquato QA (Phase 7, node T0): this is the baseline this
-// pin proves for CONTRAST against ClipMatrix::on_bar's own DIFFERENT
-// (live-recomputed, not snapshotted) behavior under the identical scenario
-// -- see test_clip_matrix_live_meter_change_regression.cpp.
-void test_arm_window_is_frozen_at_arm_time_immune_to_a_later_meter_change() {
+// THE regression guard this hardening pass exists for: a meter change
+// between arm() and due() cannot desynchronize a bar-COUNT latch the way it
+// broke the old tick-window shape -- due() only ever compares Transport's
+// own bar_index() (already meter-change-safe by construction, runtime/
+// transport.hpp), never re-derives a tick length of its own. Simulating "the
+// meter changed after arm()" here just means: the caller keeps advancing
+// bar_index_now one bar at a time, however long each of those bars turned out
+// to be in ticks -- the due tick's own TICK value is irrelevant to this
+// type; only the ORDINAL bar count is.
+void test_due_is_immune_to_whatever_the_meter_did_between_arm_and_due() {
   BoundaryLatch latch;
-  latch.arm(2, kTicksPerBar);  // armed while the meter is still 4/4
-  CHECK(latch.window == 2 * kTicksPerBar);
-  // The "meter changes" here is simulated by simply never re-arming: due()
-  // has no ticks_per_bar parameter to feed a new value through, by design.
-  CHECK(!latch.due(kTicksPerBar));             // 1 bar in: not yet
-  CHECK(!latch.due(2 * (3 * kTicksPerBeat)));  // a 3/4-bar-window tick: NOT a hit
-  CHECK(latch.due(2 * kTicksPerBar));          // fires exactly where it was armed to
+  latch.arm(1, /*bar_index_now=*/2);  // armed while bar_index was 2
+  CHECK(latch.due_bar_index == 2);
+  CHECK(!latch.due(2 - 1));  // hasn't reached it yet (defensive; bar_index never decreases)
+  CHECK(latch.due(2));       // fires at the very next bar boundary, no matter its tick length
 }
 
 }  // namespace
 
 int main() {
   test_default_latch_is_inert();
-  test_window_zero_guard_no_div_by_zero();
-  test_arm_one_bar_due_at_exact_multiples();
-  test_arm_n_bars_due_only_at_the_n_bar_window();
+  test_arm_one_bar_due_at_the_next_bar_only();
+  test_arm_n_bars_due_only_at_the_nth_upcoming_bar();
   test_arm_clamps_n_bars_below_one();
   test_clear_consumes_the_arm();
-  test_rearm_replaces_the_previous_window();
-  test_arm_with_explicit_non_default_ticks_per_bar();
-  test_arm_window_is_frozen_at_arm_time_immune_to_a_later_meter_change();
+  test_rearm_replaces_the_previous_target();
+  test_arm_mid_song_counts_from_the_live_bar_index();
+  test_due_is_immune_to_whatever_the_meter_did_between_arm_and_due();
   return arrangrr::test::failures();
 }

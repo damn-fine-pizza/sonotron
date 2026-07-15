@@ -90,12 +90,31 @@ class Transport {
   // the identical sequence 0, kTicksPerBar, 2*kTicksPerBar, ... that
   // `tick % kTicksPerBar == 0` used to select, bit for bit.
   constexpr bool at_bar_boundary() const noexcept { return m_tick == m_next_bar_tick; }
-  constexpr void advance_bar_tick() noexcept { m_next_bar_tick = m_tick + ticks_per_bar(); }
+  constexpr void advance_bar_tick() noexcept {
+    m_next_bar_tick = m_tick + ticks_per_bar();
+    ++m_bar_index;
+  }
+
+  // Phase 7 (node 8100 hardening, Torquato QA F1-F3): a monotonic, discrete
+  // COUNT of bar boundaries closed so far (incremented once per
+  // advance_bar_tick() call) -- the shared primitive every "arm now, fire N
+  // bars later" consumer (BoundaryLatch, ClipMatrix::Clip) should count
+  // against INSTEAD OF a tick window (`n_bars * ticks_per_bar`). A tick
+  // window is fundamentally unsafe under a variable meter: it is computed
+  // once (at arm time) but compared via an ABSOLUTE match against a
+  // boundary sequence whose OWN spacing can change between arm() and the
+  // moment it fires, so the frozen window can permanently miss every future
+  // boundary the instant a meter change lands in between (the exact F1-F3
+  // findings). A bar COUNT has no such failure mode: "due at the Nth
+  // upcoming bar, counted from bar_index() now" stays correct no matter how
+  // long each of those N bars turns out to be in ticks.
+  constexpr std::uint32_t bar_index() const noexcept { return m_bar_index; }
 
   // MIDI Start semantics: rewind to zero and play.
   constexpr void start() noexcept {
     m_tick = 0;
     m_next_bar_tick = 0;
+    m_bar_index = 0;
     m_state = TransportState::kPlaying;
   }
   // MIDI Continue semantics: play from the current position.
@@ -108,6 +127,7 @@ class Transport {
   constexpr void locate(Tick t) noexcept {
     m_tick = t;
     m_next_bar_tick = t;
+    m_bar_index = 0;
   }
 
   // Advance by exactly one tick; caller loops (the engine reacts per tick).
@@ -134,6 +154,8 @@ class Transport {
  private:
   Tick m_tick = 0;
   Tick m_next_bar_tick = 0;  // Phase 7 (node 8100 finding): re-anchored bar-boundary gate
+  std::uint32_t m_bar_index =
+      0;  // Phase 7 (node 8100 hardening): discrete bar count, see bar_index()
   BpmX100 m_bpm = kDefaultBpm;
   TimeSig m_time_sig{};
   TransportState m_state = TransportState::kStopped;

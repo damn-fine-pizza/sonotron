@@ -276,3 +276,25 @@ arrangrr_test(test_loop_ops functional)
 # apply_scene_transition) -> functional, same precedent as test_clip/
 # test_loop. Thorough functional/regression QA is Torquato's follow-up.
 arrangrr_test(test_scene functional)
+# test_scene_hardening (Torquato QA, Phase 7 node 8100 hardening pass): goes
+# BEYOND test_scene.cpp's own happy-path smoke -- a chain that changes meter
+# TWICE mid-song (4/4->3/4->4/4, proving the re-anchor survives a SECOND
+# transition without accumulated drift), chord commit_bar staying coherent
+# with the fixed gate inside a non-4/4 scene, the remaining SceneChain
+# semantics (replay-restarts-from-0, table-full, clear), and an ABI round
+# trip through the raw wire verb ids (65..68), not just the named Param
+# enum. Subject is still Engine's own cross-producer wiring -> functional,
+# same precedent as test_scene itself.
+arrangrr_test(test_scene_hardening functional)
+# test_scene_meter_gate_regression (Torquato QA): pins THREE red findings the
+# node-8100 hardening pass exposed, all downstream of the SAME root cause
+# (an absolute-tick modulo of a window resolved once and never re-derived
+# from the FIXED, re-anchored Transport gate) -- a Performance recall
+# (BoundaryLatch), a pad fire (BoundaryLatch), and a clip launch
+# (ClipMatrix's own frozen-window fix) can each PERMANENTLY miss their own
+# "next bar" quantize the moment they are armed after even ONE mid-song
+# meter change, not just in a contrived multi-change scenario. Also pins
+# Arranger::on_tick's own internal bar/phase gate drifting permanently off
+# Transport's real grid under the same trigger. Handoff to Nazzareno --
+# NOT fixed here (accuse, don't repair).
+arrangrr_test(test_scene_meter_gate_regression regression)

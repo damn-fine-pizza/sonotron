@@ -333,7 +333,7 @@ class Engine {
       // Phase-5 Item #2 (decision 2): promote any armed/queued-stop clip
       // whose quantize window closes THIS bar, still BEFORE fire_arranger --
       // same reason the chord commit above precedes it.
-      fire_clips(m_transport.tick(), sink);
+      fire_clips(sink);
       // Phase-5 Item #9 (Corelli fix #3): a pending Performance recall lands
       // HERE -- after fire_clips, still BEFORE fire_arranger. A mid-bar
       // recall that changed the style before fire_clips ran would resolve a
@@ -476,7 +476,7 @@ class Engine {
   bool fire_loop_clip(const Clip& clip, Tick transport_tick, EventSink sink);
   // Promotes any clip whose quantize window closes THIS bar (on_tick's
   // existing tick % kTicksPerBar == 0 gate, decision #2).
-  void fire_clips(Tick transport_tick, EventSink sink);
+  void fire_clips(EventSink sink);
 
   // cmd_pad case handlers (Phase-5 Item #9), split out for the same reason.
   void pad_assign(const Command& cmd, EventSink sink);

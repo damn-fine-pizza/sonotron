@@ -40,3 +40,13 @@ add_executable(test_midi_parser test_midi_parser.cpp)
 target_link_libraries(test_midi_parser PRIVATE runtime)
 add_test(NAME test_midi_parser COMMAND test_midi_parser)
 set_tests_properties(test_midi_parser PROPERTIES LABELS unit)
+
+# Phase 7 (node 8100 hardening pass, Torquato QA). test_transport: Transport
+# itself in isolation (no Runtime/Engine needed) -- the re-anchored
+# at_bar_boundary()/advance_bar_tick() gate plus start()/stop()/locate()'s own
+# re-anchoring contract, mirroring test_midi_parser's own "pure module, no
+# harness" precedent -> unit.
+add_executable(test_transport test_transport.cpp)
+target_link_libraries(test_transport PRIVATE runtime)
+add_test(NAME test_transport COMMAND test_transport)
+set_tests_properties(test_transport PROPERTIES LABELS unit)

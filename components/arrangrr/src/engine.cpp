@@ -1101,7 +1101,9 @@ void Engine::clip_request(std::size_t id, LaunchState target, const Command& cmd
     return;
   }
   const std::uint8_t n_bars = cmd.boundary == Boundary::kNextNBars ? cmd.n_bars : 1;
-  (void)m_clips.arm(id, target, n_bars);
+  // Phase 7 (node 8100 hardening): the LIVE bar count, immune to any meter
+  // change between arm() and the moment ClipMatrix::on_bar promotes it.
+  (void)m_clips.arm(id, target, n_bars, m_transport.bar_index());
   const LaunchState pending =
       target == LaunchState::kPlaying ? LaunchState::kArmed : LaunchState::kQueuedStop;
   sink(OutEvent::clip(wire_id, static_cast<std::uint8_t>(pending), m_now));
@@ -1233,17 +1235,16 @@ void Engine::fire_loop(Tick transport_tick, EventSink sink) {
   // yet at this call site.
 }
 
-void Engine::fire_clips(Tick transport_tick, EventSink sink) {
+void Engine::fire_clips(EventSink sink) {
   m_clips.on_bar(
-      transport_tick,
       [&](std::size_t id, const Clip& clip) {
         apply_clip_content(clip, clip.state, sink);
         sink(OutEvent::clip(static_cast<std::uint16_t>(id), static_cast<std::uint8_t>(clip.state),
                             m_now));
       },
-      // Phase 7 (node T0): the LIVE bar length -- ClipMatrix holds no
-      // Transport&, so Engine threads it explicitly at this call boundary.
-      m_transport.ticks_per_bar());
+      // Phase 7 (node 8100 hardening): the LIVE bar count -- ClipMatrix holds
+      // no Transport&, so Engine threads it explicitly at this call boundary.
+      m_transport.bar_index());
 }
 
 // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
@@ -1439,8 +1440,8 @@ void Engine::fire_pad(const Pad& pad, LaunchState target, std::uint16_t pad_id, 
           fire_pad_cc(pad, target, sink);
         }
       } else if (pad_id < kMaxPads) {
-        // Phase 7 (node T0): the LIVE bar length.
-        m_pad_latch[pad_id].arm(1, m_transport.ticks_per_bar());
+        // Phase 7 (node 8100 hardening): the LIVE bar count.
+        m_pad_latch[pad_id].arm(1, m_transport.bar_index());
         m_pad_pending_target[pad_id] = target;
       }
       break;
@@ -1555,8 +1556,9 @@ void Engine::perf_recall(const Command& cmd, EventSink sink) {
     return;
   }
   const std::uint8_t n_bars = cmd.boundary == Boundary::kNextNBars ? cmd.n_bars : 1;
-  // Phase 7 (node T0): the LIVE bar length.
-  m_perf_recall.arm(n_bars, m_transport.ticks_per_bar());
+  // Phase 7 (node 8100 hardening): the LIVE bar count, immune to any meter
+  // change between arm() and due() (Torquato QA F1).
+  m_perf_recall.arm(n_bars, m_transport.bar_index());
   m_perf_recall_slot = cmd.idx;
 }
 // GCOVR_EXCL_STOP
@@ -1780,7 +1782,7 @@ void Engine::emit_performance_confirmation(const Performance& perf, EventSink si
 }
 
 void Engine::apply_pending_performance_recall(EventSink sink) {
-  if (!m_perf_recall.due(m_transport.tick())) {
+  if (!m_perf_recall.due(m_transport.bar_index())) {
     return;
   }
   m_perf_recall.clear();
@@ -1799,7 +1801,7 @@ void Engine::apply_pending_performance_recall(EventSink sink) {
 // matches what the user actually armed.
 void Engine::apply_pending_pad_fires(EventSink sink) {
   for (std::uint16_t id = 0; id < kMaxPads; ++id) {
-    if (!m_pad_latch[id].due(m_transport.tick())) {
+    if (!m_pad_latch[id].due(m_transport.bar_index())) {
       continue;
     }
     m_pad_latch[id].clear();

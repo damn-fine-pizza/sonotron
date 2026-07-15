@@ -417,6 +417,27 @@ class Arranger {
       return result;
     }
 
+    // Phase 7 (node 8100 hardening, Torquato QA F4): Arranger holds no
+    // Transport&, so it cannot read Transport::at_bar_boundary()/bar_index()
+    // directly the way Engine's own bar-gated consumers now do (BoundaryLatch/
+    // ClipMatrix). It instead detects a live meter change ITSELF, by diffing
+    // the threaded `ticks_per_bar` argument against what it was on the
+    // PREVIOUS call, and re-anchors `m_section_start` at the tick the change
+    // is first observed -- mirroring Transport::advance_bar_tick's own
+    // re-anchoring discipline (runtime/transport.hpp) instead of letting
+    // `pos % ticks_per_bar` below silently re-phase against a stale anchor
+    // established under the OLD meter (which permanently drifts the section's
+    // own bar/step clock off Transport's true grid the instant a meter change
+    // lands while a section is running -- the exact F4 symptom). Byte-
+    // identical whenever ticks_per_bar never actually changes across the
+    // whole run (every existing golden/unit test): this branch never fires,
+    // since m_last_ticks_per_bar already starts at the SAME default
+    // (kTicksPerBar) every un-threaded caller keeps passing.
+    if (ticks_per_bar != m_last_ticks_per_bar) {
+      m_section_start = transport_tick;
+      m_last_ticks_per_bar = ticks_per_bar;
+    }
+
     // Bar boundary: apply pending switches / one-shot transitions.
     if (transport_tick > 0 || m_section_start == transport_tick) {
       const Tick pos = transport_tick - m_section_start;
@@ -795,6 +816,13 @@ class Arranger {
   SectionType m_pending = SectionType::kVarA;
   bool m_pending_valid = false;
   Tick m_section_start = 0;
+  // Phase 7 (node 8100 hardening, Torquato QA F4): the `ticks_per_bar` value
+  // on_tick observed on its PREVIOUS call -- used only to detect a live meter
+  // change (see on_tick's own comment at the top of its body). Defaults to
+  // the SAME compile-time constant every un-threaded caller's own default
+  // `ticks_per_bar` argument already uses, so a caller that never passes a
+  // live value never triggers a spurious re-anchor.
+  Tick m_last_ticks_per_bar = kTicksPerBar;
   Route m_routes[kRoleCount]{};
   std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
   std::uint16_t m_solo = 0;   // per-role solo bitmask

@@ -6,7 +6,6 @@
 #include "arrangrr/common/static_vector.hpp"
 #include "arrangrr/config.hpp"
 #include "arrangrr/timeline/timeline.hpp"  // TrackRole
-#include "common/time.hpp"                 // Tick, kTicksPerBar
 
 // ClipMatrix: the Repeat-Zone launch primitive (Phase-5 Item #2,
 // docs/design/clip-primitive-design.md). A clip is an enum-tag + index
@@ -43,8 +42,8 @@ enum class ContentKind : std::uint8_t {
 // A clip's launch state. kArmed/kQueuedStop are the transient "counting down
 // to the quantize boundary" states; ClipMatrix::on_bar promotes them to
 // kPlaying/kStopped when their window closes (Engine::fire_clips, called
-// from the SAME `tick % kTicksPerBar == 0` gate that promotes a staged
-// chord, engine.hpp's on_tick -- decision 2).
+// from the SAME bar-boundary gate that promotes a staged chord (Transport::
+// at_bar_boundary(), engine.hpp's on_tick -- decision 2).
 enum class LaunchState : std::uint8_t {
   kStopped = 0,
   kArmed = 1,
@@ -59,27 +58,25 @@ struct Clip {
   ContentKind kind = ContentKind::kStyleSection;
   std::uint16_t content_index = 0;
   LaunchState state = LaunchState::kStopped;
-  // Quantize window while armed/queued-stop: the clip is due when
-  // `transport_tick % (n_bars * ticks_per_bar) == 0` -- Corelli's per-clip/
-  // per-request generalization of "next bar" to "next N bars" (decision 2).
-  // No new clock: the SAME Transport tick every other boundary check already
-  // reuses. Meaningless once kStopped/kPlaying; always >= 1.
+  // n_bars: how many bar boundaries to count from arm() before firing --
+  // Corelli's per-clip/per-request generalization of "next bar" to "next N
+  // bars" (decision 2). Meaningless once kStopped/kPlaying; always >= 1.
   std::uint8_t n_bars = 1;
-  // Frozen quantize window in ticks (Phase 7 node T0 fix, Torquato QA
-  // regression test_clip_matrix_live_meter_change_regression.cpp):
-  // `n_bars * ticks_per_bar` resolved ONCE, on the FIRST on_bar() check since
-  // arm(), and held fixed from then on -- mirroring BoundaryLatch::window's
-  // own frozen-at-arm-time field (boundary_latch.hpp). ClipMatrix holds no
-  // Transport&, so it cannot freeze inside arm() itself; it freezes on the
-  // first on_bar() evaluation instead, using whatever ticks_per_bar Engine
-  // threads in at that tick (the live meter as of the first bar boundary this
-  // armed clip actually sees). A later meter change can therefore no longer
-  // retune an already-counting-down clip, closing the divergence from
-  // BoundaryLatch the live ticks_per_bar recompute used to introduce. 0 = not
-  // yet resolved for the current arm cycle (sentinel; a resolved window is
-  // always > 0 since n_bars >= 1 and ticks_per_bar > 0); meaningless once
-  // kStopped/kPlaying.
-  Tick window = 0;
+  // Phase 7 (node 8100 hardening, Torquato QA F3): the Transport::
+  // bar_index() value this clip is due at, frozen at arm() time -- a
+  // discrete bar COUNT, never a tick window. The PRIOR fix (node T0,
+  // test_clip_matrix_live_meter_change_regression.cpp) froze a TICK window
+  // on the first on_bar() check since arm() to stop a LATER meter change
+  // from retuning an already-counting-down clip -- but the window itself was
+  // still an absolute-tick match, so a meter change that already happened
+  // BEFORE arm() (the F3 finding: the clip is armed on some scene reached via
+  // a prior meter change) left the frozen window's own remainder
+  // unreachable forever, permanently stuck at kArmed/kQueuedStop. A bar
+  // COUNT has no such failure mode: "due at the Nth upcoming bar, counted
+  // from bar_index() now" stays correct regardless of how long each of
+  // those N bars turns out to be in ticks -- see runtime/transport.hpp's own
+  // Transport::bar_index() comment. Meaningless once kStopped/kPlaying.
+  std::uint32_t due_bar_index = 0;
 };
 static_assert(sizeof(Clip) == 12);
 
@@ -107,20 +104,22 @@ class ClipMatrix {
   std::size_t size() const noexcept { return m_clips.size(); }
 
   // Arms clip `id` toward `target` (kPlaying or kStopped), quantized to the
-  // next `n_bars`-bar boundary. Callers with Boundary::kImmediate apply the
-  // musical effect directly and call force() instead -- this is for
-  // kNextBar/kNextNBars only. Returns false for an unknown id.
-  bool arm(std::size_t id, LaunchState target, std::uint8_t n_bars) noexcept {
+  // next `n_bars`-bar boundary, counted from Transport's OWN bar_index AT
+  // ARM TIME (`bar_index_now`, Phase 7 node 8100 hardening -- ClipMatrix
+  // holds no Transport&, so the caller threads it explicitly, mirroring
+  // BoundaryLatch::arm's own parameter). Callers with Boundary::kImmediate
+  // apply the musical effect directly and call force() instead -- this is
+  // for kNextBar/kNextNBars only. Returns false for an unknown id.
+  bool arm(std::size_t id, LaunchState target, std::uint8_t n_bars,
+           std::uint32_t bar_index_now = 0) noexcept {
     Clip* c = mutable_get(id);
     if (c == nullptr) {
       return false;
     }
     c->state = target == LaunchState::kPlaying ? LaunchState::kArmed : LaunchState::kQueuedStop;
-    c->n_bars = n_bars < 1 ? 1 : n_bars;
-    // Re-resolve the quantize window on the next on_bar() check (Phase 7
-    // node T0 fix): a fresh arm cycle must never inherit a stale frozen
-    // window left over from a previous life of this slot.
-    c->window = 0;
+    const std::uint8_t bars = n_bars < 1 ? std::uint8_t{1} : n_bars;
+    c->n_bars = bars;
+    c->due_bar_index = bar_index_now + static_cast<std::uint32_t>(bars - 1);
     return true;
   }
 
@@ -135,41 +134,37 @@ class ClipMatrix {
     return true;
   }
 
-  // Called from Engine::on_tick's EXISTING `tick % ticks_per_bar == 0` block,
-  // BEFORE fire_arranger (decision #2). Promotes every armed/queued-stop
-  // clip whose quantize window closes on `transport_tick` (kArmed ->
+  // Called from Engine::on_tick's EXISTING bar-boundary gate (Transport::
+  // at_bar_boundary()), BEFORE fire_arranger (decision #2). Promotes every
+  // armed/queued-stop clip whose bar countdown closes NOW (kArmed ->
   // kPlaying, kQueuedStop -> kStopped) and invokes `on_due(id, clip)` -- with
   // the NEW state already applied -- so the caller can trigger the
-  // underlying content and emit the wire event. `ticks_per_bar` (Phase 7,
-  // node T0) is the CURRENT bar length; ClipMatrix holds no Transport&, so
-  // Engine threads it explicitly (defaults to the compile-time kTicksPerBar
-  // so every pre-existing 2-arg caller, e.g. unit tests, keeps computing the
-  // exact same window).
+  // underlying content and emit the wire event. `bar_index_now` (Phase 7 node
+  // 8100 hardening) is Transport::bar_index() AT THIS BOUNDARY; ClipMatrix
+  // holds no Transport&, so Engine threads it explicitly (defaults to 0 so
+  // any not-yet-updated 1-arg caller keeps matching arm()'s own default).
   //
-  // Phase 7 node T0 fix (Torquato QA regression
-  // test_clip_matrix_live_meter_change_regression.cpp): each clip's window is
-  // resolved ONCE -- on the first on_bar() check since its own arm() -- and
-  // held fixed in Clip::window from then on, mirroring BoundaryLatch's own
-  // frozen-at-arm-time window. Earlier this recomputed `n_bars *
-  // ticks_per_bar` fresh on EVERY call from whatever live ticks_per_bar the
-  // caller threaded in that tick, so a meter change mid-countdown silently
-  // retuned an already-armed clip to an unrelated fire tick; under a stable
-  // meter the two are identical, so every byte-identical golden is unaffected.
+  // Phase 7 node 8100 hardening (Torquato QA F3, following the node T0 fix
+  // in test_clip_matrix_live_meter_change_regression.cpp): each clip's due
+  // point is now a bar COUNT (Clip::due_bar_index), frozen at arm() time
+  // directly -- not a tick window resolved lazily on the first on_bar()
+  // check, which was still an absolute-tick match and could permanently miss
+  // its own boundary if the meter had already changed before arm() (see
+  // Clip::due_bar_index's own comment). A bar count has no such failure
+  // mode. Under a stable meter this reproduces the identical fire tick as
+  // before (bar N since arm is bar N since arm, tick-window or bar-count
+  // alike), so every byte-identical golden is unaffected.
   template <typename Fn>
-  void on_bar(Tick transport_tick, Fn&& on_due, Tick ticks_per_bar = kTicksPerBar) {
+  void on_bar(Fn&& on_due, std::uint32_t bar_index_now = 0) {
     for (std::size_t id = 0; id < m_clips.size(); ++id) {
       Clip& c = m_clips[id];
       if (c.state != LaunchState::kArmed && c.state != LaunchState::kQueuedStop) {
         continue;
       }
-      if (c.window == 0) {
-        c.window = static_cast<Tick>(c.n_bars) * ticks_per_bar;
-      }
-      if (transport_tick % c.window != 0) {
+      if (bar_index_now != c.due_bar_index) {
         continue;
       }
       c.state = c.state == LaunchState::kArmed ? LaunchState::kPlaying : LaunchState::kStopped;
-      c.window = 0;
       on_due(id, c);
     }
   }

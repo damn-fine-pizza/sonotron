@@ -21,7 +21,6 @@
 #include "arrangrr/clip/clip_matrix.hpp"
 
 #include "arrangrr/config.hpp"
-#include "common/time.hpp"
 #include "test.hpp"
 
 namespace {
@@ -117,12 +116,25 @@ void test_force_sets_state_directly_no_arming() {
   CHECK(clips.get(0)->state == LaunchState::kPlaying);  // direct, never kArmed
 }
 
+// Phase 7 (node 8100 hardening, Torquato QA F3): on_bar()'s due-check is now
+// a bar-COUNT match (Clip::due_bar_index, frozen at arm() time from
+// Transport::bar_index()) instead of a tick-window absolute modulo -- see
+// clip_matrix.hpp's own header comment for why the old tick-window shape
+// could permanently miss its own promotion the instant a meter change landed
+// before arm(). arm()'s/on_bar()'s new `bar_index_now` parameter replaces the
+// old tick/ticks_per_bar arguments entirely; the non-4/4 exercise this file
+// used to carry (`test_on_bar_with_explicit_non_default_ticks_per_bar`) no
+// longer applies -- ClipMatrix does not consume a tick length at all anymore
+// -- and is superseded by the far more thorough Engine-level coverage in
+// test_scene_meter_gate_regression.cpp/test_clip_matrix_live_meter_change_
+// regression.cpp.
+
 void test_on_bar_does_not_fire_before_the_boundary() {
   ClipMatrix clips;
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
-  CHECK(clips.arm(0, LaunchState::kPlaying, 1));
+  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/2, /*bar_index_now=*/0));
   OnBarRecorder rec;
-  clips.on_bar(kTicksPerBar / 2, rec);
+  clips.on_bar(rec, /*bar_index_now=*/0);  // only 1 of the 2 armed bars has elapsed
   CHECK(rec.calls == 0);
   CHECK(clips.get(0)->state == LaunchState::kArmed);  // still pending
 }
@@ -130,9 +142,9 @@ void test_on_bar_does_not_fire_before_the_boundary() {
 void test_on_bar_promotes_armed_to_playing_at_the_boundary() {
   ClipMatrix clips;
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
-  CHECK(clips.arm(0, LaunchState::kPlaying, 1));
+  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/1, /*bar_index_now=*/0));
   OnBarRecorder rec;
-  clips.on_bar(kTicksPerBar, rec);
+  clips.on_bar(rec, /*bar_index_now=*/0);  // n_bars=1: due at the very next boundary
   CHECK(rec.calls == 1);
   CHECK(rec.last_id == 0);
   CHECK(rec.last_state == LaunchState::kPlaying);
@@ -143,9 +155,9 @@ void test_on_bar_promotes_queued_stop_to_stopped() {
   ClipMatrix clips;
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
   CHECK(clips.force(0, LaunchState::kPlaying));  // sounding first
-  CHECK(clips.arm(0, LaunchState::kStopped, 1));
+  CHECK(clips.arm(0, LaunchState::kStopped, /*n_bars=*/1, /*bar_index_now=*/0));
   OnBarRecorder rec;
-  clips.on_bar(kTicksPerBar, rec);
+  clips.on_bar(rec, /*bar_index_now=*/0);
   CHECK(rec.calls == 1);
   CHECK(rec.last_state == LaunchState::kStopped);
   CHECK(clips.get(0)->state == LaunchState::kStopped);
@@ -156,7 +168,7 @@ void test_on_bar_ignores_already_settled_clips() {
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
   CHECK(clips.force(0, LaunchState::kPlaying));  // settled, not pending
   OnBarRecorder rec;
-  clips.on_bar(kTicksPerBar, rec);
+  clips.on_bar(rec, /*bar_index_now=*/0);
   CHECK(rec.calls == 0);
   CHECK(clips.get(0)->state == LaunchState::kPlaying);  // unchanged
 }
@@ -164,38 +176,13 @@ void test_on_bar_ignores_already_settled_clips() {
 void test_on_bar_respects_n_bars_multi_bar_window() {
   ClipMatrix clips;
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
-  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/2));
+  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/2, /*bar_index_now=*/0));
   OnBarRecorder rec_one_bar;
-  clips.on_bar(kTicksPerBar, rec_one_bar);
-  CHECK(rec_one_bar.calls == 0);  // 1 bar is NOT a multiple of the 2-bar window
+  clips.on_bar(rec_one_bar, /*bar_index_now=*/0);
+  CHECK(rec_one_bar.calls == 0);  // 1 bar in: not yet the 2nd upcoming bar
   CHECK(clips.get(0)->state == LaunchState::kArmed);
   OnBarRecorder rec_two_bars;
-  clips.on_bar(2 * kTicksPerBar, rec_two_bars);
-  CHECK(rec_two_bars.calls == 1);
-  CHECK(clips.get(0)->state == LaunchState::kPlaying);
-}
-
-// --- Phase 7 (node T0): the threaded ticks_per_bar parameter ----------------
-
-// on_bar()'s third argument is the LIVE bar length (Engine::fire_clips threads
-// m_transport.ticks_per_bar() here every tick). A genuine non-4/4 value (a
-// 3-beat bar, 3 * kTicksPerBeat = 2880) changes the quantize window exactly
-// like the default kTicksPerBar case does, AS LONG AS the same value is
-// passed on every call between arm and fire (the stable-meter case) --
-// test_clip_matrix_live_meter_change_regression.cpp pins the DIFFERENT,
-// live-recomputed-window behavior once the value passed actually CHANGES
-// mid-flight.
-void test_on_bar_with_explicit_non_default_ticks_per_bar() {
-  ClipMatrix clips;
-  constexpr Tick kThreeBeatBar = 3 * kTicksPerBeat;  // 2880: a genuine 3/4 bar
-  CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
-  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/2));
-  OnBarRecorder rec_one_bar;
-  clips.on_bar(kThreeBeatBar, rec_one_bar, kThreeBeatBar);
-  CHECK(rec_one_bar.calls == 0);  // 1 bar (of 3 beats) is not yet the 2-bar window
-  CHECK(clips.get(0)->state == LaunchState::kArmed);
-  OnBarRecorder rec_two_bars;
-  clips.on_bar(2 * kThreeBeatBar, rec_two_bars, kThreeBeatBar);
+  clips.on_bar(rec_two_bars, /*bar_index_now=*/1);
   CHECK(rec_two_bars.calls == 1);
   CHECK(clips.get(0)->state == LaunchState::kPlaying);
 }
@@ -204,10 +191,10 @@ void test_on_bar_promotes_multiple_independent_clips_in_one_call() {
   ClipMatrix clips;
   CHECK(clips.add(TrackRole::kDrums, 0, ContentKind::kStyleSection, 0) == 0);
   CHECK(clips.add(TrackRole::kBass, 1, ContentKind::kChordSequence, 5) == 1);
-  CHECK(clips.arm(0, LaunchState::kPlaying, 1));
-  CHECK(clips.arm(1, LaunchState::kStopped, 1));
+  CHECK(clips.arm(0, LaunchState::kPlaying, /*n_bars=*/1, /*bar_index_now=*/0));
+  CHECK(clips.arm(1, LaunchState::kStopped, /*n_bars=*/1, /*bar_index_now=*/0));
   OnBarRecorder rec;
-  clips.on_bar(kTicksPerBar, rec);
+  clips.on_bar(rec, /*bar_index_now=*/0);
   CHECK(rec.calls == 2);
   CHECK(clips.get(0)->state == LaunchState::kPlaying);
   CHECK(clips.get(1)->state == LaunchState::kStopped);
@@ -234,7 +221,6 @@ int main() {
   test_on_bar_promotes_queued_stop_to_stopped();
   test_on_bar_ignores_already_settled_clips();
   test_on_bar_respects_n_bars_multi_bar_window();
-  test_on_bar_with_explicit_non_default_ticks_per_bar();
   test_on_bar_promotes_multiple_independent_clips_in_one_call();
 
   return arrangrr::test::failures();
