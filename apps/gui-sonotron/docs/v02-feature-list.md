@@ -78,15 +78,21 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
 - 64px track labels + 5 scene columns; row 0 = scene headers `n ▶`, click
   launches the whole column → `launch scene <n> quantize <1>`. `[wired]`. Done.
 - 6 track rows (drums/bass/chord/pad/arp/lead) with color dot + name. Done.
+- Per-row M/S latches in the (widened) label column, left of the name: wired to
+  the REAL `part <role> mute|solo on|off` L1 verb; share PartsModel state with
+  the rail mute/solo and drive standard solo-implies-others-dimmed semantics in
+  the grid. `[wired]`. Done.
 - Launch cell: empty → `+` placeholder (click adds a local clip);
   filled → track-tinted, click = `launch clip <id> quantize <1>` AND opens the
   clip in Sequence Edit. `[wired]` launch / `[local-only]` per-row single-play
   bookkeeping (there is no per-cell playing readback on the wire —
   `grid_model.hpp`'s documented gap), `[local-only]` cell content (no clip
   primitive content binding). Done.
-- Mini clip preview: pad row = audio waveform envelope; other rows = 16×5 dot
-  piano-roll; both deterministic from the clip label hash. `[new-widget]`
-  (`neon::clip_preview_*`). Done.
+- Mini clip preview: pad row = audio waveform envelope; other rows = a dot
+  piano-roll that is a step-cropped view (first 8 of 16 steps) of the SAME
+  shared `neon::clip_pattern(label)` the Sequence Edit canvas draws in full, so
+  the cell dots correspond exactly to the editor blocks for that clip.
+  `[new-widget]` (`neon::clip_preview_*` + `neon::clip_pattern`). Done.
 - L→R sweep bar on a playing cell while running (~1.7s loop). `[new-widget]` +
   `[local-only]` animation (gated on playing). Done.
 - Playing cell = stronger fill + track-color border + glow; opened cell = inset
@@ -122,12 +128,13 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
   `grid 1/16` + right-aligned `piano-roll | step` tabs (active = cyan bg).
   Tabs/selection are real `SeqEditModel` state. `[wired]` (model) /
   `[local-only]` (no engine echo). Done.
-- Canvas: vertical bar guides; if a clip is open → 16×8 track-colored piano-roll
-  blocks (deterministic from label) with glow + a green playhead sweeping while
-  the opened clip plays; else centered muted hint. `[new-widget]` +
-  `[local-only]` (the note blocks are procedural from the label hash — there is
-  no live `Track` step data on the wire, the documented `seqedit` gap; playhead
-  gated on playing). Done.
+- Canvas: vertical bar guides; if a clip is open → 16×5 track-colored piano-roll
+  blocks from the SHARED `neon::clip_pattern(label)` (same generator the launch
+  cell mini-preview crops from, so cell and editor always match) with glow + a
+  green playhead sweeping while the opened clip plays; else centered muted hint.
+  `[new-widget]` + `[local-only]` (the note blocks are procedural from the label
+  hash — there is no live `Track` step data on the wire, the documented
+  `seqedit` gap; playhead gated on playing). Done.
 
 ## Animations (ImGui frame clock, gated on playing + glow)
 - `sn-sweepx` cell sweep, `sn-blink` status dot, `sn-eq` master VU, sequence-edit

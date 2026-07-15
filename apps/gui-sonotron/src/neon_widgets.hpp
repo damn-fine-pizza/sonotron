@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -27,6 +28,20 @@ ImU32 u32(const ImVec4& color, float alpha_mul = 1.0F);
 // Deterministic 32-bit hash of a clip label -> the procedural preview seed
 // (FNV-1a). The same label always yields the same waveform / piano-roll.
 std::uint32_t hash_label(std::string_view label);
+
+// The canonical deterministic note pattern for one clip: `kSteps` columns,
+// each holding a pitch row in [0, kPitches) or -1 (a rest). This is the ONE
+// generator shared by the launch-cell mini-preview (clip_preview_pianoroll)
+// and the Sequence Edit canvas, so the SAME clip reads as the SAME melody in
+// both -- the cell shows a step-cropped subset (first kCellSteps columns) of
+// exactly the blocks the editor draws in full. Seed with hash_label(label).
+struct ClipPattern {
+  static constexpr int kSteps = 16;
+  static constexpr int kPitches = 5;
+  static constexpr int kCellSteps = 8;  // how many columns the mini-preview crops to
+  std::array<int, kSteps> pitch{};      // pitch[step] in [0,kPitches) or -1 for a rest
+};
+ClipPattern clip_pattern(std::uint32_t seed);
 
 // Soft outer glow behind a rounded-rect element: a few expanding translucent
 // outlines on `dl`, honoring `glow` (no-op when false). Draw BEFORE the

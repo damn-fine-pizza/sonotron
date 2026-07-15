@@ -23,13 +23,6 @@ bool mode_tab(const char* label, bool active) {
   return clicked;
 }
 
-float pr_rand(std::uint32_t& s) {
-  s ^= s << 13;
-  s ^= s >> 17;
-  s ^= s << 5;
-  return static_cast<float>(s & 0xFFFFFFu) / static_cast<float>(0xFFFFFF);
-}
-
 }  // namespace
 
 void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
@@ -95,19 +88,22 @@ void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
     return;
   }
 
-  // 16x8 piano-roll of track-colored blocks, deterministic from the clip label.
-  constexpr int kSteps = 16;
-  constexpr int kPitches = 8;
-  const float cw = avail.x / kSteps;
-  const float rh = avail.y / kPitches;
-  std::uint32_t s = neon::hash_label(model.clip_label());
+  // Full piano-roll of track-colored blocks from the SHARED ClipPattern (the
+  // same generator the launch-cell mini-preview crops from) so the open clip's
+  // editor content corresponds exactly to its cell preview. STEP left->right,
+  // PITCH low->high (pitch 0 at the bottom), matching the cell.
+  const neon::ClipPattern pat = neon::clip_pattern(neon::hash_label(model.clip_label()));
+  const int kSteps = neon::ClipPattern::kSteps;
+  const int kPitches = neon::ClipPattern::kPitches;
+  const float cw = avail.x / static_cast<float>(kSteps);
+  const float rh = avail.y / static_cast<float>(kPitches);
   for (int step = 0; step < kSteps; ++step) {
-    if (pr_rand(s) < 0.4F) {
+    const int pitch = pat.pitch[step];
+    if (pitch < 0) {
       continue;
     }
-    const int pitch = static_cast<int>(pr_rand(s) * kPitches) % kPitches;
     const ImVec2 b0(p0.x + static_cast<float>(step) * cw + 2.0F,
-                    p0.y + static_cast<float>(pitch) * rh + 2.0F);
+                    p0.y + static_cast<float>(kPitches - 1 - pitch) * rh + 2.0F);
     const ImVec2 b1(b0.x + cw - 4.0F, b0.y + rh - 4.0F);
     if (fx.glow) {
       neon::glow_rect(dl, b0, b1, track_color, 3.0F, 0.7F, fx.glow);

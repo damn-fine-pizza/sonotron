@@ -15,8 +15,21 @@ namespace sonotron {
 namespace {
 
 constexpr int kDefaultLaunchQuantizeBars = 1;
-constexpr float kLabelColWidth = 64.0F;
+// Widened from 64px to fit the dot + M + S latches + the track name (issue 6).
+constexpr float kLabelColWidth = 98.0F;
 constexpr float kCellGap = 7.0F;
+constexpr float kLatchSize = 16.0F;
+
+// A small neon M/S latch: solid tone when engaged, dark inset otherwise.
+bool grid_latch(const char* glyph, bool engaged, const ImVec4& tone) {
+  ImGui::PushStyleColor(ImGuiCol_Button, engaged ? tone : theme::kFrameBg);
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, engaged ? tone : theme::kFrameBgHover);
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, engaged ? tone : theme::kFrameBgActive);
+  ImGui::PushStyleColor(ImGuiCol_Text, engaged ? theme::kAppBg : theme::kTextSecondary);
+  const bool clicked = ImGui::Button(glyph, ImVec2(kLatchSize, kLatchSize));
+  ImGui::PopStyleColor(4);
+  return clicked;
+}
 
 // The 6 v02 launch-grid rows (spec §2b), each mapped to a GridModel part-row
 // index (so a launched cell addresses a real, stable ClipMatrix slot) and a
@@ -146,11 +159,22 @@ void render_header(V02State& fx) {
 
 }  // namespace
 
-void render_grid_panel(GridModel& model, SeqEditModel& seqedit, BrainSession& brain_session,
-                       V02State& fx) {
+void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+                       BrainSession& brain_session, V02State& fx) {
   seed_demo(model, fx);
   render_header(fx);
   ImGui::Spacing();
+
+  // Standard solo semantics: any part soloed makes the non-soloed rows read as
+  // muted (dimmed). Derived from the shared PartsModel (same state the rail
+  // mute/solo edits), so both surfaces stay consistent.
+  bool any_solo = false;
+  for (std::size_t i = 0; i < PartsModel::kPartCount; ++i) {
+    if (parts.part(i).soloed) {
+      any_solo = true;
+      break;
+    }
+  }
 
   const float cz = fx.cell_zoom;
   const std::size_t scenes = std::min<std::size_t>(model.scene_count(), 5);
@@ -185,13 +209,36 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, BrainSession& br
     const V02Row& row = kRows[r];
     const ImVec4& color = theme::kV02TrackColor[r];
 
-    // Label cell: color dot + name.
+    // Label cell: color dot + M/S latches + name, all left of the cells.
     ImGui::PushID(static_cast<int>(100 + r));
+    const std::size_t role = row.role_index;
+    const PartInfo& info = parts.part(role);
+    const bool dim = (any_solo && !info.soloed) || info.muted;
     const ImVec2 lp = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddCircleFilled(ImVec2(lp.x + 5.0F, lp.y + cz * 0.5F), 4.0F, neon::u32(color), 16);
-    ImGui::SetCursorScreenPos(ImVec2(lp.x + 14.0F, lp.y + cz * 0.5F - ImGui::GetTextLineHeight() * 0.5F));
-    ImGui::TextColored(theme::kText, "%s", row.name);
+    const float cy = lp.y + cz * 0.5F;
+    dl->AddCircleFilled(ImVec2(lp.x + 5.0F, cy), 4.0F, neon::u32(color, dim ? 0.4F : 1.0F), 16);
+
+    // M / S latches (real `part <role> mute|solo on|off` verb), vertically
+    // centered in the row's label column.
+    const std::string token(parts.part_wire_token(role));
+    const float by = cy - kLatchSize * 0.5F;
+    ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F, by));
+    if (grid_latch("M", info.muted, theme::kPink)) {
+      const bool was = info.muted;
+      parts.toggle_mute(role);
+      brain_session.send("part " + token + " mute " + (!was ? "on" : "off"));
+    }
+    ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + kLatchSize + 2.0F, by));
+    if (grid_latch("S", info.soloed, theme::kAmber)) {
+      const bool was = info.soloed;
+      parts.toggle_solo(role);
+      brain_session.send("part " + token + " solo " + (!was ? "on" : "off"));
+    }
+
+    ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + 2.0F * kLatchSize + 6.0F,
+                                     cy - ImGui::GetTextLineHeight() * 0.5F));
+    ImGui::TextColored(dim ? theme::kTextMuted : theme::kText, "%s", row.name);
     ImGui::SetCursorScreenPos(lp);
     ImGui::Dummy(ImVec2(kLabelColWidth, cz));
 

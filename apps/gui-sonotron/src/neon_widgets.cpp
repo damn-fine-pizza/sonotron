@@ -39,6 +39,22 @@ std::uint32_t hash_label(std::string_view label) {
   return h == 0 ? 0x9e3779b9u : h;  // never seed the xorshift with 0
 }
 
+ClipPattern clip_pattern(std::uint32_t seed) {
+  ClipPattern out{};
+  std::uint32_t s = seed == 0 ? 0x9e3779b9u : seed;
+  for (int step = 0; step < ClipPattern::kSteps; ++step) {
+    // ~60% of steps carry a note; its pitch row is seed-derived. The rest-check
+    // and the pitch draw consume the state in a fixed order, so the whole
+    // pattern is a pure function of the seed -- identical for cell and editor.
+    if (rand01(s) < 0.40F) {
+      out.pitch[step] = -1;
+      continue;
+    }
+    out.pitch[step] = static_cast<int>(rand01(s) * ClipPattern::kPitches) % ClipPattern::kPitches;
+  }
+  return out;
+}
+
 void glow_rect(ImDrawList* dl, const ImVec2& min, const ImVec2& max, const ImVec4& color,
                float rounding, float intensity, bool glow) {
   if (!glow) {
@@ -279,26 +295,25 @@ void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
 
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
                             std::uint32_t seed, const ImVec4& color) {
-  // A little HORIZONTAL piano-roll: STEP runs left->right (X), PITCH runs
-  // low->high (Y). Each note is a small DOT/BLOCK at (step, pitch), NOT a
-  // full-height bar. Few enough steps that each dot reads clearly even in the
-  // smallest launch cell (16 columns collapse to slivers).
+  // A little HORIZONTAL piano-roll showing a step-cropped view of the SHARED
+  // ClipPattern: the first kCellSteps columns, all kPitches rows, drawn at the
+  // SAME (step, pitch) positions the Sequence Edit canvas uses -- so a cell dot
+  // is a legible subset of the editor's blocks, never a different melody. STEP
+  // runs left->high (X), PITCH low->high (Y, pitch 0 at the bottom).
+  const ClipPattern pat = clip_pattern(seed);
+  const int steps = ClipPattern::kCellSteps;
+  const int pitches = ClipPattern::kPitches;
   const float w = max.x - min.x;
   const float h = max.y - min.y;
-  constexpr int kSteps = 8;
-  constexpr int kPitches = 5;
-  const float cw = w / kSteps;   // step column width (horizontal axis)
-  const float rh = h / kPitches;  // pitch row height (vertical axis)
+  const float cw = w / static_cast<float>(steps);
+  const float rh = h / static_cast<float>(pitches);
   const float dot_w = std::max(2.0F, cw * 0.66F);
   const float dot_h = std::max(2.0F, rh * 0.60F);
-  std::uint32_t s = seed;
-  for (int step = 0; step < kSteps; ++step) {
-    // ~60% of steps carry a note; its pitch row (0 = low, drawn at the bottom)
-    // is seed-derived.
-    if (rand01(s) < 0.40F) {
+  for (int step = 0; step < steps; ++step) {
+    const int pitch = pat.pitch[step];
+    if (pitch < 0) {
       continue;
     }
-    const int pitch = static_cast<int>(rand01(s) * kPitches) % kPitches;
     const float x0 = min.x + static_cast<float>(step) * cw + (cw - dot_w) * 0.5F;
     const float y0 = max.y - static_cast<float>(pitch + 1) * rh + (rh - dot_h) * 0.5F;
     dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + dot_w, y0 + dot_h), u32(color, 0.85F), 1.5F);

@@ -104,7 +104,7 @@ void render_layout(const Layout& layout, WorkstationState& state) {
 
   ImGui::SameLine(0.0F, kBandGap);
   begin_zone("band_hero", ImVec2(hero_w, work_h), /*scrolls=*/false);
-  render_grid_panel(state.grid, state.seqedit, state.brain_session, fx);
+  render_grid_panel(state.grid, state.seqedit, state.parts, state.brain_session, fx);
   ImGui::EndChild();
 
   ImGui::SameLine(0.0F, kBandGap);
