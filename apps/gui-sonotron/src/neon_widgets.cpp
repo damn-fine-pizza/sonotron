@@ -312,16 +312,23 @@ void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max
   const float h = max.y - min.y;
   const float cw = w / static_cast<float>(steps);
   const float rh = h / static_cast<float>(pitches);
-  const float dot_w = std::max(2.0F, cw * 0.66F);
-  const float dot_h = std::max(2.0F, rh * 0.60F);
+  // Notes as short horizontal BARS filling most of their step column (design),
+  // not centered square dots; a run of the same pitch merges into a 2-wide bar.
+  const float bar_h = std::max(2.0F, rh * 0.5F);
   for (int step = 0; step < steps; ++step) {
     const int pitch = pat.pitch[step];
     if (pitch < 0) {
       continue;
     }
-    const float x0 = min.x + static_cast<float>(step) * cw + (cw - dot_w) * 0.5F;
-    const float y0 = max.y - static_cast<float>(pitch + 1) * rh + (rh - dot_h) * 0.5F;
-    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + dot_w, y0 + dot_h), u32(color, 0.85F), 1.5F);
+    int span = 1;
+    while (step + span < steps && pat.pitch[step + span] == pitch && span < 2) {
+      ++span;
+    }
+    const float x0 = min.x + static_cast<float>(step) * cw + 0.5F;
+    const float x1 = min.x + static_cast<float>(step + span) * cw - 1.0F;
+    const float y0 = max.y - static_cast<float>(pitch + 1) * rh + (rh - bar_h) * 0.5F;
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + bar_h), u32(color, 0.85F), 1.5F);
+    step += span - 1;
   }
 }
 

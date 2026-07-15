@@ -15,10 +15,12 @@ namespace sonotron {
 namespace {
 
 constexpr int kDefaultLaunchQuantizeBars = 1;
-// Widened from 64px to fit the dot + M + S latches + the track name (issue 6).
-constexpr float kLabelColWidth = 98.0F;
+// The design's label column is 64px (square dot + track-colored name). We keep
+// the per-track M/S latches (owner: mute is per-track), compacted so the column
+// stays as close to the design as legibility allows.
+constexpr float kLabelColWidth = 86.0F;
 constexpr float kCellGap = 7.0F;
-constexpr float kLatchSize = 16.0F;
+constexpr float kLatchSize = 13.0F;
 
 // A small neon M/S latch: solid tone when engaged, dark inset otherwise.
 bool grid_latch(const char* glyph, bool engaged, const ImVec4& tone) {
@@ -120,16 +122,18 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   }
   const float fill_a = playing ? 0.26F : (hovered ? 0.16F : 0.10F);
   dl->AddRectFilled(p0, p1, neon::u32(color, fill_a), rounding);
-  dl->AddRect(p0, p1, neon::u32(color, playing ? 1.0F : 0.55F), rounding, 0,
+  dl->AddRect(p0, p1, neon::u32(color, playing ? 1.0F : 0.40F), rounding, 0,
               playing ? 1.6F : 1.0F);
   if (opened) {
-    dl->AddRect(ImVec2(p0.x + 2.0F, p0.y + 2.0F), ImVec2(p1.x - 2.0F, p1.y - 2.0F),
-                neon::u32(theme::kText, 0.7F), rounding - 2.0F, 0, 1.0F);
+    // Design: an inset ring in the TRACK color (not white).
+    dl->AddRect(ImVec2(p0.x + 1.0F, p0.y + 1.0F), ImVec2(p1.x - 1.0F, p1.y - 1.0F),
+                neon::u32(color, 0.9F), rounding - 1.0F, 0, 1.0F);
   }
 
-  // Preview in the inner rect (leave the bottom strip for the label).
-  const ImVec2 in0(p0.x + 4.0F, p0.y + 4.0F);
-  const ImVec2 in1(p1.x - 4.0F, p1.y - 14.0F);
+  // Preview in a compact horizontal band (design: notes sit in a ~20%..78%
+  // vertical band, above the label — not filling the whole cell).
+  const ImVec2 in0(p0.x + 6.0F, p0.y + size * 0.22F);
+  const ImVec2 in1(p1.x - 6.0F, p1.y - 14.0F);
   const std::uint32_t seed = neon::hash_label(label);
   if (in1.y > in0.y + 4.0F) {
     if (is_audio) {
@@ -152,8 +156,9 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   const float tw = font->CalcTextSizeA(lbl_sz, 1.0e4F, 0.0F, text.c_str()).x;
   const float tx = std::max(p0.x + 3.0F, p0.x + (size - tw) * 0.5F);
   dl->PushClipRect(p0, p1, true);
+  // Design: stopped label in the TRACK COLOR, playing label near-white.
   dl->AddText(font, lbl_sz, ImVec2(tx, p1.y - lbl_sz - 3.0F),
-              neon::u32(playing ? color : theme::kTextSecondary), text.c_str());
+              neon::u32(playing ? theme::kText : color, 0.95F), text.c_str());
   dl->PopClipRect();
 
   // L->R sweep on a playing cell while running.
@@ -250,7 +255,11 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
     const ImVec2 lp = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float cy = lp.y + cz * 0.5F;
-    dl->AddCircleFilled(ImVec2(lp.x + 5.0F, cy), 4.0F, neon::u32(color, dim ? 0.4F : 1.0F), 16);
+    // Design: a 7x7 track-colored SQUARE (glow), not a circle.
+    const ImVec2 d0(lp.x + 2.0F, cy - 3.5F);
+    const ImVec2 d1(lp.x + 9.0F, cy + 3.5F);
+    neon::glow_rect(dl, d0, d1, color, 1.0F, dim ? 0.4F : 1.0F, fx.glow && !dim);
+    dl->AddRectFilled(d0, d1, neon::u32(color, dim ? 0.4F : 1.0F), 1.0F);
 
     // M / S latches (real `part <role> mute|solo on|off` verb), vertically
     // centered in the row's label column.
@@ -271,7 +280,8 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 
     ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + 2.0F * kLatchSize + 6.0F,
                                      cy - ImGui::GetTextLineHeight() * 0.5F));
-    ImGui::TextColored(dim ? theme::kTextMuted : theme::kText, "%s", row.name);
+    // Design: the track name is in the TRACK COLOR (not white).
+    ImGui::TextColored(dim ? theme::kTextMuted : color, "%s", row.name);
     ImGui::SetCursorScreenPos(lp);
     ImGui::Dummy(ImVec2(kLabelColWidth, cz));
 
