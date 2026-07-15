@@ -156,7 +156,7 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTimeSig) == 9);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kLoop) == 10);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
-// kNone(0) .. kRetroCaptureEmpty(12), kWarnCodeCount == 13 (next free id).
+// kNone(0) .. kRetroCaptureTruncated(13), kWarnCodeCount == 14 (next free id).
 static_assert(static_cast<std::uint16_t>(WarnCode::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSchedulerFull) == 1);
 static_assert(static_cast<std::uint16_t>(WarnCode::kRouteTableFull) == 2);
@@ -170,7 +170,8 @@ static_assert(static_cast<std::uint16_t>(WarnCode::kUnsupported) == 9);
 static_assert(static_cast<std::uint16_t>(WarnCode::kLoopTableFull) == 10);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSceneTableFull) == 11);
 static_assert(static_cast<std::uint16_t>(WarnCode::kRetroCaptureEmpty) == 12);
-static_assert(kWarnCodeCount == 13);
+static_assert(static_cast<std::uint16_t>(WarnCode::kRetroCaptureTruncated) == 13);
+static_assert(kWarnCodeCount == 14);
 
 // --- Wire struct sizes: pinned to the exact measured values -----------------
 // Concrete numbers (fixed-width fields => identical on host and arm-none-eabi).

@@ -458,8 +458,16 @@ enum class WarnCode : std::uint16_t {
   // kBadArgument (mirrors kLoopErase/kLoopUndo's own precedent for "idx names
   // no registered slot").
   kRetroCaptureEmpty = 12,
+  // Phase 7 (node 6300, Torquato QA hardening): kRetroCaptureGrab succeeded
+  // (the target slot DOES hold a coherent, playable loop -- the kLoop/
+  // kGrabbed echo still fires) but the requested window held more events
+  // than the destination LoopClip's own pool capacity (kMaxLoopEvents) could
+  // fit; RetroCaptureRing::grab() keeps only the MOST RECENT
+  // capacity-worth (never the stale head), and this warn surfaces that
+  // trimming to the host instead of silently discarding it.
+  kRetroCaptureTruncated = 13,
 };
-inline constexpr std::uint16_t kWarnCodeCount = 13;
+inline constexpr std::uint16_t kWarnCodeCount = 14;
 
 // Event from core to host.
 struct OutEvent {

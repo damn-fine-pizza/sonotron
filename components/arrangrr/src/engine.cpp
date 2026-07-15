@@ -894,7 +894,12 @@ void Engine::retro_disarm(const Command& cmd, EventSink sink) {
 // SceneStep::n_bars's own clamp-not-reject convention). Quantizes the
 // grabbed content after materializing it (the SAME grid the window itself
 // used), so the result is identical in kind to a freshly recorded loop
-// (LoopBuffer::stop_record's own quantize-after step).
+// (LoopBuffer::stop_record's own quantize-after step). Torquato QA hardening:
+// RetroCaptureRing::grab() reports whether the window's own event count
+// exceeded the target LoopClip's pool capacity and had to be trimmed to the
+// MOST RECENT events -- kRetroCaptureTruncated surfaces that instead of
+// leaving it a silent drop; the grab itself still succeeded (the slot holds
+// a coherent, playable partial window), so kGrabbed still fires too.
 void Engine::retro_grab(const Command& cmd, EventSink sink) {
   LoopClip* clip = m_loop.get(cmd.idx);
   if (clip == nullptr) {
@@ -905,12 +910,16 @@ void Engine::retro_grab(const Command& cmd, EventSink sink) {
   if (cmd.a > 0) {
     n_bars = cmd.a > 255 ? std::uint8_t{255} : static_cast<std::uint8_t>(cmd.a);
   }
-  if (!m_retro.grab(m_now, m_transport.ticks_per_bar(), n_bars, *clip)) {
+  bool truncated = false;
+  if (!m_retro.grab(m_now, m_transport.ticks_per_bar(), n_bars, *clip, &truncated)) {
     sink(OutEvent::warn(WarnCode::kRetroCaptureEmpty, m_now));
     return;
   }
   clip->quantize(m_transport.ticks_per_bar());
   sink(OutEvent::loop(cmd.idx, LoopEventKind::kGrabbed, m_now));
+  if (truncated) {
+    sink(OutEvent::warn(WarnCode::kRetroCaptureTruncated, m_now));
+  }
 }
 
 // Phase 7 (node 8100, Scenes/song mode): cmd_scene dispatches the 4 verbs;

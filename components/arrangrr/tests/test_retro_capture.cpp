@@ -173,6 +173,167 @@ void test_retro_bad_args_warn() {
   CHECK(b.warns() == 1);
 }
 
+// Boundary of the port check (kMaxPorts == 4: valid ports are 0..3) and the
+// EXACT WarnCode carried on each rejection, not just "some warn happened".
+void test_retro_bad_args_boundary_and_warn_codes() {
+  Band b;
+  b.cmd(Param::kRetroCaptureArm, /*a=*/kMaxPorts);  // exactly one past the last valid port
+  CHECK(b.warns() == 1);
+  CHECK(b.ev.back().code == static_cast<std::uint16_t>(WarnCode::kBadArgument));
+  CHECK(!b.e.retro_capture().armed());
+
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureArm, /*a=*/kMaxPorts - 1);  // the last VALID port arms cleanly
+  CHECK(b.warns() == 0);
+  CHECK(b.e.retro_capture().armed());
+
+  b.cmd(Param::kLoopNew);  // register exactly one slot (idx 0)
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureGrab, 1, 0, 0, /*idx=*/5);  // idx 5 was never registered
+  CHECK(b.warns() == 1);
+  CHECK(b.ev.back().code == static_cast<std::uint16_t>(WarnCode::kBadArgument));
+
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureGrab, 1, 0, 0, /*idx=*/0);  // registered, but ring is empty
+  CHECK(b.warns() == 1);
+  CHECK(b.ev.back().code == static_cast<std::uint16_t>(WarnCode::kRetroCaptureEmpty));
+}
+
+// Port-gating: the tee is gated on BOTH armed() and the exact matching port
+// (Engine::push_midi_in: `is_note_message(msg) && m_retro.armed() && port ==
+// m_retro.port()`). Notes on a DIFFERENT port while armed must NOT be
+// captured at all.
+void test_retro_wrong_port_not_captured() {
+  Band b;
+  b.cmd(Param::kRetroCaptureArm, /*a=*/3);
+  CHECK(b.e.retro_capture().armed());
+
+  b.cmd(Param::kTransportStart);
+  b.feed_note(1, 64, 100);  // WRONG port (armed on 3)
+  b.advance(kTicksPerBar);
+  b.feed_note(1, 64, 0);
+  CHECK(b.e.retro_capture().empty());
+  CHECK(b.warns() == 0);
+
+  // The correct port still works in the same session.
+  b.feed_note(3, 67, 100);
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 67, 0);
+  CHECK(!b.e.retro_capture().empty());
+}
+
+// Double-arm: re-arming (same port or a different one) discards any prior
+// ring content -- arm()'s own documented "abandon any in-progress capture,
+// fresh start" discipline, mirrored from LoopBuffer::start_record.
+void test_retro_double_arm_clears_prior_content() {
+  Band b;
+  b.cmd(Param::kRetroCaptureArm, /*a=*/3);
+  b.cmd(Param::kTransportStart);
+  b.feed_note(3, 64, 100);
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 64, 0);
+  CHECK(!b.e.retro_capture().empty());
+
+  b.cmd(Param::kRetroCaptureArm, /*a=*/3);  // re-arm on the SAME port mid-session
+  CHECK(b.e.retro_capture().empty());       // prior content discarded
+  CHECK(b.e.retro_capture().armed());
+
+  b.feed_note(3, 64, 100);
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 64, 0);
+  CHECK(!b.e.retro_capture().empty());
+
+  b.cmd(Param::kRetroCaptureArm, /*a=*/1);  // re-arm on a DIFFERENT port
+  CHECK(b.e.retro_capture().empty());       // prior content discarded here too
+  CHECK(b.e.retro_capture().port() == 1);
+  b.feed_note(3, 64, 100);  // the OLD port no longer captures
+  CHECK(b.e.retro_capture().empty());
+  b.feed_note(1, 64, 100);  // the NEW port does
+  CHECK(!b.e.retro_capture().empty());
+}
+
+// Disarm without ever having armed: a clean no-op, no warn, stays disarmed.
+void test_retro_disarm_without_arm_is_noop() {
+  Band b;
+  CHECK(!b.e.retro_capture().armed());
+  b.cmd(Param::kRetroCaptureDisarm);
+  CHECK(b.warns() == 0);
+  CHECK(!b.e.retro_capture().armed());
+  CHECK(b.e.retro_capture().empty());
+}
+
+// The load-bearing invariant (bullet 5): disarm is truly inert GOING FORWARD,
+// not just "never armed at all". "arm, play, disarm, grab" is a valid
+// gesture (ring content is left ALONE across disarm) -- but any note played
+// AFTER the disarm must be silently dropped by the tee, never reaching the
+// ring. If the tee ever captured while disarmed, this guard fails.
+void test_retro_disarm_mid_session_truly_stops_further_capture() {
+  Band b;
+  b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
+  b.cmd(Param::kChordPlay, 60, static_cast<std::int32_t>(ChordQuality::kMaj7), 100);
+  b.cmd(Param::kLoopNew);
+  b.cmd(Param::kRetroCaptureArm, /*a=*/3);
+  b.cmd(Param::kTransportStart);
+
+  b.feed_note(3, 64, 100);  // captured while armed
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 64, 0);
+  CHECK(b.e.loops().get(0) != nullptr);
+  const std::size_t count_before_disarm = b.e.retro_capture().count();
+  CHECK(count_before_disarm >= 1);
+
+  b.cmd(Param::kRetroCaptureDisarm);
+  CHECK(!b.e.retro_capture().armed());
+  CHECK(b.e.retro_capture().count() == count_before_disarm);  // disarm alone leaves ring ALONE
+
+  b.feed_note(3, 65, 100);  // played AFTER disarm, on the SAME port -- must be dropped
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 65, 0);
+  CHECK(b.e.retro_capture().count() == count_before_disarm);  // still unchanged -- truly inert
+
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureGrab, /*a=n_bars*/ 10, 0, 0,
+        /*idx=*/0);  // grab everything the ring ever held
+  CHECK(b.warns() == 0);
+  const LoopClip* clip = b.e.loops().get(0);
+  CHECK(clip != nullptr &&
+        clip->count() == 1);  // ONLY the pre-disarm note, never the post-disarm one
+}
+
+// Re-arm after a successful grab: grab leaves ring content ALONE (so a
+// second grab on the same content is possible), but arming again clears it,
+// and a subsequent grab on the freshly-armed-but-not-yet-fed ring warns
+// kRetroCaptureEmpty exactly like a never-armed ring.
+void test_retro_rearm_after_grab_clears_ring() {
+  Band b;
+  b.cmd(Param::kLoopNew);
+  b.cmd(Param::kLoopNew);
+  b.cmd(Param::kRetroCaptureArm, /*a=*/3);
+  b.cmd(Param::kTransportStart);
+  b.feed_note(3, 64, 100);
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 64, 0);
+  CHECK(!b.e.retro_capture().empty());
+
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureGrab, /*a=*/1, 0, 0, /*idx=*/0);
+  CHECK(b.warns() == 0);
+  CHECK(!b.e.retro_capture().empty());  // grab leaves the ring content alone
+
+  // A second grab into a DIFFERENT slot, same still-armed ring, still works.
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureGrab, /*a=*/1, 0, 0, /*idx=*/1);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.loops().get(1)->count() == 1);
+
+  b.cmd(Param::kRetroCaptureArm, /*a=*/3);  // re-arm: clears the ring
+  CHECK(b.e.retro_capture().empty());
+
+  b.ev.clear();
+  b.cmd(Param::kRetroCaptureGrab, /*a=*/1, 0, 0, /*idx=*/0);
+  CHECK(b.warns() == 1);  // kRetroCaptureEmpty: nothing captured since the re-arm
+}
+
 }  // namespace
 
 int main() {
@@ -180,6 +341,12 @@ int main() {
   test_retro_disarmed_ring_stays_empty_and_grab_is_noop();
   test_retro_default_inert();
   test_retro_bad_args_warn();
+  test_retro_bad_args_boundary_and_warn_codes();
+  test_retro_wrong_port_not_captured();
+  test_retro_double_arm_clears_prior_content();
+  test_retro_disarm_without_arm_is_noop();
+  test_retro_disarm_mid_session_truly_stops_further_capture();
+  test_retro_rearm_after_grab_clears_ring();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_retro_capture: all OK\n");
   }

@@ -157,6 +157,10 @@ class LoopClip {
   constexpr const LoopEvent& event(std::size_t i) const noexcept { return m_events[i]; }
   constexpr Span<const LoopEvent> events() const noexcept { return m_events.span(); }
   constexpr bool empty() const noexcept { return m_events.empty(); }
+  // The bounded event pool's own fixed capacity (node 6300, retroactive
+  // capture's own grab() reads this to know how many of a dense window's
+  // events it can actually keep -- see retro_capture.hpp).
+  static constexpr std::size_t capacity() noexcept { return kMaxLoopEvents; }
 
   // The raw, content-derived length: the furthest event end. Unlike
   // ChordSequence::length() (which trusts the LAST pushed step, valid only

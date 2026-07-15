@@ -309,3 +309,12 @@ arrangrr_test(test_scene_meter_gate_regression regression)
 # test_loop/test_scene. Thorough functional/regression QA is Torquato's
 # follow-up.
 arrangrr_test(test_retro_capture functional)
+# test_retro_capture_ring (Torquato's thorough follow-up): drives
+# RetroCaptureRing DIRECTLY (bypassing Engine/the ABI), pinning the pure
+# ring/window logic byte for byte -- overflow/oldest-out eviction, the
+# invalidate-on-overwrite late-note-off guard, grab() window-boundary
+# clipping (exact/short/boundary-crossing/empty), and a genuine finding
+# (host LoopClip pool smaller than the ring: a dense grab silently drops the
+# RECENT tail of the window instead of the stale head). Subject is one pure
+# module (RetroCaptureRing itself), same precedent as test_timeline -> unit.
+arrangrr_test(test_retro_capture_ring unit)

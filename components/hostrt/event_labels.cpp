@@ -26,6 +26,7 @@ const char* warn_name(std::uint16_t code) {
       "loop_table_full",
       "scene_table_full",
       "retro_capture_empty",
+      "retro_capture_truncated",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == kWarnCodeCount,
                 "every WarnCode needs a wire name");

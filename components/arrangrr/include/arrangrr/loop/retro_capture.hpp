@@ -120,35 +120,68 @@ class RetroCaptureRing {
   // starts at 0 -- a normal, playable, re-harmonizing loop, identical in kind
   // to a recorded one. Returns false when the ring holds nothing inside that
   // window (including an entirely empty/never-armed ring) or `bar_ticks==0`.
-  bool grab(Tick now, Tick bar_ticks, std::uint8_t n_bars, LoopClip& out) const noexcept {
+  //
+  // Torquato QA (node 6300 hardening): the destination LoopClip has its OWN
+  // fixed capacity (out.capacity(), kMaxLoopEvents), independent of and
+  // potentially SMALLER than this ring's own kMaxRetroCaptureEvents (true on
+  // host, config.hpp's own comment). When the window holds more overlapping
+  // events than `out` can fit, keep the MOST RECENT ones -- the material
+  // closest to `now`, what "grab last N bars" actually wants -- never the
+  // stale head a naive oldest-to-newest fill-until-full would keep.
+  // `truncated` (optional) is set to whether this trimming actually happened,
+  // so a caller (Engine::retro_grab) can surface it instead of the silent
+  // drop LoopClip::record's own pool-full behavior would otherwise hide.
+  bool grab(Tick now, Tick bar_ticks, std::uint8_t n_bars, LoopClip& out,
+            bool* truncated = nullptr) const noexcept {
+    if (truncated != nullptr) {
+      *truncated = false;
+    }
     if (m_count == 0 || bar_ticks == 0) {
       return false;
     }
     const std::uint8_t bars = n_bars < 1 ? std::uint8_t{1} : n_bars;
     const Tick window = bar_ticks * static_cast<Tick>(bars);
     const Tick window_start = now > window ? now - window : 0;
-    // First pass: does the window actually contain anything? Two O(m_count)
-    // passes over a bounded, compile-time-capped array is cheap -- grab() is
-    // a one-shot user gesture, never the per-tick hot path.
-    bool any = false;
-    for (std::size_t i = 0; i < m_count && !any; ++i) {
-      any = window_overlap(m_ring[physical(i)], window_start, now).overlaps;
+    // First pass: how many captured events overlap the window at all? Two
+    // O(m_count) passes over a bounded, compile-time-capped array is cheap --
+    // grab() is a one-shot user gesture, never the per-tick hot path.
+    std::size_t overlap_count = 0;
+    for (std::size_t i = 0; i < m_count; ++i) {
+      if (window_overlap(m_ring[physical(i)], window_start, now).overlaps) {
+        ++overlap_count;
+      }
     }
-    if (!any) {
+    if (overlap_count == 0) {
       return false;
     }
+    // Skip the oldest `skip` overlapping events so only the trailing
+    // out.capacity()-worth survive -- still visited in chronological
+    // (oldest-to-newest within the kept set) order below, so the resulting
+    // loop plays back correctly.
+    const std::size_t capacity = out.capacity();
+    const std::size_t skip = overlap_count > capacity ? overlap_count - capacity : 0;
+    if (truncated != nullptr) {
+      *truncated = skip > 0;
+    }
     out.clear();
+    std::size_t seen = 0;
     for (std::size_t i = 0; i < m_count; ++i) {
       const LoopEvent& ev = m_ring[physical(i)];
       const WindowOverlap ov = window_overlap(ev, window_start, now);
       if (!ov.overlaps) {
         continue;
       }
+      if (seen < skip) {
+        ++seen;
+        continue;
+      }
+      ++seen;
       LoopEvent rebased = ev;
       rebased.start = ov.rel_start;
       rebased.duration = ov.rel_end - ov.rel_start;
-      // Pool-full drop is graceful degradation, same discipline as every
-      // other bounded pool here (LoopBuffer::note_on's own comment).
+      // Never pool-full here by construction (the kept count is exactly
+      // min(overlap_count, capacity)) -- unlike the pre-fix version, this
+      // record() call cannot silently drop anything.
       (void)out.record(rebased);
     }
     return true;
