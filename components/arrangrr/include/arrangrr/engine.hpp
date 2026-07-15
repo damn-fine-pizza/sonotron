@@ -17,6 +17,7 @@
 #include "arrangrr/perf/performance.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
 #include "arrangrr/routing/router.hpp"
+#include "arrangrr/scene/scene_chain.hpp"
 #include "arrangrr/timeline/timeline.hpp"
 #include "chorddet/followed_context.hpp"
 #include "chorddet/stage.hpp"
@@ -135,6 +136,12 @@ class Engine {
   // own in-engine equivalent, see cmd_loop in engine.cpp for the ABI path).
   const LoopBuffer& loops() const noexcept { return m_loop; }
   LoopBuffer& loops() noexcept { return m_loop; }
+  // Phase 7 (node 8100, Scenes/song mode): the song-mode scene chain, mirroring
+  // loops()'/sequences()' own const+mutable accessor pair. Host/test code
+  // registers scene steps directly through the mutable accessor (kSceneAdd's
+  // own in-engine equivalent, see cmd_scene in engine.cpp for the ABI path).
+  const SceneChain& scenes() const noexcept { return m_scene_chain; }
+  SceneChain& scenes() noexcept { return m_scene_chain; }
   // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
   // Performance"): pad-bank wrapper bookkeeping and the Performance recall
   // store, mirroring clips()' own const+mutable accessor pair. Host code
@@ -301,12 +308,18 @@ class Engine {
     // followed context BEFORE the arranger fires the bar — the same
     // bar-boundary point at which the arranger applies pending style/section
     // switches, ordered so the arranger reads the freshly-committed chord.
-    // Phase 7 (node T0): the bar-boundary gate reads the LIVE Transport time
-    // signature instead of the compile-time kTicksPerBar constant -- a
-    // default-constructed Transport computes the identical value (common/
-    // time.hpp's own byte-identity gate), so this is byte-identical until
-    // something genuinely calls set_time_sig with a non-4/4 value.
-    if (m_transport.tick() % m_transport.ticks_per_bar() == 0) {
+    // Phase 7 (node 8100 finding, T0 follow-up): the bar-boundary gate is now
+    // Transport::at_bar_boundary(), a re-anchored counter, NOT the tempting
+    // `tick % ticks_per_bar() == 0` absolute modulo -- that modulo only
+    // reproduces the correct boundary PHASE for a constant meter; the moment
+    // ticks_per_bar() changes MID-SONG (set_time_sig), the modulo silently
+    // re-phases the whole grid back to what tick 0 would have produced under
+    // the NEW meter instead of continuing from the tick the change actually
+    // landed on (see Transport::at_bar_boundary's own header comment for the
+    // worked example). Byte-identical for the default (never-changing)
+    // meter: a default-constructed Transport's re-anchored grid still lands
+    // on exactly 0, kTicksPerBar, 2*kTicksPerBar, ..., bit for bit.
+    if (m_transport.at_bar_boundary()) {
       const bool had_pending = m_chords.pending().valid;
       const Producer promoted_by = m_chords.pending_source();
       m_chords.commit_bar();
@@ -334,6 +347,18 @@ class Engine {
       // since a Drum/CC hit has no cross-subsystem read/write the way a
       // recall's style/section change does.
       apply_pending_pad_fires(sink);
+      // Phase 7 (node 8100, Scenes/song mode): the SceneChain's own per-bar
+      // driver -- placed LAST in this block (after an explicit pending
+      // Performance recall, which still wins if BOTH happen to close on the
+      // same bar) so a scene transition's apply_performance/set_time_sig see
+      // every other subsystem's this-bar state first.
+      fire_scene(sink);
+      // Re-anchors the NEXT bar boundary using whatever ticks_per_bar() is
+      // live NOW -- i.e. AFTER fire_scene (and apply_pending_performance_
+      // recall above) have had a chance to call set_time_sig this tick, so a
+      // meter change takes effect for the bar STARTING at this transition,
+      // never retroactively re-phasing a boundary already consumed.
+      m_transport.advance_bar_tick();
     }
     fire_arranger(m_transport.tick(), sink);
     // Phase 7 (node 6000, the Looper): runs AFTER fire_arranger, same as the
@@ -397,6 +422,7 @@ class Engine {
   void cmd_fx(const Command& cmd, EventSink sink);     // Phase-5 Item #10: MIDI-FX insert chain
   void cmd_master_transpose(const Command& cmd, EventSink sink);  // Phase-6 Theme 3 Item #1
   void cmd_loop(const Command& cmd, EventSink sink);              // Phase 7 (node 6000): the Looper
+  void cmd_scene(const Command& cmd, EventSink sink);  // Phase 7 (node 8100): Scenes/song mode
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on
@@ -532,6 +558,28 @@ class Engine {
   // -- LoopBuffer itself has no notion of "is this slot playing"; ClipMatrix
   // already owns that truth (same scope discipline fire_clips observes).
   void fire_loop(Tick transport_tick, EventSink sink);
+
+  // cmd_scene case handlers (Phase 7, node 8100), split out for the same
+  // reason.
+  void scene_add(const Command& cmd, EventSink sink);
+  void scene_clear(const Command& cmd, EventSink sink);
+  void scene_play(const Command& cmd, EventSink sink);
+  void scene_stop(const Command& cmd, EventSink sink);
+  // The ONE place a scene TRANSITION becomes a real musical effect (mirrors
+  // apply_clip_content's own placement for the clip primitive): applies the
+  // destination Performance (referenced by SLOT INDEX, §2/§4 -- never an
+  // embedded copy) THEN the step's own T0 TimeSig override, so a Performance
+  // shared across several scenes with different meters still gets the
+  // SCENE's own meter, not whatever the snapshot itself carried. Called
+  // SYNCHRONOUSLY from scene_play (step 0, the same "runs even before the
+  // ordinary per-tick pass would ever reach it" precedent LoopBuffer/
+  // ChordSequencer's own immediate-launch already established) and from
+  // fire_scene's own per-bar driver.
+  void apply_scene_transition(std::size_t step_index, const SceneStep& step, EventSink sink);
+  // Drives the SceneChain's own bar-boundary cadence (Engine::on_tick's
+  // existing bar gate, Fork B: own transport, NOT ClipMatrix) -- a no-op pass
+  // until the chain is ever kScenePlay'd.
+  void fire_scene(EventSink sink);
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
@@ -841,6 +889,13 @@ class Engine {
   PerformanceStore m_perfs;
   BoundaryLatch m_perf_recall;
   std::uint16_t m_perf_recall_slot = 0;
+  // Phase 7 (node 8100, Scenes/song mode -- Fork B, own transport): the
+  // song-mode scene chain, declared right after m_perfs since every step it
+  // holds REFERENCES a PerformanceStore slot index (never an embedded copy,
+  // §2/§4 of the scope doc) -- driven from Engine::on_tick's own bar-boundary
+  // gate (fire_scene), a sibling of fire_chord_seq/fire_loop, NOT wired
+  // through m_clips/ClipMatrix.
+  SceneChain m_scene_chain;
   // Torquato finding 1 (Phase-6 Theme 3 Item #2 hand-off): kDrum/kCC's own
   // arm-at-boundary state, ONE BoundaryLatch per flat pad slot (unlike
   // m_perf_recall's single instance -- several pads can be armed

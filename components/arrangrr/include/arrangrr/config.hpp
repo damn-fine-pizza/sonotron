@@ -165,4 +165,29 @@ static_assert((kMaxLoopSlots + 1) * kMaxLoopEvents * 12ull <= 512ull * 1024ull,
               "LoopBuffer pool (content + one undo shadow): keep it inside the D33 SRAM envelope");
 #endif
 
+// SceneChain (Phase 7, node 8100, "Scenes / song mode" -- docs/reflections/
+// phase7-scope-6000-8100-clip-timeline-seam.md, Fork B RESOLVED = own
+// transport): a bounded, static (no-heap on EITHER target, D32) ordered list
+// of scene steps, each referencing a PerformanceStore slot INDEX (never an
+// embedded Performance copy, per that scope doc's §2/§4) plus its own T0
+// TimeSig. NOT a pool of several independent chains (unlike ChordSequencer's
+// own add_sequence/use pool) -- 8100 is one linear song, so ONE constant
+// (kMaxScenes, the chain's own step capacity) is the whole budget; no second
+// "kMaxSceneChainSteps" constant is needed because there is no chain-vs-step
+// split to make.
+//
+// Budget: SceneStep is a 12-byte POD (pinned by
+// static_assert(sizeof(SceneStep) == 12) in arrangrr/scene/scene_chain.hpp,
+// matching LoopEvent/ChordStep's own 12 B chord-relative precedent), so
+// kMaxScenes x 12 B stays a trivial slice of the STM32H743 512 KB envelope
+// even at generous headroom -- no target-conditional split is needed the way
+// kMaxLoopSlots/kMaxLoopEvents required (that pool's per-slot EVENT capacity
+// was the real SRAM pressure; a song's own SCENE COUNT is orders of magnitude
+// smaller by nature).
+inline constexpr std::size_t kMaxScenes = 64;
+static_assert(kMaxScenes >= 1 && kMaxScenes <= 256,
+              "SceneChain pool: keep the song-mode step chain bounded (D33)");
+static_assert(kMaxScenes * 12ull <= 512ull * 1024ull,
+              "SceneChain pool: keep it inside the D33 SRAM envelope");
+
 }  // namespace arrangrr

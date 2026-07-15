@@ -329,6 +329,35 @@ enum class Param : std::uint16_t {
                           //     = content-derived, 1 fixed = explicit tick
                           //     length in b, 2 quantized = snap the content
                           //     length up to the grid in b, ticks). 6400.
+  // Phase 7 (node 8100, Scenes/song mode -- docs/reflections/phase7-scope-
+  // 6000-8100-clip-timeline-seam.md, Fork B RESOLVED = own transport):
+  // SceneChain (arrangrr/scene/scene_chain.hpp) is a bounded, ordered list of
+  // scene steps, each referencing a PerformanceStore slot INDEX (never an
+  // embedded Performance copy) plus its own T0 TimeSig. Advances at BAR
+  // boundaries, mirroring ChordSequencer's own play()/on_tick() cadence --
+  // NOT wired through ClipMatrix/kSceneQuantize, which stays the GUI's own
+  // grid-column "Scene" (performance.hpp's header comment already draws that
+  // line).
+  kSceneAdd = 65,    // do: appends a new scene step to the chain (mirrors
+                     //     kLoopNew/kClipAdd's own host/script-only
+                     //     registration convention -- no return-value echo,
+                     //     the host tracks the sequential id).
+                     //     a = performance_slot (0..kMaxPerformances-1)
+                     //     b = n_bars (low byte, 1..255; 0 clamps to 1) |
+                     //         (beats_per_bar << 8) (high byte; 0 = default
+                     //         4/4, else must be in
+                     //         [kMinBeatsPerBar, kMaxBeatsPerBar])
+                     //     c = SceneTransitionKind
+  kSceneClear = 66,  // do: clears the whole chain (mirrors kSeqClear; no idx).
+  kScenePlay = 67,   // do: starts the chain from step 0 -- applies step 0's
+                     //     Performance + TimeSig SYNCHRONOUSLY (mirrors
+                     //     kSeqPlay/kLoopRecordStart's own "runs even if the
+                     //     transport handling has not reached this tick yet"
+                     //     precedent). Subsequent steps advance from
+                     //     Engine::on_tick's own bar-boundary gate.
+  kSceneStop = 68,   // do: stops the chain from advancing (content and
+                     //     current position are left alone; a later
+                     //     kScenePlay always restarts from step 0).
 };
 
 // ============================================================================
@@ -388,8 +417,11 @@ enum class WarnCode : std::uint16_t {
   kUnsupported = 9,  // parameter reserved by the ABI but not implemented yet
   // Phase 7 (node 6000, the Looper): the LoopBuffer pool (kLoopNew) is full.
   kLoopTableFull = 10,
+  // Phase 7 (node 8100, Scenes/song mode): the SceneChain pool (kSceneAdd) is
+  // full (kMaxScenes, config.hpp).
+  kSceneTableFull = 11,
 };
-inline constexpr std::uint16_t kWarnCodeCount = 11;
+inline constexpr std::uint16_t kWarnCodeCount = 12;
 
 // Event from core to host.
 struct OutEvent {

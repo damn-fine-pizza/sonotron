@@ -44,6 +44,10 @@ class TestEngine {
   // own const observation accessor -- pure forwarding to Engine::loops(),
   // already public production API.
   const LoopBuffer& loops() const noexcept { return engine().loops(); }
+  // Phase 7 (node 8100, Scenes/song mode) test seam: mirrors loops()' own
+  // pure-forwarding accessor, pure forwarding to Engine::scenes(), already
+  // public production API.
+  const SceneChain& scenes() const noexcept { return engine().scenes(); }
   // Phase-5 Item #9 test seam (Torquato): mirrors clips()' own const+mutable
   // accessor pair. PadEngine/PerformanceStore state is observed through the
   // ABI in every functional pad/perf test (test_pad.cpp/test_performance.cpp)

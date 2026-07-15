@@ -266,3 +266,13 @@ arrangrr_test(test_loop_wrap_and_idempotency_regression regression)
 # (kMaxLoopEvents) degrading gracefully -> functional, same precedent as
 # test_clip/test_fx (the subject is Engine's own cross-producer wiring).
 arrangrr_test(test_loop_ops functional)
+# test_scene (Phase 7, node 8100, Scenes/song mode -- docs/reflections/
+# phase7-scope-6000-8100-clip-timeline-seam.md, Fork B RESOLVED = own
+# transport): the MINIMAL happy-path pass -- a 2-scene chain advancing at the
+# right bar and applying each transition's Performance, a non-4/4 scene step
+# actually moving Transport::ticks_per_bar() AND the re-anchored next-bar-
+# boundary regression guard, plus inert/default-path byte-identity checks.
+# Subject is Engine's own cross-producer wiring (cmd_scene/fire_scene/
+# apply_scene_transition) -> functional, same precedent as test_clip/
+# test_loop. Thorough functional/regression QA is Torquato's follow-up.
+arrangrr_test(test_scene functional)

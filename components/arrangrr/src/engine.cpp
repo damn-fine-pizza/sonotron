@@ -107,6 +107,12 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kLoopLength:
       cmd_loop(cmd, sink);
       break;
+    case Param::kSceneAdd:
+    case Param::kSceneClear:
+    case Param::kScenePlay:
+    case Param::kSceneStop:
+      cmd_scene(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -140,6 +146,22 @@ void Engine::cmd_transport(const Command& cmd, EventSink sink) {
       fire_timeline(0, sink);  // grid step 0 plays on start, like the F8
       fire_chord_seq(0, sink);
       fire_arranger(0, sink);
+      // Phase 7 (node 8100 finding): Runtime::advance_ticks only ever calls
+      // Engine::on_tick for FUTURE ticks (current+1 onward), so tick 0's own
+      // bar-boundary gate (chord commit_bar/fire_clips/perf recall/pad fires/
+      // fire_scene) never runs through on_tick -- it never did, even under
+      // the old `tick % ticks_per_bar == 0` check, since that check only ever
+      // executed INSIDE on_tick. What DOES matter for the NEW re-anchored
+      // gate (Transport::at_bar_boundary/advance_bar_tick) is seeding
+      // m_next_bar_tick past this synchronous tick-0 handling: fire_arranger
+      // above may have just applied a deferred style switch's OWN time
+      // signature (apply_style_time_sig), so this reads ticks_per_bar()
+      // AFTER that effect, exactly mirroring what the old stateless modulo
+      // recomputed fresh on every on_tick call -- byte-identical for the
+      // default (never-changing) meter, since ticks_per_bar() is still
+      // kTicksPerBar here and this simply seeds next_bar_tick to
+      // kTicksPerBar, the same first match the old modulo produced.
+      m_transport.advance_bar_tick();
       flush(sink);
       sink(OutEvent::transport(static_cast<std::uint16_t>(m_transport.state()), m_now));
       break;
@@ -836,6 +858,117 @@ void Engine::loop_length(const Command& cmd, EventSink sink) {
   } else if (mode == LoopLengthMode::kQuantized) {
     clip->quantize_grid = static_cast<Tick>(cmd.b);
   }
+}
+
+// Phase 7 (node 8100, Scenes/song mode): cmd_scene dispatches the 4 verbs;
+// scene_add/scene_clear/scene_play/scene_stop each own their own validation,
+// mirroring cmd_loop's own per-verb split.
+void Engine::cmd_scene(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kSceneAdd:
+      scene_add(cmd, sink);
+      break;
+    case Param::kSceneClear:
+      scene_clear(cmd, sink);
+      break;
+    case Param::kScenePlay:
+      scene_play(cmd, sink);
+      break;
+    case Param::kSceneStop:
+    default:
+      scene_stop(cmd, sink);
+      break;
+  }
+}
+
+// Host/script-only registration (mirrors kLoopNew/kClipAdd's own convention:
+// no return-value echo, the host tracks the sequential id). a =
+// performance_slot; b = n_bars (low byte, 0 clamps to 1) | (beats_per_bar <<
+// 8) (high byte, 0 = default 4/4); c = SceneTransitionKind.
+void Engine::scene_add(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPerformances) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  if (cmd.c < 0 || cmd.c > static_cast<std::int32_t>(SceneTransitionKind::kCut)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto packed_b = static_cast<std::uint32_t>(cmd.b);
+  const auto n_bars = static_cast<std::uint8_t>(packed_b & 0xFFu);
+  const auto beats_per_bar_wire = static_cast<std::uint8_t>((packed_b >> 8) & 0xFFu);
+  const std::uint8_t beats_per_bar = beats_per_bar_wire == 0 ? kBeatsPerBar : beats_per_bar_wire;
+  if (beats_per_bar < kMinBeatsPerBar || beats_per_bar > kMaxBeatsPerBar) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  SceneStep step;
+  step.performance_slot = static_cast<std::uint16_t>(cmd.a);
+  step.n_bars = n_bars == 0 ? std::uint8_t{1} : n_bars;
+  step.time_sig.beats_per_bar = beats_per_bar;
+  step.transition = static_cast<SceneTransitionKind>(cmd.c);
+  if (!m_scene_chain.add_scene(step)) {
+    sink(OutEvent::warn(WarnCode::kSceneTableFull, m_now));
+  }
+}
+
+void Engine::scene_clear(const Command& cmd, EventSink sink) {
+  (void)cmd;
+  (void)sink;
+  m_scene_chain.clear();
+}
+
+// Starts the chain from step 0 -- fires step 0's transition SYNCHRONOUSLY
+// (SceneChain::play's own header comment explains why: Runtime::advance_ticks
+// only ever calls Engine::on_tick for FUTURE ticks, so step 0 would otherwise
+// never be applied, mirroring LoopBuffer/ChordSequencer's own immediate-
+// launch precedent).
+void Engine::scene_play(const Command& cmd, EventSink sink) {
+  (void)cmd;
+  const bool started = m_scene_chain.play(
+      [&](std::size_t idx, const SceneStep& step) { apply_scene_transition(idx, step, sink); });
+  if (!started) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+  }
+}
+
+void Engine::scene_stop(const Command& cmd, EventSink sink) {
+  (void)cmd;
+  (void)sink;
+  m_scene_chain.stop();
+}
+
+// The ONE place a scene transition becomes a real musical effect (mirrors
+// apply_clip_content's own placement for the clip primitive): the
+// Performance is applied FIRST (it may carry its own beats_per_bar, captured
+// independently of any scene), then the STEP's own T0 TimeSig explicitly
+// OVERRIDES it -- a Performance shared across several scenes with different
+// meters always ends up in the meter its OWN scene declares, not whatever
+// the snapshot happened to carry. Emits its own kTimeSig ONLY when the
+// override actually moves the value (apply_performance's own confirmation
+// dump already announced the Performance's own beats_per_bar a moment
+// earlier; re-announcing an unchanged value would be redundant), mirroring
+// apply_style_time_sig's own on-change-only discipline.
+void Engine::apply_scene_transition(std::size_t step_index, const SceneStep& step, EventSink sink) {
+  (void)step_index;
+  if (const Performance* perf = m_perfs.get(step.performance_slot); perf != nullptr) {
+    apply_performance(*perf, sink);
+  }
+  const std::uint8_t before = m_transport.time_sig().beats_per_bar;
+  if (step.time_sig.beats_per_bar != before &&
+      m_transport.set_time_sig(step.time_sig.beats_per_bar)) {
+    sink(OutEvent::time_sig(m_transport.time_sig().beats_per_bar, m_now));
+  }
+}
+
+// Drives the SceneChain's own bar-boundary cadence (Engine::on_tick's
+// existing bar gate, sibling of apply_pending_performance_recall/
+// apply_pending_pad_fires) -- a no-op pass until the chain is ever
+// kScenePlay'd (SceneChain::on_bar itself returns immediately while
+// !m_playing).
+void Engine::fire_scene(EventSink sink) {
+  m_scene_chain.on_bar(
+      [&](std::size_t idx, const SceneStep& step) { apply_scene_transition(idx, step, sink); });
 }
 
 // Feeds a captured live note-on/off into the LoopBuffer (Engine::

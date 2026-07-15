@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kLoopLength(64). Next free id is 65.
+// kNone(0) .. kSceneStop(68). Next free id is 69.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -119,6 +119,13 @@ static_assert(static_cast<std::uint16_t>(Param::kLoopRecordStop) == 61);
 static_assert(static_cast<std::uint16_t>(Param::kLoopErase) == 62);
 static_assert(static_cast<std::uint16_t>(Param::kLoopUndo) == 63);
 static_assert(static_cast<std::uint16_t>(Param::kLoopLength) == 64);
+// Phase 7 (node 8100, Scenes/song mode -- docs/reflections/phase7-scope-6000-
+// 8100-clip-timeline-seam.md, Fork B RESOLVED = own transport): song-mode
+// scene-chain registration/transport verbs.
+static_assert(static_cast<std::uint16_t>(Param::kSceneAdd) == 65);
+static_assert(static_cast<std::uint16_t>(Param::kSceneClear) == 66);
+static_assert(static_cast<std::uint16_t>(Param::kScenePlay) == 67);
+static_assert(static_cast<std::uint16_t>(Param::kSceneStop) == 68);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kLoop(10). Next free id is 11.
@@ -156,7 +163,8 @@ static_assert(static_cast<std::uint16_t>(WarnCode::kSeqTableFull) == 7);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSeqEmpty) == 8);
 static_assert(static_cast<std::uint16_t>(WarnCode::kUnsupported) == 9);
 static_assert(static_cast<std::uint16_t>(WarnCode::kLoopTableFull) == 10);
-static_assert(kWarnCodeCount == 11);
+static_assert(static_cast<std::uint16_t>(WarnCode::kSceneTableFull) == 11);
+static_assert(kWarnCodeCount == 12);
 
 // --- Wire struct sizes: pinned to the exact measured values -----------------
 // Concrete numbers (fixed-width fields => identical on host and arm-none-eabi).
