@@ -279,23 +279,29 @@ void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
 
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
                             std::uint32_t seed, const ImVec4& color) {
+  // A little HORIZONTAL piano-roll: STEP runs left->right (X), PITCH runs
+  // low->high (Y). Each note is a small DOT/BLOCK at (step, pitch), NOT a
+  // full-height bar. Few enough steps that each dot reads clearly even in the
+  // smallest launch cell (16 columns collapse to slivers).
   const float w = max.x - min.x;
   const float h = max.y - min.y;
-  constexpr int kSteps = 16;
+  constexpr int kSteps = 8;
   constexpr int kPitches = 5;
-  const float cw = w / kSteps;
-  const float rh = h / kPitches;
+  const float cw = w / kSteps;   // step column width (horizontal axis)
+  const float rh = h / kPitches;  // pitch row height (vertical axis)
+  const float dot_w = std::max(2.0F, cw * 0.66F);
+  const float dot_h = std::max(2.0F, rh * 0.60F);
   std::uint32_t s = seed;
   for (int step = 0; step < kSteps; ++step) {
-    // ~55% of steps carry a note; its pitch row is seed-derived.
-    if (rand01(s) < 0.45F) {
+    // ~60% of steps carry a note; its pitch row (0 = low, drawn at the bottom)
+    // is seed-derived.
+    if (rand01(s) < 0.40F) {
       continue;
     }
     const int pitch = static_cast<int>(rand01(s) * kPitches) % kPitches;
-    const float x0 = min.x + static_cast<float>(step) * cw + 1.0F;
-    const float y0 = min.y + static_cast<float>(pitch) * rh + 1.0F;
-    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + cw - 2.0F, y0 + rh - 2.0F), u32(color, 0.8F),
-                      1.5F);
+    const float x0 = min.x + static_cast<float>(step) * cw + (cw - dot_w) * 0.5F;
+    const float y0 = max.y - static_cast<float>(pitch + 1) * rh + (rh - dot_h) * 0.5F;
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + dot_w, y0 + dot_h), u32(color, 0.85F), 1.5F);
   }
 }
 

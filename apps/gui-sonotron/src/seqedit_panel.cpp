@@ -52,13 +52,19 @@ void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
   ImGui::SameLine(0.0F, 12.0F);
   ImGui::TextColored(theme::kTextMuted, "grid 1/%d", model.grid_division());
 
-  // Right-aligned mode tabs.
+  // Right-aligned mode tabs, sized to fit BOTH labels fully (a SmallButton is
+  // text + 2*FramePadding.x wide; reserve exactly that for each so neither
+  // "piano-roll" nor "step" is clipped, at any DPI/font size).
   ImGui::SameLine();
-  ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 130.0F);
+  const float pad2 = ImGui::GetStyle().FramePadding.x * 2.0F;
+  const float w_pr = ImGui::CalcTextSize("piano-roll").x + pad2;
+  const float w_st = ImGui::CalcTextSize("step").x + pad2;
+  const float tab_gap = 6.0F;
+  ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - (w_pr + tab_gap + w_st));
   if (mode_tab("piano-roll", model.view() == SeqEditView::kPianoRoll)) {
     model.set_view(SeqEditView::kPianoRoll);
   }
-  ImGui::SameLine(0.0F, 4.0F);
+  ImGui::SameLine(0.0F, tab_gap);
   if (mode_tab("step", model.view() == SeqEditView::kStep)) {
     model.set_view(SeqEditView::kStep);
   }

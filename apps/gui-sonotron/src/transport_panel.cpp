@@ -72,7 +72,7 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session, V0
   static int bpm = 120;
   static int transpose_semitones = 0;
   ImGui::SameLine(0.0F, 14.0F);
-  begin_inset("tempo_inset", 300.0F, row_h);
+  begin_inset("tempo_inset", 348.0F, row_h);
   theme::text_bold_colored(theme::kText, "%d", bpm);
   ImGui::SameLine(0.0F, 3.0F);
   ImGui::TextColored(theme::kTextMuted, "BPM");
@@ -126,7 +126,7 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session, V0
   // bar:beat:pulse readout (REAL, from the kBeat heartbeat). "— : — : ··" when
   // stopped / never positioned.
   ImGui::SameLine(0.0F, 10.0F);
-  begin_inset("beat_inset", 118.0F, row_h);
+  begin_inset("beat_inset", 150.0F, row_h);
   if (app_state.bar() == 0) {
     ImGui::TextColored(theme::kTextMuted, "\xE2\x80\x94 : \xE2\x80\x94 : \xC2\xB7\xC2\xB7");
   } else {
