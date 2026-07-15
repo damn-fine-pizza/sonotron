@@ -549,15 +549,17 @@ int main(int argc, char** argv) {
   // the sequence-edit note canvas) stay honest placeholders — see each
   // model/panel pair's own header comment for the exact gap.
   sonotron::BrowserModel browser_model;
-  sonotron::GridModel grid_model;
+  sonotron::GridModel grid_model(5);  // v02 launch grid: 5 scene columns
   sonotron::SeqEditModel seqedit_model;
   sonotron::PartsModel parts_model;
+  sonotron::V02State v02_state;  // v02 redesign: glow flag, frame clock, local intent
   sonotron::WorkstationState workstation_state{.app_state = app_state,
                                                .brain_session = brain_session,
                                                .browser = browser_model,
                                                .grid = grid_model,
                                                .seqedit = seqedit_model,
-                                               .parts = parts_model};
+                                               .parts = parts_model,
+                                               .fx = v02_state};
 
   const int max_frames = max_frames_from_env();
   const char* screenshot_path = screenshot_path_from_env();

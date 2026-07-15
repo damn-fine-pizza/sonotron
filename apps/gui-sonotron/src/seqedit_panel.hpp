@@ -1,18 +1,20 @@
 #pragma once
 
 #include "seqedit_model.hpp"
+#include "v02_state.hpp"
 
-// Renders the Sequence Edit zone (ux-workstation.md §4.5/§6). Declared here
-// as pure data/interface (SeqEditModel only, no ImGui) — see the
+// Renders the v02 SEQUENCE EDIT zone (v02-workstation-spec.md §3). Declared
+// here as pure data/interface (SeqEditModel + V02State, no ImGui) -- see the
 // *_panel/*_model split invariant.
 
 namespace sonotron {
 
-// Renders the toolbar (part/clip selector, record-arm, grid-division
-// stepper, piano-roll/step view toggle — all REAL, testable SeqEditModel
-// state) plus an HONEST PLACEHOLDER note canvas: the piano-roll/step grid
-// over live `Track` step data (§7 A7's `track step ...` verb) is a later
-// slice, not modeled or rendered here yet.
-void render_seqedit_panel(SeqEditModel& model);
+// Draws the header (part/clip readout + grid + piano-roll/step tabs, all real
+// SeqEditModel state) and the canvas: bar guides plus, when a clip is open
+// (V02State::open_cell), a 16x8 track-colored piano-roll deterministic from
+// the clip label with a green playhead sweeping while it plays. The note
+// blocks are procedural -- there is no live `Track` step data on the wire
+// (the documented seqedit gap) -- so they are local-only, not a fake readback.
+void render_seqedit_panel(SeqEditModel& model, const V02State& fx);
 
 }  // namespace sonotron

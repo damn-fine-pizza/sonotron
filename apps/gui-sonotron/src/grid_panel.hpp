@@ -2,23 +2,25 @@
 
 #include "brain_session.hpp"
 #include "grid_model.hpp"
+#include "seqedit_model.hpp"
+#include "v02_state.hpp"
 
-// Renders the Repeat Zone / Live-Loops launch grid (ux-workstation.md
-// §4.4/§5). Declared here as pure data/interface (GridModel only, no
-// ImGui) — see the *_panel/*_model split invariant.
+// Renders the v02 REPEAT ZONE launch grid (v02-workstation-spec.md §2b).
+// Declared here as pure data/interface (models + BrainSession + V02State, no
+// ImGui) -- see the *_panel/*_model split invariant.
 
 namespace sonotron {
 
-// Renders the matrix inside the CURRENT ImGui window/child: one row per
-// part (GridModel::part_label), one column per scene, plus a "+" to add a
-// scene. Each cell is a real ImGui drop target for a browser style drag
-// (browser_panel.hpp's kStyleDragPayloadId) — dropping sets the cell's
-// content for real (GridModel::set_cell). LAUNCH is wired to the real core
-// clip primitive (Phase-5 Item #2, docs/design/clip-primitive-design.md):
-// clicking a cell sends `launch clip <id> quantize <n>` (id = part_index *
-// scene_count() + scene_index, mirroring the cell's own ImGui PushID);
-// clicking a scene header's "▶" fans out `launch scene <n> quantize <q>`.
-// `brain_session` mirrors render_styles_branch's own BrainSession& param.
-void render_grid_panel(GridModel& model, BrainSession& brain_session);
+// Draws the 6-track x 5-scene launch grid inside the CURRENT ImGui child:
+// track labels, scene headers (click = `launch scene <n> quantize 1`), and
+// launch cells with procedural mini clip previews + an L->R sweep on the
+// playing cell. Clicking a FILLED cell sends `launch clip <id> quantize 1`
+// (real verb) AND opens the clip into Sequence Edit (`seqedit`); clicking an
+// EMPTY cell fills it with a local demo clip (no launch, no verb -- there is
+// no clip primitive content binding on the wire yet, grid_model.hpp's gap).
+// The per-row single-playing echo (V02State::row_playing) is local: there is
+// no per-cell playing readback on the wire.
+void render_grid_panel(GridModel& model, SeqEditModel& seqedit, BrainSession& brain_session,
+                       V02State& fx);
 
 }  // namespace sonotron

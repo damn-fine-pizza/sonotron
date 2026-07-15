@@ -18,15 +18,17 @@ ImVec4 wash(const ImVec4& color, float alpha) { return ImVec4(color.x, color.y, 
 void apply() {
   ImGuiStyle& style = ImGui::GetStyle();
 
-  // ---- Geometry (tokens/spacing.css): square corners, ImGui's 4/8 rhythm.
-  // Radius is the exception, not the rule -- only tabs round.
+  // ---- Geometry (v02 redesign): the v02 "hardware synth" look ROUNDS its
+  // panels (12px), inputs/buttons (8px) and cells (7px) -- the opposite of the
+  // earlier square-by-default terminal theme. The full-window host stays
+  // unrounded (it fills the viewport); its child zones carry the radius.
   style.WindowRounding = 0.0F;
-  style.ChildRounding = 0.0F;
-  style.FrameRounding = 0.0F;
-  style.PopupRounding = 0.0F;
-  style.ScrollbarRounding = 0.0F;
-  style.GrabRounding = 0.0F;
-  style.TabRounding = 4.0F;  // --sn-radius-tab, the one exception
+  style.ChildRounding = 12.0F;   // --sn-radius panels
+  style.FrameRounding = 8.0F;    // inputs / buttons
+  style.PopupRounding = 8.0F;
+  style.ScrollbarRounding = 6.0F;
+  style.GrabRounding = 8.0F;
+  style.TabRounding = 8.0F;
 
   style.WindowBorderSize = 1.0F;
   style.ChildBorderSize = 1.0F;
@@ -34,9 +36,9 @@ void apply() {
   style.FrameBorderSize = 1.0F;
 
   style.WindowPadding = ImVec2(8.0F, 8.0F);  // --sn-pad-panel
-  style.FramePadding = ImVec2(4.0F, 3.0F);   // --sn-pad-frame-x/y
-  style.ItemSpacing = ImVec2(8.0F, 4.0F);    // --sn-gap-item / --sn-gap-row
-  style.IndentSpacing = 21.0F;               // --sn-indent
+  style.FramePadding = ImVec2(6.0F, 4.0F);   // --sn-pad-frame-x/y
+  style.ItemSpacing = ImVec2(8.0F, 6.0F);    // --sn-gap-item / --sn-gap-row
+  style.IndentSpacing = 16.0F;               // --sn-indent
 
   // ---- Colors (tokens/colors.css) ----
   ImVec4* colors = style.Colors;
@@ -59,7 +61,7 @@ void apply() {
 
   colors[ImGuiCol_MenuBarBg] = kMenuBarBg;
 
-  colors[ImGuiCol_ScrollbarBg] = kPanelBg2;
+  colors[ImGuiCol_ScrollbarBg] = kInsetBg;
   colors[ImGuiCol_ScrollbarGrab] = kBorderStrong;
   colors[ImGuiCol_ScrollbarGrabHovered] = kAccent;
   colors[ImGuiCol_ScrollbarGrabActive] = kAccentActive;

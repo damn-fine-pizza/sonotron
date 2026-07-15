@@ -25,54 +25,71 @@
 
 namespace sonotron::theme {
 
-// ---- Base neutrals (back-to-front) ----
-inline constexpr ImVec4 kAppBg{0.1019608F, 0.1019608F, 0.1215686F, 1.0F};      // #1a1a1f (GL clear)
-inline constexpr ImVec4 kWindowBg{0.0588235F, 0.0588235F, 0.0588235F, 1.0F};   // #0f0f0f
-inline constexpr ImVec4 kPanelBg{0.0745098F, 0.0745098F, 0.0862745F, 1.0F};    // #131316
-inline constexpr ImVec4 kPanelBg2{0.0901961F, 0.0901961F, 0.1058824F, 1.0F};   // #17171b
-inline constexpr ImVec4 kPopupBg{0.0784314F, 0.0784314F, 0.0784314F, 1.0F};    // #141414
-inline constexpr ImVec4 kMenuBarBg{0.1372549F, 0.1372549F, 0.1372549F, 1.0F};  // #232323
-inline constexpr ImVec4 kTitleBg{0.0392157F, 0.0392157F, 0.0392157F, 1.0F};    // #0a0a0a
+// ---- v02 base neutrals (near-black neon "hardware synth" surfaces) ----
+// Redesign palette (v02-workstation-spec.md §Palette): the earlier flat
+// terminal hexes are overridden with the v02 inline neon values. The named
+// constants are kept (every *_panel.cpp references a semantic token, not a
+// literal) -- only the resolved RGB moves.
+inline constexpr ImVec4 kAppBg{0.0392157F, 0.0431373F, 0.0627451F, 1.0F};      // #0a0b10 (GL clear)
+inline constexpr ImVec4 kWindowBg{0.0392157F, 0.0431373F, 0.0627451F, 1.0F};   // #0a0b10
+inline constexpr ImVec4 kPanelBg{0.0470588F, 0.0549020F, 0.0823529F, 1.0F};    // #0c0e15
+inline constexpr ImVec4 kPanelBg2{0.0431373F, 0.0509804F, 0.0784314F, 1.0F};   // #0b0d14
+inline constexpr ImVec4 kInsetBg{0.0313725F, 0.0392157F, 0.0627451F, 1.0F};    // #080a10 (sunken)
+inline constexpr ImVec4 kPopupBg{0.0470588F, 0.0549020F, 0.0823529F, 1.0F};    // #0c0e15
+inline constexpr ImVec4 kMenuBarBg{0.0431373F, 0.0509804F, 0.0784314F, 1.0F};  // #0b0d14
+inline constexpr ImVec4 kTitleBg{0.0313725F, 0.0392157F, 0.0627451F, 1.0F};    // #080a10
 
-// ---- Frame (input) background: resolved translucent-blue-over-black ----
-inline constexpr ImVec4 kFrameBg{0.1137255F, 0.1843137F, 0.2862745F, 1.0F};        // #1d2f49
-inline constexpr ImVec4 kFrameBgHover{0.1529412F, 0.2666667F, 0.4078431F, 1.0F};   // #274468
-inline constexpr ImVec4 kFrameBgActive{0.1764706F, 0.3294118F, 0.5254902F, 1.0F};  // #2d5486
+// ---- Frame (input) background: dark cyan-tinted inset ----
+inline constexpr ImVec4 kFrameBg{0.0470588F, 0.0627451F, 0.0862745F, 1.0F};        // #0c1016
+inline constexpr ImVec4 kFrameBgHover{0.0745098F, 0.1058824F, 0.1411765F, 1.0F};   // #131b24
+inline constexpr ImVec4 kFrameBgActive{0.1098039F, 0.1568627F, 0.2078431F, 1.0F};  // #1c2835
 
 // ---- Text ----
-inline constexpr ImVec4 kText{1.0000000F, 1.0000000F, 1.0000000F, 1.0F};           // #ffffff
-inline constexpr ImVec4 kTextSecondary{0.6588235F, 0.6588235F, 0.6901961F, 1.0F};  // #a8a8b0
-inline constexpr ImVec4 kTextMuted{0.5019608F, 0.5019608F, 0.5019608F, 1.0F};      // #808080
-inline constexpr ImVec4 kTextDim{0.4156863F, 0.4156863F, 0.4156863F, 1.0F};        // #6a6a6a
+inline constexpr ImVec4 kText{0.8117647F, 0.8784314F, 0.9019608F, 1.0F};           // #cfe0e6
+inline constexpr ImVec4 kTextSecondary{0.5607843F, 0.6274510F, 0.6705882F, 1.0F};  // #8fa0ab
+inline constexpr ImVec4 kTextMuted{0.4274510F, 0.4862745F, 0.5254902F, 1.0F};      // #6d7c86
+inline constexpr ImVec4 kTextDim{0.2274510F, 0.2705882F, 0.2980392F, 1.0F};        // #3a454c
 
 // ---- Borders / separators ----
-inline constexpr ImVec4 kBorder{0.2274510F, 0.2274510F, 0.2627451F, 1.0F};        // #3a3a43
-inline constexpr ImVec4 kBorderStrong{0.4313725F, 0.4313725F, 0.5019608F, 1.0F};  // #6e6e80
+inline constexpr ImVec4 kBorder{0.1098039F, 0.1411765F, 0.1960784F, 1.0F};        // #1c2432
+inline constexpr ImVec4 kBorderStrong{0.1333333F, 0.8784314F, 0.9019608F, 0.24F};  // cyan @ .24
+inline constexpr ImVec4 kBorderCyan{0.1333333F, 0.8784314F, 0.9019608F, 0.14F};   // rgba(34,224,230,.14)
 
-// ---- Interactive accent -- the one ImGui blue ----
-inline constexpr ImVec4 kAccent{0.2588235F, 0.5882353F, 0.9803922F, 1.0F};        // #4296fa
-inline constexpr ImVec4 kAccentRest{0.1725490F, 0.3529412F, 0.5803922F, 1.0F};    // #2c5a94
-inline constexpr ImVec4 kAccentActive{0.0588235F, 0.5294118F, 0.9803922F, 1.0F};  // #0f87fa
-inline constexpr ImVec4 kAccentGrab{0.2392157F, 0.5176471F, 0.8784314F, 1.0F};    // #3d84e0
-inline constexpr ImVec4 kHeader{0.1529412F, 0.2901961F, 0.4705882F, 1.0F};        // #274a78
+// ---- Interactive accent -- v02 blue (also the XY dot) ----
+inline constexpr ImVec4 kAccent{0.1803922F, 0.6588235F, 1.0000000F, 1.0F};        // #2ea8ff
+inline constexpr ImVec4 kAccentRest{0.1098039F, 0.3921569F, 0.6000000F, 1.0F};    // #2ea8ff @ .6
+inline constexpr ImVec4 kAccentActive{0.3803922F, 0.7607843F, 1.0000000F, 1.0F};  // #61c2ff
+inline constexpr ImVec4 kAccentGrab{0.1803922F, 0.6588235F, 1.0000000F, 1.0F};    // #2ea8ff
+inline constexpr ImVec4 kHeader{0.1098039F, 0.2000000F, 0.3098039F, 1.0F};        // dim blue wash
 
-// ---- Semantic -- meaning-bearing, from the panel source ----
-inline constexpr ImVec4 kGreen{0.3019608F, 0.8509804F, 0.3019608F, 1.0F};           // #4dd94d
-inline constexpr ImVec4 kGreenConnected{0.2509804F, 0.8509804F, 0.3490196F, 1.0F};  // #40d959
-inline constexpr ImVec4 kGreenSoft{0.5490196F, 0.8509804F, 0.5490196F, 1.0F};       // #8cd98c
-inline constexpr ImVec4 kAmber{0.9019608F, 0.7019608F, 0.2000000F, 1.0F};           // #e6b333
-inline constexpr ImVec4 kRed{0.8509804F, 0.3019608F, 0.3019608F, 1.0F};             // #d94d4d
-inline constexpr ImVec4 kCyan{0.2627451F, 0.8509804F, 0.8509804F, 1.0F};            // #43d9d9
+// ---- Semantic -- v02 neon, meaning-bearing ----
+inline constexpr ImVec4 kGreen{0.2392157F, 1.0000000F, 0.6274510F, 1.0F};           // #3dffa0
+inline constexpr ImVec4 kGreenConnected{0.2392157F, 1.0000000F, 0.6274510F, 1.0F};  // #3dffa0
+inline constexpr ImVec4 kGreenSoft{0.2392157F, 1.0000000F, 0.6274510F, 1.0F};       // #3dffa0
+inline constexpr ImVec4 kAmber{1.0000000F, 0.7607843F, 0.3019608F, 1.0F};           // #ffc24d
+inline constexpr ImVec4 kRed{1.0000000F, 0.2431373F, 0.6470588F, 1.0F};             // #ff3ea5 (pink=danger)
+inline constexpr ImVec4 kCyan{0.1333333F, 0.8784314F, 0.9019608F, 1.0F};            // #22e0e6
+inline constexpr ImVec4 kPink{1.0000000F, 0.2431373F, 0.6470588F, 1.0F};            // #ff3ea5
+inline constexpr ImVec4 kBlue{0.1803922F, 0.6588235F, 1.0000000F, 1.0F};            // #2ea8ff
+inline constexpr ImVec4 kLead{0.7764706F, 0.4705882F, 0.8666667F, 1.0F};            // #c678dd
+inline constexpr ImVec4 kStopDark{0.0784314F, 0.0941176F, 0.1411765F, 1.0F};        // #141824
 
 // ---- Meter fill (the block bars: energy/tension/valence, volume) ----
-inline constexpr ImVec4 kMeterFill = kAccent;                                   // #4296fa
-inline constexpr ImVec4 kMeterTrack{0.1490196F, 0.1490196F, 0.1725490F, 1.0F};  // #26262c
+inline constexpr ImVec4 kMeterFill = kCyan;                                        // #22e0e6
+inline constexpr ImVec4 kMeterTrack{0.0470588F, 0.0627451F, 0.0862745F, 1.0F};     // #0c1016
 
 // Per-role tint ramp (workstation-layout.md: LaunchGrid rows, the opened
 // clip). Order matches track_roles.hpp's kTrackRoleLabels exactly: Drums,
 // Perc, Bass, Chord1, Chord2, Pad, Arp, Phrase, Lead.
 inline constexpr std::array<ImVec4, kTrackRoleCount> kRoleTint = {
-    kAccent, kAmber, kGreen, kCyan, kAccent, kGreenSoft, kCyan, kAmber, kGreen,
+    kCyan, kAmber, kBlue, kGreen, kGreen, kAmber, kCyan, kLead, kLead,
+};
+
+// The 6 v02 launch-grid track colors (drums/bass/chord/pad/arp/lead), in the
+// exact row order the v02 grid renders (v02-workstation-spec.md §2b): cyan,
+// blue, green, amber, cyan, lead-purple.
+inline constexpr std::array<ImVec4, 6> kV02TrackColor = {
+    kCyan, kBlue, kGreen, kAmber, kCyan, kLead,
 };
 
 // Applies every color + geometry token to ImGui::GetStyle(). Call once at

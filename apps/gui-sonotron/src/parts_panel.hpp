@@ -2,17 +2,19 @@
 
 #include "brain_session.hpp"
 #include "parts_model.hpp"
+#include "v02_state.hpp"
 
-// Renders the Parts / Mixer zone (ux-workstation.md §4.6). Declared here as
-// pure data/interface (PartsModel + BrainSession only, no ImGui) — see the
-// *_panel/*_model split invariant.
+// Renders the v02 PARTS section of the right rail (v02-workstation-spec.md
+// §2c). Declared here as pure data/interface (PartsModel + BrainSession +
+// V02State, no ImGui) -- see the *_panel/*_model split invariant.
 
 namespace sonotron {
 
-// Renders one row per part inside the CURRENT ImGui window/child: name,
-// real Mute/Solo toggles (sends the shipped `part <role> mute|solo on|off`
-// L1 verb, §7 B8 — not a placeholder) and a GM-program readout that stays
-// "--" (honest: no per-part program readback exists yet, §11.4).
-void render_parts_panel(PartsModel& model, BrainSession& brain_session);
+// Draws the PARTS divider + the DRUMS/BASS/CHORD "amount" rotary knobs, each
+// with compact M/S latches beneath. The amount knobs write V02State's
+// local-only intent (there is NO per-part amount/volume verb on the wire); the
+// M/S latches send the REAL `part <role> mute|solo on|off` L1 verb (§7 B8),
+// preserving that wiring in the v02 surface.
+void render_parts_panel(PartsModel& model, BrainSession& brain_session, V02State& fx);
 
 }  // namespace sonotron

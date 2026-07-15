@@ -72,6 +72,7 @@ target_compile_options(gui_sonotron_brain PRIVATE -Wall -Wextra -Werror)
 # interface) so no link dependency on gui_sonotron_brain is required.
 add_library(gui_sonotron_layout STATIC
   src/theme.cpp
+  src/neon_widgets.cpp
   src/layout_model.cpp
   src/layout_json.cpp
   src/layout_renderer.cpp
