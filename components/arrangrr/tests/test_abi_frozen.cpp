@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kPadBankSelect(58). Next free id is 59.
+// kNone(0) .. kLoopLength(64). Next free id is 65.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -109,9 +109,19 @@ static_assert(static_cast<std::uint16_t>(Param::kMasterTranspose) == 57);
 // Phase-6 Theme 3 Item #4: the active pad-bank view-cursor verb, next free
 // id after kMasterTranspose.
 static_assert(static_cast<std::uint16_t>(Param::kPadBankSelect) == 58);
+// Phase 7 (node 6000, the Looper -- docs/reflections/phase7-scope-6000-8100-
+// clip-timeline-seam.md, SLICE 1): registration/record/erase/undo/length.
+// Launch/stop reuse kClipLaunch/kClipStop unchanged (ClipMatrix::ContentKind
+// ::kLoopBuffer).
+static_assert(static_cast<std::uint16_t>(Param::kLoopNew) == 59);
+static_assert(static_cast<std::uint16_t>(Param::kLoopRecordStart) == 60);
+static_assert(static_cast<std::uint16_t>(Param::kLoopRecordStop) == 61);
+static_assert(static_cast<std::uint16_t>(Param::kLoopErase) == 62);
+static_assert(static_cast<std::uint16_t>(Param::kLoopUndo) == 63);
+static_assert(static_cast<std::uint16_t>(Param::kLoopLength) == 64);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
-// kMidi(0) .. kTimeSig(9). Next free id is 10.
+// kMidi(0) .. kLoop(10). Next free id is 11.
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kMidi) == 0);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTransport) == 1);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kWarn) == 2);
@@ -129,9 +139,12 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kClip) == 8);
 // Phase 7 (node T0): kTimeSig is a NEW appended enumerator (F3), rides the
 // SAME 16-byte OutEvent layout unchanged (no new field, no resize).
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTimeSig) == 9);
+// Phase 7 (node 6000, the Looper): kLoop is a NEW appended enumerator, rides
+// the SAME 16-byte OutEvent layout unchanged (no new field, no resize).
+static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kLoop) == 10);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
-// kNone(0) .. kUnsupported(9), kWarnCodeCount == 10 (next free id).
+// kNone(0) .. kLoopTableFull(10), kWarnCodeCount == 11 (next free id).
 static_assert(static_cast<std::uint16_t>(WarnCode::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSchedulerFull) == 1);
 static_assert(static_cast<std::uint16_t>(WarnCode::kRouteTableFull) == 2);
@@ -142,7 +155,8 @@ static_assert(static_cast<std::uint16_t>(WarnCode::kNotInKey) == 6);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSeqTableFull) == 7);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSeqEmpty) == 8);
 static_assert(static_cast<std::uint16_t>(WarnCode::kUnsupported) == 9);
-static_assert(kWarnCodeCount == 10);
+static_assert(static_cast<std::uint16_t>(WarnCode::kLoopTableFull) == 10);
+static_assert(kWarnCodeCount == 11);
 
 // --- Wire struct sizes: pinned to the exact measured values -----------------
 // Concrete numbers (fixed-width fields => identical on host and arm-none-eabi).

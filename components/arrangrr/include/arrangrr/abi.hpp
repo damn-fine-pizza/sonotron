@@ -297,6 +297,38 @@ enum class Param : std::uint16_t {
                         //     (kBadArgument) outside that range -- state
                         //     unchanged on reject, matching
                         //     kMasterTranspose's own discipline.
+  // Phase 7 (node 6000, the Looper -- docs/reflections/phase7-scope-6000-
+  // 8100-clip-timeline-seam.md, SLICE 1): LoopBuffer (arrangrr/loop/
+  // loop_buffer.hpp) is a bounded pool of captured, chord-tone-relative note
+  // loops, the note-level peer of ChordSequencer. Launch/stop reuse the
+  // EXISTING kClipLaunch/kClipStop verbs unchanged (ClipMatrix::ContentKind::
+  // kLoopBuffer, clip_matrix.hpp) -- only registration/record/erase/undo/
+  // length need new verbs here.
+  kLoopNew = 59,          // do: registers a new EMPTY loop slot (mirrors
+                          //     kSeqNew); no return-value echo (host tracks
+                          //     the sequential id, same convention as
+                          //     kSeqNew/kClipAdd).
+  kLoopRecordStart = 60,  // do: idx = slot id. a = LoopRecordMode (0 record/
+                          //     1 overdub/2 replace). b = input port
+                          //     (0..kMaxPorts-1) to capture live notes from.
+                          //     Starts capturing at the current stream tick
+                          //     (D29: runs even with the transport stopped,
+                          //     same as kSeqRec); a shadow copy of the
+                          //     slot's prior content is saved first
+                          //     (single-generation undo, Fork E).
+  kLoopRecordStop = 61,   // do: idx = slot id. a = quantize grid in ticks
+                          //     (0 = default one bar). Closes any still-
+                          //     held note, then quantizes-after (6200,
+                          //     non-destructive to event count/positions).
+  kLoopErase = 62,        // do: idx = slot id. Clears the slot's content
+                          //     (shadow-saved first for undo).
+  kLoopUndo = 63,         // do: idx = slot id. Restores the single retained
+                          //     prior generation (Fork E); kBadArgument when
+                          //     no shadow backs this slot.
+  kLoopLength = 64,       // set: idx = slot id. a = LoopLengthMode (0 auto
+                          //     = content-derived, 1 fixed = explicit tick
+                          //     length in b, 2 quantized = snap the content
+                          //     length up to the grid in b, ticks). 6400.
 };
 
 // ============================================================================
@@ -315,6 +347,15 @@ enum class Param : std::uint16_t {
 // role (the UI intentionally exposes only 4). Stable ABI surface.
 inline constexpr std::uint16_t kMaxInserts = 8;
 // ============================================================================
+
+// Phase 7 (node 6000, the Looper): the recording-side state transition an
+// OutEvent::Kind::kLoop event reports (msg.status). Values append-only.
+enum class LoopEventKind : std::uint8_t {
+  kRecordStarted = 0,
+  kRecordStopped = 1,
+  kErased = 2,
+  kUndone = 3,
+};
 
 struct Command {
   Op op = Op::kDo;
@@ -345,8 +386,10 @@ enum class WarnCode : std::uint16_t {
   kSeqTableFull = 7,
   kSeqEmpty = 8,     // play/record on a sequence with no usable content
   kUnsupported = 9,  // parameter reserved by the ABI but not implemented yet
+  // Phase 7 (node 6000, the Looper): the LoopBuffer pool (kLoopNew) is full.
+  kLoopTableFull = 10,
 };
-inline constexpr std::uint16_t kWarnCodeCount = 10;
+inline constexpr std::uint16_t kWarnCodeCount = 11;
 
 // Event from core to host.
 struct OutEvent {
@@ -424,6 +467,15 @@ struct OutEvent {
     // beats_per_bar before this).
     //   code = beats_per_bar (1..kMaxBeatsPerBar)
     kTimeSig = 9,
+    // Phase 7 (node 6000, the Looper): a LoopBuffer slot's OWN state changed
+    // (record started/stopped, erased, undone) -- launch/stop of an already-
+    // captured loop still rides the EXISTING kClip echo (ClipMatrix::
+    // ContentKind::kLoopBuffer), this is only for the recording-side
+    // transitions kClip has no vocabulary for.
+    //   code       = slot id
+    //   msg.status = LoopEventKind (0 record-started, 1 record-stopped/
+    //                quantized, 2 erased, 3 undone)
+    kLoop = 10,
   };
 
   Kind kind = Kind::kMidi;
@@ -541,6 +593,17 @@ struct OutEvent {
     OutEvent e;
     e.kind = Kind::kTimeSig;
     e.code = beats_per_bar;
+    e.tick = t;
+    return e;
+  }
+  // Packs a kLoop event (Phase 7, node 6000): `id` rides `code`, the
+  // LoopEventKind rides msg.status. Plain numeric packing like every other
+  // factory here.
+  static constexpr OutEvent loop(std::uint16_t id, LoopEventKind state, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kLoop;
+    e.code = id;
+    e.msg = MidiMessage{.status = static_cast<std::uint8_t>(state), .d1 = 0, .d2 = 0};
     e.tick = t;
     return e;
   }

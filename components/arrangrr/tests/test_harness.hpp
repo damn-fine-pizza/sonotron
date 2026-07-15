@@ -40,6 +40,10 @@ class TestEngine {
   const ChordSequencer& sequences() const noexcept { return engine().sequences(); }
   const Arranger& arranger() const noexcept { return engine().arranger(); }
   const ClipMatrix& clips() const noexcept { return engine().clips(); }
+  // Phase 7 (node 6000, the Looper) test seam: mirrors clips()/sequences()'
+  // own const observation accessor -- pure forwarding to Engine::loops(),
+  // already public production API.
+  const LoopBuffer& loops() const noexcept { return engine().loops(); }
   // Phase-5 Item #9 test seam (Torquato): mirrors clips()' own const+mutable
   // accessor pair. PadEngine/PerformanceStore state is observed through the
   // ABI in every functional pad/perf test (test_pad.cpp/test_performance.cpp)

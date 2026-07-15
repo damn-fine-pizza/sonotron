@@ -15,7 +15,7 @@ const char* warn_name(std::uint16_t code) {
   static constexpr const char* kNames[] = {
       "none",         "scheduler_full",   "route_table_full", "unknown_command",
       "bad_argument", "track_table_full", "not_in_key",       "seq_table_full",
-      "seq_empty",    "unsupported",
+      "seq_empty",    "unsupported",      "loop_table_full",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == kWarnCodeCount,
                 "every WarnCode needs a wire name");

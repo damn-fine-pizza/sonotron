@@ -217,3 +217,13 @@ arrangrr_test(test_dual_arp_collision regression)
 # precedent) so its failure never masks test_clip_matrix.cpp's surrounding
 # GREEN coverage. Currently RED; do not silence it.
 arrangrr_test(test_clip_matrix_live_meter_change_regression regression)
+# Phase 7 (node 6000, the Looper -- docs/reflections/phase7-scope-6000-8100-
+# clip-timeline-seam.md, SLICE 1). test_loop_event: LoopEvent's decompose_
+# note()/resolve_note() chord-relative round-trip (Fork A) and LoopClip's own
+# record/quantize/length-mode/remove surface -- pure, no Engine -> unit, same
+# precedent as test_chord_seq.cpp's ChordSequence-only coverage.
+arrangrr_test(test_loop_event unit)
+# test_loop: the musically-observable record/overdub/erase/undo/launch
+# behavior only exists through Engine's cmd_loop/apply_clip_content/
+# fire_loop cross-producer wiring -> functional, same precedent as test_clip.
+arrangrr_test(test_loop functional)

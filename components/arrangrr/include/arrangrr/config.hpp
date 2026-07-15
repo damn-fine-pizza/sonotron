@@ -101,4 +101,68 @@ inline constexpr std::uint8_t kScheduleSourceCore = 0;
 inline constexpr std::uint8_t kScheduleSourceLiveArp = 1;
 inline constexpr std::uint8_t kScheduleSourceRoleArpBase = 2;
 
+// LoopBuffer (Phase 7, node 6000, "the capture gesture" -- docs/reflections/
+// phase7-scope-6000-8100-clip-timeline-seam.md, Fork A/E/F resolved by the
+// owner for this slice): a bounded, static (no-heap on EITHER target, D32)
+// pool of captured, chord-tone-relative note loops, the note-level peer of
+// ChordSequencer (arrangrr/loop/loop_buffer.hpp).
+//
+// TARGET-CONDITIONAL budget (owner directive): the arm-none-eabi firmware
+// target keeps the tight DESIGN.md `6000` envelope verbatim -- 8 slots x 3072
+// events -- even though LoopEvent (12 B, matching ChordStep's own 12 B
+// precedent for a chord-relative payload) is larger than the ORIGINAL 8-B/
+// event planning estimate that produced "192 KB" (docs/reflections/
+// phase7-scope-6000-8100-clip-timeline-seam.md §1/§4 flagged this explicitly:
+// the DESIGN.md byte figure was never `static_assert`-pinned, only the SLOT
+// and EVENT counts were quoted as the reusable envelope). __arm__ is
+// predefined by arm-none-eabi-gcc/g++ for the Cortex-M7 target (cmake/
+// toolchains/arm-cortex-m7.cmake) and is NOT defined by the host's native
+// (x86_64/aarch64) compiler, so this is a clean, existing-toolchain-native
+// target switch, not a new build knob.
+//
+// The HOST build has no SRAM pressure, so it gets MORE slots (double arm's
+// 8) for scripting/testing flexibility -- but NOT an unboundedly large
+// per-slot event capacity: LoopBuffer is an Engine-owned VALUE member (m_loop
+// in engine.hpp, mirroring m_seq/m_timeline's own placement), and Engine
+// itself is routinely STACK-allocated, often SEVERAL AT ONCE in one test
+// function (e.g. test_step_locks.cpp declares three `Player`-wrapped Engines
+// in a single scope). A naive "generous" host figure (e.g. 32 slots x 8192
+// events, an earlier draft of this constant) balloons a single Engine by
+// several MB and reliably blows the default 8 MB thread stack the moment two
+// or three are alive at once -- reproduced as a genuine SIGSEGV in
+// test_step_locks/test_master_transpose before this figure was corrected.
+// 16 slots x 512 events keeps LoopBuffer's own footprint at ~100 KB per
+// Engine on host (safe for many simultaneous stack instances) while still
+// giving host scripting/tests twice arm's slot count to work with.
+#if defined(__arm__)
+inline constexpr std::size_t kMaxLoopSlots = 8;      // DESIGN.md 6000: 8 loop slots
+inline constexpr std::size_t kMaxLoopEvents = 3072;  // DESIGN.md 6000: 3072 events/slot
+#else
+inline constexpr std::size_t kMaxLoopSlots = 16;
+inline constexpr std::size_t kMaxLoopEvents = 512;
+#endif
+static_assert(kMaxLoopSlots >= 1 && kMaxLoopSlots <= 256,
+              "LoopBuffer pool: keep the loop-slot pool bounded (D33)");
+static_assert(kMaxLoopEvents >= 1, "LoopBuffer pool: every slot needs room for at least one event");
+// Budget note (Fork E, single-generation undo): the pool itself is
+// kMaxLoopSlots x kMaxLoopEvents x 12 B (LoopEvent, pinned by
+// static_assert(sizeof(LoopEvent) == 12) in arrangrr/loop/loop_event.hpp);
+// undo adds exactly ONE extra slot's worth of shadow storage (a single
+// shared LoopClip, not one shadow PER slot -- a live performer can only be
+// actively recording/overdub/erasing ONE slot at a time, so shadowing every
+// slot would waste (kMaxLoopSlots - 1)x the RAM for no reachable benefit).
+// On arm-none-eabi: (8 + 1) x 3072 x 12 B ~= 324 KB, alongside the existing
+// ~40 KB the rest of arrangrr's own bounded pools already commit (chord
+// sequences 24 KB, timeline 8 KB, clips/pads/performances/scheduler the
+// remainder) -- within the STM32H743 512 KB planning envelope (D33). On
+// host: (16 + 1) x 512 x 12 B ~= 100 KB per Engine -- small enough that
+// several stack-allocated Engines in one test scope stay well inside the
+// default thread stack. The static_assert gate below is arm-only: the host
+// figure above is a deliberate STACK-safety choice, not an SRAM-envelope
+// constraint, so there is nothing meaningful to gate on host.
+#if defined(__arm__)
+static_assert((kMaxLoopSlots + 1) * kMaxLoopEvents * 12ull <= 512ull * 1024ull,
+              "LoopBuffer pool (content + one undo shadow): keep it inside the D33 SRAM envelope");
+#endif
+
 }  // namespace arrangrr

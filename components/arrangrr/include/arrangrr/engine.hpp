@@ -12,6 +12,7 @@
 #include "arrangrr/common/function_ref.hpp"
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/config.hpp"
+#include "arrangrr/loop/loop_buffer.hpp"
 #include "arrangrr/pad/pad_bank.hpp"
 #include "arrangrr/perf/performance.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
@@ -128,6 +129,12 @@ class Engine {
   // cmd_clip in engine.cpp for the ABI path).
   const ClipMatrix& clips() const noexcept { return m_clips; }
   ClipMatrix& clips() noexcept { return m_clips; }
+  // Phase 7 (node 6000, the Looper): the captured-loop pool, mirroring
+  // clips()'/sequences()' own const+mutable accessor pair. Host/test code
+  // registers loop slots directly through the mutable accessor (kLoopNew's
+  // own in-engine equivalent, see cmd_loop in engine.cpp for the ABI path).
+  const LoopBuffer& loops() const noexcept { return m_loop; }
+  LoopBuffer& loops() noexcept { return m_loop; }
   // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
   // Performance"): pad-bank wrapper bookkeeping and the Performance recall
   // store, mirroring clips()' own const+mutable accessor pair. Host code
@@ -179,6 +186,15 @@ class Engine {
         // exactly as before.
         const bool harmony_suppress =
             is_note_message(msg) && m_input_zone[port] == InputZone::kHarmony;
+        // Phase 7 (node 6000, the Looper): a passive TEE, not part of the
+        // mutually-exclusive chain below -- the note still routes/sounds
+        // normally (through-monitoring, so the performer hears their own
+        // playing) AND is captured into the LoopBuffer when recording is
+        // armed on this exact port. Gated fully on m_loop.recording() (false
+        // by default): zero behavior change for any existing golden.
+        if (is_note_message(msg) && m_loop.recording() && port == m_loop.recording_port()) {
+          observe_loop_input(port, msg);
+        }
         if (arp_captures) {
           observe_arp_input(msg);
         } else if (!harmony_suppress) {
@@ -320,6 +336,14 @@ class Engine {
       apply_pending_pad_fires(sink);
     }
     fire_arranger(m_transport.tick(), sink);
+    // Phase 7 (node 6000, the Looper): runs AFTER fire_arranger, same as the
+    // bar-gate's own ordering rationale above ("the arranger reads the
+    // freshly-committed chord") -- resolve_note() reads m_chords.state()/
+    // key() too, so a bar-boundary chord change must be visible to the
+    // looper's own resolution on the SAME tick fire_arranger sees it, not
+    // one tick late. A no-op pass (no clip is ever kind==kLoopBuffer) until
+    // the first kLoopNew/kClipAdd(kLoopBuffer,...) is ever issued.
+    fire_loop(m_transport.tick(), sink);
     fire_arp(m_transport.tick(), sink);
   }
 
@@ -372,6 +396,7 @@ class Engine {
   void cmd_perf(const Command& cmd, EventSink sink);   // Phase-5 Item #9: Performance store/recall
   void cmd_fx(const Command& cmd, EventSink sink);     // Phase-5 Item #10: MIDI-FX insert chain
   void cmd_master_transpose(const Command& cmd, EventSink sink);  // Phase-6 Theme 3 Item #1
+  void cmd_loop(const Command& cmd, EventSink sink);              // Phase 7 (node 6000): the Looper
 
   // cmd_chord case handlers, split out to keep cmd_chord's own cognitive
   // complexity under the clang-tidy gate (each case validates + dispatches on
@@ -406,6 +431,23 @@ class Engine {
   // clip references -- the ONE place that translates {kind, content_index}
   // into a real musical effect, per ClipMatrix's own scope tripwire.
   void apply_clip_content(const Clip& clip, LaunchState target, EventSink sink);
+  // apply_clip_content's kLoopBuffer case, split out to keep
+  // apply_clip_content itself under the clang-tidy cognitive-complexity
+  // gate (see engine.cpp for the full rationale).
+  void apply_clip_content_loop_buffer(const Clip& clip, LaunchState target, EventSink sink);
+  // Drives ONE clip's LoopBuffer::on_tick pass (resolving the launching
+  // clip's own part_role -> port/channel via Arranger::part_info, mirroring
+  // fire_loop's own per-clip body) and returns whether the slot's content
+  // naturally ended (non-looping, reached its end) THIS call. Shared by
+  // fire_loop (the ordinary per-tick driver) and
+  // apply_clip_content_loop_buffer's immediate-launch branch, which must
+  // fire whatever is due AT the exact launch tick synchronously --
+  // Runtime::advance_ticks only ever calls Engine::on_tick for FUTURE ticks
+  // (current+1 onward, runtime/runtime.hpp), so a note captured at a loop's
+  // own tick 0 would otherwise never sound (mirrors apply_clip_content's own
+  // kChordSequence branch calling fire_chord_seq synchronously right after
+  // ChordSequencer::play() succeeds, for the exact same reason).
+  bool fire_loop_clip(const Clip& clip, Tick transport_tick, EventSink sink);
   // Promotes any clip whose quantize window closes THIS bar (on_tick's
   // existing tick % kTicksPerBar == 0 gate, decision #2).
   void fire_clips(Tick transport_tick, EventSink sink);
@@ -468,6 +510,28 @@ class Engine {
   void fx_param(const Command& cmd, EventSink sink);
   void fx_enable(const Command& cmd, EventSink sink);
   void fx_clear(const Command& cmd, EventSink sink);
+
+  // cmd_loop case handlers (Phase 7, node 6000), split out for the same
+  // reason. Launch/stop of an already-captured loop reuse clip_launch/
+  // clip_stop unchanged (ContentKind::kLoopBuffer) -- no loop_launch/
+  // loop_stop handler exists here on purpose.
+  void loop_new(const Command& cmd, EventSink sink);
+  void loop_record_start(const Command& cmd, EventSink sink);
+  void loop_record_stop(const Command& cmd, EventSink sink);
+  void loop_erase(const Command& cmd, EventSink sink);
+  void loop_undo(const Command& cmd, EventSink sink);
+  void loop_length(const Command& cmd, EventSink sink);
+  // Feeds a captured live note-on/off into the LoopBuffer while it is
+  // recording on the matching input port (Engine::push_midi_in's own tap,
+  // mirroring observe_arp_input's placement) -- a passive OBSERVE, not a
+  // capture-and-suppress: the note still routes/sounds normally so the
+  // performer hears their own playing (through-monitoring).
+  void observe_loop_input(std::uint8_t port, const MidiMessage& msg) noexcept;
+  // Drives every currently kPlaying kLoopBuffer clip's on_tick (Engine::
+  // on_tick's own per-tick pass, mirrors fire_chord_seq's placement/cadence)
+  // -- LoopBuffer itself has no notion of "is this slot playing"; ClipMatrix
+  // already owns that truth (same scope discipline fire_clips observes).
+  void fire_loop(Tick transport_tick, EventSink sink);
 
   // Emits the loaded style's default per-role GM voices on their routes. Cheap
   // and idempotent (re-sending a Program Change is a no-op on the synth), so it
@@ -753,6 +817,16 @@ class Engine {
   // m_arranger/m_seq/m_timeline so a future audit of construction order
   // finds it beside the subsystems it references by index.
   ClipMatrix m_clips;
+  // Phase 7 (node 6000, the Looper): the captured-loop pool, mirroring
+  // m_seq's own placement/rationale -- Engine-owned, referenced from
+  // Engine::on_tick (fire_loop) and Engine::push_midi_in (observe_loop_
+  // input), never from Arranger's own generative kernel. The recording input
+  // port lives INSIDE LoopBuffer itself (recording_port(), set by
+  // start_record's own `port` argument) -- no duplicate Engine-side field,
+  // unlike m_arp_in_port (the arp's port is config independent of a
+  // recording session; the loop's recording port only ever matters WHILE
+  // m_loop.recording() is true).
+  LoopBuffer m_loop;
   // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
   // Performance"): pad-bank wrapper bookkeeping (mirrors m_clips' own
   // placement/rationale -- PadEngine orchestrates subsystems Engine already

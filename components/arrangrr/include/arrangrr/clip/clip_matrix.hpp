@@ -32,6 +32,12 @@ enum class ContentKind : std::uint8_t {
   kStyleSection = 0,
   kChordSequence = 1,
   kStepTrack = 2,
+  // Phase 7 (node 6000, the Looper): a captured LoopBuffer slot
+  // (arrangrr/loop/loop_buffer.hpp), launched exactly like any other clip --
+  // ClipMatrix itself still never touches LoopBuffer directly (same scope
+  // tripwire above); Engine::apply_clip_content is the ONE place that drives
+  // it, mirroring kChordSequence's own dispatch shape.
+  kLoopBuffer = 3,
 };
 
 // A clip's launch state. kArmed/kQueuedStop are the transient "counting down

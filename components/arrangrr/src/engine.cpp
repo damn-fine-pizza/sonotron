@@ -99,6 +99,14 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kMasterTranspose:
       cmd_master_transpose(cmd, sink);
       break;
+    case Param::kLoopNew:
+    case Param::kLoopRecordStart:
+    case Param::kLoopRecordStop:
+    case Param::kLoopErase:
+    case Param::kLoopUndo:
+    case Param::kLoopLength:
+      cmd_loop(cmd, sink);
+      break;
     default:
       sink(OutEvent::warn(WarnCode::kUnknownCommand, m_now));
       break;
@@ -720,6 +728,129 @@ void Engine::cmd_master_transpose(const Command& cmd, EventSink sink) {
                              m_now));
 }
 
+// Phase 7 (node 6000, the Looper -- docs/reflections/phase7-scope-6000-8100-
+// clip-timeline-seam.md, SLICE 1): registration/record/erase/undo/length.
+// Launch/stop reuse kClipLaunch/kClipStop unchanged (ClipMatrix::ContentKind
+// ::kLoopBuffer, apply_clip_content/fire_loop drive the actual playback).
+void Engine::cmd_loop(const Command& cmd, EventSink sink) {
+  switch (cmd.param) {
+    case Param::kLoopNew:
+      loop_new(cmd, sink);
+      break;
+    case Param::kLoopRecordStart:
+      loop_record_start(cmd, sink);
+      break;
+    case Param::kLoopRecordStop:
+      loop_record_stop(cmd, sink);
+      break;
+    case Param::kLoopErase:
+      loop_erase(cmd, sink);
+      break;
+    case Param::kLoopUndo:
+      loop_undo(cmd, sink);
+      break;
+    case Param::kLoopLength:
+    default:
+      loop_length(cmd, sink);
+      break;
+  }
+}
+
+// Host/script-only registration (mirrors kSeqNew/kClipAdd's own convention:
+// no return-value echo, the host tracks the sequential id).
+void Engine::loop_new(const Command& cmd, EventSink sink) {
+  (void)cmd;
+  if (m_loop.add_slot() < 0) {
+    sink(OutEvent::warn(WarnCode::kLoopTableFull, m_now));
+  }
+}
+
+void Engine::loop_record_start(const Command& cmd, EventSink sink) {
+  const auto port = static_cast<std::uint8_t>(cmd.b);
+  if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(LoopRecordMode::kReplace) ||
+      port >= kMaxPorts) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto mode = static_cast<LoopRecordMode>(cmd.a);
+  if (!m_loop.start_record(cmd.idx, m_now, port, mode)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  sink(OutEvent::loop(cmd.idx, LoopEventKind::kRecordStarted, m_now));
+}
+
+void Engine::loop_record_stop(const Command& cmd, EventSink sink) {
+  if (!m_loop.recording() || m_loop.recording_slot() != cmd.idx) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  // Phase 7 (node T0): the "one bar" fallback grid reads the LIVE Transport
+  // bar length instead of the compile-time kTicksPerBar constant, same
+  // discipline as seq_stop's own T0 fix.
+  const Tick grid = cmd.a > 0 ? static_cast<Tick>(cmd.a) : m_transport.ticks_per_bar();
+  if (!m_loop.stop_record(m_now, grid)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  sink(OutEvent::loop(cmd.idx, LoopEventKind::kRecordStopped, m_now));
+}
+
+void Engine::loop_erase(const Command& cmd, EventSink sink) {
+  if (!m_loop.erase(cmd.idx)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  sink(OutEvent::loop(cmd.idx, LoopEventKind::kErased, m_now));
+}
+
+void Engine::loop_undo(const Command& cmd, EventSink sink) {
+  if (!m_loop.undo(cmd.idx)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  sink(OutEvent::loop(cmd.idx, LoopEventKind::kUndone, m_now));
+}
+
+// 6400: idx = slot. a = LoopLengthMode. b = mode-dependent value (fixed:
+// explicit tick length; quantized: grid ticks; auto: ignored).
+void Engine::loop_length(const Command& cmd, EventSink sink) {
+  LoopClip* clip = m_loop.get(cmd.idx);
+  if (clip == nullptr || cmd.a < 0 ||
+      cmd.a > static_cast<std::int32_t>(LoopLengthMode::kQuantized)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  const auto mode = static_cast<LoopLengthMode>(cmd.a);
+  if (mode == LoopLengthMode::kFixed && cmd.b <= 0) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  if (mode == LoopLengthMode::kQuantized && cmd.b <= 0) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  clip->length_mode = mode;
+  if (mode == LoopLengthMode::kFixed) {
+    clip->fixed_length = static_cast<Tick>(cmd.b);
+  } else if (mode == LoopLengthMode::kQuantized) {
+    clip->quantize_grid = static_cast<Tick>(cmd.b);
+  }
+}
+
+// Feeds a captured live note-on/off into the LoopBuffer (Engine::
+// push_midi_in's own tee, gated on m_loop.recording() && the matching
+// port -- mirrors observe_arp_input's exact NoteOn-vel-0-is-release
+// convention).
+void Engine::observe_loop_input(std::uint8_t port, const MidiMessage& msg) noexcept {
+  (void)port;
+  if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
+    m_loop.note_on(m_now, msg.d1, msg.d2, m_chords.state(), m_chords.key());
+  } else {
+    m_loop.note_off(m_now, msg.d1);
+  }
+}
+
 // Live arpeggiator: kArp sets one field (kEnabled toggles capture on the input
 // port; the rest are engine params); kArpOut sets the output route.
 void Engine::cmd_arp(const Command& cmd, EventSink sink) {
@@ -783,7 +914,7 @@ void Engine::clip_add(const Command& cmd, EventSink sink) {
     return;
   }
   const auto kind_value = cmd.c & 0xFF;
-  if (kind_value > static_cast<std::int32_t>(ContentKind::kStepTrack)) {
+  if (kind_value > static_cast<std::int32_t>(ContentKind::kLoopBuffer)) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
     return;
   }
@@ -875,6 +1006,9 @@ void Engine::apply_clip_content(const Clip& clip, LaunchState target, EventSink 
         flush(sink);
       }
       break;
+    case ContentKind::kLoopBuffer:
+      apply_clip_content_loop_buffer(clip, target, sink);
+      break;
     case ContentKind::kStepTrack:
     default:
       if (Track* t = m_timeline.track(clip.content_index); t != nullptr) {
@@ -882,6 +1016,88 @@ void Engine::apply_clip_content(const Clip& clip, LaunchState target, EventSink 
       }
       break;
   }
+}
+
+// apply_clip_content's kLoopBuffer case, split out to keep apply_clip_content
+// itself under the clang-tidy cognitive-complexity gate (same discipline as
+// every other case-handler split in this class, e.g. cmd_clip's own
+// clip_add/clip_launch/clip_stop split). Launch starts this slot's own
+// per-slot playback (LoopBuffer::start_playback); the per-tick advance
+// itself lives in fire_loop (Engine::on_tick), which iterates every kPlaying
+// kLoopBuffer clip -- mirroring how kStepTrack's own per-tick firing lives in
+// fire_timeline, not here. Stop releases any currently sounding notes for the
+// slot through the SAME route this clip fires on, so a stop never leaves a
+// stuck note.
+void Engine::apply_clip_content_loop_buffer(const Clip& clip, LaunchState target, EventSink sink) {
+  if (target == LaunchState::kPlaying) {
+    if (m_loop.start_playback(clip.content_index, m_transport.tick()) && m_transport.playing()) {
+      // Fire whatever is due AT this exact tick synchronously (mirrors
+      // apply_clip_content's own kChordSequence branch calling
+      // fire_chord_seq right after ChordSequencer::play() succeeds) --
+      // fire_loop_clip's own header comment explains why this call cannot
+      // simply wait for the next on_tick pass. `ended` can never be true on
+      // this very first call (pos == 0 is always < a positive length; a
+      // zero-length slot returns before the ended check), so the return
+      // value is safe to ignore here.
+      (void)fire_loop_clip(clip, m_transport.tick(), sink);
+    }
+    return;
+  }
+  const Arranger::PartInfo info = m_arranger.part_info(clip.part_role);
+  m_loop.stop_playback(clip.content_index, [&](std::uint8_t note, std::uint8_t velocity, bool on) {
+    if (!info.routed) {
+      return;
+    }
+    const MidiMessage msg = on ? MidiMessage::note_on(info.channel, note, velocity)
+                               : MidiMessage::note_off(info.channel, note);
+    schedule_or_warn(info.port, m_now, msg, sink);
+  });
+  flush(sink);
+}
+
+bool Engine::fire_loop_clip(const Clip& clip, Tick transport_tick, EventSink sink) {
+  const Arranger::PartInfo info = m_arranger.part_info(clip.part_role);
+  const LoopBuffer::TickResult r = m_loop.on_tick(
+      clip.content_index, transport_tick, m_chords.state(), m_chords.key(),
+      [&](std::uint8_t note, std::uint8_t velocity, bool on) {
+        if (!info.routed) {
+          return;
+        }
+        const MidiMessage msg = on ? MidiMessage::note_on(info.channel, note, velocity)
+                                   : MidiMessage::note_off(info.channel, note);
+        schedule_or_warn(info.port, m_now, msg, sink);
+      });
+  return r.ended;
+}
+
+// Phase 7 (node 6000, the Looper): iterates every kPlaying kLoopBuffer clip
+// and advances its own slot one tick -- LoopBuffer itself has no notion of
+// "is this slot playing" (ClipMatrix already owns that truth, same scope
+// discipline fire_clips/apply_clip_content observe for every other kind). A
+// clip whose loop naturally ends this tick (non-looping content) is demoted
+// to kStopped and echoed exactly like any other clip state change (fires
+// through the SAME kClip event fire_clips/clip_request already use).
+void Engine::fire_loop(Tick transport_tick, EventSink sink) {
+  for (std::size_t id = 0; id < m_clips.size(); ++id) {
+    const Clip* c = m_clips.get(id);
+    if (c == nullptr || c->kind != ContentKind::kLoopBuffer || c->state != LaunchState::kPlaying) {
+      continue;
+    }
+    if (fire_loop_clip(*c, transport_tick, sink)) {
+      (void)m_clips.force(id, LaunchState::kStopped);
+      sink(OutEvent::clip(static_cast<std::uint16_t>(id),
+                          static_cast<std::uint8_t>(LaunchState::kStopped), m_now));
+    }
+  }
+  // No flush() here (unlike apply_clip_content's kChordSequence-stop branch,
+  // an established outlier reused verbatim below): fire_loop runs as part of
+  // on_tick's own fire_timeline/fire_chord_seq/fire_arranger sequence, and
+  // Runtime's single per-tick flush() (called once after on_tick returns,
+  // per this method's own class-level docstring) already drains everything
+  // scheduled this tick in the correct D29 total order. An extra mid-tick
+  // flush here would split that into two partial batches and risk
+  // reordering output relative to fire_arranger/fire_arp, which have not run
+  // yet at this call site.
 }
 
 void Engine::fire_clips(Tick transport_tick, EventSink sink) {
