@@ -40,7 +40,7 @@ static_assert(static_cast<std::uint8_t>(Boundary::kNextBar) == 1);
 static_assert(static_cast<std::uint8_t>(Boundary::kNextNBars) == 2);
 
 // --- Param: every current enumerator pinned to its exact value --------------
-// kNone(0) .. kSceneStop(68). Next free id is 69.
+// kNone(0) .. kRetroCaptureGrab(71). Next free id is 72.
 static_assert(static_cast<std::uint16_t>(Param::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(Param::kTransportTempo) == 1);
 static_assert(static_cast<std::uint16_t>(Param::kTransportStart) == 2);
@@ -126,6 +126,11 @@ static_assert(static_cast<std::uint16_t>(Param::kSceneAdd) == 65);
 static_assert(static_cast<std::uint16_t>(Param::kSceneClear) == 66);
 static_assert(static_cast<std::uint16_t>(Param::kScenePlay) == 67);
 static_assert(static_cast<std::uint16_t>(Param::kSceneStop) == 68);
+// Phase 7 (node 6300, "grab last N bars" -- retroactive capture): arm/disarm
+// the ring + grab-last-N-bars-into-slot, next free ids after kSceneStop.
+static_assert(static_cast<std::uint16_t>(Param::kRetroCaptureArm) == 69);
+static_assert(static_cast<std::uint16_t>(Param::kRetroCaptureDisarm) == 70);
+static_assert(static_cast<std::uint16_t>(Param::kRetroCaptureGrab) == 71);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
 // kMidi(0) .. kLoop(10). Next free id is 11.
@@ -151,7 +156,7 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTimeSig) == 9);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kLoop) == 10);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
-// kNone(0) .. kLoopTableFull(10), kWarnCodeCount == 11 (next free id).
+// kNone(0) .. kRetroCaptureEmpty(12), kWarnCodeCount == 13 (next free id).
 static_assert(static_cast<std::uint16_t>(WarnCode::kNone) == 0);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSchedulerFull) == 1);
 static_assert(static_cast<std::uint16_t>(WarnCode::kRouteTableFull) == 2);
@@ -164,7 +169,8 @@ static_assert(static_cast<std::uint16_t>(WarnCode::kSeqEmpty) == 8);
 static_assert(static_cast<std::uint16_t>(WarnCode::kUnsupported) == 9);
 static_assert(static_cast<std::uint16_t>(WarnCode::kLoopTableFull) == 10);
 static_assert(static_cast<std::uint16_t>(WarnCode::kSceneTableFull) == 11);
-static_assert(kWarnCodeCount == 12);
+static_assert(static_cast<std::uint16_t>(WarnCode::kRetroCaptureEmpty) == 12);
+static_assert(kWarnCodeCount == 13);
 
 // --- Wire struct sizes: pinned to the exact measured values -----------------
 // Concrete numbers (fixed-width fields => identical on host and arm-none-eabi).

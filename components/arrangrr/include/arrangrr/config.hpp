@@ -190,4 +190,28 @@ static_assert(kMaxScenes >= 1 && kMaxScenes <= 256,
 static_assert(kMaxScenes * 12ull <= 512ull * 1024ull,
               "SceneChain pool: keep it inside the D33 SRAM envelope");
 
+// RetroCaptureRing (Phase 7, node 6300, "grab last N bars" -- retroactive
+// capture): a bounded, static (no-heap on EITHER target, D32) fixed-capacity
+// CIRCULAR buffer of captured, chord-tone-relative live notes
+// (arrangrr/loop/retro_capture.hpp) -- ONE ring for the whole Engine, never
+// per-slot (the owner's own framing for this slice: "the ring is ONE
+// buffer"). Bounded via oldest-out overwrite (a plain ring, not a
+// StaticVector), so a long noodling session with capture armed never grows
+// memory -- only the most recent kMaxRetroCaptureEvents notes stay reachable,
+// comfortably more than any sane "last N bars" grab window.
+//
+// Budget: each ring slot is a LoopEvent, the SAME 12-byte POD LoopBuffer's own
+// pool already uses (pinned by static_assert(sizeof(LoopEvent) == 12),
+// arrangrr/loop/loop_event.hpp), so kMaxRetroCaptureEvents x 12 B stays a
+// trivial slice of the STM32H743 512 KB envelope (D33) even at generous
+// headroom -- no target-conditional split is needed the way kMaxLoopSlots/
+// kMaxLoopEvents required (that pool multiplies its per-slot event capacity
+// by kMaxLoopSlots; this is exactly ONE ring, so there is no per-slot
+// multiplier to blow the budget).
+inline constexpr std::size_t kMaxRetroCaptureEvents = 2048;
+static_assert(kMaxRetroCaptureEvents >= 1,
+              "RetroCaptureRing: every ring needs room for at least one event");
+static_assert(kMaxRetroCaptureEvents * 12ull <= 512ull * 1024ull,
+              "RetroCaptureRing: keep the ring inside the D33 SRAM envelope");
+
 }  // namespace arrangrr

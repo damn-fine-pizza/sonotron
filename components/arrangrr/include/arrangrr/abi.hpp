@@ -358,6 +358,32 @@ enum class Param : std::uint16_t {
   kSceneStop = 68,   // do: stops the chain from advancing (content and
                      //     current position are left alone; a later
                      //     kScenePlay always restarts from step 0).
+  // Phase 7 (node 6300, "grab last N bars" -- retroactive capture): the ring
+  // (arrangrr/loop/retro_capture.hpp) taps the SAME live-note stream
+  // LoopBuffer::note_on/note_off already taps during ordinary recording
+  // (Engine::push_midi_in), captured ONLY while explicitly armed (Fork C).
+  // A grabbed window materializes into an EXISTING LoopBuffer slot
+  // (registered via the existing kLoopNew) -- retroactive capture never
+  // registers its own slots.
+  kRetroCaptureArm = 69,     // do: a = input port (0..kMaxPorts-1) to capture
+                             //     live notes from. Clears any prior ring
+                             //     content (fresh start, mirrors
+                             //     kLoopRecordStart's own discipline).
+  kRetroCaptureDisarm = 70,  // do: stops capturing; ring content is left
+                             //     alone (a later kRetroCaptureGrab can still
+                             //     read it).
+  kRetroCaptureGrab = 71,    // do: idx = target LoopBuffer slot id (an
+                             //     EXISTING slot, registered via kLoopNew).
+                             //     a = n_bars to grab, ending NOW (1..255;
+                             //     0 clamps to 1). Materializes the ring's
+                             //     last n_bars into the slot (rebasing
+                             //     captured start ticks so the grabbed
+                             //     window starts at 0) -- a normal,
+                             //     playable, re-harmonizing loop, identical
+                             //     in kind to a recorded one.
+                             //     kRetroCaptureEmpty when the ring holds
+                             //     nothing inside that window; kBadArgument
+                             //     when idx names no registered slot.
 };
 
 // ============================================================================
@@ -384,6 +410,12 @@ enum class LoopEventKind : std::uint8_t {
   kRecordStopped = 1,
   kErased = 2,
   kUndone = 3,
+  // Phase 7 (node 6300): a retroactive-capture grab materialized ring
+  // content into this slot -- reuses the EXISTING kLoop OutEvent (code =
+  // target slot id) rather than a new OutEvent::Kind, since this is exactly
+  // the same "this slot's content changed" shape kRecordStopped already
+  // reports.
+  kGrabbed = 4,
 };
 
 struct Command {
@@ -420,8 +452,14 @@ enum class WarnCode : std::uint16_t {
   // Phase 7 (node 8100, Scenes/song mode): the SceneChain pool (kSceneAdd) is
   // full (kMaxScenes, config.hpp).
   kSceneTableFull = 11,
+  // Phase 7 (node 6300, retroactive capture): kRetroCaptureGrab found nothing
+  // inside the requested last-N-bars window (including an entirely empty/
+  // never-armed ring). An invalid target slot id still uses the existing
+  // kBadArgument (mirrors kLoopErase/kLoopUndo's own precedent for "idx names
+  // no registered slot").
+  kRetroCaptureEmpty = 12,
 };
-inline constexpr std::uint16_t kWarnCodeCount = 12;
+inline constexpr std::uint16_t kWarnCodeCount = 13;
 
 // Event from core to host.
 struct OutEvent {

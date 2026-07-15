@@ -13,6 +13,7 @@
 #include "arrangrr/common/span.hpp"
 #include "arrangrr/config.hpp"
 #include "arrangrr/loop/loop_buffer.hpp"
+#include "arrangrr/loop/retro_capture.hpp"
 #include "arrangrr/pad/pad_bank.hpp"
 #include "arrangrr/perf/performance.hpp"
 #include "arrangrr/routing/note_tracker.hpp"
@@ -136,6 +137,13 @@ class Engine {
   // own in-engine equivalent, see cmd_loop in engine.cpp for the ABI path).
   const LoopBuffer& loops() const noexcept { return m_loop; }
   LoopBuffer& loops() noexcept { return m_loop; }
+  // Phase 7 (node 6300, retroactive capture): the "grab last N bars" ring,
+  // mirroring loops()'/scenes()' own const+mutable accessor pair. Host/test
+  // code arms/disarms/reads the ring directly through the mutable accessor
+  // (kRetroCaptureArm/Disarm's own in-engine equivalent, see cmd_loop in
+  // engine.cpp for the ABI path).
+  const RetroCaptureRing& retro_capture() const noexcept { return m_retro; }
+  RetroCaptureRing& retro_capture() noexcept { return m_retro; }
   // Phase 7 (node 8100, Scenes/song mode): the song-mode scene chain, mirroring
   // loops()'/sequences()' own const+mutable accessor pair. Host/test code
   // registers scene steps directly through the mutable accessor (kSceneAdd's
@@ -201,6 +209,15 @@ class Engine {
         // by default): zero behavior change for any existing golden.
         if (is_note_message(msg) && m_loop.recording() && port == m_loop.recording_port()) {
           observe_loop_input(port, msg);
+        }
+        // Phase 7 (node 6300, retroactive capture): a SECOND, INDEPENDENT
+        // passive TEE at the exact same point -- the SAME live-note stream
+        // LoopBuffer's own tee above taps, captured into the ring ONLY while
+        // explicitly armed (Fork C). Gated fully on m_retro.armed() (false
+        // by default): zero behavior change for any existing golden, a
+        // single branch on the hot path when disarmed.
+        if (is_note_message(msg) && m_retro.armed() && port == m_retro.port()) {
+          observe_retro_input(port, msg);
         }
         if (arp_captures) {
           observe_arp_input(msg);
@@ -559,6 +576,18 @@ class Engine {
   // already owns that truth (same scope discipline fire_clips observes).
   void fire_loop(Tick transport_tick, EventSink sink);
 
+  // cmd_loop case handlers (Phase 7, node 6300, retroactive capture), split
+  // out for the same reason -- dispatched from cmd_loop alongside the kLoop*
+  // verbs above (a sibling, not a new domain switch: 6300 is the SAME
+  // Looper family, just a different way to fill a slot).
+  void retro_arm(const Command& cmd, EventSink sink);
+  void retro_disarm(const Command& cmd, EventSink sink);
+  void retro_grab(const Command& cmd, EventSink sink);
+  // Feeds a captured live note-on/off into the RetroCaptureRing while it is
+  // armed on the matching input port (Engine::push_midi_in's own second tee,
+  // mirroring observe_loop_input's exact shape/placement).
+  void observe_retro_input(std::uint8_t port, const MidiMessage& msg) noexcept;
+
   // cmd_scene case handlers (Phase 7, node 8100), split out for the same
   // reason.
   void scene_add(const Command& cmd, EventSink sink);
@@ -875,6 +904,13 @@ class Engine {
   // recording session; the loop's recording port only ever matters WHILE
   // m_loop.recording() is true).
   LoopBuffer m_loop;
+  // Phase 7 (node 6300, retroactive capture): the "grab last N bars" ring,
+  // mirroring m_loop's own placement/rationale -- Engine-owned, referenced
+  // from Engine::push_midi_in (observe_retro_input) and cmd_loop's own
+  // retro_arm/retro_disarm/retro_grab handlers. ONE ring for the whole
+  // Engine (config.hpp's own kMaxRetroCaptureEvents comment), not one per
+  // LoopBuffer slot.
+  RetroCaptureRing m_retro;
   // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
   // Performance"): pad-bank wrapper bookkeeping (mirrors m_clips' own
   // placement/rationale -- PadEngine orchestrates subsystems Engine already

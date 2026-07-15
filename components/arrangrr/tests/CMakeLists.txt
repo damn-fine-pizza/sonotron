@@ -298,3 +298,14 @@ arrangrr_test(test_scene_hardening functional)
 # Transport's real grid under the same trigger. Handoff to Nazzareno --
 # NOT fixed here (accuse, don't repair).
 arrangrr_test(test_scene_meter_gate_regression regression)
+# test_retro_capture (Phase 7, node 6300, "grab last N bars" -- retroactive
+# capture): the MINIMAL happy-path pass -- arm captures live notes across a
+# couple of bars into RetroCaptureRing, kRetroCaptureGrab materializes the
+# last N bars into an existing LoopBuffer slot as a normal, re-harmonizing
+# loop; disarmed keeps the ring empty (grab is a clean no-op); an Engine that
+# never touches any kRetroCapture* verb behaves exactly as before. Subject is
+# Engine's own cross-producer wiring (push_midi_in's second tee + cmd_loop's
+# retro_arm/retro_disarm/retro_grab) -> functional, same precedent as
+# test_loop/test_scene. Thorough functional/regression QA is Torquato's
+# follow-up.
+arrangrr_test(test_retro_capture functional)

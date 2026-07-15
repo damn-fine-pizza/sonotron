@@ -105,6 +105,9 @@ void Engine::push_command(const Command& cmd, EventSink sink) {
     case Param::kLoopErase:
     case Param::kLoopUndo:
     case Param::kLoopLength:
+    case Param::kRetroCaptureArm:
+    case Param::kRetroCaptureDisarm:
+    case Param::kRetroCaptureGrab:
       cmd_loop(cmd, sink);
       break;
     case Param::kSceneAdd:
@@ -771,6 +774,15 @@ void Engine::cmd_loop(const Command& cmd, EventSink sink) {
     case Param::kLoopUndo:
       loop_undo(cmd, sink);
       break;
+    case Param::kRetroCaptureArm:
+      retro_arm(cmd, sink);
+      break;
+    case Param::kRetroCaptureDisarm:
+      retro_disarm(cmd, sink);
+      break;
+    case Param::kRetroCaptureGrab:
+      retro_grab(cmd, sink);
+      break;
     case Param::kLoopLength:
     default:
       loop_length(cmd, sink);
@@ -858,6 +870,47 @@ void Engine::loop_length(const Command& cmd, EventSink sink) {
   } else if (mode == LoopLengthMode::kQuantized) {
     clip->quantize_grid = static_cast<Tick>(cmd.b);
   }
+}
+
+// Phase 7 (node 6300, "grab last N bars" -- retroactive capture): a = input
+// port to capture live notes from. Rejects an out-of-range port (state
+// unchanged), same discipline as loop_record_start's own port check.
+void Engine::retro_arm(const Command& cmd, EventSink sink) {
+  if (cmd.a < 0 || static_cast<std::uint32_t>(cmd.a) >= kMaxPorts) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  m_retro.arm(static_cast<std::uint8_t>(cmd.a));
+}
+
+void Engine::retro_disarm(const Command& cmd, EventSink sink) {
+  (void)cmd;
+  (void)sink;
+  m_retro.disarm();
+}
+
+// idx = target LoopBuffer slot (an EXISTING slot, registered via kLoopNew).
+// a = n_bars to grab, ending NOW (1..255; 0 clamps to 1, mirroring
+// SceneStep::n_bars's own clamp-not-reject convention). Quantizes the
+// grabbed content after materializing it (the SAME grid the window itself
+// used), so the result is identical in kind to a freshly recorded loop
+// (LoopBuffer::stop_record's own quantize-after step).
+void Engine::retro_grab(const Command& cmd, EventSink sink) {
+  LoopClip* clip = m_loop.get(cmd.idx);
+  if (clip == nullptr) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
+    return;
+  }
+  std::uint8_t n_bars = 1;
+  if (cmd.a > 0) {
+    n_bars = cmd.a > 255 ? std::uint8_t{255} : static_cast<std::uint8_t>(cmd.a);
+  }
+  if (!m_retro.grab(m_now, m_transport.ticks_per_bar(), n_bars, *clip)) {
+    sink(OutEvent::warn(WarnCode::kRetroCaptureEmpty, m_now));
+    return;
+  }
+  clip->quantize(m_transport.ticks_per_bar());
+  sink(OutEvent::loop(cmd.idx, LoopEventKind::kGrabbed, m_now));
 }
 
 // Phase 7 (node 8100, Scenes/song mode): cmd_scene dispatches the 4 verbs;
@@ -981,6 +1034,18 @@ void Engine::observe_loop_input(std::uint8_t port, const MidiMessage& msg) noexc
     m_loop.note_on(m_now, msg.d1, msg.d2, m_chords.state(), m_chords.key());
   } else {
     m_loop.note_off(m_now, msg.d1);
+  }
+}
+
+// Feeds a captured live note-on/off into the RetroCaptureRing (Engine::
+// push_midi_in's second tee, gated on m_retro.armed() && the matching port --
+// mirrors observe_loop_input's exact NoteOn-vel-0-is-release convention).
+void Engine::observe_retro_input(std::uint8_t port, const MidiMessage& msg) noexcept {
+  (void)port;
+  if (msg.type() == midi::kNoteOn && msg.d2 > 0) {
+    m_retro.note_on(m_now, msg.d1, msg.d2, m_chords.state(), m_chords.key());
+  } else {
+    m_retro.note_off(m_now, msg.d1);
   }
 }
 
