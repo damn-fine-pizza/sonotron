@@ -227,3 +227,42 @@ arrangrr_test(test_loop_event unit)
 # behavior only exists through Engine's cmd_loop/apply_clip_content/
 # fire_loop cross-producer wiring -> functional, same precedent as test_clip.
 arrangrr_test(test_loop functional)
+# test_loop_buffer_sounding_overflow_regression: Torquato QA regression guard
+# (Phase 7, node 6000 SLICE 1 hardening) -- LoopBuffer::on_tick's PLAYBACK-side
+# sounding-note table (kMaxLoopHeldNotes, loop_buffer.hpp) is bounded at 16
+# concurrently-sounding voices per slot; Nazzareno's fix gates the note-ON
+# itself on store_sounding() claiming a tracking slot, so an excess voice
+# past that bound is silently CAPPED (never sounds) instead of sounding and
+# then losing its release path. Originally pinned the pre-fix orphaned-note
+# defect (RED); now GREEN, asserting the locked contract (bounded polyphony,
+# zero orphans -- every voice that sounds gets released). Subject is
+# LoopBuffer alone, no Engine needed -> unit-scoped, kept `regression` per
+# this file's own isolation precedent (mirrors test_performance_style_id_
+# regression.cpp) so a future re-break of this specific guard is caught in
+# isolation, without masking the surrounding GREEN test_loop/test_loop_event
+# coverage.
+arrangrr_test(test_loop_buffer_sounding_overflow_regression regression)
+# test_loop_reharmonize: Torquato QA hardening pass -- THE key property of
+# node 6000's whole storage shape (Fork A, loop_event.hpp) proven end to end
+# through Engine's real ABI (record -> stop -> context change -> launch),
+# covering all three LoopNoteSource branches. test_loop.cpp's own round-trip
+# test never changes the followed chord/key between record and launch, so
+# this is genuinely new coverage, not a duplicate -> functional (the subject
+# is the cross-tick/cross-command Engine integration, same precedent as
+# test_clip/test_fx).
+arrangrr_test(test_loop_reharmonize functional)
+# test_loop_wrap_and_idempotency_regression: Torquato QA guards for the two
+# ALREADY-FIXED bugs loop_buffer.hpp's own header comments document in
+# detail (note-off-at-wrap, tick-0 idempotency across the synchronous-
+# promote + ordinary-fire_loop dual call site) -- GREEN today, kept in its
+# own file/CTest entry so a future re-break of either specific guard is
+# caught in isolation, same precedent as test_dual_arp_collision.cpp.
+arrangrr_test(test_loop_wrap_and_idempotency_regression regression)
+# test_loop_ops: Torquato QA hardening pass -- closes the remaining mandate
+# gaps test_loop.cpp/test_loop_event.cpp leave open: overdub's own wrap
+# alignment across a cycle boundary, undo's shared shadow moving ACROSS
+# different slots, two loop slots playing simultaneously/independently, live-
+# meter-respecting playback (T0), and per-slot event-pool capacity
+# (kMaxLoopEvents) degrading gracefully -> functional, same precedent as
+# test_clip/test_fx (the subject is Engine's own cross-producer wiring).
+arrangrr_test(test_loop_ops functional)

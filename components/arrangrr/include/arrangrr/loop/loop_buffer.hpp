@@ -369,8 +369,17 @@ class LoopBuffer {
       const LoopEvent& ev = clip->event(i);
       if (ev.start == pos) {
         const int note = resolve_note(ev, chord, key);
-        if (note >= 0) {
-          store_sounding(ps, static_cast<std::uint16_t>(i), static_cast<std::uint8_t>(note));
+        // Only sound the note-ON if the sounding table can actually track its
+        // release: firing unconditionally and letting store_sounding() drop
+        // the bookkeeping on a full table would orphan the voice forever (no
+        // release path -- release_sounding/release_all_sounding only ever
+        // walk what IS tracked). Gate on store_sounding() succeeding instead,
+        // mirroring the RECORDING-side m_held table's own graceful
+        // degradation (LoopBuffer::hold's comment above): past
+        // kMaxLoopHeldNotes concurrently-sounding voices from this slot, the
+        // excess voice is silently dropped rather than sounded-and-abandoned.
+        if (note >= 0 &&
+            store_sounding(ps, static_cast<std::uint16_t>(i), static_cast<std::uint8_t>(note))) {
           fire(static_cast<std::uint8_t>(note), ev.velocity, /*on=*/true);
         }
       }
@@ -410,14 +419,19 @@ class LoopBuffer {
     }
   }
 
-  static void store_sounding(LoopBufferPlayState& ps, std::uint16_t event_index,
+  // Returns true iff a free tracking slot was found and claimed. The caller
+  // (on_tick) MUST NOT sound the note-ON when this returns false -- a false
+  // return means no release path exists for this voice (see on_tick's own
+  // comment at the call site).
+  static bool store_sounding(LoopBufferPlayState& ps, std::uint16_t event_index,
                              std::uint8_t note) noexcept {
     for (LoopBufferSoundingNote& s : ps.sounding) {
       if (!s.used) {
         s = LoopBufferSoundingNote{.event_index = event_index, .note = note, .used = true};
-        return;
+        return true;
       }
     }
+    return false;
   }
   static void release_sounding(LoopBufferPlayState& ps, std::uint16_t event_index,
                                FireFn fire) noexcept {
