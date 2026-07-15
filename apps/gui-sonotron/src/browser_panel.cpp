@@ -42,9 +42,10 @@ bool matches(std::string_view item, const std::string& filter) {
   return hay.find(needle) != std::string::npos;
 }
 
-// A tree section header: "▾ TITLE" in a section color.
-bool section_header(const char* title, const ImVec4& color) {
-  ImGui::PushStyleColor(ImGuiCol_Text, color);
+// A tree section header "▾ title" — uniform near-white across all sections, as
+// in the design (no per-section tint; only the active style leaf goes cyan).
+bool section_header(const char* title) {
+  ImGui::PushStyleColor(ImGuiCol_Text, theme::kText);
   const bool open = ImGui::TreeNodeEx(title, ImGuiTreeNodeFlags_DefaultOpen |
                                                  ImGuiTreeNodeFlags_SpanAvailWidth);
   ImGui::PopStyleColor();
@@ -73,7 +74,7 @@ bool leaf_row(std::string_view item, bool active) {
 
 void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& fx,
                    const std::string& filter, int& shown) {
-  if (!section_header("styles", theme::kCyan)) {
+  if (!section_header("styles")) {
     return;
   }
   int local_shown = 0;
@@ -103,10 +104,9 @@ void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& f
 }
 
 template <std::size_t N>
-void render_list(const char* title, const ImVec4& color,
-                 const std::array<std::string_view, N>& items, const std::string& filter,
-                 int& shown) {
-  if (!section_header(title, color)) {
+void render_list(const char* title, const std::array<std::string_view, N>& items,
+                 const std::string& filter, int& shown) {
+  if (!section_header(title)) {
     return;
   }
   int local_shown = 0;
@@ -136,9 +136,9 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session, V02S
   const std::string filter = model.search_filter();
   int shown = 0;
   render_styles(model, brain_session, fx, filter, shown);
-  render_list("variations", theme::kAmber, kVariations, filter, shown);
-  render_list("kits \xC2\xB7 GM", theme::kGreen, kKits, filter, shown);
-  if (section_header("clips", theme::kBlue)) {
+  render_list("variations", kVariations, filter, shown);
+  render_list("kits \xC2\xB7 GM", kKits, filter, shown);
+  if (section_header("clips")) {
     ImGui::TextDisabled("  (none authored yet)");
     ImGui::TreePop();
   }

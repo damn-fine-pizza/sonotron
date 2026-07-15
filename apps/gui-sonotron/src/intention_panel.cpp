@@ -41,7 +41,7 @@ void render_intention_panel(const AppState& app_state, V02State& fx) {
   if (live) {
     ImGui::TextColored(theme::kGreen, "  \xE2\x97\x8F live");
   } else {
-    ImGui::TextColored(theme::kTextMuted, "  \xE2\x97\x8F at rest");
+    ImGui::TextColored(theme::kTextMuted, "  at rest");
   }
   ImGui::Spacing();
 

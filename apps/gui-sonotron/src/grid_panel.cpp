@@ -58,21 +58,40 @@ std::size_t cell_id(std::size_t role_index, std::size_t scene, std::size_t scene
 // previews have content (same local-content path a browser drag uses;
 // launching still sends real verbs). Deterministic labels -> deterministic
 // previews.
-void seed_demo(GridModel& model, V02State& fx) {
+void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
   if (fx.seeded) {
     return;
   }
   fx.seeded = true;
-  const std::array<std::pair<std::size_t, std::size_t>, 9> pattern = {{
-      {0, 0}, {0, 2}, {1, 0}, {2, 1}, {2, 3}, {3, 0}, {4, 2}, {5, 1}, {5, 4},
+  // Match the v02 design's default clip set + short curated labels exactly
+  // (Sonotron v02 Workstation.dc.html) so the launch grid reads like the ref
+  // (A/B/fil, wlk/sub, cmp/stab/out, swl, up/up2, vox/ld/end) — no truncation.
+  struct DemoCell {
+    std::size_t row;
+    std::size_t scene;
+    const char* label;
+  };
+  static constexpr std::array<DemoCell, 15> pattern = {{
+      {0, 0, "A"},   {0, 1, "B"},    {0, 3, "fil"},
+      {1, 0, "wlk"}, {1, 2, "sub"},
+      {2, 0, "cmp"}, {2, 1, "stab"}, {2, 4, "out"},
+      {3, 1, "swl"}, {3, 3, "swl"},
+      {4, 0, "up"},  {4, 2, "up2"},
+      {5, 1, "vox"}, {5, 2, "ld"},   {5, 4, "end"},
   }};
-  for (const auto& [row, scene] : pattern) {
+  for (const auto& [row, scene, label] : pattern) {
     if (row >= kRows.size() || scene >= model.scene_count()) {
       continue;
     }
-    const std::string label = std::string(kRows[row].name) + std::to_string(scene + 1);
     model.set_cell(kRows[row].role_index, scene, GridCellKind::kStyleSection, label);
   }
+
+  // Open the bass 'wlk' clip by default — the design's initial openAt {r:1,c:0}
+  // — so Sequence Edit shows a populated (blue) piano-roll, not the empty hint.
+  fx.open_row = 1;
+  fx.open_cell = static_cast<int>(cell_id(kRows[1].role_index, 0, model.scene_count()));
+  seqedit.set_part_index(kRows[1].role_index);
+  seqedit.set_clip_label("wlk");
 }
 
 // Draws one launch cell (custom draw-list) at the cursor; returns true on
@@ -120,17 +139,21 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
     }
   }
 
-  // Bottom-centered label: "▶ label" playing / "▷ label" stopped, truncated to
-  // fit the cell width (a mini clip cell shows a clipped name, never a spill).
+  // Bottom-centered label "▶/▷ label" at the design's ~11px so short curated
+  // names ("stab","up2") fit un-truncated and descenders (p/g/y) clear the
+  // cell's bottom edge.
+  ImFont* font = ImGui::GetFont();
+  const float lbl_sz = 11.0F;
   std::string text = (playing ? "\xE2\x96\xB6 " : "\xE2\x96\xB7 ") + label;
-  while (text.size() > 2 && ImGui::CalcTextSize(text.c_str()).x > size - 4.0F) {
+  while (text.size() > 2 &&
+         font->CalcTextSizeA(lbl_sz, 1.0e4F, 0.0F, text.c_str()).x > size - 6.0F) {
     text.pop_back();
   }
-  const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
-  const float tx = std::max(p0.x + 3.0F, p0.x + (size - ts.x) * 0.5F);
+  const float tw = font->CalcTextSizeA(lbl_sz, 1.0e4F, 0.0F, text.c_str()).x;
+  const float tx = std::max(p0.x + 3.0F, p0.x + (size - tw) * 0.5F);
   dl->PushClipRect(p0, p1, true);
-  dl->AddText(ImVec2(tx, p1.y - 13.0F), neon::u32(playing ? color : theme::kTextSecondary),
-              text.c_str());
+  dl->AddText(font, lbl_sz, ImVec2(tx, p1.y - lbl_sz - 3.0F),
+              neon::u32(playing ? color : theme::kTextSecondary), text.c_str());
   dl->PopClipRect();
 
   // L->R sweep on a playing cell while running.
@@ -142,12 +165,17 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
 
 void render_header(V02State& fx) {
   ImGui::TextColored(theme::kCyan, "REPEAT ZONE");
-  ImGui::SameLine(0.0F, 10.0F);
-  ImGui::TextColored(theme::kTextMuted, "click to launch \xC2\xB7 one clip per row");
 
-  // Zoom -/+ right-aligned.
+  // Hint + zoom -/+ as one right-aligned group (design: the hint sits next to
+  // the zoom control, not beside the title).
+  const char* hint = "click = launch + open \xC2\xB7 scene \xE2\x96\xB6 = launch column";
+  const float hint_w = ImGui::CalcTextSize(hint).x;
+  const float zoom_w = 58.0F;
   ImGui::SameLine();
-  ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 58.0F);
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),
+                                ImGui::GetContentRegionMax().x - zoom_w - hint_w - 8.0F));
+  ImGui::TextColored(theme::kTextMuted, "%s", hint);
+  ImGui::SameLine(0.0F, 8.0F);
   if (ImGui::SmallButton("-")) {
     fx.cell_zoom = std::clamp(fx.cell_zoom - 9.0F, 34.0F, 88.0F);
   }
@@ -161,7 +189,7 @@ void render_header(V02State& fx) {
 
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                        BrainSession& brain_session, V02State& fx) {
-  seed_demo(model, fx);
+  seed_demo(model, seqedit, fx);
   render_header(fx);
   ImGui::Spacing();
 
@@ -181,18 +209,23 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 
   ImGui::BeginChild("grid_body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_None);
 
-  // Scene header row: a spacer over the label column, then "n ▶" launch heads.
+  // Scene header row: a spacer over the label column, then "n ▶" launch heads
+  // drawn as plain text + a cyan underline (design has no button pill).
   ImGui::Dummy(ImVec2(kLabelColWidth, cz * 0.5F));
+  ImDrawList* hdl = ImGui::GetWindowDrawList();
   for (std::size_t s = 0; s < scenes; ++s) {
     ImGui::SameLine(0.0F, kCellGap);
     ImGui::PushID(static_cast<int>(s));
-    ImGui::BeginGroup();
-    ImGui::TextColored(theme::kTextSecondary, "%zu", s + 1);
-    ImGui::SameLine(0.0F, 4.0F);
-    ImGui::PushStyleColor(ImGuiCol_Text, theme::kGreen);
-    const bool go = ImGui::SmallButton("\xE2\x96\xB6");
-    ImGui::PopStyleColor();
-    ImGui::EndGroup();
+    const ImVec2 hp0 = ImGui::GetCursorScreenPos();
+    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
+    const std::string num = std::to_string(s + 1);
+    const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
+    hdl->AddText(ImVec2(hp0.x + 3.0F, ty),
+                 neon::u32(s == 0 ? theme::kText : theme::kTextSecondary), num.c_str());
+    hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(num.c_str()).x + 4.0F, ty),
+                 neon::u32(theme::kGreen), "\xE2\x96\xB6");
+    const float uy = hp0.y + cz * 0.5F - 2.0F;
+    hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
     if (go) {
       brain_session.send("launch scene " + std::to_string(s) + " quantize " +
                          std::to_string(kDefaultLaunchQuantizeBars));
@@ -254,9 +287,9 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
           draw_cell("cell", cz, filled, cell.label, color, row.audio, playing, opened, fx);
       if (clicked) {
         if (!filled) {
-          // Empty -> add a local demo clip (no launch, no verb).
-          const std::string label = std::string(row.name) + std::to_string(s + 1);
-          model.set_cell(row.role_index, s, GridCellKind::kStyleSection, label);
+          // Empty -> add a local demo clip (no launch, no verb). Short label
+          // like the design's addClip, so the cell never shows a truncated name.
+          model.set_cell(row.role_index, s, GridCellKind::kStyleSection, "clip");
         } else {
           // Filled -> real launch + open in Sequence Edit + local row echo.
           brain_session.send("launch clip " + std::to_string(id) + " quantize " +

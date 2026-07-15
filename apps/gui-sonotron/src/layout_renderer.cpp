@@ -69,7 +69,7 @@ void render_rail(WorkstationState& state) {
   ImGui::Spacing();
   ImGui::Separator();
   ImGui::Spacing();
-  render_parts_panel(state.parts, state.brain_session, state.fx);
+  render_parts_panel(state.fx);
   render_master_vu(state.app_state, state.fx);
 }
 

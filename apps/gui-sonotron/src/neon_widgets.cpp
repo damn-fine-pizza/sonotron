@@ -234,14 +234,19 @@ bool xy_pad(const char* id, float* valence, float* energy, const ImVec2& size, b
   dl->AddCircleFilled(dot, 5.0F, u32(theme::kBlue), 20);
   dl->AddCircle(dot, 6.0F, u32(theme::kText, 0.6F), 20, 1.0F);
 
-  // Axis labels.
-  dl->AddText(ImVec2(p0.x + size.x * 0.5F - 12.0F, p0.y + 2.0F), u32(theme::kTextMuted, 0.8F),
-              "E+");
-  dl->AddText(ImVec2(p0.x + size.x * 0.5F - 12.0F, p1.y - 14.0F), u32(theme::kTextMuted, 0.8F),
-              "E-");
-  dl->AddText(ImVec2(p0.x + 3.0F, p0.y + size.y * 0.5F - 7.0F), u32(theme::kTextMuted, 0.8F), "V-");
-  dl->AddText(ImVec2(p1.x - 16.0F, p0.y + size.y * 0.5F - 7.0F), u32(theme::kTextMuted, 0.8F),
-              "V+");
+  // Axis labels (full words, matching the design): ENERGY vertical, VAL horizontal.
+  const ImU32 lc = u32(theme::kTextMuted, 0.8F);
+  const float mid_y = p0.y + size.y * 0.5F;
+  const char* e_plus = "ENERGY +";
+  const char* e_minus = "ENERGY \xE2\x88\x92";  // U+2212 minus, per design
+  const char* v_minus = "VAL \xE2\x88\x92";
+  const char* v_plus = "VAL +";
+  dl->AddText(ImVec2(p0.x + (size.x - ImGui::CalcTextSize(e_plus).x) * 0.5F, p0.y + 3.0F), lc,
+              e_plus);
+  dl->AddText(ImVec2(p0.x + (size.x - ImGui::CalcTextSize(e_minus).x) * 0.5F, p1.y - 14.0F), lc,
+              e_minus);
+  dl->AddText(ImVec2(p0.x + 4.0F, mid_y - 7.0F), lc, v_minus);
+  dl->AddText(ImVec2(p1.x - ImGui::CalcTextSize(v_plus).x - 4.0F, mid_y - 7.0F), lc, v_plus);
   return moved;
 }
 
