@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "app_state.hpp"
 #include "browser_model.hpp"
@@ -26,17 +27,84 @@ constexpr int kDefaultLaunchQuantizeBars = 1;
 // stays as close to the design as legibility allows.
 constexpr float kLabelColWidth = 86.0F;
 constexpr float kCellGap = 7.0F;
-constexpr float kLatchSize = 13.0F;
+// Owner: the per-track M/S latches were 13px, too small to read or tell
+// apart. Enlarged to clearly legible squares, stacked BELOW the track name
+// (render_track_label) rather than crammed inline with it.
+constexpr float kLatchSize = 17.0F;
+constexpr float kLatchGap = 3.0F;
 
-// A small neon M/S latch: solid tone when engaged, dark inset otherwise.
+// A small neon M/S latch: a SQUARE (owner: "squares are fine", not the
+// theme's usual pill-rounded ImGui::Button, which at this compact footprint
+// rounds into a near-circle), solid tone fill when engaged, dark inset
+// otherwise, with an explicit-size letter glyph. Drawn manually (InvisibleButton
+// + draw-list), NOT ImGui::Button: Button's internal RenderTextClipped()
+// centers/clips the label at the CURRENT (global, ~20px) font size, which is
+// taller than this button -- the top of a clipped "S" reads as a bare hook,
+// illegible (the actual bug behind the owner's "can't tell M/S apart"
+// report). Drawing the glyph ourselves at a small explicit size (matching
+// draw_cell's own ~11px compact-label convention) avoids that entirely.
 bool grid_latch(const char* glyph, bool engaged, const ImVec4& tone) {
-  ImGui::PushStyleColor(ImGuiCol_Button, engaged ? tone : theme::kFrameBg);
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, engaged ? tone : theme::kFrameBgHover);
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, engaged ? tone : theme::kFrameBgActive);
-  ImGui::PushStyleColor(ImGuiCol_Text, engaged ? theme::kAppBg : theme::kTextSecondary);
-  const bool clicked = ImGui::Button(glyph, ImVec2(kLatchSize, kLatchSize));
-  ImGui::PopStyleColor(4);
+  const ImVec2 p0 = ImGui::GetCursorScreenPos();
+  const bool clicked = ImGui::InvisibleButton(glyph, ImVec2(kLatchSize, kLatchSize));
+  const bool hovered = ImGui::IsItemHovered();
+  const ImVec2 p1(p0.x + kLatchSize, p0.y + kLatchSize);
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const float rounding = 3.0F;
+  dl->AddRectFilled(p0, p1, neon::u32(engaged ? tone : theme::kFrameBg, hovered ? 1.0F : 0.9F),
+                    rounding);
+  dl->AddRect(p0, p1, neon::u32(engaged ? tone : theme::kBorder, hovered ? 1.0F : 0.7F), rounding,
+              0, 1.0F);
+  ImFont* font = ImGui::GetFont();
+  const float glyph_sz = 12.0F;
+  const ImVec2 ts = font->CalcTextSizeA(glyph_sz, 1.0e4F, 0.0F, glyph);
+  dl->AddText(font, glyph_sz,
+              ImVec2(p0.x + (kLatchSize - ts.x) * 0.5F, p0.y + (kLatchSize - ts.y) * 0.5F),
+              neon::u32(engaged ? theme::kAppBg : theme::kTextSecondary), glyph);
   return clicked;
+}
+
+// Owner: the scene-header name used to draw at the default font size,
+// overflowing longer/renamed names past the column width. Rendered at the
+// same small size draw_cell's own bottom label uses (11px), word-wrapped
+// across multiple lines so it fits within the column instead.
+constexpr float kSceneNameFontSize = 11.0F;
+
+// Greedy word-wrap of `text` into lines that fit `max_width` at `font_size`
+// -- mirrors the column-width fitting draw_cell's own bottom label already
+// does (grid_panel.cpp), just line-by-line instead of truncating. A single
+// word wider than `max_width` on its own is kept whole (never mid-word
+// split) rather than overflowing onto more lines than the text actually has.
+std::vector<std::string> wrap_scene_name(ImFont* font, float font_size, const std::string& text,
+                                         float max_width) {
+  std::vector<std::string> lines;
+  std::string current;
+  std::string word;
+  auto flush_word = [&]() {
+    if (word.empty()) {
+      return;
+    }
+    const std::string candidate = current.empty() ? word : current + " " + word;
+    if (current.empty() ||
+        font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, candidate.c_str()).x <= max_width) {
+      current = candidate;
+    } else {
+      lines.push_back(current);
+      current = word;
+    }
+    word.clear();
+  };
+  for (const char c : text) {
+    if (c == ' ') {
+      flush_word();
+    } else {
+      word.push_back(c);
+    }
+  }
+  flush_word();
+  if (!current.empty() || lines.empty()) {
+    lines.push_back(current);
+  }
+  return lines;
 }
 
 // The 6 v02 launch-grid rows (spec §2b), each mapped to a GridModel part-row
@@ -84,18 +152,55 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
     const char* label;
   };
   static constexpr std::array<DemoCell, 15> pattern = {{
-      {0, 0, "A"},   {0, 1, "B"},    {0, 3, "fil"},
-      {1, 0, "wlk"}, {1, 2, "sub"},
-      {2, 0, "cmp"}, {2, 1, "stab"}, {2, 4, "out"},
-      {3, 1, "swl"}, {3, 3, "swl"},
-      {4, 0, "up"},  {4, 2, "up2"},
-      {5, 1, "vox"}, {5, 2, "ld"},   {5, 4, "end"},
+      {0, 0, "A"},
+      {0, 1, "B"},
+      {0, 3, "fil"},
+      {1, 0, "wlk"},
+      {1, 2, "sub"},
+      {2, 0, "cmp"},
+      {2, 1, "stab"},
+      {2, 4, "out"},
+      {3, 1, "swl"},
+      {3, 3, "swl"},
+      {4, 0, "up"},
+      {4, 2, "up2"},
+      {5, 1, "vox"},
+      {5, 2, "ld"},
+      {5, 4, "end"},
   }};
   for (const auto& [row, scene, label] : pattern) {
     if (row >= kRows.size() || scene >= model.scene_count()) {
       continue;
     }
     model.set_cell(kRows[row].role_index, scene, GridCellKind::kStyleSection, label);
+  }
+
+  // Root-cause fix: every scene column used to default to the SAME section
+  // (GridModel::kDefaultSectionType == SectionType::kVarA), so selecting a
+  // different column (or auto-song advancing) sent the identical `style
+  // section varA` every time -- the arranger's live section never actually
+  // changed, so the audio never changed either (owner-reported "always
+  // scene 1"). Give the 5 demo columns 5 DISTINCT sections so a column
+  // switch is audible; each built-in style authors genuinely different
+  // per-section patterns (kVarBDrums != kVarADrums, etc.).
+  struct DemoSection {
+    std::size_t scene;
+    preview::Section section;
+    const char* name;
+  };
+  static constexpr std::array<DemoSection, 5> kDemoSections = {{
+      {0, preview::Section::kIntro1, "Intro"},
+      {1, preview::Section::kVarA, "Var A"},
+      {2, preview::Section::kVarB, "Var B"},
+      {3, preview::Section::kVarC, "Var C"},
+      {4, preview::Section::kVarD, "Var D"},
+  }};
+  for (const auto& [scene, section, name] : kDemoSections) {
+    if (scene >= model.scene_count()) {
+      continue;
+    }
+    model.set_scene_section(scene, static_cast<std::uint8_t>(section));
+    model.set_scene_name(scene, name);
   }
 
   // Open the bass 'wlk' clip by default — the design's initial openAt {r:1,c:0}
@@ -145,8 +250,7 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   }
   const float fill_a = playing ? 0.26F : (hovered ? 0.16F : 0.10F);
   dl->AddRectFilled(p0, p1, neon::u32(color, fill_a), rounding);
-  dl->AddRect(p0, p1, neon::u32(color, playing ? 1.0F : 0.40F), rounding, 0,
-              playing ? 1.6F : 1.0F);
+  dl->AddRect(p0, p1, neon::u32(color, playing ? 1.0F : 0.40F), rounding, 0, playing ? 1.6F : 1.0F);
   if (opened) {
     // Design: an inset ring in the TRACK color (not white).
     dl->AddRect(ImVec2(p0.x + 1.0F, p0.y + 1.0F), ImVec2(p1.x - 1.0F, p1.y - 1.0F),
@@ -244,8 +348,8 @@ void render_header(V02State& fx, const AppState& app_state) {
   const float hint_w = ImGui::CalcTextSize(hint).x;
   const float zoom_w = 58.0F;
   ImGui::SameLine();
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),
-                                ImGui::GetContentRegionMax().x - zoom_w - hint_w - 8.0F));
+  ImGui::SetCursorPosX(
+      std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - zoom_w - hint_w - 8.0F));
   ImGui::TextColored(theme::kTextMuted, "%s", hint);
   ImGui::SameLine(0.0F, 8.0F);
   if (ImGui::SmallButton("-")) {
@@ -351,14 +455,15 @@ bool any_part_soloed(const PartsModel& parts) {
 // launch happens). Deliberately minimal per owner judgment: the scene's
 // stored NAME is left untouched by a drop -- only the section changes.
 void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
-                              const AppState& app_state, V02State& fx, std::size_t s, float cz) {
+                              const AppState& app_state, V02State& fx, std::size_t s, float cz,
+                              float header_h) {
   ImGui::SameLine(0.0F, kCellGap);
   ImGui::PushID(static_cast<int>(s));
   const ImVec2 hp0 = ImGui::GetCursorScreenPos();
 
   if (fx.renaming_scene == static_cast<int>(s)) {
     // Inline rename in progress for THIS scene column: an InputText
-    // replaces the header, occupying the same cz x cz*0.5 footprint the
+    // replaces the header, occupying the same cz x header_h footprint the
     // InvisibleButton takes in the non-editing branch below.
     ImGui::SetCursorScreenPos(hp0);
     ImGui::SetNextItemWidth(cz);
@@ -379,9 +484,9 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     }
     // Reserve the rest of the non-editing header's height so the cell row
     // below never shifts while a rename is in progress.
-    ImGui::Dummy(ImVec2(cz, std::max(0.0F, cz * 0.5F - ImGui::GetFrameHeight())));
+    ImGui::Dummy(ImVec2(cz, std::max(0.0F, header_h - ImGui::GetFrameHeight())));
   } else {
-    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
+    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, header_h));
     if (ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVariationDragPayloadId)) {
         const std::uint8_t section = *static_cast<const std::uint8_t*>(payload->Data);
@@ -392,19 +497,32 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     const bool double_clicked =
         ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     const std::string name(model.scene_name(s));
-    const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
     ImDrawList* hdl = ImGui::GetWindowDrawList();
+    ImFont* font = ImGui::GetFont();
+    // Owner: smaller (kSceneNameFontSize), word-wrapped, multi-line name so
+    // a longer/renamed scene name fits within the column instead of
+    // overflowing it at the default font size. The green launch caret sits
+    // in its own fixed top-right corner (decoupled from the wrapped text's
+    // own width, which can now span several lines).
+    const std::vector<std::string> lines =
+        wrap_scene_name(font, kSceneNameFontSize, name, cz - 6.0F);
+    const float line_h = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, "Ag").y;
     // SLICE 4b: the header's own text tint doubles as the "active scene"
     // indicator -- was hardcoded to column 0; now tracks fx.active_scene,
     // which auto-song's advance AND a manual scene launch both update, so
     // the highlight reflects whichever column is really current.
-    hdl->AddText(
-        ImVec2(hp0.x + 3.0F, ty),
-        neon::u32(static_cast<int>(s) == fx.active_scene ? theme::kText : theme::kTextSecondary),
-        name.c_str());
-    hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(name.c_str()).x + 4.0F, ty),
-                 neon::u32(theme::kGreen), "\xE2\x96\xB6");
-    const float uy = hp0.y + cz * 0.5F - 2.0F;
+    const ImU32 name_color =
+        neon::u32(static_cast<int>(s) == fx.active_scene ? theme::kText : theme::kTextSecondary);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+      hdl->AddText(font, kSceneNameFontSize,
+                   ImVec2(hp0.x + 3.0F, hp0.y + 3.0F + static_cast<float>(i) * line_h), name_color,
+                   lines[i].c_str());
+    }
+    const char* caret = "\xE2\x96\xB6";
+    const ImVec2 caret_ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, caret);
+    hdl->AddText(font, kSceneNameFontSize, ImVec2(hp0.x + cz - caret_ts.x - 3.0F, hp0.y + 3.0F),
+                 neon::u32(theme::kGreen), caret);
+    const float uy = hp0.y + header_h - 2.0F;
     hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
     if (double_clicked) {
       fx.renaming_scene = static_cast<int>(s);
@@ -440,20 +558,38 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
 }
 
 // Scene header row: a spacer over the label column, then one launch head per
-// scene column (see render_scene_header_cell).
+// scene column (see render_scene_header_cell). `header_h` is computed ONCE
+// here from the LONGEST wrapped name among every visible column, and shared
+// by all of them -- every column must use the SAME header height, or the
+// track rows below would start at a different Y per column.
 void render_scene_header_row(GridModel& model, BrainSession& brain_session,
                              const AppState& app_state, V02State& fx, std::size_t scenes,
                              float cz) {
-  ImGui::Dummy(ImVec2(kLabelColWidth, cz * 0.5F));
+  ImFont* font = ImGui::GetFont();
+  std::size_t max_lines = 1;
   for (std::size_t s = 0; s < scenes; ++s) {
-    render_scene_header_cell(model, brain_session, app_state, fx, s, cz);
+    const std::string name(model.scene_name(s));
+    const std::vector<std::string> lines =
+        wrap_scene_name(font, kSceneNameFontSize, name, cz - 6.0F);
+    max_lines = std::max(max_lines, lines.size());
+  }
+  const float line_h = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, "Ag").y;
+  const float header_h = std::max(cz * 0.5F, static_cast<float>(max_lines) * line_h + 6.0F);
+
+  ImGui::Dummy(ImVec2(kLabelColWidth, header_h));
+  for (std::size_t s = 0; s < scenes; ++s) {
+    render_scene_header_cell(model, brain_session, app_state, fx, s, cz, header_h);
   }
 }
 
-// Label cell for one track row: color dot + M/S latches + name, all left of
-// the row's launch cells. M/S latches wire the REAL `part <role> mute|solo
-// on/off` L1 verb through `parts` -- they share PartsModel state with the
-// rail mute/solo, and drive the standard solo-implies-others-muted dim here.
+// Label cell for one track row: color dot + name on top, M/S latches below,
+// all left of the row's launch cells. M/S latches wire the REAL `part <role>
+// mute|solo on/off` L1 verb through `parts` -- they share PartsModel state
+// with the rail mute/solo, and drive the standard solo-implies-others-muted
+// dim here. Owner: the pair used to sit inline with the name at 13px, too
+// small/cramped to read or tell apart -- stacking the name above the
+// latches gives both rows their own full-width space for a bigger, clearly
+// legible S/M pair.
 void render_track_label(PartsModel& parts, BrainSession& brain_session, const V02Row& row,
                         bool any_solo, const ImVec4& color, V02State& fx, float cz) {
   const std::size_t role = row.role_index;
@@ -461,34 +597,37 @@ void render_track_label(PartsModel& parts, BrainSession& brain_session, const V0
   const bool dim = (any_solo && !info.soloed) || info.muted;
   const ImVec2 lp = ImGui::GetCursorScreenPos();
   ImDrawList* dl = ImGui::GetWindowDrawList();
-  const float cy = lp.y + cz * 0.5F;
-  // Design: a 7x7 track-colored SQUARE (glow), not a circle.
-  const ImVec2 d0(lp.x + 2.0F, cy - 3.5F);
-  const ImVec2 d1(lp.x + 9.0F, cy + 3.5F);
+
+  // Row 1 (top): a 7x7 track-colored SQUARE (glow, design) + the track name
+  // in the TRACK COLOR (design), sharing one text-line-height row. Kept
+  // tight (minimal padding) so the stacked M/S row below still fits within
+  // `cz` even at the smallest zoom (render_header's -/+ clamp bottoms out
+  // at 34px).
+  const float name_row_h = ImGui::GetTextLineHeight() + 1.0F;
+  const float name_cy = lp.y + name_row_h * 0.5F;
+  const ImVec2 d0(lp.x + 2.0F, name_cy - 3.5F);
+  const ImVec2 d1(lp.x + 9.0F, name_cy + 3.5F);
   neon::glow_rect(dl, d0, d1, color, 1.0F, dim ? 0.4F : 1.0F, fx.glow && !dim);
   dl->AddRectFilled(d0, d1, neon::u32(color, dim ? 0.4F : 1.0F), 1.0F);
+  ImGui::SetCursorScreenPos(ImVec2(lp.x + 14.0F, name_cy - ImGui::GetTextLineHeight() * 0.5F));
+  ImGui::TextColored(dim ? theme::kTextMuted : color, "%s", row.name);
 
-  // M / S latches (real `part <role> mute|solo on|off` verb), vertically
-  // centered in the row's label column.
+  // Row 2 (below the name): the M / S latches -- bigger, explicit-letter
+  // squares (kLatchSize), unambiguously lit (tone fill) when engaged.
   const std::string token(parts.part_wire_token(role));
-  const float by = cy - kLatchSize * 0.5F;
-  ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F, by));
+  const float latch_y = lp.y + name_row_h + kLatchGap;
+  ImGui::SetCursorScreenPos(ImVec2(lp.x + 2.0F, latch_y));
   if (grid_latch("M", info.muted, theme::kPink)) {
     const bool was = info.muted;
     parts.toggle_mute(role);
     brain_session.send("part " + token + " mute " + (!was ? "on" : "off"));
   }
-  ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + kLatchSize + 2.0F, by));
+  ImGui::SetCursorScreenPos(ImVec2(lp.x + 2.0F + kLatchSize + kLatchGap, latch_y));
   if (grid_latch("S", info.soloed, theme::kAmber)) {
     const bool was = info.soloed;
     parts.toggle_solo(role);
     brain_session.send("part " + token + " solo " + (!was ? "on" : "off"));
   }
-
-  ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + 2.0F * kLatchSize + 6.0F,
-                                   cy - ImGui::GetTextLineHeight() * 0.5F));
-  // Design: the track name is in the TRACK COLOR (not white).
-  ImGui::TextColored(dim ? theme::kTextMuted : color, "%s", row.name);
   ImGui::SetCursorScreenPos(lp);
   ImGui::Dummy(ImVec2(kLabelColWidth, cz));
 }

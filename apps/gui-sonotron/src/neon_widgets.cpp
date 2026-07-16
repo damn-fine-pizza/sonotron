@@ -150,8 +150,8 @@ bool pad_button(const char* id, const char* glyph, const ImVec2& size, const ImV
 
   const ImVec4 glyph_col = filled ? theme::kAppBg : accent;
   const ImVec2 ts = ImGui::CalcTextSize(glyph);
-  dl->AddText(ImVec2(p0.x + (size.x - ts.x) * 0.5F, p0.y + (size.y - ts.y) * 0.5F),
-              u32(glyph_col), glyph);
+  dl->AddText(ImVec2(p0.x + (size.x - ts.x) * 0.5F, p0.y + (size.y - ts.y) * 0.5F), u32(glyph_col),
+              glyph);
   return clicked;
 }
 
@@ -297,8 +297,8 @@ void master_vu(const char* id, const ImVec2& size, bool playing, float time, boo
   }
 }
 
-void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
-                           std::uint32_t seed, const ImVec4& color) {
+void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max, std::uint32_t seed,
+                           const ImVec4& color) {
   const float w = max.x - min.x;
   const float h = max.y - min.y;
   const float cy = min.y + h * 0.5F;
@@ -312,22 +312,29 @@ void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
   }
 }
 
+PitchCellRect pitch_grid_cell(const ImVec2& band_min, const ImVec2& band_max, int step, int steps,
+                              int pitch, int pitches) {
+  const float w = band_max.x - band_min.x;
+  const float h = band_max.y - band_min.y;
+  const float cw = w / static_cast<float>(steps);
+  const float rh = h / static_cast<float>(pitches);
+  const float x0 = band_min.x + static_cast<float>(step) * cw;
+  // Pitch 0 sits at the BOTTOM of the band; row index counts up from there.
+  const float y1 = band_max.y - static_cast<float>(pitch) * rh;
+  return PitchCellRect{ImVec2(x0, y1 - rh), ImVec2(x0 + cw, y1)};
+}
+
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
                             const ClipPattern& pat, const ImVec4& color) {
   // A little HORIZONTAL piano-roll showing a step-cropped view of `pat`: the
   // first kCellSteps columns, all kPitches rows, drawn at the SAME
-  // (step, pitch) positions the Sequence Edit canvas uses -- so a cell dot
-  // is a legible subset of the editor's blocks, never a different melody. STEP
-  // runs left->high (X), PITCH low->high (Y, pitch 0 at the bottom).
+  // (step, pitch) positions the Sequence Edit canvas uses -- via the shared
+  // pitch_grid_cell() helper above, so a cell dot is a legible subset of the
+  // editor's blocks, never a different melody (the two views can no longer
+  // silently drift apart, since both compute the rect through one function).
+  // STEP runs left->right (X), PITCH low->high (Y, pitch 0 at the bottom).
   const int steps = ClipPattern::kCellSteps;
   const int pitches = ClipPattern::kPitches;
-  const float w = max.x - min.x;
-  const float h = max.y - min.y;
-  const float cw = w / static_cast<float>(steps);
-  const float rh = h / static_cast<float>(pitches);
-  // Notes as short horizontal BARS filling most of their step column (design),
-  // not centered square dots; a run of the same pitch merges into a 2-wide bar.
-  const float bar_h = std::max(2.0F, rh * 0.5F);
   for (int step = 0; step < steps; ++step) {
     const int pitch = pat.pitch[step];
     if (pitch < 0) {
@@ -337,10 +344,18 @@ void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max
     while (step + span < steps && pat.pitch[step + span] == pitch && span < 2) {
       ++span;
     }
-    const float x0 = min.x + static_cast<float>(step) * cw + 0.5F;
-    const float x1 = min.x + static_cast<float>(step + span) * cw - 1.0F;
-    const float y0 = max.y - static_cast<float>(pitch + 1) * rh + (rh - bar_h) * 0.5F;
-    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + bar_h), u32(color, 0.85F), 1.5F);
+    // Notes as short horizontal BARS filling most of their step column
+    // (design), not centered square dots; a run of the same pitch merges
+    // into a 2-wide bar -- `r0`/`r1` are this bar's first/last step cell.
+    const PitchCellRect r0 = pitch_grid_cell(min, max, step, steps, pitch, pitches);
+    const PitchCellRect r1 = pitch_grid_cell(min, max, step + span - 1, steps, pitch, pitches);
+    const float rh = r0.max.y - r0.min.y;
+    const float bar_h = std::max(2.0F, rh * 0.5F);
+    const float cy = (r0.min.y + r0.max.y) * 0.5F;
+    const float x0 = r0.min.x + 0.5F;
+    const float x1 = r1.max.x - 1.0F;
+    dl->AddRectFilled(ImVec2(x0, cy - bar_h * 0.5F), ImVec2(x1, cy + bar_h * 0.5F),
+                      u32(color, 0.85F), 1.5F);
     step += span - 1;
   }
 }

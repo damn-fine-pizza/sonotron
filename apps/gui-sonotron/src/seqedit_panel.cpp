@@ -15,9 +15,9 @@ namespace {
 
 // A small mode tab: cyan fill when active.
 bool mode_tab(const char* label, bool active) {
-  ImGui::PushStyleColor(ImGuiCol_Button,
-                        active ? ImVec4(theme::kCyan.x, theme::kCyan.y, theme::kCyan.z, 0.22F)
-                               : theme::kFrameBg);
+  ImGui::PushStyleColor(
+      ImGuiCol_Button,
+      active ? ImVec4(theme::kCyan.x, theme::kCyan.y, theme::kCyan.z, 0.22F) : theme::kFrameBg);
   ImGui::PushStyleColor(ImGuiCol_Text, active ? theme::kCyan : theme::kTextSecondary);
   const bool clicked = ImGui::SmallButton(label);
   ImGui::PopStyleColor(2);
@@ -121,20 +121,20 @@ void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
   // stays reserved for genuine future audio content (an owner-flagged
   // deviation from the design's audio->waveform mapping, see this
   // workstream's implementation report). STEP left->right, PITCH low->high
-  // (pitch 0 at the bottom), matching the launch-cell mini-preview exactly.
+  // (pitch 0 at the bottom), via the SAME neon::pitch_grid_cell() helper the
+  // launch-cell mini-preview uses (neon_widgets.cpp's clip_preview_pianoroll)
+  // -- one shared formula, so the two views can never silently drift apart.
   const neon::ClipPattern pat = neon::clip_pattern_from_pitches(pp.pitch);
   const int kSteps = neon::ClipPattern::kSteps;
   const int kPitches = neon::ClipPattern::kPitches;
-  const float cw = avail.x / static_cast<float>(kSteps);
-  const float rh = avail.y / static_cast<float>(kPitches);
   for (int step = 0; step < kSteps; ++step) {
     const int pitch = pat.pitch[static_cast<std::size_t>(step)];
     if (pitch < 0) {
       continue;
     }
-    const ImVec2 b0(p0.x + static_cast<float>(step) * cw + 2.0F,
-                    p0.y + static_cast<float>(kPitches - 1 - pitch) * rh + 2.0F);
-    const ImVec2 b1(b0.x + cw - 4.0F, b0.y + rh - 4.0F);
+    const neon::PitchCellRect r = neon::pitch_grid_cell(p0, p1, step, kSteps, pitch, kPitches);
+    const ImVec2 b0(r.min.x + 2.0F, r.min.y + 2.0F);
+    const ImVec2 b1(r.max.x - 2.0F, r.max.y - 2.0F);
     if (fx.glow) {
       neon::glow_rect(dl, b0, b1, track_color, 3.0F, 0.7F, fx.glow);
     }

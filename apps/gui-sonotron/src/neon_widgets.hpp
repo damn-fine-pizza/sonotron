@@ -97,8 +97,24 @@ void master_vu(const char* id, const ImVec2& size, bool playing, float time, boo
 // no current caller feeds it real audio data (repeat-zone-real-contract.md:
 // the pad row shows its real MIDI note pattern instead, via
 // clip_preview_pianoroll below, since there is no real audio content yet).
-void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
-                           std::uint32_t seed, const ImVec4& color);
+void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max, std::uint32_t seed,
+                           const ImVec4& color);
+
+// One (step, pitch) grid-cell rect within [band_min, band_max], given
+// `steps` columns and `pitches` rows -- the ONE shared layout helper BOTH
+// the launch-cell mini-preview (clip_preview_pianoroll below) and the
+// Sequence Edit canvas (seqedit_panel.cpp) call, so a note at a given
+// (step, pitch) ALWAYS lands at the identical relative position in both
+// views by construction (sharing one function), rather than by two
+// independently hand-written formulas that could silently drift apart on a
+// future edit to either call site. STEP runs left->right (X), PITCH
+// low->high (Y -- pitch 0 sits at the BOTTOM of the band).
+struct PitchCellRect {
+  ImVec2 min;
+  ImVec2 max;
+};
+PitchCellRect pitch_grid_cell(const ImVec2& band_min, const ImVec2& band_max, int step, int steps,
+                              int pitch, int pitches);
 
 // A little horizontal piano-roll inside a launch cell's inner rect: a
 // step-cropped view (the first kCellSteps columns) of `pattern`, drawn at
