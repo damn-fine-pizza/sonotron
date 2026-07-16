@@ -686,7 +686,17 @@ void Engine::style_switch(const Command& cmd, EventSink sink) {
   // rides the next bar boundary (ENTER "next-bar"), matching kStyleSection's
   // quantization. (Phase-5 Item #2: retired the old `c != 0`-is-immediate
   // overload -- boundary is the single shared spelling now.)
-  const bool immediate = cmd.boundary == Boundary::kImmediate || !m_transport.playing();
+  //
+  // ALSO immediate when no style is loaded yet (!m_arranger.loaded()): a
+  // deferred switch parks in the arranger's m_pending and is only consumed at
+  // a bar boundary inside on_tick(), but on_tick() returns early while
+  // m_style == nullptr (arranger.hpp) -- so a next-bar switch issued before
+  // ANY style is loaded would never land and the band would stay silent
+  // forever. You cannot cross-fade from silence: the first style must cut in
+  // at once. (Fixes the GUI "press Play, THEN pick a style" flow, where the
+  // browser sends `style switch` because the transport is already running.)
+  const bool immediate =
+      cmd.boundary == Boundary::kImmediate || !m_transport.playing() || !m_arranger.loaded();
   const bool ok = cmd.a >= 0 && cmd.a < static_cast<std::int32_t>(styles::kBuiltinCount) &&
                   cmd.b >= 0 && cmd.b < kSectionTypeCount &&
                   m_arranger.request_style(styles::kBuiltins[static_cast<std::uint8_t>(cmd.a)],

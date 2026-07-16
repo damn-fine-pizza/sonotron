@@ -72,9 +72,47 @@ void test_style_playback_reaches_primary_port_ring() {
   session.stop();
 }
 
+// Regression pin (gui-sonotron "se faccio play non si sente nulla"): the
+// browser sends `style switch <name>` instead of `style load <name>` whenever
+// the transport is ALREADY playing (browser_panel.cpp -- the live-morph path).
+// Route::enabled defaults to false and ONLY kStyleRoute flips it, so if
+// send()'s auto-route fired on kStyleLoad alone, the natural "press Play, THEN
+// pick a style" flow routed nothing and stayed silent forever. This reproduces
+// that exact ordering (transport start BEFORE the style) and proves MIDI now
+// reaches the primary port on a `style switch` too.
+void test_style_switch_after_play_reaches_primary_port_ring() {
+  InProcessBrainSession session;
+  AudioMidiRing ring;
+  session.set_audio_ring(&ring);
+  CHECK(session.start());
+
+  session.send("transport start");   // user presses Play first...
+  session.send("style switch basic");  // ...then picks a style -> live morph verb
+  // No style was loaded when the switch arrived, so it cuts in immediately
+  // (engine.cpp Engine::style_switch) rather than parking for a bar boundary
+  // that on_tick() -- early-returning while m_style is null -- would never run.
+
+  bool saw_primary_midi_in_ring = false;
+  for (int i = 0; i < 500 && !saw_primary_midi_in_ring; ++i) {
+    std::vector<BrainEvent> batch;
+    session.poll(batch);
+    AudioMidiEvent ev;
+    while (ring.try_pop(ev)) {
+      if (ev.port == kPrimaryPort) {
+        saw_primary_midi_in_ring = true;
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  CHECK(saw_primary_midi_in_ring);
+
+  session.stop();
+}
+
 }  // namespace
 
 int main() {
   test_style_playback_reaches_primary_port_ring();
+  test_style_switch_after_play_reaches_primary_port_ring();
   return sonotron::test::failures();
 }

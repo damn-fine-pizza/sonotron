@@ -683,12 +683,18 @@ void InProcessBrainSession::send(std::string_view command_line) {
   }
 
   // Auto-route the default band (see kDefaultStyleRoutes's own comment)
-  // right after a successful `style load` -- and only then: routing before a
-  // style is loaded would apply to whatever style loads next, not this one,
-  // and there is no style to route if the load itself never reached the
-  // ring. Same validated Command path as every other verb here (never a
-  // shortcut around push_command).
-  if (cmd.param == Param::kStyleLoad) {
+  // right after a successful `style load` OR `style switch` -- and only then:
+  // routing before a style is active would apply to whatever style comes
+  // next, not this one, and there is nothing to route if the command itself
+  // never reached the ring. `style switch` (the browser's playing-time morph,
+  // browser_panel.cpp) MUST route too: Route::enabled defaults to false and
+  // ONLY kStyleRoute flips it, so a switch that was never preceded by a load
+  // (e.g. the user pressed Play, THEN picked a style) would otherwise emit no
+  // MIDI on out0 and stay silent forever. Re-enabling an already-enabled
+  // route is idempotent, so routing on every load/switch is harmless. Same
+  // validated Command path as every other verb here (never a shortcut around
+  // push_command).
+  if (cmd.param == Param::kStyleLoad || cmd.param == Param::kStyleSwitch) {
     for (const DefaultStyleRoute& route : kDefaultStyleRoutes) {
       if (!m_impl->command_ring.try_push(make_default_style_route_command(route))) {
         BrainEvent warn;
