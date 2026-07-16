@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Unix-domain-socket control adapter (D38 GUI transport): a live-mode-only,

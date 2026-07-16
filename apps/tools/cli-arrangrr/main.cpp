@@ -682,14 +682,19 @@ int run_live(bool human, const char* init_path, const char* motd_path, const cha
     // Clock: harvest elapsed time into whole ticks.
     if (fds[1].revents & POLLIN) {
       std::uint64_t expirations = 0;
-      (void)read(tfd, &expirations, sizeof(expirations));
-      const std::uint64_t now_us = monotonic_us();
-      acc.set_bpm(shell.engine().transport().bpm());
-      const std::uint32_t ticks = acc.advance_us(now_us - last_us);
-      last_us = now_us;
-      if (ticks > 0) {
-        std::string tick_error;
-        shell.advance_by(ticks, tick_error);
+      const ssize_t n_read = read(tfd, &expirations, sizeof(expirations));
+      // timerfd is level-triggered: on a short read, -1 (EINTR/EAGAIN), or a
+      // spurious wakeup, just skip this iteration -- POLLIN will be set
+      // again on the next poll() as long as the timer has really expired.
+      if (n_read == static_cast<ssize_t>(sizeof(expirations))) {
+        const std::uint64_t now_us = monotonic_us();
+        acc.set_bpm(shell.engine().transport().bpm());
+        const std::uint32_t ticks = acc.advance_us(now_us - last_us);
+        last_us = now_us;
+        if (ticks > 0) {
+          std::string tick_error;
+          shell.advance_by(ticks, tick_error);
+        }
       }
     }
 

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "app_state.hpp"
 #include "browser_model.hpp"

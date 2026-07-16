@@ -1,5 +1,6 @@
 #include "parts_panel.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 

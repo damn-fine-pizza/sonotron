@@ -1,5 +1,7 @@
 #include "coremidi_midi.hpp"
 
+#include <utility>
+
 namespace arrangrr::host {
 
 CoreMidiMidi::~CoreMidiMidi() {

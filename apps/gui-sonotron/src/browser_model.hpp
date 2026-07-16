@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Pure-data model for the Browser zone (ux-workstation.md §4.3): a
