@@ -278,6 +278,279 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   }
 }
 
+// Standard solo semantics: any part soloed makes the non-soloed rows read as
+// muted (dimmed). Derived from the shared PartsModel (same state the rail
+// mute/solo edits), so both surfaces stay consistent.
+bool any_part_soloed(const PartsModel& parts) {
+  for (std::size_t i = 0; i < PartsModel::kPartCount; ++i) {
+    if (parts.part(i).soloed) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// One scene-header column: the plain-text "name ▶" launch head + cyan
+// underline (design has no button pill), OR -- while renaming -- an inline
+// ImGui InputText (repeat-zone-real-contract.md §4/§8b decision 3, OWNER
+// LOCKED to host-only GridModel storage + scenes.json, no core touch) so the
+// column can be renamed; commit on Enter/focus-loss, Esc cancels. Also the
+// drop target (SLICE 4a item 4): a "variations" row dragged from the browser
+// (kVariationDragPayloadId, browser_panel.cpp) sets THIS column's SectionType
+// through GridModel -- host-side state only, no wire send here (the section
+// only takes musical effect once the header's own ▶ below applies it, or a
+// launch happens). Deliberately minimal per owner judgment: the scene's
+// stored NAME is left untouched by a drop -- only the section changes.
+void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
+                              const AppState& app_state, V02State& fx, std::size_t s, float cz) {
+  ImGui::SameLine(0.0F, kCellGap);
+  ImGui::PushID(static_cast<int>(s));
+  const ImVec2 hp0 = ImGui::GetCursorScreenPos();
+
+  if (fx.renaming_scene == static_cast<int>(s)) {
+    // Inline rename in progress for THIS scene column: an InputText
+    // replaces the header, occupying the same cz x cz*0.5 footprint the
+    // InvisibleButton takes in the non-editing branch below.
+    ImGui::SetCursorScreenPos(hp0);
+    ImGui::SetNextItemWidth(cz);
+    if (fx.rename_focus_pending) {
+      ImGui::SetKeyboardFocusHere();
+      fx.rename_focus_pending = false;
+    }
+    ImGui::InputText("##rename", fx.rename_buffer.data(), fx.rename_buffer.size());
+    const bool escape_pressed = ImGui::IsKeyPressed(ImGuiKey_Escape);
+    if (ImGui::IsItemDeactivated()) {
+      if (!escape_pressed) {
+        // Commit on Enter or on any other focus-loss (click elsewhere);
+        // Escape (checked above) skips the write-back, so the header
+        // reverts to its previously stored name.
+        model.set_scene_name(s, std::string(fx.rename_buffer.data()));
+      }
+      fx.renaming_scene = -1;
+    }
+    // Reserve the rest of the non-editing header's height so the cell row
+    // below never shifts while a rename is in progress.
+    ImGui::Dummy(ImVec2(cz, std::max(0.0F, cz * 0.5F - ImGui::GetFrameHeight())));
+  } else {
+    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVariationDragPayloadId)) {
+        const std::uint8_t section = *static_cast<const std::uint8_t*>(payload->Data);
+        model.set_scene_section(s, section);
+      }
+      ImGui::EndDragDropTarget();
+    }
+    const bool double_clicked =
+        ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    const std::string name(model.scene_name(s));
+    const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
+    ImDrawList* hdl = ImGui::GetWindowDrawList();
+    // SLICE 4b: the header's own text tint doubles as the "active scene"
+    // indicator -- was hardcoded to column 0; now tracks fx.active_scene,
+    // which auto-song's advance AND a manual scene launch both update, so
+    // the highlight reflects whichever column is really current.
+    hdl->AddText(
+        ImVec2(hp0.x + 3.0F, ty),
+        neon::u32(static_cast<int>(s) == fx.active_scene ? theme::kText : theme::kTextSecondary),
+        name.c_str());
+    hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(name.c_str()).x + 4.0F, ty),
+                 neon::u32(theme::kGreen), "\xE2\x96\xB6");
+    const float uy = hp0.y + cz * 0.5F - 2.0F;
+    hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
+    if (double_clicked) {
+      fx.renaming_scene = static_cast<int>(s);
+      std::snprintf(fx.rename_buffer.data(), fx.rename_buffer.size(), "%s", name.c_str());
+      fx.rename_focus_pending = true;
+    } else if (go) {
+      // SLICE 4a item 5: the header's PRIMARY job is now applying this
+      // column's own SectionType through the existing `style section`
+      // verb (Param::kStyleSection, quantized to the next bar while
+      // playing, immediate when stopped -- Engine::cmd_style's own
+      // handling, not reimplemented here). The `launch scene ... quantize`
+      // send (kSceneQuantize, the grid-column clip-launch verb) is KEPT
+      // alongside it -- a genuinely different, still-useful effect (fires
+      // every filled cell in this column) that this slice does not retire.
+      // Real per-cell readback (app_state.clip_state) reports the launched
+      // state on the NEXT poll(), so no local echo is written here -- see
+      // render_grid_panel's own header comment.
+      const std::string_view section_name = section_wire_name(model.scene_section(s));
+      if (!section_name.empty()) {
+        brain_session.send("style section " + std::string(section_name));
+      }
+      brain_session.send("launch scene " + std::to_string(s) + " quantize " +
+                         std::to_string(kDefaultLaunchQuantizeBars));
+      // SLICE 4b: a manual scene-column launch is also a real launch of
+      // this scene, so it becomes auto-song's own "active scene" baseline
+      // -- auto-song, if later armed (or already armed), measures
+      // bars-elapsed from THIS launch, not a stale one.
+      fx.active_scene = static_cast<int>(s);
+      fx.active_scene_start_bar = app_state.bar();
+    }
+  }
+  ImGui::PopID();
+}
+
+// Scene header row: a spacer over the label column, then one launch head per
+// scene column (see render_scene_header_cell).
+void render_scene_header_row(GridModel& model, BrainSession& brain_session,
+                             const AppState& app_state, V02State& fx, std::size_t scenes,
+                             float cz) {
+  ImGui::Dummy(ImVec2(kLabelColWidth, cz * 0.5F));
+  for (std::size_t s = 0; s < scenes; ++s) {
+    render_scene_header_cell(model, brain_session, app_state, fx, s, cz);
+  }
+}
+
+// Label cell for one track row: color dot + M/S latches + name, all left of
+// the row's launch cells. M/S latches wire the REAL `part <role> mute|solo
+// on/off` L1 verb through `parts` -- they share PartsModel state with the
+// rail mute/solo, and drive the standard solo-implies-others-muted dim here.
+void render_track_label(PartsModel& parts, BrainSession& brain_session, const V02Row& row,
+                        bool any_solo, const ImVec4& color, V02State& fx, float cz) {
+  const std::size_t role = row.role_index;
+  const PartInfo& info = parts.part(role);
+  const bool dim = (any_solo && !info.soloed) || info.muted;
+  const ImVec2 lp = ImGui::GetCursorScreenPos();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const float cy = lp.y + cz * 0.5F;
+  // Design: a 7x7 track-colored SQUARE (glow), not a circle.
+  const ImVec2 d0(lp.x + 2.0F, cy - 3.5F);
+  const ImVec2 d1(lp.x + 9.0F, cy + 3.5F);
+  neon::glow_rect(dl, d0, d1, color, 1.0F, dim ? 0.4F : 1.0F, fx.glow && !dim);
+  dl->AddRectFilled(d0, d1, neon::u32(color, dim ? 0.4F : 1.0F), 1.0F);
+
+  // M / S latches (real `part <role> mute|solo on|off` verb), vertically
+  // centered in the row's label column.
+  const std::string token(parts.part_wire_token(role));
+  const float by = cy - kLatchSize * 0.5F;
+  ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F, by));
+  if (grid_latch("M", info.muted, theme::kPink)) {
+    const bool was = info.muted;
+    parts.toggle_mute(role);
+    brain_session.send("part " + token + " mute " + (!was ? "on" : "off"));
+  }
+  ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + kLatchSize + 2.0F, by));
+  if (grid_latch("S", info.soloed, theme::kAmber)) {
+    const bool was = info.soloed;
+    parts.toggle_solo(role);
+    brain_session.send("part " + token + " solo " + (!was ? "on" : "off"));
+  }
+
+  ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + 2.0F * kLatchSize + 6.0F,
+                                   cy - ImGui::GetTextLineHeight() * 0.5F));
+  // Design: the track name is in the TRACK COLOR (not white).
+  ImGui::TextColored(dim ? theme::kTextMuted : color, "%s", row.name);
+  ImGui::SetCursorScreenPos(lp);
+  ImGui::Dummy(ImVec2(kLabelColWidth, cz));
+}
+
+// One launch cell for a track row: computes its real preview content, draws
+// it (draw_cell), and handles both click (launch+open a filled cell, or fill
+// an empty one with a local demo clip) and the browser style drag-drop
+// target that registers a real ClipMatrix clip.
+void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+                       BrainSession& brain_session, const AppState& app_state, V02State& fx,
+                       const V02Row& row, std::size_t r, std::size_t s, const ImVec4& color,
+                       float cz) {
+  ImGui::SameLine(0.0F, kCellGap);
+  const std::size_t id = cell_id(row.role_index, s, model.scene_count());
+  const GridCell& cell = model.cell(row.role_index, s);
+  const bool filled = cell.kind != GridCellKind::kEmpty;
+  // Real per-cell readback (repeat-zone-real-contract.md §3): armed,
+  // playing, and queued-stop all read as "lit" -- the same immediate
+  // feedback the former click-time local echo gave, now backed by the
+  // core's own "clip" OutEvent instead of a guess.
+  const AppState::ClipLaunchState launch_state = app_state.clip_state(static_cast<int>(id));
+  const bool playing = launch_state != AppState::ClipLaunchState::kStopped;
+  const bool opened = fx.open_cell == static_cast<int>(id);
+  // Real content (repeat-zone-real-contract.md "cell preview made real"): the
+  // SAME preview_for(...) the opened cell's Sequence Edit canvas uses, keyed
+  // by this cell's own role, the (today: single, browser-highlight) active
+  // style, AND (SLICE 4a) THIS COLUMN's own SectionType (model.scene_section
+  // (s)) instead of a hardcoded kVarA -- so a column carrying e.g. kVarB
+  // previews visibly different content from one still at the kVarA default.
+  // Empty cells never draw a preview, so this is only computed for a filled
+  // one.
+  neon::ClipPattern pattern{};
+  bool approx = false;
+  if (filled) {
+    const auto section = static_cast<preview::Section>(model.scene_section(s));
+    const preview::PreviewPattern pp =
+        preview::preview_for(fx.active_style, section, row.role_index);
+    pattern = neon::clip_pattern_from_pitches(pp.pitch);
+    approx = pp.approx;
+  }
+  ImGui::PushID(static_cast<int>(s));
+  const bool clicked =
+      draw_cell("cell", cz, filled, cell.label, color, pattern, approx, playing, opened, fx);
+  if (clicked) {
+    if (!filled) {
+      // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix
+      // registration -- only a browser style drop registers for real, see
+      // the drag-drop handler below). Short label like the design's
+      // addClip, so the cell never shows a truncated name.
+      model.set_cell(row.role_index, s, GridCellKind::kStyleSection, "clip");
+    } else {
+      // Filled -> real launch + open in Sequence Edit. The launched
+      // state itself is read back for real (above), not echoed locally.
+      brain_session.send("launch clip " + std::to_string(id) + " quantize " +
+                         std::to_string(kDefaultLaunchQuantizeBars));
+      fx.open_cell = static_cast<int>(id);
+      fx.open_row = static_cast<int>(r);
+      fx.open_audio = row.audio;
+      // SLICE 4a: seqedit_panel.cpp's own preview_for() call needs THIS
+      // column's SectionType (parity with the cell preview above).
+      fx.open_section = model.scene_section(s);
+      seqedit.set_part_index(row.role_index);
+      seqedit.set_clip_label(cell.label);
+    }
+  }
+  // Drop target: a browser style drag fills this cell for real AND
+  // registers a real ClipMatrix clip at this cell's own stable id
+  // (repeat-zone-real-contract.md §3/§8b decision 1, Shape A) -- so a
+  // later `launch clip <id>` actually addresses THIS cell's material
+  // instead of an empty pool slot. Owner decision 2: drag-a-style is the
+  // only content source real for this pass. FLAG-1 FIX (slice 4a's own
+  // flag, folded into slice 4b): the registered clip now references THIS
+  // COLUMN's own SectionType (model.scene_section(s)) instead of a
+  // hardcoded kVarA, so launching this cell and launching its column
+  // header both target the SAME section -- no latent misalignment
+  // between the two launch paths. Falls back to "varA" only if the
+  // column's stored section byte is somehow out of range (defensive;
+  // set_scene_section() already keeps it in-range).
+  if (ImGui::BeginDragDropTarget()) {
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kStyleDragPayloadId)) {
+      const std::size_t style_index = *static_cast<const std::size_t*>(payload->Data);
+      model.set_cell(row.role_index, s, GridCellKind::kStyleSection,
+                     std::string(kBuiltinStyleNames[style_index]));
+      const std::string_view cell_section_name = section_wire_name(model.scene_section(s));
+      const std::string cell_section_arg =
+          cell_section_name.empty() ? "varA" : std::string(cell_section_name);
+      brain_session.send("clip add " + std::string(parts.part_wire_token(row.role_index)) + " " +
+                         std::to_string(s) + " style " + cell_section_arg + " id " +
+                         std::to_string(id));
+    }
+    ImGui::EndDragDropTarget();
+  }
+  ImGui::PopID();
+}
+
+// One full track row: the label cell (render_track_label) plus its launch
+// cells (render_track_cell), one per scene column.
+void render_track_row(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+                      BrainSession& brain_session, const AppState& app_state, V02State& fx,
+                      std::size_t r, std::size_t scenes, bool any_solo, float cz) {
+  const V02Row& row = kRows[r];
+  const ImVec4& color = theme::kV02TrackColor[r];
+
+  ImGui::PushID(static_cast<int>(100 + r));
+  render_track_label(parts, brain_session, row, any_solo, color, fx, cz);
+  for (std::size_t s = 0; s < scenes; ++s) {
+    render_track_cell(model, seqedit, parts, brain_session, app_state, fx, row, r, s, color, cz);
+  }
+  ImGui::PopID();
+}
+
 }  // namespace
 
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
@@ -289,13 +562,7 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   // Standard solo semantics: any part soloed makes the non-soloed rows read as
   // muted (dimmed). Derived from the shared PartsModel (same state the rail
   // mute/solo edits), so both surfaces stay consistent.
-  bool any_solo = false;
-  for (std::size_t i = 0; i < PartsModel::kPartCount; ++i) {
-    if (parts.part(i).soloed) {
-      any_solo = true;
-      break;
-    }
-  }
+  const bool any_solo = any_part_soloed(parts);
 
   const float cz = fx.cell_zoom;
   const std::size_t scenes = std::min<std::size_t>(model.scene_count(), 5);
@@ -307,238 +574,11 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 
   ImGui::BeginChild("grid_body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_None);
 
-  // Scene header row: a spacer over the label column, then "name ▶" launch
-  // heads drawn as plain text + a cyan underline (design has no button
-  // pill). Double-clicking a header swaps it for an inline ImGui InputText
-  // (repeat-zone-real-contract.md §4/§8b decision 3, OWNER LOCKED to
-  // host-only GridModel storage + scenes.json, no core touch) so the column
-  // can be renamed; commit on Enter/focus-loss, Esc cancels. The launch verb
-  // and cyan underline are otherwise unchanged from before this rename
-  // affordance existed.
-  ImGui::Dummy(ImVec2(kLabelColWidth, cz * 0.5F));
-  ImDrawList* hdl = ImGui::GetWindowDrawList();
-  for (std::size_t s = 0; s < scenes; ++s) {
-    ImGui::SameLine(0.0F, kCellGap);
-    ImGui::PushID(static_cast<int>(s));
-    const ImVec2 hp0 = ImGui::GetCursorScreenPos();
-
-    if (fx.renaming_scene == static_cast<int>(s)) {
-      // Inline rename in progress for THIS scene column: an InputText
-      // replaces the header, occupying the same cz x cz*0.5 footprint the
-      // InvisibleButton takes in the non-editing branch below.
-      ImGui::SetCursorScreenPos(hp0);
-      ImGui::SetNextItemWidth(cz);
-      if (fx.rename_focus_pending) {
-        ImGui::SetKeyboardFocusHere();
-        fx.rename_focus_pending = false;
-      }
-      ImGui::InputText("##rename", fx.rename_buffer.data(), fx.rename_buffer.size());
-      const bool escape_pressed = ImGui::IsKeyPressed(ImGuiKey_Escape);
-      if (ImGui::IsItemDeactivated()) {
-        if (!escape_pressed) {
-          // Commit on Enter or on any other focus-loss (click elsewhere);
-          // Escape (checked above) skips the write-back, so the header
-          // reverts to its previously stored name.
-          model.set_scene_name(s, std::string(fx.rename_buffer.data()));
-        }
-        fx.renaming_scene = -1;
-      }
-      // Reserve the rest of the non-editing header's height so the cell row
-      // below never shifts while a rename is in progress.
-      ImGui::Dummy(ImVec2(cz, std::max(0.0F, cz * 0.5F - ImGui::GetFrameHeight())));
-    } else {
-      const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
-      // Drop target (repeat-zone-real-contract.md SLICE 4a item 4): a
-      // "variations" row dragged from the browser (kVariationDragPayloadId,
-      // browser_panel.cpp) sets THIS column's SectionType through GridModel
-      // -- host-side state only, no wire send here (the section only takes
-      // musical effect once the header's own ▶ below applies it, or a launch
-      // happens). Deliberately minimal per owner judgment: the scene's
-      // stored NAME is left untouched by a drop -- only the section changes.
-      if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVariationDragPayloadId)) {
-          const std::uint8_t section = *static_cast<const std::uint8_t*>(payload->Data);
-          model.set_scene_section(s, section);
-        }
-        ImGui::EndDragDropTarget();
-      }
-      const bool double_clicked =
-          ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-      const std::string name(model.scene_name(s));
-      const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
-      // SLICE 4b: the header's own text tint doubles as the "active scene"
-      // indicator -- was hardcoded to column 0; now tracks fx.active_scene,
-      // which auto-song's advance AND a manual scene launch both update, so
-      // the highlight reflects whichever column is really current.
-      hdl->AddText(
-          ImVec2(hp0.x + 3.0F, ty),
-          neon::u32(static_cast<int>(s) == fx.active_scene ? theme::kText : theme::kTextSecondary),
-          name.c_str());
-      hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(name.c_str()).x + 4.0F, ty),
-                   neon::u32(theme::kGreen), "\xE2\x96\xB6");
-      const float uy = hp0.y + cz * 0.5F - 2.0F;
-      hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F),
-                   2.0F);
-      if (double_clicked) {
-        fx.renaming_scene = static_cast<int>(s);
-        std::snprintf(fx.rename_buffer.data(), fx.rename_buffer.size(), "%s", name.c_str());
-        fx.rename_focus_pending = true;
-      } else if (go) {
-        // SLICE 4a item 5: the header's PRIMARY job is now applying this
-        // column's own SectionType through the existing `style section`
-        // verb (Param::kStyleSection, quantized to the next bar while
-        // playing, immediate when stopped -- Engine::cmd_style's own
-        // handling, not reimplemented here). The `launch scene ... quantize`
-        // send (kSceneQuantize, the grid-column clip-launch verb) is KEPT
-        // alongside it -- a genuinely different, still-useful effect (fires
-        // every filled cell in this column) that this slice does not retire.
-        // Real per-cell readback (app_state.clip_state) reports the launched
-        // state on the NEXT poll(), so no local echo is written here -- see
-        // render_grid_panel's own header comment.
-        const std::string_view section_name = section_wire_name(model.scene_section(s));
-        if (!section_name.empty()) {
-          brain_session.send("style section " + std::string(section_name));
-        }
-        brain_session.send("launch scene " + std::to_string(s) + " quantize " +
-                           std::to_string(kDefaultLaunchQuantizeBars));
-        // SLICE 4b: a manual scene-column launch is also a real launch of
-        // this scene, so it becomes auto-song's own "active scene" baseline
-        // -- auto-song, if later armed (or already armed), measures
-        // bars-elapsed from THIS launch, not a stale one.
-        fx.active_scene = static_cast<int>(s);
-        fx.active_scene_start_bar = app_state.bar();
-      }
-    }
-    ImGui::PopID();
-  }
+  render_scene_header_row(model, brain_session, app_state, fx, scenes, cz);
 
   // Track rows.
   for (std::size_t r = 0; r < kRows.size(); ++r) {
-    const V02Row& row = kRows[r];
-    const ImVec4& color = theme::kV02TrackColor[r];
-
-    // Label cell: color dot + M/S latches + name, all left of the cells.
-    ImGui::PushID(static_cast<int>(100 + r));
-    const std::size_t role = row.role_index;
-    const PartInfo& info = parts.part(role);
-    const bool dim = (any_solo && !info.soloed) || info.muted;
-    const ImVec2 lp = ImGui::GetCursorScreenPos();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float cy = lp.y + cz * 0.5F;
-    // Design: a 7x7 track-colored SQUARE (glow), not a circle.
-    const ImVec2 d0(lp.x + 2.0F, cy - 3.5F);
-    const ImVec2 d1(lp.x + 9.0F, cy + 3.5F);
-    neon::glow_rect(dl, d0, d1, color, 1.0F, dim ? 0.4F : 1.0F, fx.glow && !dim);
-    dl->AddRectFilled(d0, d1, neon::u32(color, dim ? 0.4F : 1.0F), 1.0F);
-
-    // M / S latches (real `part <role> mute|solo on|off` verb), vertically
-    // centered in the row's label column.
-    const std::string token(parts.part_wire_token(role));
-    const float by = cy - kLatchSize * 0.5F;
-    ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F, by));
-    if (grid_latch("M", info.muted, theme::kPink)) {
-      const bool was = info.muted;
-      parts.toggle_mute(role);
-      brain_session.send("part " + token + " mute " + (!was ? "on" : "off"));
-    }
-    ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + kLatchSize + 2.0F, by));
-    if (grid_latch("S", info.soloed, theme::kAmber)) {
-      const bool was = info.soloed;
-      parts.toggle_solo(role);
-      brain_session.send("part " + token + " solo " + (!was ? "on" : "off"));
-    }
-
-    ImGui::SetCursorScreenPos(ImVec2(lp.x + 12.0F + 2.0F * kLatchSize + 6.0F,
-                                     cy - ImGui::GetTextLineHeight() * 0.5F));
-    // Design: the track name is in the TRACK COLOR (not white).
-    ImGui::TextColored(dim ? theme::kTextMuted : color, "%s", row.name);
-    ImGui::SetCursorScreenPos(lp);
-    ImGui::Dummy(ImVec2(kLabelColWidth, cz));
-
-    for (std::size_t s = 0; s < scenes; ++s) {
-      ImGui::SameLine(0.0F, kCellGap);
-      const std::size_t id = cell_id(row.role_index, s, model.scene_count());
-      const GridCell& cell = model.cell(row.role_index, s);
-      const bool filled = cell.kind != GridCellKind::kEmpty;
-      // Real per-cell readback (repeat-zone-real-contract.md §3): armed,
-      // playing, and queued-stop all read as "lit" -- the same immediate
-      // feedback the former click-time local echo gave, now backed by the
-      // core's own "clip" OutEvent instead of a guess.
-      const AppState::ClipLaunchState launch_state = app_state.clip_state(static_cast<int>(id));
-      const bool playing = launch_state != AppState::ClipLaunchState::kStopped;
-      const bool opened = fx.open_cell == static_cast<int>(id);
-      // Real content (repeat-zone-real-contract.md "cell preview made
-      // real"): the SAME preview_for(...) the opened cell's Sequence Edit
-      // canvas uses, keyed by this cell's own role, the (today: single,
-      // browser-highlight) active style, AND (SLICE 4a) THIS COLUMN's own
-      // SectionType (model.scene_section(s)) instead of a hardcoded kVarA --
-      // so a column carrying e.g. kVarB previews visibly different content
-      // from one still at the kVarA default. Empty cells never draw a
-      // preview, so this is only computed for a filled one.
-      neon::ClipPattern pattern{};
-      bool approx = false;
-      if (filled) {
-        const auto section = static_cast<preview::Section>(model.scene_section(s));
-        const preview::PreviewPattern pp =
-            preview::preview_for(fx.active_style, section, row.role_index);
-        pattern = neon::clip_pattern_from_pitches(pp.pitch);
-        approx = pp.approx;
-      }
-      ImGui::PushID(static_cast<int>(s));
-      const bool clicked =
-          draw_cell("cell", cz, filled, cell.label, color, pattern, approx, playing, opened, fx);
-      if (clicked) {
-        if (!filled) {
-          // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix
-          // registration -- only a browser style drop registers for real, see
-          // the drag-drop handler below). Short label like the design's
-          // addClip, so the cell never shows a truncated name.
-          model.set_cell(row.role_index, s, GridCellKind::kStyleSection, "clip");
-        } else {
-          // Filled -> real launch + open in Sequence Edit. The launched
-          // state itself is read back for real (above), not echoed locally.
-          brain_session.send("launch clip " + std::to_string(id) + " quantize " +
-                             std::to_string(kDefaultLaunchQuantizeBars));
-          fx.open_cell = static_cast<int>(id);
-          fx.open_row = static_cast<int>(r);
-          fx.open_audio = row.audio;
-          // SLICE 4a: seqedit_panel.cpp's own preview_for() call needs THIS
-          // column's SectionType (parity with the cell preview above).
-          fx.open_section = model.scene_section(s);
-          seqedit.set_part_index(row.role_index);
-          seqedit.set_clip_label(cell.label);
-        }
-      }
-      // Drop target: a browser style drag fills this cell for real AND
-      // registers a real ClipMatrix clip at this cell's own stable id
-      // (repeat-zone-real-contract.md §3/§8b decision 1, Shape A) -- so a
-      // later `launch clip <id>` actually addresses THIS cell's material
-      // instead of an empty pool slot. Owner decision 2: drag-a-style is the
-      // only content source real for this pass. FLAG-1 FIX (slice 4a's own
-      // flag, folded into slice 4b): the registered clip now references THIS
-      // COLUMN's own SectionType (model.scene_section(s)) instead of a
-      // hardcoded kVarA, so launching this cell and launching its column
-      // header both target the SAME section -- no latent misalignment
-      // between the two launch paths. Falls back to "varA" only if the
-      // column's stored section byte is somehow out of range (defensive;
-      // set_scene_section() already keeps it in-range).
-      if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kStyleDragPayloadId)) {
-          const std::size_t style_index = *static_cast<const std::size_t*>(payload->Data);
-          model.set_cell(row.role_index, s, GridCellKind::kStyleSection,
-                         std::string(kBuiltinStyleNames[style_index]));
-          const std::string_view cell_section_name = section_wire_name(model.scene_section(s));
-          const std::string cell_section_arg =
-              cell_section_name.empty() ? "varA" : std::string(cell_section_name);
-          brain_session.send("clip add " + std::string(parts.part_wire_token(row.role_index)) +
-                             " " + std::to_string(s) + " style " + cell_section_arg + " id " +
-                             std::to_string(id));
-        }
-        ImGui::EndDragDropTarget();
-      }
-      ImGui::PopID();
-    }
-    ImGui::PopID();
+    render_track_row(model, seqedit, parts, brain_session, app_state, fx, r, scenes, any_solo, cz);
   }
 
   ImGui::EndChild();
