@@ -70,6 +70,13 @@ enum class Boundary : std::uint8_t {
   kNextNBars = 2,
 };
 
+// Sentinel for `Command::idx` on a `kClipAdd` command (Repeat-Zone binding
+// contract, docs/proposals/repeat-zone-real-contract.md §3/§8b decision 1):
+// "no explicit id was given, keep the original sequential-append behavior".
+// Well past kMaxClips (arrangrr/config.hpp, currently 96, hard-capped <=256),
+// so it can never collide with a real, in-bounds explicit id.
+inline constexpr std::uint16_t kNoExplicitClipId = 0xFFFFU;
+
 // Flat M0 parameter/action ids (the full L1 catalog grows with milestones;
 // ids are stable — never reuse a value).
 enum class Param : std::uint16_t {
@@ -195,6 +202,22 @@ enum class Param : std::uint16_t {
                         //     a = TrackRole part_role, b = scene_index,
                         //     c = ContentKind (low byte) |
                         //     (content_index << 8).
+                        //     idx = EXPLICIT clip id (Repeat-Zone binding
+                        //     contract Shape A, docs/proposals/repeat-zone-
+                        //     real-contract.md §3/§8b decision 1) -- reuses
+                        //     this field rather than growing Command
+                        //     (idx was otherwise unused by kClipAdd,
+                        //     sizeof(Command) stays 20). idx ==
+                        //     kNoExplicitClipId (the sentinel below, well
+                        //     past kMaxClips) keeps the ORIGINAL sequential-
+                        //     append convention above; any other idx
+                        //     registers AT that exact id instead (bounds +
+                        //     uniqueness validated, ClipMatrix::add_at) --
+                        //     lets a caller that already knows a stable id
+                        //     (the GUI's own cell_id(role,scene)) address it
+                        //     directly. The legacy `clip add` L1 grammar
+                        //     (shell_clip_commands.cpp) always sends the
+                        //     sentinel, so its behavior is unchanged.
   kClipLaunch = 45,     // do: idx = clip id (ClipMatrix slot, assigned by
                         //     kClipAdd in registration order). boundary +
                         //     n_bars (kNextNBars only) decide when it

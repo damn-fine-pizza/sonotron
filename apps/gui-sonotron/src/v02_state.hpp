@@ -45,14 +45,13 @@ struct V02State {
   // the wire (`part <role>` takes only mute/solo) -> local-only.
   std::array<float, 3> part_amount = {0.72F, 0.60F, 0.50F};
 
-  // Repeat-Zone selection/launch bookkeeping. `open_cell` is the clip currently
-  // opened into Sequence Edit (-1 = none). `row_playing[r]` is the scene column
-  // playing on track row r (-1 = none) -- ONE playing clip per row, a local
-  // echo of the last launch this client sent (there is no per-cell playing
-  // readback on the wire, grid_model.hpp's documented gap).
+  // Repeat-Zone selection bookkeeping. `open_cell` is the clip currently
+  // opened into Sequence Edit (-1 = none). Per-cell PLAYING state itself is no
+  // longer tracked here (was `row_playing`, a local click-time echo) -- the
+  // "clip" OutEvent is real per-clip readback (repeat-zone-real-contract.md
+  // §3), so grid_panel.cpp now reads it straight off AppState instead of
+  // mirroring a local guess.
   int open_cell = -1;
-  static constexpr std::size_t kGridRows = 6;
-  std::array<int, kGridRows> row_playing = {-1, -1, -1, -1, -1, -1};
 
   // The label of the opened clip, mirrored for the Sequence Edit header/canvas.
   // Empty means "nothing open".

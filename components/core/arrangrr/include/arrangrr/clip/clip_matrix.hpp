@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -95,11 +96,55 @@ class ClipMatrix {
     if (!m_clips.push_back(c)) {
       return -1;
     }
-    return static_cast<int>(m_clips.size() - 1);
+    const std::size_t id = m_clips.size() - 1;
+    m_used[id] = true;
+    return static_cast<int>(id);
   }
 
+  // Registers a clip AT an explicit id (Repeat-Zone binding contract, Shape A:
+  // docs/proposals/repeat-zone-real-contract.md §3/§8b decision 1) instead of
+  // taking whatever add()'s own sequential counter would have assigned --
+  // lets a caller that already knows a STABLE id (the GUI's own
+  // cell_id(role,scene)) address it directly rather than counting
+  // registrations itself. The underlying pool (StaticVector) only supports
+  // contiguous append, so reaching an id past the current tail fills every
+  // intervening, not-yet-claimed index with an inert placeholder Clip
+  // (m_used stays false for those -- get()/mutable_get() below treat an
+  // unclaimed placeholder exactly like "no clip here", so it is never
+  // launchable and never matched by a scene fan-out). A LATER add_at() call
+  // that targets one of those still-unclaimed placeholder slots (arriving
+  // out of row-major order, e.g. a lower cell_id filled after a higher one)
+  // succeeds normally without growing the pool again. Returns false when
+  // `id` is out of bounds (>= kMaxClips) or already claimed -- either by a
+  // prior add()/add_at() (explicit ids are a ONE-TIME registration, this
+  // primitive stays append-only, no retarget) -- the caller (Engine::
+  // clip_add) turns that into a kBadArgument warn.
+  bool add_at(std::size_t id, TrackRole role, std::uint8_t scene, ContentKind kind,
+              std::uint16_t content_index) noexcept {
+    if (id >= kMaxClips || (id < m_clips.size() && m_used[id])) {
+      return false;
+    }
+    while (m_clips.size() <= id) {
+      if (!m_clips.push_back(Clip{})) {
+        return false;  // pool exhausted before reaching `id`
+      }
+    }
+    Clip c;
+    c.part_role = role;
+    c.scene_index = scene;
+    c.kind = kind;
+    c.content_index = content_index;
+    m_clips[id] = c;
+    m_used[id] = true;
+    return true;
+  }
+
+  // Both accessors return nullptr for an id past the pool's tail AND for an
+  // unclaimed placeholder slot left behind by add_at() (m_used gates it) --
+  // a slot nothing ever explicitly registered is not a real clip, regardless
+  // of whether the underlying StaticVector already physically holds it.
   const Clip* get(std::size_t id) const noexcept {
-    return id < m_clips.size() ? &m_clips[id] : nullptr;
+    return (id < m_clips.size() && m_used[id]) ? &m_clips[id] : nullptr;
   }
   std::size_t size() const noexcept { return m_clips.size(); }
 
@@ -170,11 +215,19 @@ class ClipMatrix {
   }
 
  private:
+  // Same m_used gate as get() above (arm()/force() route through this, so an
+  // unclaimed add_at() placeholder can never be armed/forced into a real
+  // launch state either).
   Clip* mutable_get(std::size_t id) noexcept {
-    return id < m_clips.size() ? &m_clips[id] : nullptr;
+    return (id < m_clips.size() && m_used[id]) ? &m_clips[id] : nullptr;
   }
 
   StaticVector<Clip, kMaxClips> m_clips;
+  // Per-id "has add()/add_at() actually claimed this slot" flag -- separate
+  // from Clip itself (which stays the pinned 12-byte POD, no room for a
+  // registration marker) so add_at()'s padding placeholders are distinguishable
+  // from a real registration without growing Clip's own footprint.
+  std::array<bool, kMaxClips> m_used{};
 };
 
 }  // namespace arrangrr

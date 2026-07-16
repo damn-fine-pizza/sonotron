@@ -48,9 +48,23 @@ struct Band {
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8));
   }
   // a = TrackRole part_role, b = scene_index, c = ContentKind | (content_index << 8).
+  // idx = kNoExplicitClipId: the legacy sequential-append form (Repeat-Zone
+  // binding contract Shape A, abi.hpp's kClipAdd comment) -- explicit here
+  // since Command::idx now means "explicit clip id" for kClipAdd, and every
+  // caller of THIS helper relies on the ORIGINAL sequential-id assignment
+  // (test_clip_add_assigns_sequential_ids below would otherwise collide on
+  // its second call).
   void add_clip(TrackRole role, std::uint8_t scene, ContentKind kind, std::uint16_t content_index) {
     cmd(Param::kClipAdd, static_cast<std::int32_t>(role), scene,
-        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8));
+        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
+        kNoExplicitClipId);
+  }
+  // The new Shape-A path: registers AT an explicit id instead of the
+  // sequential counter.
+  void add_clip_at(std::uint16_t id, TrackRole role, std::uint8_t scene, ContentKind kind,
+                   std::uint16_t content_index) {
+    cmd(Param::kClipAdd, static_cast<std::int32_t>(role), scene,
+        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8), id);
   }
   int warns() const {
     int n = 0;
@@ -232,6 +246,106 @@ void test_clip_add_bad_role_warns() {
   CHECK(b.e.clips().size() == 0);
 }
 
+// Repeat-Zone binding contract, Shape A (docs/proposals/repeat-zone-real-
+// contract.md §3/§8b decision 1): registering at an explicit id past the
+// pool's tail pads every intervening index with an unclaimed placeholder
+// (never returned by get(), see clip_matrix.hpp), then claims exactly `id`.
+void test_clip_add_at_explicit_id_registers() {
+  Band b;
+  b.setup_basic();
+  b.add_clip_at(5, TrackRole::kBass, 2, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarB));
+  CHECK(b.warns() == 0);
+  const Clip* c5 = b.e.clips().get(5);
+  CHECK(c5 != nullptr && c5->part_role == TrackRole::kBass && c5->scene_index == 2);
+  // Every padded id below 5 stays unclaimed -- get() reports "no clip here".
+  CHECK(b.e.clips().get(0) == nullptr);
+  CHECK(b.e.clips().get(4) == nullptr);
+}
+
+// A later, LOWER explicit id (arriving after a higher one already padded
+// through it -- the real GUI shape: cells fill in whatever order the user
+// drags styles onto them, not row-major id order) still succeeds and fills
+// exactly its own placeholder slot, leaving every other still-unclaimed
+// index untouched.
+void test_clip_add_at_out_of_order_fills_earlier_placeholder() {
+  Band b;
+  b.setup_basic();
+  b.add_clip_at(10, TrackRole::kLead, 1, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarA));
+  b.add_clip_at(2, TrackRole::kChord1, 0, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarC));
+  CHECK(b.warns() == 0);
+  const Clip* c2 = b.e.clips().get(2);
+  const Clip* c10 = b.e.clips().get(10);
+  CHECK(c2 != nullptr && c2->part_role == TrackRole::kChord1);
+  CHECK(c10 != nullptr && c10->part_role == TrackRole::kLead);
+  CHECK(b.e.clips().get(5) == nullptr);  // still an unclaimed placeholder
+}
+
+// Re-registering the SAME explicit id is rejected (ClipMatrix stays
+// append-only, no retarget, §8b decision 1) -- the original registration is
+// left untouched.
+void test_clip_add_at_duplicate_id_warns() {
+  Band b;
+  b.setup_basic();
+  b.add_clip_at(3, TrackRole::kBass, 0, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarA));
+  b.ev.clear();
+  b.add_clip_at(3, TrackRole::kLead, 4, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarC));
+  CHECK(b.warns() == 1);
+  const Clip* c3 = b.e.clips().get(3);
+  CHECK(c3 != nullptr && c3->part_role == TrackRole::kBass && c3->scene_index == 0);
+}
+
+// An out-of-bounds explicit id (>= kMaxClips) is rejected cleanly, no crash.
+void test_clip_add_at_out_of_bounds_warns() {
+  Band b;
+  b.setup_basic();
+  b.add_clip_at(static_cast<std::uint16_t>(kMaxClips), TrackRole::kBass, 0,
+                ContentKind::kStyleSection, static_cast<std::uint16_t>(SectionType::kVarA));
+  CHECK(b.warns() == 1);
+  CHECK(b.e.clips().get(kMaxClips) == nullptr);
+}
+
+// The full Shape-A round trip: an explicit-id registration is launchable and
+// emits the same real kClip readback as a sequentially-assigned clip.
+void test_clip_add_at_then_launch_and_readback() {
+  Band b;
+  b.setup_basic();
+  b.add_clip_at(7, TrackRole::kBass, 0, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarB));
+  b.cmd(Param::kTransportStart);
+  b.ev.clear();
+  b.cmd(Param::kClipLaunch, 0, 0, 0, /*idx=*/7);
+  CHECK(b.current_section() == SectionType::kVarB);
+  const OutEvent* ce = b.last_clip_event();
+  CHECK(ce != nullptr && ce->code == 7 &&
+        ce->msg.status == static_cast<std::uint8_t>(LaunchState::kPlaying));
+  CHECK(b.e.clips().get(7)->state == LaunchState::kPlaying);
+  CHECK(b.warns() == 0);
+}
+
+// A scene fan-out (`launch scene <n>`) must never fire an add_at() padding
+// placeholder: its default scene_index (0) would otherwise falsely match a
+// scene-0 launch. get()'s m_used gate (clip_matrix.hpp) already excludes it;
+// this proves the exclusion holds through Engine's own clip_scene_launch.
+void test_clip_scene_launch_skips_unclaimed_placeholder() {
+  Band b;
+  b.setup_basic();
+  // Pads ids 0..9 as unclaimed placeholders (default scene_index == 0);
+  // the real clip at 10 lives on a DIFFERENT scene.
+  b.add_clip_at(10, TrackRole::kBass, 1, ContentKind::kStyleSection,
+                static_cast<std::uint16_t>(SectionType::kVarB));
+  b.cmd(Param::kTransportStart);
+  b.ev.clear();
+  b.cmd(Param::kSceneQuantize, 0, 0, 0, /*idx=*/0);  // launch scene 0
+  CHECK(b.warns() == 1);                             // no real clip matched scene 0
+  CHECK(b.clip_event_count() == 0);
+  CHECK(b.e.clips().get(10)->state == LaunchState::kStopped);  // untouched
+}
+
 }  // namespace
 
 int main() {
@@ -243,5 +357,11 @@ int main() {
   test_clip_scene_launch_fans_out();
   test_clip_bad_id_warns();
   test_clip_add_bad_role_warns();
+  test_clip_add_at_explicit_id_registers();
+  test_clip_add_at_out_of_order_fills_earlier_placeholder();
+  test_clip_add_at_duplicate_id_warns();
+  test_clip_add_at_out_of_bounds_warns();
+  test_clip_add_at_then_launch_and_readback();
+  test_clip_scene_launch_skips_unclaimed_placeholder();
   return arrangrr::test::failures();
 }

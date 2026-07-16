@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <string>
 
+#include "app_state.hpp"
 #include "browser_model.hpp"
 #include "imgui.h"
 #include "neon_widgets.hpp"
@@ -194,7 +195,7 @@ void render_header(V02State& fx) {
 }  // namespace
 
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                       BrainSession& brain_session, V02State& fx) {
+                       BrainSession& brain_session, const AppState& app_state, V02State& fx) {
   seed_demo(model, seqedit, fx);
   render_header(fx);
   ImGui::Spacing();
@@ -233,12 +234,11 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
     const float uy = hp0.y + cz * 0.5F - 2.0F;
     hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
     if (go) {
+      // Real per-cell readback (app_state.clip_state) reports the launched
+      // state on the NEXT poll(), so no local echo is written here -- see
+      // render_grid_panel's own header comment.
       brain_session.send("launch scene " + std::to_string(s) + " quantize " +
                          std::to_string(kDefaultLaunchQuantizeBars));
-      for (std::size_t r = 0; r < kRows.size(); ++r) {
-        const GridCell& c = model.cell(kRows[r].role_index, s);
-        fx.row_playing[r] = c.kind != GridCellKind::kEmpty ? static_cast<int>(s) : -1;
-      }
     }
     ImGui::PopID();
   }
@@ -291,21 +291,28 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       const std::size_t id = cell_id(row.role_index, s, model.scene_count());
       const GridCell& cell = model.cell(row.role_index, s);
       const bool filled = cell.kind != GridCellKind::kEmpty;
-      const bool playing = fx.row_playing[r] == static_cast<int>(s);
+      // Real per-cell readback (repeat-zone-real-contract.md §3): armed,
+      // playing, and queued-stop all read as "lit" -- the same immediate
+      // feedback the former click-time local echo gave, now backed by the
+      // core's own "clip" OutEvent instead of a guess.
+      const AppState::ClipLaunchState launch_state = app_state.clip_state(static_cast<int>(id));
+      const bool playing = launch_state != AppState::ClipLaunchState::kStopped;
       const bool opened = fx.open_cell == static_cast<int>(id);
       ImGui::PushID(static_cast<int>(s));
       const bool clicked =
           draw_cell("cell", cz, filled, cell.label, color, row.audio, playing, opened, fx);
       if (clicked) {
         if (!filled) {
-          // Empty -> add a local demo clip (no launch, no verb). Short label
-          // like the design's addClip, so the cell never shows a truncated name.
+          // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix
+          // registration -- only a browser style drop registers for real, see
+          // the drag-drop handler below). Short label like the design's
+          // addClip, so the cell never shows a truncated name.
           model.set_cell(row.role_index, s, GridCellKind::kStyleSection, "clip");
         } else {
-          // Filled -> real launch + open in Sequence Edit + local row echo.
+          // Filled -> real launch + open in Sequence Edit. The launched
+          // state itself is read back for real (above), not echoed locally.
           brain_session.send("launch clip " + std::to_string(id) + " quantize " +
                              std::to_string(kDefaultLaunchQuantizeBars));
-          fx.row_playing[r] = playing ? -1 : static_cast<int>(s);
           fx.open_cell = static_cast<int>(id);
           fx.open_row = static_cast<int>(r);
           fx.open_audio = row.audio;
@@ -313,12 +320,23 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
           seqedit.set_clip_label(cell.label);
         }
       }
-      // Drop target: a browser style drag fills this cell for real.
+      // Drop target: a browser style drag fills this cell for real AND
+      // registers a real ClipMatrix clip at this cell's own stable id
+      // (repeat-zone-real-contract.md §3/§8b decision 1, Shape A) -- so a
+      // later `launch clip <id>` actually addresses THIS cell's material
+      // instead of an empty pool slot. Owner decision 2: drag-a-style is the
+      // only content source real for this pass; the registered clip always
+      // references SectionType::kVarA (the arranger's own default section --
+      // the GUI has no per-style section identity to pick from, mirroring
+      // `style switch`'s own established fallback, in_process_brain_
+      // session.cpp).
       if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kStyleDragPayloadId)) {
           const std::size_t style_index = *static_cast<const std::size_t*>(payload->Data);
           model.set_cell(row.role_index, s, GridCellKind::kStyleSection,
                          std::string(kBuiltinStyleNames[style_index]));
+          brain_session.send("clip add " + std::string(parts.part_wire_token(row.role_index)) +
+                             " " + std::to_string(s) + " style varA id " + std::to_string(id));
         }
         ImGui::EndDragDropTarget();
       }

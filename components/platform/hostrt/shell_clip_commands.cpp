@@ -33,10 +33,17 @@ bool parse_clip_id(const std::string& s, std::uint16_t& out, std::string& error)
 }  // namespace
 
 // `clip add <role> <scene> style <section>` / `clip add <role> <scene> seq
-// <index>` / `clip add <role> <scene> track <index>`.
+// <index>` / `clip add <role> <scene> track <index>`, with an OPTIONAL
+// trailing `id <n>` (Repeat-Zone binding contract Shape A, docs/proposals/
+// repeat-zone-real-contract.md §3/§8b decision 1): additive-only, mirrors the
+// established `quantize <n>` suffix idiom. Absent -> the Command carries
+// kNoExplicitClipId, preserving the ORIGINAL sequential-append behavior
+// byte-identically (every existing golden/script uses the absent-id form).
+// Present -> the core registers AT that exact id instead (bounds/uniqueness
+// validated core-side, Engine::clip_add).
 bool Shell::cmd_clip(const std::vector<std::string>& t, std::string& error) {
-  if (t.size() != 6 || t[1] != "add") {
-    error = "usage: clip add <role> <scene> style|seq|track <section|index>";
+  if ((t.size() != 6 && t.size() != 8) || t[1] != "add") {
+    error = "usage: clip add <role> <scene> style|seq|track <section|index> [id <n>]";
     return false;
   }
   TrackRole role{};
@@ -75,8 +82,23 @@ bool Shell::cmd_clip(const std::vector<std::string>& t, std::string& error) {
     error = "unknown clip content kind: " + t[4];
     return false;
   }
+  std::uint16_t explicit_id = kNoExplicitClipId;
+  if (t.size() == 8) {
+    if (t[6] != "id") {
+      error = "usage: clip add <role> <scene> style|seq|track <section|index> [id <n>]";
+      return false;
+    }
+    if (!parse_clip_id(t[7], explicit_id, error)) {
+      return false;
+    }
+    if (explicit_id == kNoExplicitClipId) {
+      error = "bad id: " + t[7] + " (reserved sentinel value)";
+      return false;
+    }
+  }
   Command c;
   c.param = Param::kClipAdd;
+  c.idx = explicit_id;
   c.a = static_cast<std::int32_t>(role);
   c.b = static_cast<std::int32_t>(scene);
   c.c = static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8);

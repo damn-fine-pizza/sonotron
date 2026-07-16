@@ -390,6 +390,69 @@ void test_launch_clip_bad_id_surfaces_clean_error() {
   session.stop();
 }
 
+// Repeat-Zone binding contract, Shape A (docs/proposals/repeat-zone-real-
+// contract.md §3/§8b decision 1): `clip add <role> <scene> style <section>
+// id <n>` -- grid_panel.cpp's own drag-drop registration -- reaches the
+// engine as a real kClipAdd Command carrying the EXPLICIT id, registering
+// the clip AT that id instead of the sequential counter. Proves the whole
+// round trip: registration, no error/warn, a real launch addressing that
+// EXACT id, and the real "clip" readback confirming it (never a bad_argument
+// warn, unlike test_launch_clip_translates_and_reaches_engine's fresh,
+// nothing-registered engine above).
+void test_clip_add_with_explicit_id_registers_and_launches() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("clip add lead 0 style varA id 5");
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kWarn; }));
+
+  session.send("launch clip 5 quantize 0");
+  std::vector<BrainEvent> after;
+  CHECK(poll_until(session, after, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kClip && ev.clip_id == 5 && ev.clip_state == "playing";
+  }));
+
+  session.stop();
+}
+
+// Registering the SAME explicit id twice is rejected core-side (ClipMatrix
+// stays append-only, no retarget, §8b decision 1) -- a real kWarn, not a
+// silent no-op.
+void test_clip_add_duplicate_explicit_id_warns() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("clip add lead 0 style varA id 9");
+  CHECK(never_seen(session, collected,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kWarn; }));
+
+  std::vector<BrainEvent> second;
+  session.send("clip add bass 1 style varB id 9");
+  CHECK(poll_until(session, second, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kWarn && ev.warn_code == "bad_argument";
+  }));
+
+  session.stop();
+}
+
+// A malformed explicit id (unparsable, or the reserved sentinel value) must
+// surface a clean kError from the TRANSLATOR itself, never reach push_command.
+void test_clip_add_bad_id_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("clip add lead 0 style varA id not-a-number");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError && ev.error.find("bad id") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 void test_stop_is_idempotent_and_safe_before_start() {
   InProcessBrainSession session;
   session.stop();  // never started: must be a safe no-op
@@ -418,6 +481,9 @@ int main() {
   test_midi_source_load_invalid_path_surfaces_clean_error();
   test_launch_clip_translates_and_reaches_engine();
   test_launch_clip_bad_id_surfaces_clean_error();
+  test_clip_add_with_explicit_id_registers_and_launches();
+  test_clip_add_duplicate_explicit_id_warns();
+  test_clip_add_bad_id_surfaces_clean_error();
   test_stop_is_idempotent_and_safe_before_start();
   return sonotron::test::failures();
 }

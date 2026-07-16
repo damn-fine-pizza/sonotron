@@ -52,9 +52,14 @@ struct Band {
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8));
   }
   // a = TrackRole part_role, b = scene_index, c = ContentKind | (content_index << 8).
+  // idx = kNoExplicitClipId: the legacy sequential-append form (Repeat-Zone
+  // binding contract Shape A, abi.hpp's kClipAdd comment) -- explicit here
+  // since Command::idx now means "explicit clip id" for kClipAdd, and this
+  // helper's own callers rely on the ORIGINAL sequential-id assignment.
   void add_clip(TrackRole role, std::uint8_t scene, ContentKind kind, std::uint16_t content_index) {
     cmd(Param::kClipAdd, static_cast<std::int32_t>(role), scene,
-        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8));
+        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
+        kNoExplicitClipId);
   }
   // Mirrors kPadAssign's exact bit packing documented in abi.hpp/engine.cpp's
   // pad_assign: a = type|(mode<<8)|(sync<<16)|(pitch<<24); b = dest_port|

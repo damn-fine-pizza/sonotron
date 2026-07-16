@@ -46,9 +46,13 @@ struct Band {
     e.push_midi_in(port, Span<const std::uint8_t>(b, 3),
                    [&](const OutEvent& o) { CHECK(ev.push_back(o)); });
   }
+  // idx = kNoExplicitClipId: the legacy sequential-append form (Repeat-Zone
+  // binding contract Shape A, abi.hpp's kClipAdd comment) -- explicit here
+  // since Command::idx now means "explicit clip id" for kClipAdd.
   void add_clip(TrackRole role, std::uint8_t scene, ContentKind kind, std::uint16_t content_index) {
     cmd(Param::kClipAdd, static_cast<std::int32_t>(role), scene,
-        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8));
+        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
+        kNoExplicitClipId);
   }
   int warns() const {
     int n = 0;

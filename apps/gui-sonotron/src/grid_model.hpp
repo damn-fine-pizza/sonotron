@@ -20,30 +20,33 @@ namespace sonotron {
 // scene <n> quantize <q>` are real L1 verbs (components/platform/hostrt/
 // shell_clip_commands.cpp), the core emits a real `clip` event, and
 // grid_panel.cpp's cell/scene-header buttons send() them for real. Kept as
-// one named constant (rather than deleting it outright) so a future full
-// grid-cell-to-ClipMatrix content binding (registering each cell's content
-// with the core, still a follow-up -- see clip-primitive-design.md's own
-// scope note) has one obvious place to gate on if that ever needs staging
-// again.
+// one named constant (rather than deleting it outright) for symmetry with
+// the equally-real content-registration path below.
 inline constexpr bool kGridLaunchWired = true;
 
 enum class GridCellKind : std::uint8_t { kEmpty, kStyleSection, kChordSequence, kStepTrack };
 
 // One cell of the matrix: a part row x scene column, holding one of the
-// three material kinds the browser offers (§5), or empty. `label` is
-// display text only (e.g. a style name) — the cell does not yet reference
-// a real core object, since none exists until the clip primitive lands.
+// three material kinds the browser offers (§5), or empty. `label` is display
+// text only (e.g. a style name) -- the GUI's own display copy, kept
+// independent of whatever the core's ClipMatrix stores for the same cell
+// (repeat-zone-real-contract.md §3: a browser-dropped style DOES now
+// register a real ClipMatrix clip at this cell's stable id, grid_panel.cpp's
+// drag-drop handler; the "+" empty-cell placeholder click still only sets
+// this local display cell, unregistered -- there is no authored-content path
+// into ClipMatrix from the GUI yet, only drag-a-style, per owner decision 2).
 struct GridCell {
   GridCellKind kind = GridCellKind::kEmpty;
   std::string label;
 };
 
-// Rows are the 9 TrackRole parts (track_roles.hpp); columns are scenes.
-// Real cell CONTENT is real today (dragging a style from the browser sets
-// a cell, §4.3/§5); real LAUNCH is now wired too (kGridLaunchWired) through
-// the core clip primitive (Phase-5 Item #2). Registering each cell's own
-// content with the core's ClipMatrix (so the launched id actually plays
-// THIS cell's material) is a follow-up, not yet done here.
+// Rows are the 9 TrackRole parts (track_roles.hpp); columns are scenes. Real
+// cell CONTENT is real today (dragging a style from the browser sets a cell,
+// §4.3/§5) AND now registers with the core's ClipMatrix at the cell's own
+// stable id (repeat-zone-real-contract.md §3 Shape A) so a launch actually
+// addresses THIS cell's material, not an empty pool slot; real LAUNCH is
+// wired too (kGridLaunchWired) through the core clip primitive (Phase-5 Item
+// #2).
 class GridModel {
  public:
   static constexpr std::size_t kPartCount = kTrackRoleCount;

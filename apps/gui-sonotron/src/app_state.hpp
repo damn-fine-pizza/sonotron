@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <deque>
 #include <string>
+#include <unordered_map>
 
 #include "brain_event.hpp"
 
@@ -28,6 +29,13 @@ namespace sonotron {
 class AppState {
  public:
   enum class Transport { kStopped, kPlaying, kPaused };
+
+  // Repeat-Zone per-clip readback (repeat-zone-real-contract.md §3/§6 item 2):
+  // mirrors arrangrr::LaunchState's 4 values WITHOUT crossing a core enum
+  // (brain_event.hpp's own "no core enum crosses this boundary" rule) -- a
+  // small host-only enum decoded from the wire's string label
+  // (event_labels.hpp's clip_state_name on the host side).
+  enum class ClipLaunchState { kStopped, kArmed, kPlaying, kQueuedStop };
 
   static constexpr std::size_t kMaxLog = 200;
 
@@ -90,6 +98,15 @@ class AppState {
   int pulse() const { return m_pulse; }
   float beat_phase() const { return static_cast<float>(m_pulse) / 24.0F; }
 
+  // Real per-cell launch-state readback (repeat-zone-real-contract.md §3):
+  // reduced from the "clip" OutEvent (already on the wire, Phase-5 Item #2).
+  // A clip id never seen yet on the wire reads as kStopped -- the same "off"
+  // default a fresh, unregistered ClipMatrix slot has core-side.
+  ClipLaunchState clip_state(int clip_id) const {
+    const auto it = m_clip_states.find(clip_id);
+    return it == m_clip_states.end() ? ClipLaunchState::kStopped : it->second;
+  }
+
  private:
   bool m_connected = false;
   Transport m_transport = Transport::kStopped;
@@ -106,6 +123,7 @@ class AppState {
   int m_bar = 0;
   int m_beat = 0;
   int m_pulse = 0;
+  std::unordered_map<int, ClipLaunchState> m_clip_states;
   std::deque<std::string> m_log;
 };
 

@@ -12,6 +12,7 @@
 #include "alsa_midi.hpp"
 #include "arrangrr/abi.hpp"
 #include "arrangrr/arranger/style_model.hpp"
+#include "arrangrr/clip/clip_matrix.hpp"
 #include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
@@ -32,6 +33,8 @@ namespace {
 
 using arrangrr::Boundary;
 using arrangrr::Command;
+using arrangrr::ContentKind;
+using arrangrr::kNoExplicitClipId;
 using arrangrr::Op;
 using arrangrr::OutEvent;
 using arrangrr::Param;
@@ -195,6 +198,42 @@ bool parse_quantize_suffix(const std::vector<std::string_view>& t, std::size_t a
     n_bars = n > 255 ? static_cast<std::uint8_t>(255) : static_cast<std::uint8_t>(n);
   }
   return true;
+}
+
+// Resolves a section-name token to a SectionType (Repeat-Zone binding
+// contract, docs/proposals/repeat-zone-real-contract.md §3/§8b decision 1's
+// `clip add ... style <section> id <n>` line, grid_panel.cpp's own send()
+// shape). Mirrors components/platform/hostrt/shell_parse.cpp's own
+// parse_section() spellings exactly, duplicated deliberately (D38: this
+// pure-client translator never reaches into hostrt's own parsing helpers --
+// same discipline parse_quantize_suffix above already documents).
+bool parse_section_name(std::string_view s, SectionType& out) {
+  struct Entry {
+    std::string_view name;
+    SectionType type;
+  };
+  static constexpr Entry kSections[] = {
+      {.name = "intro1", .type = SectionType::kIntro1},
+      {.name = "intro2", .type = SectionType::kIntro2},
+      {.name = "varA", .type = SectionType::kVarA},
+      {.name = "varB", .type = SectionType::kVarB},
+      {.name = "varC", .type = SectionType::kVarC},
+      {.name = "varD", .type = SectionType::kVarD},
+      {.name = "fillA", .type = SectionType::kFillA},
+      {.name = "fillB", .type = SectionType::kFillB},
+      {.name = "fillC", .type = SectionType::kFillC},
+      {.name = "fillD", .type = SectionType::kFillD},
+      {.name = "break", .type = SectionType::kBreak},
+      {.name = "ending1", .type = SectionType::kEnding1},
+      {.name = "ending2", .type = SectionType::kEnding2},
+  };
+  for (const Entry& e : kSections) {
+    if (s == e.name) {
+      out = e.type;
+      return true;
+    }
+  }
+  return false;
 }
 
 std::vector<std::string_view> split_ws(std::string_view s) {
@@ -362,6 +401,45 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.param = t[2] == "mute" ? Param::kPartMute : Param::kPartSolo;
     out.a = static_cast<std::int32_t>(role);
     out.b = t[3] == "on" ? 1 : 0;
+    return TranslateOutcome::kOk;
+  }
+
+  // Repeat-Zone binding contract, Shape A (docs/proposals/repeat-zone-real-
+  // contract.md §3/§8b decision 1): `clip add <role> <scene> style <section>
+  // id <n>` -- grid_panel.cpp's own on-first-fill registration (a browser
+  // style drop), ALWAYS carrying an explicit id (the GUI's own
+  // cell_id(role,scene)), so the core registers AT that stable id instead of
+  // the sequential counter. Only ContentKind::kStyleSection is reachable from
+  // here (owner decision 2, §8b: drag-a-style ONLY for this pass -- no
+  // seq/track authoring from the GUI yet); the CLI/script `clip add` grammar
+  // (shell_clip_commands.cpp) still covers seq/track for host/script use.
+  if (t.size() == 8 && t[0] == "clip" && t[1] == "add" && t[4] == "style" && t[6] == "id") {
+    TrackRole role{};
+    if (!Shell::resolve_track_role(std::string(t[2]), role)) {
+      detail = "unknown role: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t scene = 0;
+    if (!parse_uint(t[3], scene) || scene > 255) {
+      detail = "bad scene index: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    SectionType section{};
+    if (!parse_section_name(t[5], section)) {
+      detail = "unknown section: " + std::string(t[5]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t id = 0;
+    if (!parse_uint(t[7], id) || id >= static_cast<std::uint64_t>(kNoExplicitClipId)) {
+      detail = "bad id: " + std::string(t[7]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kClipAdd;
+    out.idx = static_cast<std::uint16_t>(id);
+    out.a = static_cast<std::int32_t>(role);
+    out.b = static_cast<std::int32_t>(scene);
+    out.c = static_cast<std::int32_t>(ContentKind::kStyleSection) |
+            (static_cast<std::int32_t>(section) << 8);
     return TranslateOutcome::kOk;
   }
 

@@ -47,9 +47,13 @@ struct Band {
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8));
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8));
   }
+  // idx = kNoExplicitClipId: the legacy sequential-append form (Repeat-Zone
+  // binding contract Shape A, abi.hpp's kClipAdd comment) -- explicit here
+  // since Command::idx now means "explicit clip id" for kClipAdd.
   void add_clip(TrackRole role, std::uint8_t scene, ContentKind kind, std::uint16_t content_index) {
     cmd(Param::kClipAdd, static_cast<std::int32_t>(role), scene,
-        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8));
+        static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
+        kNoExplicitClipId);
   }
 
   int warns() const {

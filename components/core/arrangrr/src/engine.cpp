@@ -1124,7 +1124,13 @@ void Engine::cmd_clip(const Command& cmd, EventSink sink) {
 
 // Host/script-only registration (no L1 grammar of its own beyond `clip add`,
 // shell_clip_commands.cpp): a = TrackRole, b = scene_index, c = ContentKind
-// (low byte) | (content_index << 8).
+// (low byte) | (content_index << 8). idx == kNoExplicitClipId keeps the
+// original sequential-append convention (m_clips.add()); any other idx is an
+// EXPLICIT id (Repeat-Zone binding contract Shape A, docs/proposals/
+// repeat-zone-real-contract.md §3/§8b decision 1) -- registers AT that exact
+// id (m_clips.add_at()), which validates bounds (< kMaxClips) and uniqueness
+// (not already claimed) itself and reports both failures the same way a full
+// pool already does: one kBadArgument warn, nothing registered.
 void Engine::clip_add(const Command& cmd, EventSink sink) {
   if (cmd.a < 0 || cmd.a > static_cast<std::int32_t>(TrackRole::kCc) || cmd.b < 0 || cmd.b > 255) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
@@ -1139,7 +1145,10 @@ void Engine::clip_add(const Command& cmd, EventSink sink) {
   const auto scene = static_cast<std::uint8_t>(cmd.b);
   const auto kind = static_cast<ContentKind>(kind_value);
   const auto content_index = static_cast<std::uint16_t>((cmd.c >> 8) & 0xFFFF);
-  if (m_clips.add(role, scene, kind, content_index) < 0) {
+  const bool ok = cmd.idx == kNoExplicitClipId
+                      ? m_clips.add(role, scene, kind, content_index) >= 0
+                      : m_clips.add_at(cmd.idx, role, scene, kind, content_index);
+  if (!ok) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
   }
 }
