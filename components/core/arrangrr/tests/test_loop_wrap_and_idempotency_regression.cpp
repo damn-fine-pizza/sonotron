@@ -71,6 +71,13 @@ struct Band {
         static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
         kNoExplicitClipId);
   }
+  // idx = kNoLoopExplicitId: the legacy sequential-append form (docs/
+  // proposals/looper-in-gui-contract.md §7 item 5, the IDENTICAL fix already
+  // shipped for kClipAdd/kNoExplicitClipId above) -- explicit here since
+  // Command::idx now means "explicit loop-slot id" for kLoopNew, and every
+  // bare `loop_new()` caller below relies on the ORIGINAL sequential-id
+  // assignment.
+  void loop_new() { cmd(Param::kLoopNew, 0, 0, 0, kNoLoopExplicitId); }
   int count_midi(std::uint8_t port, std::uint8_t channel, std::uint8_t note, bool on) const {
     int n = 0;
     for (const OutEvent& o : ev) {
@@ -105,7 +112,7 @@ void test_loop_note_off_fires_exactly_at_the_wrap_tick_before_the_next_ons() {
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, 0, 100);  // explicit kMaj, root C
   b.ev.clear();
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 0);
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 1 | (2 << 8));
 
@@ -159,7 +166,7 @@ void test_loop_boundary_promoted_launch_fires_tick_zero_exactly_once() {
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, 0, 100);
   b.ev.clear();
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 0);
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 1 | (2 << 8));
 

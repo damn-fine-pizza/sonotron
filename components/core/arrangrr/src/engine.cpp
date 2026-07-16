@@ -801,11 +801,21 @@ void Engine::cmd_loop(const Command& cmd, EventSink sink) {
 }
 
 // Host/script-only registration (mirrors kSeqNew/kClipAdd's own convention:
-// no return-value echo, the host tracks the sequential id).
+// no return-value echo, the host tracks the sequential id). Phase 7 (§7 item
+// 5, docs/proposals/looper-in-gui-contract.md): idx == kNoLoopExplicitId (the
+// sentinel, abi.hpp) keeps the ORIGINAL sequential-append behavior
+// byte-identically (kLoopTableFull on a full pool, unchanged); any other idx
+// registers AT that exact slot instead (LoopBuffer::add_slot_at validates
+// bounds/uniqueness) -- mirrors Engine::clip_add's identical kClipAdd fix.
 void Engine::loop_new(const Command& cmd, EventSink sink) {
-  (void)cmd;
-  if (m_loop.add_slot() < 0) {
-    sink(OutEvent::warn(WarnCode::kLoopTableFull, m_now));
+  if (cmd.idx == kNoLoopExplicitId) {
+    if (m_loop.add_slot() < 0) {
+      sink(OutEvent::warn(WarnCode::kLoopTableFull, m_now));
+    }
+    return;
+  }
+  if (!m_loop.add_slot_at(cmd.idx)) {
+    sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
   }
 }
 

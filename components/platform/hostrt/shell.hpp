@@ -107,6 +107,18 @@ class Shell {
   // internal call sites), so no dispatch logic is duplicated or reopened.
   void push_command(const Command& cmd) { m_engine.push_command(cmd, m_sink); }
 
+  // Decodes a kNoteRaw Command into its 3-byte MIDI note-on/off message
+  // (docs/proposals/looper-in-gui-contract.md §2/§7 items 1/2): idx's low
+  // byte is the input port, its high byte the 0-based MIDI channel; `a` is
+  // the note, `b` the velocity, `c` the on/off flag -- exactly cmd_note's own
+  // packing (shell_music_commands.cpp). PUBLIC and STATIC (a pure function,
+  // no Shell state) so a caller that drains a kNoteRaw Command off a ring
+  // (in_process_brain_session.cpp's run_engine(), which never reaches
+  // Engine::push_command() for this Param) can decode + feed_midi() it
+  // without duplicating this logic -- hoisted out of shell_music_commands.
+  // cpp's own anonymous namespace, which used to be the only caller.
+  static void note_raw_to_bytes(const Command& c, std::uint8_t out[3]);
+
   explicit Shell(EventSink sink);
   void set_port_hook(PortHook hook) { m_port_hook = std::move(hook); }
   void set_panel_hook(PanelHook hook) { m_panel_hook = std::move(hook); }
@@ -389,6 +401,12 @@ class Shell {
   bool cmd_clip(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_launch(const std::vector<std::string>& tokens, std::string& error);
   bool cmd_stop_clip(const std::vector<std::string>& tokens, std::string& error);
+  // Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-gui-contract.md
+  // §7 item 4): the Looper's first-ever L1 verb family (shell_loop_commands.
+  // cpp) -- `loop new|record|stop|erase|undo|length ...`. MVP verb set only
+  // (owner sign-off §9b): record/stop/erase/undo/length + new; overdub-mode
+  // UI selection and retro-capture arm/grab stay out of this pass (v2).
+  bool cmd_loop(const std::vector<std::string>& tokens, std::string& error);
   // Phase-5 Item #9 (docs/phase5-design-reviews.md "Pad/Scene live ->
   // Performance"): the pad-bank + Performance recall L1 grammar
   // (shell_pad_commands.cpp). `pad assign` is host/script-only registration

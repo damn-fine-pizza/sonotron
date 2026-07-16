@@ -54,6 +54,13 @@ struct Band {
         static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
         kNoExplicitClipId);
   }
+  // idx = kNoLoopExplicitId: the legacy sequential-append form (docs/
+  // proposals/looper-in-gui-contract.md §7 item 5, the IDENTICAL fix already
+  // shipped for kClipAdd/kNoExplicitClipId above) -- explicit here since
+  // Command::idx now means "explicit loop-slot id" for kLoopNew, and every
+  // bare `loop_new()` caller below relies on the ORIGINAL sequential-id
+  // assignment.
+  void loop_new() { cmd(Param::kLoopNew, 0, 0, 0, kNoLoopExplicitId); }
   int warns() const {
     int n = 0;
     for (const OutEvent& o : ev) {
@@ -86,8 +93,8 @@ void test_retro_arm_play_grab_reharmonizes() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, static_cast<std::int32_t>(ChordQuality::kMaj7),
-        100);              // C major -> Cmaj7, root_pc 0
-  b.cmd(Param::kLoopNew);  // the target slot the grab will fill
+        100);    // C major -> Cmaj7, root_pc 0
+  b.loop_new();  // the target slot the grab will fill
 
   b.cmd(Param::kRetroCaptureArm, /*a=*/3);  // capture live notes on port 3
   CHECK(b.e.retro_capture().armed());
@@ -131,7 +138,7 @@ void test_retro_disarmed_ring_stays_empty_and_grab_is_noop() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, static_cast<std::int32_t>(ChordQuality::kMaj7), 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   CHECK(!b.e.retro_capture().armed());
 
   b.cmd(Param::kTransportStart);
@@ -191,7 +198,7 @@ void test_retro_bad_args_boundary_and_warn_codes() {
   CHECK(b.warns() == 0);
   CHECK(b.e.retro_capture().armed());
 
-  b.cmd(Param::kLoopNew);  // register exactly one slot (idx 0)
+  b.loop_new();  // register exactly one slot (idx 0)
   b.ev.clear();
   b.cmd(Param::kRetroCaptureGrab, 1, 0, 0, /*idx=*/5);  // idx 5 was never registered
   CHECK(b.warns() == 1);
@@ -275,7 +282,7 @@ void test_retro_disarm_mid_session_truly_stops_further_capture() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, static_cast<std::int32_t>(ChordQuality::kMaj7), 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kRetroCaptureArm, /*a=*/3);
   b.cmd(Param::kTransportStart);
 
@@ -310,8 +317,8 @@ void test_retro_disarm_mid_session_truly_stops_further_capture() {
 // kRetroCaptureEmpty exactly like a never-armed ring.
 void test_retro_rearm_after_grab_clears_ring() {
   Band b;
-  b.cmd(Param::kLoopNew);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
+  b.loop_new();
   b.cmd(Param::kRetroCaptureArm, /*a=*/3);
   b.cmd(Param::kTransportStart);
   b.feed_note(3, 64, 100);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "arrangrr/common/function_ref.hpp"
@@ -111,13 +112,54 @@ class LoopBuffer {
     // m_play shares m_pool's own capacity (kMaxLoopSlots): a successful
     // m_pool.push_back above guarantees this one succeeds too.
     (void)m_play.push_back(LoopBufferPlayState{});
-    return static_cast<int>(m_pool.size() - 1);
+    const std::size_t id = m_pool.size() - 1;
+    m_used[id] = true;
+    return static_cast<int>(id);
   }
+
+  // Registers a slot AT an explicit id (docs/proposals/looper-in-gui-
+  // contract.md §7 item 5 -- the IDENTICAL fix already shipped for
+  // ClipMatrix::add_at, clip_matrix.hpp, applied here): lets a caller that
+  // already knows a STABLE id (the GUI's own cell_id(role,scene)) address it
+  // directly rather than counting registrations itself. The underlying pool
+  // (StaticVector) only supports contiguous append, so reaching an id past
+  // the current tail fills every intervening, not-yet-claimed index with an
+  // inert placeholder LoopClip (m_used stays false for those -- get()/
+  // mutable get() below treat an unclaimed placeholder exactly like "no slot
+  // here", mirroring ClipMatrix's own m_used gate). A LATER add_slot_at()
+  // call that targets one of those still-unclaimed placeholders (arriving
+  // out of order) succeeds normally without growing the pool again. Returns
+  // false when `id` is out of bounds (>= kMaxLoopSlots) or already claimed --
+  // either by a prior add_slot()/add_slot_at() (explicit ids are a ONE-TIME
+  // registration, this primitive stays append-only, no retarget).
+  bool add_slot_at(std::size_t id) noexcept {
+    if (id >= kMaxLoopSlots || (id < m_pool.size() && m_used[id])) {
+      return false;
+    }
+    while (m_pool.size() <= id) {
+      if (!m_pool.push_back(LoopClip{})) {
+        return false;  // pool exhausted before reaching `id`
+      }
+      // m_play shares m_pool's own capacity: the push_back above guarantees
+      // this one succeeds too (same invariant add_slot() relies on).
+      (void)m_play.push_back(LoopBufferPlayState{});
+    }
+    m_used[id] = true;
+    return true;
+  }
+
   std::size_t count() const noexcept { return m_pool.size(); }
+  // Both accessors return nullptr for an id past the pool's tail AND for an
+  // unclaimed placeholder slot left behind by add_slot_at() (m_used gates
+  // it) -- a slot nothing ever explicitly registered is not a real loop,
+  // regardless of whether the underlying StaticVector already physically
+  // holds it (mirrors ClipMatrix::get's own gate exactly).
   const LoopClip* get(std::size_t idx) const noexcept {
-    return idx < m_pool.size() ? &m_pool[idx] : nullptr;
+    return (idx < m_pool.size() && m_used[idx]) ? &m_pool[idx] : nullptr;
   }
-  LoopClip* get(std::size_t idx) noexcept { return idx < m_pool.size() ? &m_pool[idx] : nullptr; }
+  LoopClip* get(std::size_t idx) noexcept {
+    return (idx < m_pool.size() && m_used[idx]) ? &m_pool[idx] : nullptr;
+  }
 
   // ---- recording (6100) --------------------------------------------------
   // Starts capturing live notes arriving on `port` into slot `idx`. A shadow
@@ -460,6 +502,11 @@ class LoopBuffer {
   StaticVector<LoopClip, kMaxLoopSlots> m_pool;
   StaticVector<LoopBufferPlayState, kMaxLoopSlots>
       m_play;  // parallel to m_pool, one entry per slot
+  // Per-id "has add_slot()/add_slot_at() actually claimed this slot" flag --
+  // separate from LoopClip itself so add_slot_at()'s padding placeholders are
+  // distinguishable from a real registration (mirrors ClipMatrix's own
+  // m_used, clip_matrix.hpp).
+  std::array<bool, kMaxLoopSlots> m_used{};
 
   // Recording: a single active target (mirrors ChordSequencer).
   bool m_recording = false;

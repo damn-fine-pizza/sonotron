@@ -169,23 +169,23 @@ bool Shell::cmd_key(const std::vector<std::string>& t, std::string& error) {
   return true;
 }
 
-namespace {
-
 // Translates a kNoteRaw Command (docs/design/orchestrator-pipeline-
 // extraction.md §17.3a) into the exact 3-byte MIDI note-on/off message
 // surface_send_note() already builds in-process: `idx`'s low byte is the
 // input port, its high byte the 0-based MIDI channel; `a` is the note,
 // `b` the velocity, `c` the on/off flag. Never touches Engine::push_command
 // -- this is a pure wire-shape-to-bytes translation, exactly like
-// surface_send_note()'s own feed_midi() call.
-void note_raw_to_bytes(const Command& c, std::uint8_t out[3]) {
+// surface_send_note()'s own feed_midi() call. PUBLIC and STATIC (see
+// shell.hpp's own declaration comment): hoisted out of this file's former
+// anonymous namespace so in_process_brain_session.cpp's run_engine() can
+// reach it too (docs/proposals/looper-in-gui-contract.md §7 item 2), without
+// duplicating this logic.
+void Shell::note_raw_to_bytes(const Command& c, std::uint8_t out[3]) {
   const auto channel = static_cast<std::uint8_t>((c.idx >> 8) & 0xFF);
   out[0] = static_cast<std::uint8_t>((c.c != 0 ? midi::kNoteOn : midi::kNoteOff) | channel);
   out[1] = static_cast<std::uint8_t>(c.a);
   out[2] = static_cast<std::uint8_t>(c.b);
 }
-
-}  // namespace
 
 bool Shell::cmd_note(const std::vector<std::string>& t, std::string& error) {
   // note <port>[:ch] on|off <midinote> [velocity]   -- the wire-safe

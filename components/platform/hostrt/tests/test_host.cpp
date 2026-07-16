@@ -13,11 +13,11 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/arranger/arranger.hpp"
-#include "gm_program.hpp"
-#include "runtime/transport.hpp"
 #include "console.hpp"
+#include "gm_program.hpp"
 #include "jsonl.hpp"
 #include "kitty_keys.hpp"
+#include "runtime/transport.hpp"
 #include "shell.hpp"
 #include "test.hpp"
 #include "uds_server.hpp"
@@ -432,6 +432,58 @@ void test_note_verb() {
   }
 }
 
+// Phase 7 (node 6000, the Looper) -- docs/proposals/looper-in-gui-contract.md
+// §7 item 4: the Looper's first-ever L1 verb family (shell_loop_commands.
+// cpp), mirroring test_note_verb's own end-to-end style: parse -> the real
+// ABI Command -> the observable engine state kLoopRecordStart/kLoopRecordStop/
+// kLoopErase/kLoopUndo/kLoopLength already drive (test_loop.cpp exercises the
+// SAME Params directly against an Engine; this proves the L1 grammar reaches
+// them identically through Shell::exec_line).
+void test_shell_loop_commands() {
+  ShellFixture f;
+  CHECK(f.run("port open in in0"));
+  f.events.clear();
+
+  // `loop new` -- always the legacy sequential-append form (item 5 stays
+  // untouched by this verb, see shell_loop_commands.cpp's own comment).
+  CHECK(f.run("loop new"));
+  CHECK(f.shell.engine().loops().count() == 1);
+
+  // `loop record <slot> record|overdub|replace <port>`.
+  CHECK(f.run("loop record 0 record in0"));
+  CHECK(f.shell.engine().loops().recording());
+  CHECK(f.shell.engine().loops().recording_slot() == 0);
+
+  // Feed a captured note through the SAME `note` L1 verb item 1/2 wires --
+  // both reach push_midi_in via feed_midi(), so this doubles as an
+  // end-to-end proof that a captured note actually lands in the loop.
+  CHECK(f.run("note in0 on 60 100"));
+  CHECK(f.run("advance 480"));
+  CHECK(f.run("note in0 off 60"));
+
+  // `loop stop <slot> [grid]`.
+  CHECK(f.run("loop stop 0"));
+  CHECK(!f.shell.engine().loops().recording());
+  CHECK(f.shell.engine().loops().get(0)->count() == 1);
+
+  // `loop length <slot> fixed <ticks>`.
+  CHECK(f.run("loop length 0 fixed 960"));
+  CHECK(f.shell.engine().loops().get(0)->length() == 960);
+
+  // `loop erase <slot>` / `loop undo <slot>`.
+  CHECK(f.run("loop erase 0"));
+  CHECK(f.shell.engine().loops().get(0)->count() == 0);
+  CHECK(f.run("loop undo 0"));
+  CHECK(f.shell.engine().loops().get(0)->count() == 1);
+
+  // Error paths: unknown sub-verb, bad mode, bad port, bad length shape.
+  CHECK(!f.run("loop bogus"));
+  CHECK(!f.run("loop record 0 notamode in0"));
+  CHECK(!f.run("loop record 0 record bogusport"));
+  CHECK(!f.run("loop length 0 notamode"));
+  CHECK(!f.run("loop length 0 fixed"));
+}
+
 void test_shell_chord_detect_panel() {
   ShellFixture f;
   std::vector<std::string> panel;
@@ -563,7 +615,7 @@ void test_permanent_transpose_persists_across_bars() {
   // chord likewise persists across bars with no revert.
   CHECK(f.shell.handle_ui_key('g'));
   CHECK(f.shell.engine().chords().state().root_pc == 7);  // G
-  CHECK(f.shell.handle_ui_key('g'));  // release
+  CHECK(f.shell.handle_ui_key('g'));                      // release
   CHECK(f.shell.advance_by(2 * kTicksPerBar, err));
   CHECK(f.shell.engine().chords().state().root_pc == 7);  // stays on G
 }
@@ -601,8 +653,8 @@ void test_pressing_a_then_s_yields_different_roots_when_properly_released() {
               f.shell.engine().chords().state().root_pc,
               static_cast<int>(f.shell.engine().chords().state().quality));
   const std::uint8_t r_s = f.shell.engine().chords().state().root_pc;
-  CHECK(r_s == 2);      // D
-  CHECK(r_s != r_a);    // a genuinely different chord from a genuinely different key
+  CHECK(r_s == 2);    // D
+  CHECK(r_s != r_a);  // a genuinely different chord from a genuinely different key
 }
 
 // The REAL-WORLD gesture: a player moving a finger from one key straight to
@@ -701,10 +753,10 @@ void test_parts_solo_migrated_to_i_key() {
   // 's' is a NOTE-letter (D4) now: the global steer choke consumes it BEFORE the
   // parts key handler, so it never toggles solo — it steers the band to D (ii).
   CHECK(f.shell.handle_ui_key('s'));
-  CHECK(!f.shell.engine().arranger().soloed(role));       // solo untouched
+  CHECK(!f.shell.engine().arranger().soloed(role));  // solo untouched
   CHECK(f.shell.engine().chords().state().valid);
   CHECK(f.shell.engine().chords().state().root_pc == 2);  // D
-  CHECK(f.shell.handle_ui_key('s'));                       // release the steered note
+  CHECK(f.shell.handle_ui_key('s'));                      // release the steered note
 
   // 'm' is not a note-letter, so it survives the choke and still mutes the part.
   CHECK(!f.shell.engine().arranger().muted(role));
@@ -764,17 +816,17 @@ void test_shell_groove_command_and_panel() {
 void test_gm_program_parsing() {
   CHECK(parse_gm_program("0") == 0);
   CHECK(parse_gm_program("127") == 127);
-  CHECK(parse_gm_program("128") == -1);        // out of range
+  CHECK(parse_gm_program("128") == -1);  // out of range
   CHECK(parse_gm_program("-1") == -1);
-  CHECK(parse_gm_program("trumpet") == 56);    // exact name
-  CHECK(parse_gm_program("Trumpet") == 56);    // case-insensitive
+  CHECK(parse_gm_program("trumpet") == 56);              // exact name
+  CHECK(parse_gm_program("Trumpet") == 56);              // case-insensitive
   CHECK(parse_gm_program("acoustic-grand-piano") == 0);  // hyphen-normalized
   CHECK(parse_gm_program("Electric Piano 1") == 4);      // spaces normalized
-  CHECK(parse_gm_program("finger") == 33);     // unique substring: Electric Bass (finger)
-  CHECK(parse_gm_program("violin") == 40);     // exact single name
-  CHECK(parse_gm_program("pad") == -1);        // ambiguous (Pad 1..8) -> reject
-  CHECK(parse_gm_program("piano") == -1);      // ambiguous family -> reject, use a number
-  CHECK(parse_gm_program("zzznope") == -1);    // unknown
+  CHECK(parse_gm_program("finger") == 33);               // unique substring: Electric Bass (finger)
+  CHECK(parse_gm_program("violin") == 40);               // exact single name
+  CHECK(parse_gm_program("pad") == -1);                  // ambiguous (Pad 1..8) -> reject
+  CHECK(parse_gm_program("piano") == -1);                // ambiguous family -> reject, use a number
+  CHECK(parse_gm_program("zzznope") == -1);              // unknown
   CHECK(std::string(gm_program_name(56)) == "Trumpet");
 }
 
@@ -1643,10 +1695,10 @@ void test_piano_harmony_gate_at_rest() {
   // exactly like `chord play`/`transport start` below.)
   CHECK(f.run("style load basic"));
   f.shell.refresh_panels();
-  CHECK(f.shell.engine().chords().state().valid);        // home tonic seeded
-  CHECK(!f.shell.engine().chords().explicit_set());      // but never steered
-  CHECK(!f.shell.engine().transport().playing());        // and not playing
-  CHECK(!has_green());                                   // -> overlay stays off
+  CHECK(f.shell.engine().chords().state().valid);    // home tonic seeded
+  CHECK(!f.shell.engine().chords().explicit_set());  // but never steered
+  CHECK(!f.shell.engine().transport().playing());    // and not playing
+  CHECK(!has_green());                               // -> overlay stays off
 
   // An explicit steer while STILL stopped activates the overlay (part a).
   CHECK(f.run("chord play C"));
@@ -1689,7 +1741,7 @@ void test_piano_harmony_gate_at_rest() {
 struct PianoFixture : ShellFixture {
   PianoFixture() {
     shell.configure_default_surfaces();  // detect on, single-finger, kHarmony steer port
-    CHECK(run("panel focus piano"));      // the piano panel steers the band
+    CHECK(run("panel focus piano"));     // the piano panel steers the band
     events.clear();
   }
 
@@ -2418,6 +2470,7 @@ int main() {
   test_note_name_parsing();
   test_shell_chord_commands();
   test_note_verb();
+  test_shell_loop_commands();
   test_shell_chord_detect_panel();
   test_note_letters_steer_from_every_panel_but_repl();
   test_permanent_transpose_persists_across_bars();

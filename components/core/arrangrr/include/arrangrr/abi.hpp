@@ -77,6 +77,15 @@ enum class Boundary : std::uint8_t {
 // so it can never collide with a real, in-bounds explicit id.
 inline constexpr std::uint16_t kNoExplicitClipId = 0xFFFFU;
 
+// Sentinel for `Command::idx` on a `kLoopNew` command (docs/proposals/
+// looper-in-gui-contract.md §7 item 5 -- the IDENTICAL fix already shipped
+// for `kClipAdd`/kNoExplicitClipId above, applied to the Looper's own
+// registration verb): "no explicit id was given, keep the original
+// sequential-append behavior". Well past kMaxLoopSlots (arrangrr/config.hpp,
+// currently <=16), so it can never collide with a real, in-bounds explicit
+// slot id.
+inline constexpr std::uint16_t kNoLoopExplicitId = 0xFFFFU;
+
 // Flat M0 parameter/action ids (the full L1 catalog grows with milestones;
 // ids are stable — never reuse a value).
 enum class Param : std::uint16_t {
@@ -331,6 +340,19 @@ enum class Param : std::uint16_t {
                           //     kSeqNew); no return-value echo (host tracks
                           //     the sequential id, same convention as
                           //     kSeqNew/kClipAdd).
+                          //     idx == kNoLoopExplicitId (the sentinel above)
+                          //     keeps this ORIGINAL sequential-append
+                          //     convention; any other idx registers AT that
+                          //     exact slot id instead (bounds + uniqueness
+                          //     validated, LoopBuffer::add_slot_at) --
+                          //     the IDENTICAL explicit-id fix already shipped
+                          //     for kClipAdd (docs/proposals/looper-in-gui-
+                          //     contract.md §7 item 5), letting a caller that
+                          //     already knows a stable id (the GUI's own
+                          //     cell_id(role,scene)) address it directly. The
+                          //     `loop new` L1 grammar (shell_loop_commands.cpp)
+                          //     always sends the sentinel, so its behavior is
+                          //     unchanged.
   kLoopRecordStart = 60,  // do: idx = slot id. a = LoopRecordMode (0 record/
                           //     1 overdub/2 replace). b = input port
                           //     (0..kMaxPorts-1) to capture live notes from.

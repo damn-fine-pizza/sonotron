@@ -7,6 +7,7 @@ add_library(hostrt STATIC
   shell_io_commands.cpp
   shell_music_commands.cpp
   shell_clip_commands.cpp
+  shell_loop_commands.cpp
   shell_pad_commands.cpp
   shell_fx_commands.cpp
   perf_v1_migrate.cpp

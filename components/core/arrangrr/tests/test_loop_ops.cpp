@@ -55,6 +55,13 @@ struct Band {
         static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
         kNoExplicitClipId);
   }
+  // idx = kNoLoopExplicitId: the legacy sequential-append form (docs/
+  // proposals/looper-in-gui-contract.md §7 item 5, the IDENTICAL fix already
+  // shipped for kClipAdd/kNoExplicitClipId above) -- explicit here since
+  // Command::idx now means "explicit loop-slot id" for kLoopNew, and every
+  // bare `loop_new()` caller below relies on the ORIGINAL sequential-id
+  // assignment.
+  void loop_new() { cmd(Param::kLoopNew, 0, 0, 0, kNoLoopExplicitId); }
   int warns() const {
     int n = 0;
     for (const OutEvent& o : ev) {
@@ -86,7 +93,7 @@ void test_loop_overdub_wraps_new_material_onto_existing_content_length() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, 0, 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
   b.feed_note(3, 60, 100);
@@ -127,8 +134,8 @@ void test_loop_undo_shared_shadow_moves_with_the_most_recent_edit() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, 0, 100);
-  b.cmd(Param::kLoopNew);  // slot 0
-  b.cmd(Param::kLoopNew);  // slot 1
+  b.loop_new();  // slot 0
+  b.loop_new();  // slot 1
 
   // Slot 0: one recorded note (this call also saves slot 0's -- empty --
   // shadow, but that generation is about to be superseded below).
@@ -183,8 +190,8 @@ void test_loop_two_slots_play_simultaneously_and_independently() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, 0, 100);
-  b.cmd(Param::kLoopNew);  // slot 0: a bass note
-  b.cmd(Param::kLoopNew);  // slot 1: a chord-role note
+  b.loop_new();  // slot 0: a bass note
+  b.loop_new();  // slot 1: a chord-role note
   b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 0);
   b.add_clip(TrackRole::kChord1, 0, ContentKind::kLoopBuffer, 1);
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 1 | (2 << 8));
@@ -243,16 +250,17 @@ void test_loop_playback_wrap_respects_the_live_non_default_meter() {
   b.cmd(Param::kChordPlay, 60, 0, 100);
 
   Performance p;
-  p.style_id = 0xFFFF;             // none: apply_performance skips Arranger::load
-  p.chord_sequence_id = 0xFFFF;    // none
-  p.controller_map_id = 0xFFFF;    // none
-  p.beats_per_bar = 3;             // a genuine 3/4 -- 3 * kTicksPerBeat, not kTicksPerBar (4 beats)
-  p.routes[static_cast<std::size_t>(TrackRole::kBass)] = PerfRoute{.port = 1, .channel = 2, .enabled = 1};
+  p.style_id = 0xFFFF;           // none: apply_performance skips Arranger::load
+  p.chord_sequence_id = 0xFFFF;  // none
+  p.controller_map_id = 0xFFFF;  // none
+  p.beats_per_bar = 3;           // a genuine 3/4 -- 3 * kTicksPerBeat, not kTicksPerBar (4 beats)
+  p.routes[static_cast<std::size_t>(TrackRole::kBass)] =
+      PerfRoute{.port = 1, .channel = 2, .enabled = 1};
   CHECK(b.e.performances().store(0, p));
   b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
   CHECK(b.e.transport().ticks_per_bar() == 3 * kTicksPerBeat);
 
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 0);
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
@@ -275,10 +283,10 @@ void test_loop_playback_wrap_respects_the_live_non_default_meter() {
   b.cmd(Param::kTransportStart);
   b.ev.clear();
   b.cmd(Param::kClipLaunch, 0, 0, 0, /*idx=*/0);
-  b.advance(3 * kTicksPerBeat - 1);  // one tick shy of the LIVE bar
+  b.advance(3 * kTicksPerBeat - 1);                  // one tick shy of the LIVE bar
   CHECK(b.count_midi(1, 2, 60, /*on=*/false) == 0);  // not yet -- confirms it
-                                                      // is NOT wrapping at the
-                                                      // stale 4-beat kTicksPerBar
+                                                     // is NOT wrapping at the
+                                                     // stale 4-beat kTicksPerBar
   b.advance(1);                                      // now exactly 3 beats elapsed
   CHECK(b.count_midi(1, 2, 60, /*on=*/false) == 1);  // wraps at the LIVE meter's own bar
 }
@@ -292,7 +300,7 @@ void test_loop_playback_wrap_respects_the_live_non_default_meter() {
 void test_loop_event_pool_capacity_degrades_gracefully_never_crashes() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
   // kMaxLoopEvents distinct, non-overlapping one-tick notes (start i, held
@@ -316,7 +324,7 @@ void test_loop_event_pool_capacity_degrades_gracefully_never_crashes() {
   b.ev.clear();
   b.feed_note(3, 100, 100);
   CHECK(b.e.loops().get(0)->count() == kMaxLoopEvents);  // pinned, not grown
-  CHECK(b.warns() == 0);  // no observable signal either way -- a silent cap
+  CHECK(b.warns() == 0);   // no observable signal either way -- a silent cap
   b.feed_note(3, 100, 0);  // the matching off: also a no-op (nothing was held)
   b.cmd(Param::kLoopRecordStop, 0, 0, 0, /*idx=*/0);
   CHECK(b.e.loops().get(0)->count() == kMaxLoopEvents);

@@ -58,6 +58,16 @@ struct Band {
         static_cast<std::int32_t>(kind) | (static_cast<std::int32_t>(content_index) << 8),
         kNoExplicitClipId);
   }
+  // idx = kNoLoopExplicitId: the legacy sequential-append form (docs/
+  // proposals/looper-in-gui-contract.md §7 item 5, the IDENTICAL fix already
+  // shipped for kClipAdd/kNoExplicitClipId above) -- explicit here since
+  // Command::idx now means "explicit loop-slot id" for kLoopNew, and every
+  // bare `loop_new()` caller below relies on the ORIGINAL sequential-id
+  // assignment.
+  void loop_new() { cmd(Param::kLoopNew, 0, 0, 0, kNoLoopExplicitId); }
+  // The new Shape-A path: registers AT an explicit id instead of the
+  // sequential counter (mirrors test_clip.cpp's own add_clip_at).
+  void loop_new_at(std::uint16_t id) { cmd(Param::kLoopNew, 0, 0, 0, id); }
   int warns() const {
     int n = 0;
     for (const OutEvent& o : ev) {
@@ -81,7 +91,7 @@ struct Band {
 
 void test_loop_new_and_clip_add() {
   Band b;
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   CHECK(b.e.loops().count() == 1);
   b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 0);
   CHECK(b.e.clips().size() == 1);
@@ -98,7 +108,7 @@ void test_loop_record_stop_and_launch_round_trip() {
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, -1, 100);  // C major key -> Cmaj7, root_pc 0
   b.ev.clear();
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 0);
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 1 | (2 << 8));
 
@@ -130,7 +140,7 @@ void test_loop_overdub_merges_without_clearing() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, -1, 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
   b.feed_note(3, 60, 100);
@@ -154,7 +164,7 @@ void test_loop_undo_restores_prior_generation() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, -1, 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
   b.feed_note(3, 60, 100);
@@ -188,7 +198,7 @@ void test_loop_erase_clears_and_undo_restores() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, -1, 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
   b.feed_note(3, 60, 100);
@@ -211,7 +221,7 @@ void test_loop_length_modes() {
   Band b;
   b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
   b.cmd(Param::kChordPlay, 60, -1, 100);
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
         /*idx=*/0);
   b.feed_note(3, 60, 100);
@@ -245,11 +255,11 @@ void test_loop_length_modes() {
 void test_loop_pool_capacity_is_target_conditional() {
   Band b;
   for (std::size_t i = 0; i < kMaxLoopSlots; ++i) {
-    b.cmd(Param::kLoopNew);
+    b.loop_new();
   }
   CHECK(b.e.loops().count() == kMaxLoopSlots);
   CHECK(b.warns() == 0);
-  b.cmd(Param::kLoopNew);  // one past capacity
+  b.loop_new();  // one past capacity
   CHECK(b.warns() == 1);
   CHECK(b.e.loops().count() == kMaxLoopSlots);
 }
@@ -259,7 +269,7 @@ void test_loop_bad_args_warn() {
   b.cmd(Param::kLoopRecordStart, 0, 0, 0, /*idx=*/0);  // no slot registered
   CHECK(b.warns() == 1);
   b.ev.clear();
-  b.cmd(Param::kLoopNew);
+  b.loop_new();
   b.cmd(Param::kLoopRecordStart, 99 /*bad mode*/, 0, 0, /*idx=*/0);
   CHECK(b.warns() == 1);
   b.ev.clear();
@@ -288,6 +298,84 @@ void test_loop_default_inert() {
   CHECK(b.e.loops().count() == 0);
 }
 
+// Phase 7 (§7 item 5, docs/proposals/looper-in-gui-contract.md): the IDENTICAL
+// explicit-id fix already shipped for kClipAdd, applied to kLoopNew --
+// registering at an explicit id past the pool's tail pads every intervening
+// index with an unclaimed placeholder (never returned by get(), see
+// loop_buffer.hpp), then claims exactly `id`. Mirrors test_clip.cpp's own
+// test_clip_add_at_explicit_id_registers.
+void test_loop_new_at_explicit_id_registers() {
+  Band b;
+  b.loop_new_at(5);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.loops().count() == 6);
+  CHECK(b.e.loops().get(5) != nullptr);
+  // Every padded id below 5 stays unclaimed -- get() reports "no slot here".
+  CHECK(b.e.loops().get(0) == nullptr);
+  CHECK(b.e.loops().get(4) == nullptr);
+}
+
+// A later, LOWER explicit id (arriving after a higher one already padded
+// through it) still succeeds and fills exactly its own placeholder slot,
+// leaving every other still-unclaimed index untouched. Mirrors
+// test_clip.cpp's own test_clip_add_at_out_of_order_fills_earlier_placeholder.
+void test_loop_new_at_out_of_order_fills_earlier_placeholder() {
+  Band b;
+  if (kMaxLoopSlots <= 3) {
+    return;  // needs room for ids 0..3 on the smaller (device) pool
+  }
+  b.loop_new_at(3);
+  b.loop_new_at(1);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.loops().get(1) != nullptr);
+  CHECK(b.e.loops().get(3) != nullptr);
+  CHECK(b.e.loops().get(2) == nullptr);  // still an unclaimed placeholder
+}
+
+// Re-registering the SAME explicit id is rejected (LoopBuffer stays
+// append-only, no retarget) -- the original registration is left untouched.
+// Mirrors test_clip.cpp's own test_clip_add_at_duplicate_id_warns.
+void test_loop_new_at_duplicate_id_warns() {
+  Band b;
+  b.loop_new_at(2);
+  b.ev.clear();
+  b.loop_new_at(2);
+  CHECK(b.warns() == 1);
+  CHECK(b.e.loops().count() == 3);
+}
+
+// An out-of-bounds explicit id (>= kMaxLoopSlots) is rejected cleanly, no
+// crash. Mirrors test_clip.cpp's own test_clip_add_at_out_of_bounds_warns.
+void test_loop_new_at_out_of_bounds_warns() {
+  Band b;
+  b.loop_new_at(static_cast<std::uint16_t>(kMaxLoopSlots));
+  CHECK(b.warns() == 1);
+  CHECK(b.e.loops().count() == 0);
+}
+
+// The full Shape-A round trip: an explicit-id registration is recordable
+// exactly like a sequentially-assigned slot.
+void test_loop_new_at_then_record_and_launch() {
+  Band b;
+  b.cmd(Param::kKeySet, 0, 0, 0, 0, Op::kSet);
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.loop_new_at(4);
+  b.add_clip(TrackRole::kBass, 0, ContentKind::kLoopBuffer, 4);
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 1 | (2 << 8));
+  b.ev.clear();
+  b.cmd(Param::kLoopRecordStart, static_cast<std::int32_t>(LoopRecordMode::kRecord), 3, 0,
+        /*idx=*/4);
+  CHECK(b.e.loops().recording() && b.e.loops().recording_slot() == 4);
+  b.feed_note(3, 64, 100);
+  b.advance(kTicksPerBar);
+  b.feed_note(3, 64, 0);
+  b.cmd(Param::kLoopRecordStop, /*grid=*/0, 0, 0, /*idx=*/4);
+  CHECK(!b.e.loops().recording());
+  const LoopClip* clip = b.e.loops().get(4);
+  CHECK(clip != nullptr && clip->count() == 1);
+  CHECK(b.warns() == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -300,6 +388,11 @@ int main() {
   test_loop_pool_capacity_is_target_conditional();
   test_loop_bad_args_warn();
   test_loop_default_inert();
+  test_loop_new_at_explicit_id_registers();
+  test_loop_new_at_out_of_order_fills_earlier_placeholder();
+  test_loop_new_at_duplicate_id_warns();
+  test_loop_new_at_out_of_bounds_warns();
+  test_loop_new_at_then_record_and_launch();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_loop: all OK\n");
   }

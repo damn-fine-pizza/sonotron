@@ -497,6 +497,148 @@ void test_clip_add_bad_id_surfaces_clean_error() {
   session.stop();
 }
 
+// Phase 7 (node 6000, docs/proposals/looper-in-gui-contract.md §2/§7 items
+// 1/2): `note <port> on|off <midinote> [velocity]` translates to a real
+// Param::kNoteRaw Command. BEFORE this milestone's fix, ANY kNoteRaw Command
+// pushed through the ring landed on Engine::push_command's unhandled-param
+// default and emitted exactly WarnCode::kUnknownCommand (abi.hpp's own
+// kNoteRaw comment: "it never reaches Engine::push_command()") -- this is the
+// precise regression the drain-loop special case (item 2) closes.
+void test_note_raw_never_surfaces_unknown_command_warn() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("note 0 on 60 100");
+  session.send("note 0 off 60");
+  CHECK(never_seen(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kWarn && ev.warn_code == "unknown_command";
+  }));
+
+  session.stop();
+}
+
+// Proves the note actually reaches the LIVE-INPUT tap Engine::push_midi_in
+// runs -- not just "was accepted somewhere" -- by driving a `loop record`
+// window on the SAME port a note is sent on: `loop record`'s own start only
+// flips m_loop.recording() true, and `loop stop` only succeeds while
+// GENUINELY recording (Engine::loop_record_stop rejects otherwise with
+// kBadArgument) -- so a `loop stop` that surfaces no "bad_argument" warn here
+// proves the whole sequence (including feed_midi()'s note-on/note-off in
+// between) reached the engine's real Engine::push_midi_in path. Neither the
+// note nor the loop verbs need ALSA/port-open: kNoteRaw's own feed_midi()
+// call and kLoopRecordStart/Stop's port argument are both raw indices,
+// independent of Shell's port-open table -- exactly why this test (like
+// every other test in this file) runs safely in a headless/CI sandbox. The
+// captured EVENT COUNT itself is verified at the core layer already
+// (test_loop.cpp, components/platform/hostrt/tests/test_host.cpp's
+// test_shell_loop_commands) -- BrainEvent has no loop-content readback yet
+// (docs/proposals/looper-in-gui-contract.md §7 item 9, a later slice), so
+// this is the strongest signal reachable at this layer. NOTE: every
+// kLoopRecordStart/Stop SUCCESS also emits a real OutEvent::loop() echo that
+// currently (a KNOWN, documented, out-of-scope defect -- §7 item 9)
+// misdecodes as a benign BrainEvent::Kind::kWarn with warn_code=="none"
+// (brain_event_from_outevent.cpp's kLoop case falls into the kWarn default);
+// this test checks for the REAL failure code ("bad_argument"), not the
+// presence of kWarn at all, so it is not tripped by that separate, already-
+// flagged bug.
+void test_note_raw_reaches_engine_via_loop_record_round_trip() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("loop new");
+  session.send("loop record 0 record 0");
+  session.send("note 0 on 60 100");
+  session.send("note 0 off 60");
+  session.send("loop stop 0");
+  CHECK(never_seen(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kWarn && ev.warn_code == "bad_argument";
+  }));
+
+  session.stop();
+}
+
+// A malformed note line (unparsable port/note/velocity, or a missing on|off)
+// must surface a clean kError from the TRANSLATOR itself, never reach
+// push_command -- mirrors the style/part/transpose "invalid input" tests
+// above.
+void test_note_raw_bad_input_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("note 0 maybe 60 100");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("note <port> on|off") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
+// docs/proposals/looper-in-gui-contract.md §7 item 4: the SAME `loop ...`
+// grammar shell_loop_commands.cpp implements, translated by the integrated
+// GUI backend too -- every one of these Params already has an Engine::
+// push_command case (Engine::cmd_loop), so (unlike kNoteRaw) they ride the
+// normal Command ring with no drain-loop special case needed. Checks for the
+// REAL failure code ("bad_argument"), not the presence of kWarn at all --
+// every SUCCESS here also emits a real OutEvent::loop() echo that currently
+// misdecodes as a benign kWarn/"none" (a KNOWN, documented, out-of-scope
+// defect, §7 item 9), which this assertion is deliberately not tripped by
+// (see test_note_raw_reaches_engine_via_loop_record_round_trip's own longer
+// comment above).
+void test_loop_verbs_translate_and_reach_engine_without_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("loop new");
+  session.send("loop record 0 record 0");
+  session.send("loop stop 0");
+  session.send("loop length 0 fixed 960");
+  session.send("loop erase 0");
+  session.send("loop undo 0");
+  CHECK(never_seen(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kWarn && ev.warn_code == "bad_argument";
+  }));
+
+  session.stop();
+}
+
+// A bad loop record mode must surface a clean kError from the TRANSLATOR
+// itself (never reaches push_command).
+void test_loop_record_bad_mode_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("loop record 0 notamode 0");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("loop record mode") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
+// A `loop stop` on a slot that never started recording still reaches the
+// engine and surfaces a real kWarn -- proving push_command was actually
+// reached, not swallowed by the translator.
+void test_loop_stop_without_active_recording_warns() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("loop new");
+  session.send("loop stop 0");  // never started recording
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kWarn && ev.warn_code == "bad_argument";
+  }));
+
+  session.stop();
+}
+
 void test_stop_is_idempotent_and_safe_before_start() {
   InProcessBrainSession session;
   session.stop();  // never started: must be a safe no-op
@@ -530,6 +672,12 @@ int main() {
   test_clip_add_with_explicit_id_registers_and_launches();
   test_clip_add_duplicate_explicit_id_warns();
   test_clip_add_bad_id_surfaces_clean_error();
+  test_note_raw_never_surfaces_unknown_command_warn();
+  test_note_raw_reaches_engine_via_loop_record_round_trip();
+  test_note_raw_bad_input_surfaces_clean_error();
+  test_loop_verbs_translate_and_reach_engine_without_error();
+  test_loop_record_bad_mode_surfaces_clean_error();
+  test_loop_stop_without_active_recording_warns();
   test_stop_is_idempotent_and_safe_before_start();
   return sonotron::test::failures();
 }
