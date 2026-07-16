@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 #include "imgui.h"
@@ -15,12 +16,16 @@ namespace {
 // A dark rounded inset "cluster" box (the v02 tempo / bar:beat readout
 // housings, spec §1) as an inline child so several sit side by side on the
 // rack's single row. Caller fills it with content, then calls end_inset().
-void begin_inset(const char* id, float width, float height) {
+// `content_width`, when >= 0, horizontally centers the upcoming content
+// (its rendered width, as measured by the caller via ImGui::CalcTextSize)
+// inside the inset instead of the default fixed 8px left inset padding.
+void begin_inset(const char* id, float width, float height, float content_width = -1.0F) {
   ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kInsetBg);
   ImGui::PushStyleColor(ImGuiCol_Border, theme::kBorderCyan);
   ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_Borders,
                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-  ImGui::SetCursorPos(ImVec2(8.0F, (height - ImGui::GetTextLineHeight()) * 0.5F));
+  const float x = content_width >= 0.0F ? std::max(0.0F, (width - content_width) * 0.5F) : 8.0F;
+  ImGui::SetCursorPos(ImVec2(x, (height - ImGui::GetTextLineHeight()) * 0.5F));
 }
 
 void end_inset() {
@@ -124,29 +129,43 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session, V0
   }
 
   // bar:beat:pulse readout (REAL, from the kBeat heartbeat). "— : — : ··" when
-  // stopped / never positioned.
+  // stopped / never positioned. Horizontally centered in the inset: the
+  // content width is measured up front (same glyphs about to be drawn) so
+  // the SetCursorPos offset in begin_inset() lands the whole string in the
+  // middle of the pill instead of flush against the 8px left padding.
   ImGui::SameLine(0.0F, 10.0F);
-  begin_inset("beat_inset", 150.0F, row_h);
   if (app_state.bar() == 0) {
-    ImGui::TextColored(theme::kTextMuted, "\xE2\x80\x94 : \xE2\x80\x94 : \xC2\xB7\xC2\xB7");
+    static constexpr const char* kStoppedReadout = "\xE2\x80\x94 : \xE2\x80\x94 : \xC2\xB7\xC2\xB7";
+    begin_inset("beat_inset", 150.0F, row_h, ImGui::CalcTextSize(kStoppedReadout).x);
+    ImGui::TextColored(theme::kTextMuted, "%s", kStoppedReadout);
   } else {
-    theme::text_bold_colored(theme::kPink, "%03d", app_state.bar());
+    char bar_buf[8];
+    char beat_buf[8];
+    char pulse_buf[8];
+    std::snprintf(bar_buf, sizeof(bar_buf), "%03d", app_state.bar());
+    std::snprintf(beat_buf, sizeof(beat_buf), "%d", app_state.beat_num());
+    std::snprintf(pulse_buf, sizeof(pulse_buf), "%02d", app_state.pulse());
+    const float sep_w = ImGui::CalcTextSize(":").x;
+    const float content_width = ImGui::CalcTextSize(bar_buf).x + 3.0F + sep_w + 3.0F +
+                                ImGui::CalcTextSize(beat_buf).x + 3.0F + sep_w + 3.0F +
+                                ImGui::CalcTextSize(pulse_buf).x;
+    begin_inset("beat_inset", 150.0F, row_h, content_width);
+    theme::text_bold_colored(theme::kPink, "%s", bar_buf);
     ImGui::SameLine(0.0F, 3.0F);
     ImGui::TextColored(theme::kTextDim, ":");
     ImGui::SameLine(0.0F, 3.0F);
-    theme::text_bold_colored(theme::kText, "%d", app_state.beat_num());
+    theme::text_bold_colored(theme::kText, "%s", beat_buf);
     ImGui::SameLine(0.0F, 3.0F);
     ImGui::TextColored(theme::kTextDim, ":");
     ImGui::SameLine(0.0F, 3.0F);
-    ImGui::TextColored(theme::kTextMuted, "%02d", app_state.pulse());
+    ImGui::TextColored(theme::kTextMuted, "%s", pulse_buf);
   }
   end_inset();
 
   // Right-aligned: status dot + label, then the glow ⚙ toggle.
   const float right_w = 150.0F;
   ImGui::SameLine();
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),
-                                ImGui::GetContentRegionMax().x - right_w));
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - right_w));
 
   // Blinking status dot (blink gated on playing + glow), colored by transport.
   const ImVec4 dot_col = playing ? theme::kGreen : theme::kTextMuted;
