@@ -55,8 +55,9 @@ bets deferred because each opens a new front rather than continuing the GUI-era 
 
 ## Reading of the order
 Three anti-sameness moves first (**1, 7, 8** — idiom transfer, procedural
-generation, raw content volume), then two GUI-depth items (**2, 9** — the inert
-hero zone, then the "50/50 live" half), then the first audio peer (**6**), then
+generation, raw content volume), then two GUI-depth items (**2, 9** — the hero
+zone's launch grid, now shipped with real launch, then the "50/50 live" half),
+then the first audio peer (**6**), then
 robustness (**4**), then the hackability framework (**10**, on-ramp to the Director
 capstone). Musical capability leads.
 
@@ -87,7 +88,7 @@ capstone). Musical capability leads.
 | #6 melodd | `components/melodd` (new component) | no (consumes output via orchestrator) | **P-dep** (blocked on `0800` audio-dep) |
 | #1 Restyle | transform policy inside `arrangrr` | **yes** | **S-core** (serialized) |
 | #7 Motif | new resolver stage in `arrangrr` NTT (`3120`) | **yes** | **S-core** |
-| #2 Clip | ABI events + `arrangrr`+`hostrt`+GUI | **yes** | **S-core** |
+| #2 Clip | ABI events + `arrangrr`+`hostrt`+GUI | **yes** | **S-core** (SHIPPED — see Item D) |
 | #9 Pad/Scene | scheduler source + `hostrt`+GUI | **yes** | **S-core** |
 | #10 MIDI-FX | groove/arp→chain refactor in `arrangrr` | **yes (deepest)** | **S-core** |
 
@@ -111,8 +112,14 @@ order.** But their **design reviews are read-only and DO parallelize now**.
   surface) + reviews B/C land. The spine; gets main implementation attention.
 - **#8 implementation** — after Ottorino's scope (D). Disjoint tool, so it can run
   in parallel with #1 implementation once scoped.
-- **#7 / #2 / #9 / #10** — serialized in order after #1; each gets its Ottorino/
-  Corelli design pass one step ahead of its implementation slot.
+- **#7 / #9 / #10** — serialized in order after #1; each gets its Ottorino/
+  Corelli design pass one step ahead of its implementation slot. **#2 has already
+  shipped** (Item D, `ClipMatrix` + `3398f04`/`f531d8f`/`9ce480d`/`f1fa7d7`/
+  `9382c07`) — it is no longer in this wait list. *Open note for the owner: #2
+  landed ahead of #1/#7/#8 in this program's stated `1→7→8→2→...` order, and
+  ahead of the "serialized after #1" rule the S-core file-overlap analysis
+  below states for it; this doc does not confirm whether that was a deliberate
+  reordering or an out-of-turn build — see "Aperto per il proprietario."*
 - **#6 melodd** — blocked on the `0800` audio-dependency decision (which lib,
   license, weight); surfaced to the owner before its slot. Its component scaffold
   (opaque-reference interface, silent stub) is disjoint and could start earlier if
@@ -142,12 +149,22 @@ into the compiled-`.cpp` style format. **Risks:** messy proprietary-adjacent for
 (least-predictable effort) + **`../resources/` provenance/licensing must be checked
 before any imported style ships publicly** (ship-gate, not build-gate).
 
-### Item D — #2 Clip / launch primitive  [core + HOST GUI, ABI reshape now free]
+### Item D — #2 Clip / launch primitive  [core + HOST GUI, ABI reshape now free]  — SHIPPED
 Real launchable-cell primitive for the GUI hero zone: `launch`/`stop`/
 `scene-quantize` verbs + a `clip` state event, bar/beat-quantized. Lighter than the
 Looper (`6000`) — arm pre-existing content, not record/overdub. With F3 resolved, the
-event/command shape is designed freely (Corelli review), not squeezed into the old
-append-only ABI.
+event/command shape was designed freely (Corelli review), not squeezed into the old
+append-only ABI. **Landed:** the core `ClipMatrix`
+(`components/core/arrangrr/include/arrangrr/clip/clip_matrix.hpp`) plus ABI
+`kClipAdd`/`kClipLaunch`/`kClipStop` (`abi.hpp`), and the GUI binding across
+`3398f04` (readback into `AppState` + Shape-A `ClipMatrix::add_at` explicit-id
+binding), `f531d8f` (renamable scenes + `scenes.json`), `9ce480d` (real-content
+cell preview), `f1fa7d7` (scene sections + variations drag palette), `9382c07`
+(auto-song). `apps/gui-sonotron/src/grid_model.hpp`'s `kGridLaunchWired` is now
+`true` — the Repeat Zone's clip/scene launch primitive is a shipped fact, not a
+future candidate; it no longer needs the fake-launcher workaround this item
+existed to avoid. See `docs/gui-and-ux.md` §4.4/§10/§11 and
+`docs/proposals/repeat-zone-real-contract.md` for the full as-built contract.
 
 ### Item E — #9 Pad/Scene live (`7200`/`8100`–`8200`)  [core + HOST GUI]
 4-pad performance banks (quantized triggers) + one-button full-state recall
