@@ -53,6 +53,13 @@ endfunction()
 gui_sonotron_engine_test(test_brain_event_from_outevent unit)
 gui_sonotron_engine_test(test_in_process_brain_session functional)
 
+# Torquato QA pass (live-bug repro, real backend, no synthetic kBeat
+# injection): drives a REAL InProcessBrainSession across several REAL
+# wall-clock seconds and asserts AppState::bar() actually climbs -- see this
+# test file's own header comment for why this is a different seam than
+# test_grid_panel_auto_song.cpp's SpyBrainSession-based render/decision test.
+gui_sonotron_engine_test(test_in_process_brain_session_bar_advance functional)
+
 # `midi-source load <path>` round trip (GUI integrated-mode refinement):
 # reuses the already-committed shared fixture `components/midisrc/tests/
 # fixtures/tiny.mid` (also used by midisrc's/arrstyle-converter's own tests
@@ -139,3 +146,18 @@ function(gui_sonotron_grid_panel_test name category)
 endfunction()
 
 gui_sonotron_grid_panel_test(test_grid_panel_auto_song functional)
+
+# Torquato QA pass, UI-AUTOMATING flavor of the live-bug repro (owner steer):
+# the same headless-ImGui render loop as test_grid_panel_auto_song.cpp above,
+# but wired end-to-end to a REAL InProcessBrainSession (real engine thread,
+# real Play verb, real poll/apply/render pipeline) instead of that test's
+# SpyBrainSession + hand-injected beat JSONL -- see this test file's own
+# header comment. Needs gui_sonotron_engine on top of the grid-panel test's
+# usual layout+brain link set (the only test in this directory that needs
+# all three).
+add_executable(test_grid_panel_auto_song_real_backend test_grid_panel_auto_song_real_backend.cpp)
+target_link_libraries(test_grid_panel_auto_song_real_backend PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_panel_auto_song_real_backend PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_grid_panel_auto_song_real_backend COMMAND test_grid_panel_auto_song_real_backend)
+set_tests_properties(test_grid_panel_auto_song_real_backend PROPERTIES LABELS functional)
