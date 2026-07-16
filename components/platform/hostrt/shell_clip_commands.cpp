@@ -8,6 +8,14 @@
 // documented `launch clip <id> quantize <n>` / `stop clip <id> [quantize
 // <n>]` / `launch scene <n> quantize <q>` (docs/design/ux-workstation.md
 // §7/§8, grid_model.hpp's own kGridLaunchWired comment).
+//
+// Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-gui-contract.md
+// §7 item 6): a fourth `loop <slot-id>` selector alongside style/seq/track,
+// registering a ContentKind::kLoopBuffer clip referencing an EXISTING
+// LoopBuffer slot (registered separately via `loop new`, shell_loop_
+// commands.cpp) -- `content_index` carries the slot id exactly like `seq`/
+// `track` carry their own pool index. This is the verb a future hold-gesture
+// (item 11) drives to turn a recorded loop into a real grid cell.
 
 namespace arrangrr::host {
 
@@ -30,6 +38,50 @@ bool parse_clip_id(const std::string& s, std::uint16_t& out, std::string& error)
   return true;
 }
 
+// Resolves `t[4]`'s content-kind selector (style|seq|track|loop) plus its
+// own `t[5]` argument into `kind`/`content_index`, hoisted out of cmd_clip
+// itself to keep that function's own cognitive complexity down (readability-
+// function-cognitive-complexity) -- purely mechanical, no behavior change.
+bool resolve_clip_content(const std::vector<std::string>& t, ContentKind& kind,
+                          std::uint64_t& content_index, std::string& error) {
+  if (t[4] == "style") {
+    SectionType section{};
+    if (!parse_section(t[5], section)) {
+      error = "unknown section: " + t[5];
+      return false;
+    }
+    kind = ContentKind::kStyleSection;
+    content_index = static_cast<std::uint64_t>(section);
+    return true;
+  }
+  if (t[4] == "seq") {
+    if (!parse_u64(t[5], content_index)) {
+      error = "bad sequence index: " + t[5];
+      return false;
+    }
+    kind = ContentKind::kChordSequence;
+    return true;
+  }
+  if (t[4] == "track") {
+    if (!parse_u64(t[5], content_index)) {
+      error = "bad track index: " + t[5];
+      return false;
+    }
+    kind = ContentKind::kStepTrack;
+    return true;
+  }
+  if (t[4] == "loop") {
+    if (!parse_u64(t[5], content_index)) {
+      error = "bad loop slot id: " + t[5];
+      return false;
+    }
+    kind = ContentKind::kLoopBuffer;
+    return true;
+  }
+  error = "unknown clip content kind: " + t[4];
+  return false;
+}
+
 }  // namespace
 
 // `clip add <role> <scene> style <section>` / `clip add <role> <scene> seq
@@ -43,7 +95,7 @@ bool parse_clip_id(const std::string& s, std::uint16_t& out, std::string& error)
 // validated core-side, Engine::clip_add).
 bool Shell::cmd_clip(const std::vector<std::string>& t, std::string& error) {
   if ((t.size() != 6 && t.size() != 8) || t[1] != "add") {
-    error = "usage: clip add <role> <scene> style|seq|track <section|index> [id <n>]";
+    error = "usage: clip add <role> <scene> style|seq|track|loop <section|index|slot-id> [id <n>]";
     return false;
   }
   TrackRole role{};
@@ -58,34 +110,14 @@ bool Shell::cmd_clip(const std::vector<std::string>& t, std::string& error) {
   }
   ContentKind kind{};
   std::uint64_t content_index = 0;
-  if (t[4] == "style") {
-    SectionType section{};
-    if (!parse_section(t[5], section)) {
-      error = "unknown section: " + t[5];
-      return false;
-    }
-    kind = ContentKind::kStyleSection;
-    content_index = static_cast<std::uint64_t>(section);
-  } else if (t[4] == "seq") {
-    if (!parse_u64(t[5], content_index)) {
-      error = "bad sequence index: " + t[5];
-      return false;
-    }
-    kind = ContentKind::kChordSequence;
-  } else if (t[4] == "track") {
-    if (!parse_u64(t[5], content_index)) {
-      error = "bad track index: " + t[5];
-      return false;
-    }
-    kind = ContentKind::kStepTrack;
-  } else {
-    error = "unknown clip content kind: " + t[4];
+  if (!resolve_clip_content(t, kind, content_index, error)) {
     return false;
   }
   std::uint16_t explicit_id = kNoExplicitClipId;
   if (t.size() == 8) {
     if (t[6] != "id") {
-      error = "usage: clip add <role> <scene> style|seq|track <section|index> [id <n>]";
+      error =
+          "usage: clip add <role> <scene> style|seq|track|loop <section|index|slot-id> [id <n>]";
       return false;
     }
     if (!parse_clip_id(t[7], explicit_id, error)) {

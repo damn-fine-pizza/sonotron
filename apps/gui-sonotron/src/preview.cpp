@@ -7,7 +7,9 @@
 #include "arrangrr/arranger/style.hpp"
 #include "arrangrr/arranger/style_model.hpp"
 #include "arrangrr/common/span.hpp"
+#include "arrangrr/loop/loop_event.hpp"
 #include "chorddet/theory.hpp"
+#include "common/time.hpp"
 
 // D38/Corelli §15 (see preview.hpp's own header comment): this is the ONLY
 // translation unit in gui_sonotron_preview, and the only place in the whole
@@ -112,6 +114,55 @@ int section_bars(int style_index, Section section) {
   const auto core_section = static_cast<arrangrr::SectionType>(section);
   const arrangrr::StyleSection* sec = style->find(core_section);
   return sec == nullptr ? 1 : static_cast<int>(sec->bars);
+}
+
+PreviewPattern preview_for_loop(const LoopPreviewEvent* events, std::size_t count) {
+  PreviewPattern out{};
+  out.pitch.fill(-1);
+  // Always approximate: even a kInterval event is resolved against the
+  // placeholder harmony below, never the loop's own live one (see this
+  // function's header comment).
+  out.approx = true;
+
+  if (events == nullptr || count == 0) {
+    return out;
+  }
+
+  // Canonical placeholder harmony -- the SAME one preview_for() constructs
+  // above, for the SAME reason (no live chord while browsing the grid).
+  const arrangrr::Key key{.root_pc = 0, .mode = arrangrr::Mode::kMajor};
+  const arrangrr::ChordState chord{
+      .root_pc = 0, .quality = arrangrr::ChordQuality::kMaj, .valid = true};
+
+  constexpr arrangrr::Tick kTicksPerStep =
+      arrangrr::kTicksPerBar / static_cast<arrangrr::Tick>(kSteps);
+  static_assert(kTicksPerStep * kSteps == arrangrr::kTicksPerBar,
+                "kSteps must divide kTicksPerBar evenly");
+
+  for (std::size_t i = 0; i < count; ++i) {
+    const LoopPreviewEvent& pev = events[i];
+    if (pev.start >= arrangrr::kTicksPerBar) {
+      continue;  // outside the one-bar preview window (mirrors preview_for's own guard)
+    }
+    arrangrr::LoopEvent ev;
+    ev.start = static_cast<arrangrr::Tick>(pev.start);
+    ev.duration = static_cast<arrangrr::Tick>(pev.duration);
+    ev.tone = static_cast<std::int8_t>(pev.tone);
+    ev.octave = static_cast<std::int8_t>(pev.octave);
+    ev.velocity = static_cast<std::uint8_t>(pev.velocity);
+    ev.source = static_cast<arrangrr::LoopNoteSource>(pev.source);
+
+    const int note = arrangrr::resolve_note(ev, chord, key);
+    if (note < 0 || note > 127) {
+      continue;
+    }
+    const std::size_t step = static_cast<std::size_t>(pev.start / kTicksPerStep);
+    if (step >= static_cast<std::size_t>(kSteps)) {
+      continue;
+    }
+    out.pitch[step] = note;
+  }
+  return out;
 }
 
 }  // namespace sonotron::preview

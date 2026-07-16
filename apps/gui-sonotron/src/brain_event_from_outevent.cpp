@@ -101,6 +101,18 @@ BrainEvent brain_event_from_outevent(const arrangrr::OutEvent& ev, bool prefer_f
       out.clip_state = host::clip_state_name(ev.msg.status);
       break;
 
+    // Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-gui-
+    // contract.md §7 item 9): `ev.code` is the target LoopBuffer slot id
+    // (abi.hpp:437-441), NOT a WarnCode -- this dedicated case, mirroring
+    // the kClip precedent above, is what keeps it from falling through to
+    // the kWarn/default branch below and being misdecoded as a fabricated
+    // warning.
+    case OutEvent::Kind::kLoop:
+      out.kind = BrainEvent::Kind::kLoop;
+      out.loop_slot_id = ev.code;
+      out.loop_event_kind = host::loop_event_kind_name(ev.msg.status);
+      break;
+
     case OutEvent::Kind::kTransport:
       out.kind = BrainEvent::Kind::kTransport;
       out.transport_state = host::transport_name(ev.code);

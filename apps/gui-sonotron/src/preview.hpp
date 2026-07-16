@@ -97,4 +97,60 @@ PreviewPattern preview_for(int style_index, Section section, std::size_t role_in
 // permanently true).
 int section_bars(int style_index, Section section);
 
+// ---------------------------------------------------------------------------
+// Loop-content preview (Phase 7, node 6000, the Looper -- docs/proposals/
+// looper-in-gui-contract.md §7 item 8). A recorded loop's content is
+// genuinely per-instance RUNTIME state (a live arrangrr::LoopBuffer slot),
+// unlike preview_for()'s static built-in Style tables above -- there is no
+// core Engine reachable from this core-free header (D38, same discipline
+// preview_for's own header comment already documents). `LoopPreviewEvent`
+// is therefore a small, hand-copied field-for-field mirror of arrangrr::
+// LoopEvent (arrangrr/loop/loop_event.hpp), the same discipline `Section`
+// above already uses for arrangrr::SectionType -- a caller that DOES have
+// direct LoopBuffer access (e.g. the engine-linking half of the GUI, or a
+// future engine-thread query) copies `LoopBuffer::get(slot_id)`'s LoopClip
+// events into this plain array; preview_for_loop() never touches
+// arrangrr::LoopBuffer itself, so this header still names zero arrangrr/
+// core types.
+
+// Numerically IDENTICAL to arrangrr::LoopNoteSource (loop_event.hpp), same
+// mirror discipline as Section/kSteps above.
+enum class LoopNoteSource : std::uint8_t {
+  kChordTone = 0,
+  kScaleDegree = 1,
+  kInterval = 2,
+};
+
+// Field-for-field mirror of arrangrr::LoopEvent (loop_event.hpp): `start`/
+// `duration` are raw ticks (arrangrr::Tick is a std::uint32_t); `tone`/
+// `octave` widen LoopEvent's std::int8_t fields to plain int (no core type
+// named here, same discipline as PreviewPattern::pitch's own plain `int`).
+struct LoopPreviewEvent {
+  std::uint32_t start = 0;
+  std::uint32_t duration = 0;
+  int tone = 0;
+  int octave = 0;
+  int velocity = 100;
+  LoopNoteSource source = LoopNoteSource::kInterval;
+};
+
+// Resolves a captured loop's events against the SAME canonical placeholder
+// harmony preview_for() uses above (a C-major key + tonic triad -- there is
+// no live chord while the transport is stopped and the user is just
+// browsing the grid), through the identical chord/key-relative resolution
+// arrangrr::resolve_note performs at real playback time (Engine::fire_loop's
+// own LoopBuffer::on_tick call, loop_buffer.hpp:322-391) -- never a
+// re-implementation. Always APPROXIMATE (PreviewPattern::approx == true):
+// even a kInterval event (which does not strictly need a chord) is still
+// resolved against the placeholder harmony, not the loop's live one, exactly
+// like every non-kFixed style-section preview above. Only events landing
+// inside the first bar (the same one-bar, kSteps-wide window preview_for()
+// uses) are shown; an event starting at or past one bar is silently dropped,
+// mirroring preview_for()'s own "outside the one-bar preview window" note.
+// `events`/`count` follow the same plain-pointer-plus-length shape as
+// arrangrr::Span (this header cannot name that core type either) --
+// `events == nullptr` or `count == 0` yields an honestly empty, all-rest
+// pattern, never a crash.
+PreviewPattern preview_for_loop(const LoopPreviewEvent* events, std::size_t count);
+
 }  // namespace sonotron::preview

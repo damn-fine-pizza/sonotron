@@ -93,6 +93,13 @@ struct BrainEvent {
     kChordFollowed,  // additive, gap P0-1 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-1)
     kBeat,           // additive, gap P0-2 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-2)
     kClip,           // additive, Phase-5 Item #2 (docs/design/clip-primitive-design.md) -- decoded
+    // additive, Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-
+    // gui-contract.md §7 item 9) -- decoded on the IN-PROCESS path
+    // (brain_event_from_outevent.cpp). NOT yet decoded on the JSONL text
+    // path (jsonl.cpp's to_jsonl()/to_human() and brain_event.cpp's own
+    // parse_brain_event() have no "loop" case yet -- a separate, pre-
+    // existing gap, out of scope for item 9).
+    kLoop,
   };
 
   Kind kind = Kind::kUnknown;
@@ -146,6 +153,18 @@ struct BrainEvent {
   // no core enum crosses this boundary.
   int clip_id = 0;
   std::string clip_state;
+
+  // loop (additive, Phase 7, node 6000): a LoopBuffer slot's OWN recording-
+  // side state changed (record started/stopped, erased, undone, retro-
+  // capture grabbed) -- NOT a launch/stop of an already-captured loop, which
+  // still rides `kClip` above (abi.hpp's own kLoop OutEvent comment).
+  // `loop_slot_id` addresses the LoopBuffer slot (`ev.code`); `loop_event_
+  // kind` is the label text verbatim (event_labels.hpp's loop_event_kind_
+  // name on the host side, e.g. "record_started"/"erased"/"grabbed") -- a
+  // pure client renders it directly, no core enum crosses this boundary,
+  // same discipline as `clip_state` above.
+  int loop_slot_id = 0;
+  std::string loop_event_kind;
 
   // per-client error
   std::string error;

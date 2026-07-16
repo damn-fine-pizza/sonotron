@@ -30,6 +30,8 @@ std::string format_log_line(const BrainEvent& ev) {
              std::to_string(ev.beat_pulse);
     case BrainEvent::Kind::kClip:
       return "clip " + std::to_string(ev.clip_id) + " " + ev.clip_state;
+    case BrainEvent::Kind::kLoop:
+      return "loop " + std::to_string(ev.loop_slot_id) + " " + ev.loop_event_kind;
     case BrainEvent::Kind::kUnknown:
     default:
       return "unknown/malformed event";
@@ -124,6 +126,11 @@ void AppState::apply(const BrainEvent& ev) {
     case BrainEvent::Kind::kWarn:
     case BrainEvent::Kind::kError:
     case BrainEvent::Kind::kUnknown:
+    // Phase 7 (node 6000, the Looper -- item 9): decoded honestly above
+    // (no longer misread as a warning), but AppState has no per-slot loop
+    // recording-state view yet -- that is item 10/11's GUI panel work, a
+    // later slice. Logged above; no view-state change here yet.
+    case BrainEvent::Kind::kLoop:
       break;  // logged above, no other view-state change
   }
 }

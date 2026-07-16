@@ -25,10 +25,11 @@ const GridCell& GridModel::cell(std::size_t part_index, std::size_t scene_index)
 }
 
 void GridModel::set_cell(std::size_t part_index, std::size_t scene_index, GridCellKind kind,
-                         std::string label) {
+                         std::string label, int loop_slot_id) {
   GridCell& target = m_cells[index_of(part_index, scene_index)];
   target.kind = kind;
   target.label = std::move(label);
+  target.loop_slot_id = loop_slot_id;
 }
 
 void GridModel::clear_cell(std::size_t part_index, std::size_t scene_index) {

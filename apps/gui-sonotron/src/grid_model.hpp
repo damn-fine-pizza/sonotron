@@ -26,10 +26,21 @@ namespace sonotron {
 // the equally-real content-registration path below.
 inline constexpr bool kGridLaunchWired = true;
 
-enum class GridCellKind : std::uint8_t { kEmpty, kStyleSection, kChordSequence, kStepTrack };
+// kLoopBuffer (Phase 7, node 6000, the Looper -- docs/proposals/looper-in-
+// gui-contract.md §7 item 7) mirrors the core's own arrangrr::ContentKind
+// (clip_matrix.hpp:31-41), which has this fifth value in the SAME position;
+// a fifth GridCellKind value gives a recorded loop somewhere to live in
+// GridModel's own type for the first time.
+enum class GridCellKind : std::uint8_t {
+  kEmpty,
+  kStyleSection,
+  kChordSequence,
+  kStepTrack,
+  kLoopBuffer,
+};
 
 // One cell of the matrix: a part row x scene column, holding one of the
-// three material kinds the browser offers (§5), or empty. `label` is display
+// four material kinds the browser offers (§5), or empty. `label` is display
 // text only (e.g. a style name) -- the GUI's own display copy, kept
 // independent of whatever the core's ClipMatrix stores for the same cell
 // (repeat-zone-real-contract.md §3: a browser-dropped style DOES now
@@ -40,6 +51,13 @@ enum class GridCellKind : std::uint8_t { kEmpty, kStyleSection, kChordSequence, 
 struct GridCell {
   GridCellKind kind = GridCellKind::kEmpty;
   std::string label;
+  // Meaningful only when `kind == GridCellKind::kLoopBuffer`: the LoopBuffer
+  // slot id (arrangrr/loop/loop_buffer.hpp) this cell's recorded loop lives
+  // in, core-side -- the note-level peer of what `label` already is for a
+  // style-section cell. -1 = none, mirroring LoopBuffer's own "-1 = no
+  // shadow" sentinel convention (loop_buffer.hpp's m_shadow_slot) for a
+  // consistent "no value" idiom across this boundary.
+  int loop_slot_id = -1;
 };
 
 // Rows are the 9 TrackRole parts (track_roles.hpp); columns are scenes. Real
@@ -62,8 +80,12 @@ class GridModel {
   std::string_view part_label(std::size_t part_index) const;
 
   const GridCell& cell(std::size_t part_index, std::size_t scene_index) const;
+  // `loop_slot_id` defaults to -1 (none); a caller registering a
+  // GridCellKind::kLoopBuffer cell passes the LoopBuffer slot id explicitly.
+  // Passing it for any other `kind` is harmless (it is simply ignored by
+  // every reader that checks `kind` first) but not meaningful.
   void set_cell(std::size_t part_index, std::size_t scene_index, GridCellKind kind,
-                std::string label);
+                std::string label, int loop_slot_id = -1);
   void clear_cell(std::size_t part_index, std::size_t scene_index);
 
   // Adds one more scene column (the "+" affordance in the §3 wireframe's
