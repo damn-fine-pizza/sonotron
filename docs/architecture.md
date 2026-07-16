@@ -26,16 +26,19 @@ sonotron/                    project(sonotron)
 │   ├── gui-sonotron/        desktop frontend — ImGui/GLFW; pure-client GUI over an internal engine library
 │   ├── demo/                demonstration apps (clean · jam · shared lib)
 │   └── tools/               cli-arrangrr (host CLI) · arrstyle-converter · arrstyle-extractor · melodd
-├── components/              OUR libraries — flat; target-regime is a declared property, not a folder
-│   ├── common/              base, dual-target — Tick/time types, MidiMessage, ARR_ASSERT, bar constants
-│   ├── runtime/             dual-target kernel — Transport, OutScheduler, Runtime, Stage, Pipeline, MidiParser
-│   ├── arrangrr/            dual-target — the arranger stage (transport/scheduler removed → runtime)
-│   ├── chorddet/            dual-target — live ChordDetector + FollowedContext + theory, as a stage
-│   ├── midisrc/             host — SMF reader + MIDI-source stage (file I/O)
-│   ├── orchestrator/        host — composes named stage pipelines (Accompany)
-│   ├── melodd/              host — audio engine (SoundFont synth)
-│   ├── samplrr/             host — SLOT — sampler
-│   └── hostrt/              host — runtime glue + TUI (jsonl, uds, ALSA, panels, views)
+├── components/              OUR libraries — split on the regime axis (core/ vs platform/, see §3)
+│   ├── core/                platform-AGNOSTIC, freestanding-capable (compiles on STM32 M7 too)
+│   │   ├── common/          base, dual-target — Tick/time types, MidiMessage, ARR_ASSERT, bar constants
+│   │   ├── runtime/         dual-target kernel — Transport, OutScheduler, Runtime, Stage, Pipeline, MidiParser
+│   │   ├── chorddet/        dual-target — live ChordDetector + FollowedContext + theory, as a stage
+│   │   └── arrangrr/        dual-target — the arranger stage (transport/scheduler removed → runtime)
+│   ├── platform/            platform-DEPENDENT, needs a hosted OS — FLAT, no further regime nesting
+│   │   ├── midisrc/         host — SMF reader + MIDI-source stage (file I/O)
+│   │   ├── orchestrator/    host — composes named stage pipelines (Accompany)
+│   │   ├── hostrt/          host — runtime glue + TUI (jsonl, uds, ALSA, panels, views)
+│   │   └── engines/
+│   │       └── melodd/      host — audio engine (SoundFont synth)
+│   └── samplrr/             host — SLOT — sampler (not yet folded into platform/, deferred)
 ├── third_party/             vendored host-only deps: imgui · glfw (off-limits to freestanding)
 ├── tests/                   integration + golden + arm-smoke (freestanding link gate); unit tests live in-component
 ├── build/                   linux-x64/ · arm64/  (per-target output)
@@ -44,16 +47,28 @@ sonotron/                    project(sonotron)
 
 ## 3. Componentization principles
 
-**`components/` is flat; the target boundary is a *contract*, not a folder.** We do not
-split `components/` into `core/` vs `host/` sub-trees — that would force the same axis
-into every top-level dir and read as asymmetric. Instead each component **declares its
-target-regime** (freestanding/STM32-capable vs host-only) in its own CMake. CI
-cross-builds the freestanding components for `arm-none-eabi` and link-checks them
-(`nosys.specs`). Today this proves compile+link, not symbolic heap-absence — a real
-no-heap symbol scan is outstanding hardening — so the boundary is a **verified contract**
-still to be *fully* gated, not a directory. A target specialization is a **sibling
-component**, created only when needed (e.g. `arrangrr-arm64/` beside `arrangrr/`), never
-a pervasive folder split.
+**`components/` splits on the regime axis: `core/` vs `platform/`.** This reverses an
+earlier decision (this section used to say the opposite — components stayed flat and the
+target boundary was a per-component CMake declaration, never a folder). The owner locked
+the two-tier split instead: `components/core/` holds every platform-AGNOSTIC,
+freestanding-capable component (`common`, `runtime`, `chorddet`, `arrangrr` — compiles for
+BOTH host and `arm-none-eabi`, added unconditionally at the top level); `components/
+platform/` holds every component that needs a hosted OS (`midisrc`, `orchestrator`,
+`hostrt`, plus the `engines/` family, e.g. `melodd` — added only in the host `else()`
+branch). `platform/` itself stays **flat** (no further regime nesting inside it, `engines/`
+is a namespacing convenience for audio-realization components, not a third tier) — the
+folder boundary now *is* the regime contract for the two top-level tiers, no per-component
+prose declaration needed to know which side of the line a component sits on.
+
+The regime is still independently **verified**, not just declared by placement: CI
+cross-builds every `core/` component for `arm-none-eabi` and link-checks it (`nosys.specs`).
+Today this proves compile+link, not symbolic heap-absence — a real no-heap symbol scan is
+outstanding hardening. `components/samplrr` is a still-unwired placeholder slot and, as of
+this restructure, deliberately **not yet folded** into `platform/engines/` — a deferred
+follow-up, not an exception to the rule (it has no code and is not `add_subdirectory`'d
+anywhere today). A target specialization that cannot fit the two-tier split (e.g. a genuine
+third regime) would be a **sibling component**, created only when actually needed — not a
+pervasive folder split invented ahead of a real second case.
 
 **`apps/` are the deliverables.** `sonotron-server` (backend — links the components,
 serves the socket), `gui-sonotron` (desktop frontend), `cli-arrangrr` (host CLI), `demo/`

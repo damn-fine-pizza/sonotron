@@ -25,7 +25,7 @@ target_include_directories(melodd PUBLIC include)
 # (README.md, Phase-6 design review traced ground). PUBLIC so every consumer
 # that reaches dispatch.hpp through this target (gui_sonotron_audio,
 # apps/tools/melodd) resolves the include too, without inheriting the flags.
-target_include_directories(melodd PUBLIC ${CMAKE_SOURCE_DIR}/components/common/include)
+target_include_directories(melodd PUBLIC ${CMAKE_SOURCE_DIR}/components/core/common/include)
 target_link_libraries(melodd PRIVATE tinysoundfont)
 target_compile_options(melodd PRIVATE -Wall -Wextra -Werror)
 

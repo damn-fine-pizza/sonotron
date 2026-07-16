@@ -42,14 +42,14 @@ option(ARRANGRR_FIRMWARE_RELEASE
 # components/common (the base, dependency-free layer) and components/runtime
 # (the dual-target kernel: Transport + OutScheduler + the Stage port) are
 # unconditional — BOTH the arm-none-eabi branch and the host branch need them.
-add_subdirectory(components/common)
-add_subdirectory(components/runtime)
-# Phase-4b promotion (§16.1/§16.8): components/chorddet (ChordDetector +
+add_subdirectory(components/core/common)
+add_subdirectory(components/core/runtime)
+# Phase-4b promotion (§16.1/§16.8): components/core/chorddet (ChordDetector +
 # FollowedContext + the chorddet Seam-C stage) is ALSO unconditional and
 # dual-target -- arrangrr now depends on it for these types (D43: the
 # dependency runs arrangrr -> chorddet, chorddet never depends on arrangrr).
-add_subdirectory(components/chorddet)
-add_subdirectory(components/arrangrr)
+add_subdirectory(components/core/chorddet)
+add_subdirectory(components/core/arrangrr)
 
 if(ARRANGRR_FIRMWARE)
   add_subdirectory(tests/arm-smoke)
@@ -63,18 +63,18 @@ else()
   # extraction.md §16.7: hostrt::Shell drives the SAME 3-stage pipeline type
   # interactively AND for the `midi-source load` L1 verb). HOST-ONLY; never
   # on the arm-none-eabi branch above.
-  add_subdirectory(components/midisrc)
-  add_subdirectory(components/orchestrator)
-  add_subdirectory(components/hostrt)
+  add_subdirectory(components/platform/midisrc)
+  add_subdirectory(components/platform/orchestrator)
+  add_subdirectory(components/platform/hostrt)
   add_subdirectory(apps/tools/cli-arrangrr)
   # Phase 2a (docs/design/orchestrator-pipeline-extraction.md §15 /
   # docs/design/sonotron-server-phase2-brief.md): the headless server binary,
   # a thin main() around the SAME hostrt Shell/Runtime/arrangrr composition
   # cli-arrangrr already links -- additive, cli-arrangrr is untouched.
   add_subdirectory(apps/sonotron-server)
-  add_subdirectory(components/arrangrr/tests)
-  add_subdirectory(components/runtime/tests)
-  add_subdirectory(components/hostrt/tests)
+  add_subdirectory(components/core/arrangrr/tests)
+  add_subdirectory(components/core/runtime/tests)
+  add_subdirectory(components/platform/hostrt/tests)
   add_subdirectory(tests/golden)
   add_subdirectory(tests/integration)
   # Host-only importer/compiler tooling (never in the ARM/firmware build).
@@ -92,7 +92,7 @@ else()
   # in the standalone GUI"): gui_sonotron_audio links `melodd` directly now,
   # so the component target must exist first (CMake target_link_libraries
   # requires the target to already be defined).
-  add_subdirectory(components/melodd)
+  add_subdirectory(components/platform/engines/melodd)
   add_subdirectory(apps/gui-sonotron)
   # The melodd standalone drop-in-synth binary; unaffected by the reorder
   # above (it only needs components/melodd + third_party, both already

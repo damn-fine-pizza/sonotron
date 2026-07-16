@@ -3,8 +3,8 @@
 # host build, then per-CTest-label subsets measured separately:
 #
 #   metric 1  unit        production code hit by UNIT tests (`-L unit`).
-#                         ENFORCED GATE: core (components/arrangrr/ +
-#                         components/runtime/) >= 80% on lines/functions/
+#                         ENFORCED GATE: core (components/core/arrangrr/ +
+#                         components/core/runtime/) >= 80% on lines/functions/
 #                         branches. This is THE gate. components/common/ is a
 #                         pure data/constant/macro layer with no branches to
 #                         cover and is excluded (same reasoning that already
@@ -20,12 +20,12 @@
 #
 # WHY per-category isolation works with our STATIC-lib layout: every test binary
 # links the SAME static `arrangrr`, so all runs write to the SAME shared
-# .gcda files under build/coverage/components/arrangrr/CMakeFiles/arrangrr.dir/ and
+# .gcda files under build/coverage/components/core/arrangrr/CMakeFiles/arrangrr.dir/ and
 # gcov ACCUMULATES counts across binaries. Wiping every .gcda before each
 # category's `ctest -L <cat>` therefore cleanly isolates that category's
 # coverage — the accumulation we normally fight is exactly what we exploit here.
 #
-# The host layer (components/hostrt/) is REPORTED but NOT branch-gated: its terminal/
+# The host layer (components/platform/hostrt/) is REPORTED but NOT branch-gated: its terminal/
 # resize/ALSA-failure/socket OS-error branches are not deterministically
 # reachable without fault injection (same rationale that excludes ARR_ASSERT
 # trap branches). Coverage/instrumentation is HOST-ONLY and never touches the
@@ -55,16 +55,16 @@ REPORT_DIR=build/coverage/report
 mkdir -p "${REPORT_DIR}"
 
 # Common gcovr scope for the CORE gate metric. Phase-1 runtime extraction:
-# components/runtime/ (Transport/OutScheduler/Stage/Runtime, moved out of
-# components/arrangrr/) joins the gated core scope; components/common/
+# components/core/runtime/ (Transport/OutScheduler/Stage/Runtime, moved out of
+# components/core/arrangrr/) joins the gated core scope; components/common/
 # (header-only, no branches) is deliberately NOT filtered in — nothing to
 # gate there.
 CORE_ARGS=(
   --root .
-  --filter 'components/arrangrr/'
-  --filter 'components/runtime/'
-  --exclude 'components/arrangrr/tests/'
-  --exclude 'components/runtime/tests/'
+  --filter 'components/core/arrangrr/'
+  --filter 'components/core/runtime/'
+  --exclude 'components/core/arrangrr/tests/'
+  --exclude 'components/core/runtime/tests/'
   --exclude 'tests/'
   --object-directory build/coverage
   --exclude-branches-by-pattern '.*ARR_ASSERT.*'
@@ -103,10 +103,10 @@ UNIT_RC=$(run_category unit)
   >"${REPORT_DIR}/summary_unit.txt" 2>&1 || true
 # Also give the host layer visibility (report-only, not gated).
 "${GCOVR[@]}" \
-  --root . --filter 'components/arrangrr/' --filter 'components/runtime/' \
-  --filter 'components/hostrt/' \
-  --exclude 'components/arrangrr/tests/' --exclude 'components/runtime/tests/' \
-  --exclude 'components/hostrt/tests/' --exclude 'tests/' \
+  --root . --filter 'components/core/arrangrr/' --filter 'components/core/runtime/' \
+  --filter 'components/platform/hostrt/' \
+  --exclude 'components/core/arrangrr/tests/' --exclude 'components/core/runtime/tests/' \
+  --exclude 'components/platform/hostrt/tests/' --exclude 'tests/' \
   --object-directory build/coverage \
   --exclude-branches-by-pattern '.*ARR_ASSERT.*' --exclude-throw-branches \
   --html-details "${REPORT_DIR}/coverage_full.html" >/dev/null 2>&1 || true
@@ -143,7 +143,7 @@ fi
 # --- 3-number summary -----------------------------------------------------
 echo
 echo "============================================================"
-echo " THREE-METRIC COVERAGE SUMMARY (core scope: components/arrangrr/ + components/runtime/)"
+echo " THREE-METRIC COVERAGE SUMMARY (core scope: components/core/arrangrr/ + components/core/runtime/)"
 echo "------------------------------------------------------------"
 printf ' metric 1  unit        lines %-7s functions %-7s branches %-7s\n' \
   "$(pct "${REPORT_DIR}/summary_unit.txt" lines)" \
@@ -179,7 +179,7 @@ fi
 # GCOVR_EXCL-excluded so these numbers are already honest. A RED test suite is
 # STILL a hard failure (checked above) -- only the coverage PERCENTAGE is
 # advisory. See the coverage-gate-local-not-ci memory.
-echo "=== ADVISORY: metric 1 (unit) core (components/arrangrr/ + components/runtime/), target >= 80% l/f/b (report-only) ==="
+echo "=== ADVISORY: metric 1 (unit) core (components/core/arrangrr/ + components/core/runtime/), target >= 80% l/f/b (report-only) ==="
 reset_gcda
 UNIT_RC2=$(run_category unit)
 if [ "${UNIT_RC2}" -ne 0 ]; then

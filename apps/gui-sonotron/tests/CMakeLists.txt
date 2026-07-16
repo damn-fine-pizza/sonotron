@@ -71,7 +71,7 @@ gui_sonotron_engine_test(test_in_process_brain_session functional)
 # and tests/golden's accompany_basic golden) rather than adding a new binary
 # asset under this tree.
 target_compile_definitions(test_in_process_brain_session PRIVATE
-  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
+  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/platform/midisrc/tests/fixtures/tiny.mid")
 
 # Phase-6 Theme 2 QA pass (docs/phase6-design-reviews.md "Audio in the
 # standalone GUI", Decision 3/4): pins the negative half of the OutEvent ->
@@ -82,7 +82,7 @@ target_compile_definitions(test_in_process_brain_session PRIVATE
 # here.
 gui_sonotron_engine_test(test_audio_port_gate functional)
 target_compile_definitions(test_audio_port_gate PRIVATE
-  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
+  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/platform/midisrc/tests/fixtures/tiny.mid")
 
 # Device-independent AudioEngine smoke test (Torquato QA pass): links
 # gui_sonotron_audio directly (melodd + miniaudio + gui_sonotron_ring +
