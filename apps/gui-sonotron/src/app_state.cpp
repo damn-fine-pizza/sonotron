@@ -32,6 +32,8 @@ std::string format_log_line(const BrainEvent& ev) {
       return "clip " + std::to_string(ev.clip_id) + " " + ev.clip_state;
     case BrainEvent::Kind::kLoop:
       return "loop " + std::to_string(ev.loop_slot_id) + " " + ev.loop_event_kind;
+    case BrainEvent::Kind::kTimeSig:
+      return "time-sig " + std::to_string(ev.time_sig_beats_per_bar) + "/4";
     case BrainEvent::Kind::kUnknown:
     default:
       return "unknown/malformed event";
@@ -121,6 +123,15 @@ void AppState::apply(const BrainEvent& ev) {
       // now reads playing/armed/queued-stop state off this map instead of a
       // local click-time echo (V02State's former row_playing).
       m_clip_states[ev.clip_id] = parse_clip_launch_state(ev.clip_state);
+      break;
+    case BrainEvent::Kind::kTimeSig:
+      // The Repeat-Zone beat-synchronized playhead (grid_model.hpp's
+      // section_playhead_phase) needs the REAL beats_per_bar, not the
+      // hand-copied 4/4 default -- guarded > 0 so a malformed/zero announce
+      // can never leave the playhead dividing by zero downstream.
+      if (ev.time_sig_beats_per_bar > 0) {
+        m_beats_per_bar = ev.time_sig_beats_per_bar;
+      }
       break;
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:

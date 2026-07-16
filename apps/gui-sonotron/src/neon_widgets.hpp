@@ -111,7 +111,22 @@ void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max
                             const ClipPattern& pattern, const ImVec4& color);
 
 // The L->R sweep bar animating across a playing+running cell (~1.7s loop).
+// Wall-clock only (`time` == ImGui's frame clock) -- NOT tempo-synced. Kept
+// for API stability (no other caller has been removed from this repo), but
+// grid_panel.cpp's launch-cell playhead now draws with playhead_at() below
+// instead, which is beat-synced to the ACTIVE SCENE's own section length.
 void sweep_bar(ImDrawList* dl, const ImVec2& min, const ImVec2& max, float time,
                const ImVec4& color);
+
+// The beat-synchronized launch-cell playhead: a vertical bar at the explicit
+// `phase01` position (0 = left edge, 1 = right edge) across [min,max] --
+// visually identical to sweep_bar's own two-pass line (a crisp core + a
+// soft wash), but driven by a caller-computed phase (grid_model.hpp's
+// section_playhead_phase, itself sourced from the authoritative beat/bar/
+// pulse) instead of a fixed wall-clock period. `phase01` is clamped to
+// [0,1] defensively; the caller is expected to only invoke this once it has
+// already checked for the "no playhead" sentinel (< 0).
+void playhead_at(ImDrawList* dl, const ImVec2& min, const ImVec2& max, float phase01,
+                 const ImVec4& color);
 
 }  // namespace sonotron::neon

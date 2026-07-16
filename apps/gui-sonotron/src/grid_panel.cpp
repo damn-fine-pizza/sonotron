@@ -109,13 +109,20 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
 }
 
 // Draws one launch cell (custom draw-list) at the cursor; returns true on
-// click. `filled` cells show a preview + label + (when playing) a sweep bar.
-// `pattern`/`approx` are the cell's REAL resolved content (preview::
-// preview_for, computed by the caller) and its honesty flag (repeat-zone-
-// real-contract.md STEP 4) -- ignored when `!filled`.
+// click. `filled` cells show a preview + label + (when playing) a beat-
+// synced playhead. `pattern`/`approx` are the cell's REAL resolved content
+// (preview::preview_for, computed by the caller) and its honesty flag
+// (repeat-zone-real-contract.md STEP 4) -- ignored when `!filled`.
+// `section_phase` is this cell's own playhead position in [0,1] (grid_
+// model.hpp's section_playhead_phase, resolved by the caller ONLY for the
+// active scene column's own cells), or the sentinel < 0 ("no playhead" --
+// every other scene column, and the active one before the transport ever
+// starts) computed once per frame by the caller (render_grid_panel), not
+// here -- draw_cell stays a pure draw/click primitive with no bookkeeping of
+// its own.
 bool draw_cell(const char* id, float size, bool filled, const std::string& label,
                const ImVec4& color, const neon::ClipPattern& pattern, bool approx, bool playing,
-               bool opened, const V02State& fx) {
+               bool opened, const V02State& fx, float section_phase) {
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   const bool clicked = ImGui::InvisibleButton(id, ImVec2(size, size));
   const bool hovered = ImGui::IsItemHovered();
@@ -178,9 +185,17 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
               neon::u32(playing ? theme::kText : color, 0.95F), text.c_str());
   dl->PopClipRect();
 
-  // L->R sweep on a playing cell while running.
-  if (playing && fx.playing) {
-    neon::sweep_bar(dl, p0, p1, fx.time, theme::kText);
+  // Beat-synchronized L->R playhead on the active scene's own playing cell
+  // while running: fills 0->100% over the active scene's SECTION (owner-
+  // locked behavior), reaching the right edge exactly at the section
+  // boundary -- the same instant auto-song advances. `section_phase < 0`
+  // (the sentinel, render_grid_panel's own per-cell resolution) parks it:
+  // every non-active scene column, and the active one before bar() > 0.
+  // Retired: the former neon::sweep_bar(..., fx.time, ...) call drove this
+  // off ImGui's wall-clock frame time with a fixed ~1.7s period, unrelated
+  // to tempo or the section length.
+  if (playing && fx.playing && section_phase >= 0.0F) {
+    neon::playhead_at(dl, p0, p1, section_phase, theme::kText);
   }
 
   // Honesty affordance (repeat-zone-real-contract.md STEP 4): a hover-only
@@ -465,11 +480,17 @@ void render_track_label(PartsModel& parts, BrainSession& brain_session, const V0
 // One launch cell for a track row: computes its real preview content, draws
 // it (draw_cell), and handles both click (launch+open a filled cell, or fill
 // an empty one with a local demo clip) and the browser style drag-drop
-// target that registers a real ClipMatrix clip.
+// target that registers a real ClipMatrix clip. `active_scene`/`active_
+// section_phase` are render_grid_panel's own once-per-frame playhead
+// resolution (grid_model.hpp's section_playhead_phase); only THIS column,
+// when `s == active_scene`, actually draws it -- every other column passes
+// draw_cell the "no playhead" sentinel, since only the active scene's own
+// bookkeeping (V02State::active_scene_start_bar) is beat-synced to a real
+// section boundary.
 void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                        BrainSession& brain_session, const AppState& app_state, V02State& fx,
                        const V02Row& row, std::size_t r, std::size_t s, const ImVec4& color,
-                       float cz) {
+                       float cz, int active_scene, float active_section_phase) {
   ImGui::SameLine(0.0F, kCellGap);
   const std::size_t id = cell_id(row.role_index, s, model.scene_count());
   const GridCell& cell = model.cell(row.role_index, s);
@@ -498,9 +519,10 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
     pattern = neon::clip_pattern_from_pitches(pp.pitch);
     approx = pp.approx;
   }
+  const float section_phase = static_cast<int>(s) == active_scene ? active_section_phase : -1.0F;
   ImGui::PushID(static_cast<int>(s));
-  const bool clicked =
-      draw_cell("cell", cz, filled, cell.label, color, pattern, approx, playing, opened, fx);
+  const bool clicked = draw_cell("cell", cz, filled, cell.label, color, pattern, approx, playing,
+                                 opened, fx, section_phase);
   if (clicked) {
     if (!filled) {
       // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix
@@ -554,17 +576,21 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 }
 
 // One full track row: the label cell (render_track_label) plus its launch
-// cells (render_track_cell), one per scene column.
+// cells (render_track_cell), one per scene column. `active_scene`/`active_
+// section_phase` thread render_grid_panel's once-per-frame playhead
+// resolution down to each cell (see render_track_cell's own comment).
 void render_track_row(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                       BrainSession& brain_session, const AppState& app_state, V02State& fx,
-                      std::size_t r, std::size_t scenes, bool any_solo, float cz) {
+                      std::size_t r, std::size_t scenes, bool any_solo, float cz, int active_scene,
+                      float active_section_phase) {
   const V02Row& row = kRows[r];
   const ImVec4& color = theme::kV02TrackColor[r];
 
   ImGui::PushID(static_cast<int>(100 + r));
   render_track_label(parts, brain_session, row, any_solo, color, fx, cz);
   for (std::size_t s = 0; s < scenes; ++s) {
-    render_track_cell(model, seqedit, parts, brain_session, app_state, fx, row, r, s, color, cz);
+    render_track_cell(model, seqedit, parts, brain_session, app_state, fx, row, r, s, color, cz,
+                      active_scene, active_section_phase);
   }
   ImGui::PopID();
 }
@@ -590,13 +616,30 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   // scene highlight rather than lagging one frame behind.
   update_auto_song(model, brain_session, app_state, fx, scenes);
 
+  // Beat-synchronized playhead (owner-locked): resolved ONCE per frame, here,
+  // from the active scene's own section length (preview::section_bars, the
+  // SAME lookup update_auto_song's advance decision uses) and the
+  // authoritative beat/bar/pulse -- never wall-clock time. `active_section_
+  // bars` deliberately duplicates update_auto_song's own lookup (rather than
+  // sharing a helper) so this purely-visual addition can never perturb the
+  // auto-song advance logic above it.
+  const std::size_t active_scene_index =
+      fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
+  const auto active_section =
+      static_cast<preview::Section>(model.scene_section(active_scene_index));
+  const int active_section_bars = preview::section_bars(fx.active_style, active_section);
+  const float active_section_phase =
+      section_playhead_phase(app_state.bar(), fx.active_scene_start_bar, app_state.beat_num(),
+                             app_state.pulse(), app_state.beats_per_bar(), active_section_bars);
+
   ImGui::BeginChild("grid_body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_None);
 
   render_scene_header_row(model, brain_session, app_state, fx, scenes, cz);
 
   // Track rows.
   for (std::size_t r = 0; r < kRows.size(); ++r) {
-    render_track_row(model, seqedit, parts, brain_session, app_state, fx, r, scenes, any_solo, cz);
+    render_track_row(model, seqedit, parts, brain_session, app_state, fx, r, scenes, any_solo, cz,
+                     fx.active_scene, active_section_phase);
   }
 
   ImGui::EndChild();

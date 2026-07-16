@@ -354,4 +354,12 @@ void sweep_bar(ImDrawList* dl, const ImVec2& min, const ImVec2& max, float time,
   dl->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), u32(color, 0.25F), 4.0F);
 }
 
+void playhead_at(ImDrawList* dl, const ImVec2& min, const ImVec2& max, float phase01,
+                 const ImVec4& color) {
+  const float phase = std::clamp(phase01, 0.0F, 1.0F);
+  const float x = min.x + phase * (max.x - min.x);
+  dl->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), u32(color, 0.8F), 1.5F);
+  dl->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), u32(color, 0.25F), 4.0F);
+}
+
 }  // namespace sonotron::neon

@@ -104,6 +104,17 @@ struct BrainEvent {
     // (brain_event_from_outevent.cpp) and the JSONL text path (jsonl.cpp's
     // to_jsonl()/to_human(), and parse_brain_event() below).
     kLoop,
+    // additive, Phase 7 (node T0, the variable time-signature engine --
+    // arrangrr::OutEvent::Kind::kTimeSig, abi.hpp:592) -- the CURRENT
+    // beats_per_bar, decoded on the in-process path (brain_event_from_
+    // outevent.cpp) only for now: components/platform/hostrt/jsonl.cpp has no
+    // dedicated "time-sig" wire serialization yet (a host-side gap, out of
+    // this slice's scope -- it falls through to a bogus "warn" line there
+    // today, same class of gap kLoop had before it was fixed here). A pure
+    // JSONL client (UdsBrainSession) therefore never sees this event yet and
+    // keeps AppState's default beats_per_bar until that host-side gap is
+    // closed.
+    kTimeSig,
   };
 
   Kind kind = Kind::kUnknown;
@@ -169,6 +180,11 @@ struct BrainEvent {
   // same discipline as `clip_state` above.
   int loop_slot_id = 0;
   std::string loop_event_kind;
+
+  // time-sig (additive, Phase 7 node T0): the CURRENT beats_per_bar (1..
+  // arrangrr::kMaxBeatsPerBar), announced whenever it changes (a style load/
+  // switch or a Performance recall) -- see the kTimeSig comment above.
+  int time_sig_beats_per_bar = 0;
 
   // per-client error
   std::string error;

@@ -116,4 +116,27 @@ bool bar_just_advanced(int current_bar, int& last_checked_bar) {
   return true;
 }
 
+float section_playhead_phase(int current_bar, int active_scene_start_bar, int beat_num, int pulse,
+                             int beats_per_bar, int section_bars) {
+  constexpr float kNoPlayhead = -1.0F;
+  constexpr float kPulsesPerBeat = 24.0F;
+  if (current_bar <= 0 || section_bars <= 0 || beats_per_bar <= 0) {
+    return kNoPlayhead;
+  }
+  const int bars_elapsed = current_bar - active_scene_start_bar;
+  if (bars_elapsed < 0) {
+    // A bar REWIND: active_scene_start_bar is a stale pre-stop/restart
+    // anchor. Honestly report "no playhead" rather than a nonsensical
+    // negative-going phase (see the header comment's rewind-guard note).
+    return kNoPlayhead;
+  }
+  const int beat_in_bar = std::max(beat_num - 1, 0);
+  const float within_bar =
+      (static_cast<float>(beat_in_bar) + static_cast<float>(pulse) / kPulsesPerBeat) /
+      static_cast<float>(beats_per_bar);
+  const float phase =
+      (static_cast<float>(bars_elapsed) + within_bar) / static_cast<float>(section_bars);
+  return std::clamp(phase, 0.0F, 1.0F);
+}
+
 }  // namespace sonotron

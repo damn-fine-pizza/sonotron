@@ -118,6 +118,16 @@ BrainEvent brain_event_from_outevent(const arrangrr::OutEvent& ev, bool prefer_f
       out.transport_state = host::transport_name(ev.code);
       break;
 
+    // Phase 7 (node T0, the variable time-signature engine): `ev.code` is the
+    // CURRENT beats_per_bar (abi.hpp:592), NOT a WarnCode -- this dedicated
+    // case, mirroring the kClip/kLoop precedent above, is what keeps it from
+    // falling through to the kWarn/default branch below and being misdecoded
+    // as a fabricated warning.
+    case OutEvent::Kind::kTimeSig:
+      out.kind = BrainEvent::Kind::kTimeSig;
+      out.time_sig_beats_per_bar = ev.code;
+      break;
+
     case OutEvent::Kind::kParamState:
       // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): the
       // GUI does not decode this echo yet (its own panel-mirror-struct wiring

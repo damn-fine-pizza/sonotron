@@ -179,4 +179,29 @@ std::optional<int> next_scene_to_launch(bool auto_song, bool playing, int active
 // actually changes again.
 bool bar_just_advanced(int current_bar, int& last_checked_bar);
 
+// Beat-synchronized per-section PLAYHEAD phase (owner-locked: the launch-
+// cell sweep bar must fill 0->100% over the ACTIVE SCENE's own section
+// length, driven by the authoritative beat/bar/pulse -- NOT wall-clock time,
+// which is what the former neon::sweep_bar(..., fx.time, ...) call drove it
+// with, a fixed ~1.7s period with no relation to tempo or the section
+// boundary). Pure, side-effect-free, unit-testable -- mirrors next_scene_to_
+// launch()'s own "no ImGui, no I/O" discipline above.
+//
+// `current_bar`/`beat_num`/`pulse` mirror AppState::bar()/beat_num()/pulse()
+// exactly (`beat_num` 1-based, `pulse` 0..23 at 24 PPQN); `active_scene_
+// start_bar` mirrors V02State::active_scene_start_bar (the live bar the
+// active scene became active, grid_panel.cpp's update_auto_song); `beats_
+// per_bar` mirrors AppState::beats_per_bar(); `section_bars` mirrors
+// preview::section_bars(active_style, active_section).
+//
+// Returns a value in [0,1] once started, or the sentinel -1.0F ("no
+// playhead") when: not started (`current_bar <= 0`), `section_bars <= 0`,
+// `beats_per_bar <= 0`, or a bar REWIND (`current_bar < active_scene_start_
+// bar` -- a stop/restart cycle mid-scene, mirroring update_auto_song's own
+// bar-rewind guard: the anchor is stale until the caller re-arms/re-anchors
+// it, and a deeply negative phase would only read as a nonsensical playhead
+// jump, not an honest "no position yet").
+float section_playhead_phase(int current_bar, int active_scene_start_bar, int beat_num, int pulse,
+                             int beats_per_bar, int section_bars);
+
 }  // namespace sonotron
