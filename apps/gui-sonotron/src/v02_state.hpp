@@ -67,6 +67,17 @@ struct V02State {
   // the first frame so the procedural previews have something to show (the same
   // local content path a browser drag uses; launching still sends real verbs).
   bool seeded = false;
+
+  // Inline scene-header rename (repeat-zone-real-contract.md §4/§8b decision
+  // 3): -1 when no scene header is being edited, else the scene index whose
+  // header currently shows an ImGui InputText instead of its stored name.
+  // `rename_buffer` holds the in-progress edit; `rename_focus_pending` tells
+  // grid_panel.cpp to call ImGui::SetKeyboardFocusHere() exactly once, the
+  // frame the InputText widget first appears (double-click sets both
+  // `renaming_scene` and this flag together).
+  int renaming_scene = -1;
+  std::array<char, 32> rename_buffer{};
+  bool rename_focus_pending = false;
 };
 
 }  // namespace sonotron

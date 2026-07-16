@@ -76,6 +76,7 @@
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
 #include "src/parts_model.hpp"
+#include "src/scenes_json.hpp"
 #include "src/screenshot.hpp"
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
@@ -106,6 +107,23 @@ std::string layout_path() {
     return std::string(home) + "/.config/sonotron/layout.json";
   }
   return "sonotron-layout.json";
+}
+
+// scenes.json is a SIBLING of layout.json (repeat-zone-real-contract.md
+// §4/§8b decision 3), same directory/override discipline, its own file so a
+// scene rename never touches layout.json's own schema-upgrade/reset path.
+// SONOTRON_SCENES_PATH overrides it, mirroring SONOTRON_LAYOUT_PATH.
+std::string scenes_path() {
+  if (const char* override_path = std::getenv("SONOTRON_SCENES_PATH"); override_path != nullptr) {
+    return override_path;
+  }
+  if (const char* xdg_config = std::getenv("XDG_CONFIG_HOME"); xdg_config != nullptr) {
+    return std::string(xdg_config) + "/sonotron/scenes.json";
+  }
+  if (const char* home = std::getenv("HOME"); home != nullptr) {
+    return std::string(home) + "/.config/sonotron/scenes.json";
+  }
+  return "sonotron-scenes.json";
 }
 
 // Resolves the control-socket path the GUI connects to as a pure client
@@ -580,6 +598,20 @@ int main(int argc, char** argv) {
   // model/panel pair's own header comment for the exact gap.
   sonotron::BrowserModel browser_model;
   sonotron::GridModel grid_model(5);  // v02 launch grid: 5 scene columns
+
+  // Scene names (repeat-zone-real-contract.md §4/§8b decision 3): host-only,
+  // loaded right after the GridModel they belong to is constructed, same
+  // "missing file -> current defaults" shape as load_or_create_default()
+  // above. A load failure (a corrupt hand-edit) is non-fatal -- grid_model
+  // simply keeps its constructor defaults ("1".."5"), same as layout.json's
+  // own failure path falling back to default_layout().
+  const std::string scenes_file_path = scenes_path();
+  std::string scenes_error;
+  if (!sonotron::load_scenes_or_create_default(scenes_file_path, grid_model, scenes_error)) {
+    std::fprintf(stderr, "sonotron: failed to load scene names from %s: %s\n",
+                 scenes_file_path.c_str(), scenes_error.c_str());
+  }
+
   sonotron::SeqEditModel seqedit_model;
   sonotron::PartsModel parts_model;
   sonotron::V02State v02_state;  // v02 redesign: glow flag, frame clock, local intent
@@ -646,6 +678,15 @@ int main(int argc, char** argv) {
   if (!sonotron::save_layout(path, layout, save_error)) {
     std::fprintf(stderr, "sonotron: failed to save layout to %s: %s\n", path.c_str(),
                  save_error.c_str());
+  }
+
+  // Scene names persist on the SAME "save on exit" discipline as
+  // layout.json above (repeat-zone-real-contract.md §4/§8b decision 3) --
+  // a renamed scene column survives this GUI restart.
+  std::string scenes_save_error;
+  if (!sonotron::save_scenes(scenes_file_path, grid_model, scenes_save_error)) {
+    std::fprintf(stderr, "sonotron: failed to save scene names to %s: %s\n",
+                 scenes_file_path.c_str(), scenes_save_error.c_str());
   }
 
   std::fprintf(stdout, "sonotron: closed cleanly after %d frame(s)\n", frame);

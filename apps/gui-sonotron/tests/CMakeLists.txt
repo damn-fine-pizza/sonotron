@@ -99,3 +99,8 @@ gui_sonotron_model_test(test_browser_model unit)
 gui_sonotron_model_test(test_grid_model unit)
 gui_sonotron_model_test(test_seqedit_model unit)
 gui_sonotron_model_test(test_parts_model unit)
+
+# scenes.json persistence round-trip (repeat-zone-real-contract.md §4/§8b
+# decision 3) -- a functional test in the same load/save/temp-dir shape as
+# test_layout_schema_upgrade.cpp, one directory over for its own file.
+gui_sonotron_model_test(test_scenes_json functional)

@@ -5,7 +5,11 @@
 namespace sonotron {
 
 GridModel::GridModel(std::size_t scene_count)
-    : m_scene_count(scene_count == 0 ? 1 : scene_count), m_cells(kPartCount * m_scene_count) {}
+    : m_scene_count(scene_count == 0 ? 1 : scene_count), m_cells(kPartCount * m_scene_count) {
+  for (std::size_t i = 0; i < kMaxSceneCount; ++i) {
+    m_scene_names[i] = std::to_string(i + 1);
+  }
+}
 
 std::string_view GridModel::part_label(std::size_t part_index) const {
   return kTrackRoleLabels[part_index];
@@ -44,6 +48,20 @@ void GridModel::add_scene() {
   }
   m_cells = std::move(new_cells);
   m_scene_count = new_scene_count;
+}
+
+std::string_view GridModel::scene_name(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return std::string_view();
+  }
+  return m_scene_names[scene_index];
+}
+
+void GridModel::set_scene_name(std::size_t scene_index, std::string name) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  m_scene_names[scene_index] = std::move(name);
 }
 
 }  // namespace sonotron

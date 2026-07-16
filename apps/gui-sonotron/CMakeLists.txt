@@ -26,9 +26,15 @@ find_package(Threads REQUIRED)
 # split as gui_sonotron_brain. (PartsModel/track_roles.hpp are header-only
 # and need no source file here; their declarations reach every consumer
 # through the shared include directory.)
+# scenes_json.cpp (repeat-zone-real-contract.md §4/§8b decision 3): a
+# scenes.json sibling to layout.json persisting GridModel's host-only scene
+# names. Sits in this library (not gui_sonotron_layout, alongside
+# layout_json.cpp) because it only needs GridModel + STL file I/O, no ImGui
+# -- same host-only, GPU-free unit-testability as grid_model.cpp itself.
 add_library(gui_sonotron_models STATIC
   src/browser_model.cpp
   src/grid_model.cpp
+  src/scenes_json.cpp
   src/seqedit_model.cpp
 )
 target_include_directories(gui_sonotron_models PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

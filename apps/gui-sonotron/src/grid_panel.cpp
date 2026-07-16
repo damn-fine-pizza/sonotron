@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <string>
 
 #include "app_state.hpp"
@@ -216,29 +217,69 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 
   ImGui::BeginChild("grid_body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_None);
 
-  // Scene header row: a spacer over the label column, then "n ▶" launch heads
-  // drawn as plain text + a cyan underline (design has no button pill).
+  // Scene header row: a spacer over the label column, then "name ▶" launch
+  // heads drawn as plain text + a cyan underline (design has no button
+  // pill). Double-clicking a header swaps it for an inline ImGui InputText
+  // (repeat-zone-real-contract.md §4/§8b decision 3, OWNER LOCKED to
+  // host-only GridModel storage + scenes.json, no core touch) so the column
+  // can be renamed; commit on Enter/focus-loss, Esc cancels. The launch verb
+  // and cyan underline are otherwise unchanged from before this rename
+  // affordance existed.
   ImGui::Dummy(ImVec2(kLabelColWidth, cz * 0.5F));
   ImDrawList* hdl = ImGui::GetWindowDrawList();
   for (std::size_t s = 0; s < scenes; ++s) {
     ImGui::SameLine(0.0F, kCellGap);
     ImGui::PushID(static_cast<int>(s));
     const ImVec2 hp0 = ImGui::GetCursorScreenPos();
-    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
-    const std::string num = std::to_string(s + 1);
-    const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
-    hdl->AddText(ImVec2(hp0.x + 3.0F, ty),
-                 neon::u32(s == 0 ? theme::kText : theme::kTextSecondary), num.c_str());
-    hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(num.c_str()).x + 4.0F, ty),
-                 neon::u32(theme::kGreen), "\xE2\x96\xB6");
-    const float uy = hp0.y + cz * 0.5F - 2.0F;
-    hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
-    if (go) {
-      // Real per-cell readback (app_state.clip_state) reports the launched
-      // state on the NEXT poll(), so no local echo is written here -- see
-      // render_grid_panel's own header comment.
-      brain_session.send("launch scene " + std::to_string(s) + " quantize " +
-                         std::to_string(kDefaultLaunchQuantizeBars));
+
+    if (fx.renaming_scene == static_cast<int>(s)) {
+      // Inline rename in progress for THIS scene column: an InputText
+      // replaces the header, occupying the same cz x cz*0.5 footprint the
+      // InvisibleButton takes in the non-editing branch below.
+      ImGui::SetCursorScreenPos(hp0);
+      ImGui::SetNextItemWidth(cz);
+      if (fx.rename_focus_pending) {
+        ImGui::SetKeyboardFocusHere();
+        fx.rename_focus_pending = false;
+      }
+      ImGui::InputText("##rename", fx.rename_buffer.data(), fx.rename_buffer.size());
+      const bool escape_pressed = ImGui::IsKeyPressed(ImGuiKey_Escape);
+      if (ImGui::IsItemDeactivated()) {
+        if (!escape_pressed) {
+          // Commit on Enter or on any other focus-loss (click elsewhere);
+          // Escape (checked above) skips the write-back, so the header
+          // reverts to its previously stored name.
+          model.set_scene_name(s, std::string(fx.rename_buffer.data()));
+        }
+        fx.renaming_scene = -1;
+      }
+      // Reserve the rest of the non-editing header's height so the cell row
+      // below never shifts while a rename is in progress.
+      ImGui::Dummy(ImVec2(cz, std::max(0.0F, cz * 0.5F - ImGui::GetFrameHeight())));
+    } else {
+      const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
+      const bool double_clicked =
+          ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+      const std::string name(model.scene_name(s));
+      const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
+      hdl->AddText(ImVec2(hp0.x + 3.0F, ty),
+                   neon::u32(s == 0 ? theme::kText : theme::kTextSecondary), name.c_str());
+      hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(name.c_str()).x + 4.0F, ty),
+                   neon::u32(theme::kGreen), "\xE2\x96\xB6");
+      const float uy = hp0.y + cz * 0.5F - 2.0F;
+      hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F),
+                   2.0F);
+      if (double_clicked) {
+        fx.renaming_scene = static_cast<int>(s);
+        std::snprintf(fx.rename_buffer.data(), fx.rename_buffer.size(), "%s", name.c_str());
+        fx.rename_focus_pending = true;
+      } else if (go) {
+        // Real per-cell readback (app_state.clip_state) reports the launched
+        // state on the NEXT poll(), so no local echo is written here -- see
+        // render_grid_panel's own header comment.
+        brain_session.send("launch scene " + std::to_string(s) + " quantize " +
+                           std::to_string(kDefaultLaunchQuantizeBars));
+      }
     }
     ImGui::PopID();
   }

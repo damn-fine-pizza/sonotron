@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -69,11 +70,25 @@ class GridModel {
   // once kMaxSceneCount is reached.
   void add_scene();
 
+  // Host-only scene display name (repeat-zone-real-contract.md §4/§8b
+  // decision 3: OWNER LOCKED to host-only storage here, NOT core-resident --
+  // no kSceneName verb). Storage is sized to kMaxSceneCount (not
+  // m_scene_count), so a name set on a not-yet-added column survives a later
+  // add_scene() unchanged, and every index up to kMaxSceneCount is always
+  // valid to query even before that many columns exist. Defaults to the bare
+  // 1-based column number, matching the pre-rename display exactly.
+  // Bounds-checked: an out-of-range `scene_index` (>= kMaxSceneCount) is a
+  // no-op for the setter and returns an empty view from the getter, rather
+  // than asserting or indexing out of bounds.
+  std::string_view scene_name(std::size_t scene_index) const;
+  void set_scene_name(std::size_t scene_index, std::string name);
+
  private:
   std::size_t index_of(std::size_t part_index, std::size_t scene_index) const;
 
   std::size_t m_scene_count;
   std::vector<GridCell> m_cells;  // row-major: part_index * m_scene_count + scene_index
+  std::array<std::string, kMaxSceneCount> m_scene_names;
 };
 
 }  // namespace sonotron

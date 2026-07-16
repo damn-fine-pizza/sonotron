@@ -70,6 +70,44 @@ void test_add_scene_caps_at_max() {
   CHECK(grid.scene_count() == GridModel::kMaxSceneCount);
 }
 
+void test_scene_names_default_to_bare_numbers() {
+  GridModel grid;
+  CHECK(grid.scene_name(0) == "1");
+  CHECK(grid.scene_name(2) == "3");
+  // Every index up to kMaxSceneCount is valid even before that many scene
+  // columns exist -- the default 3-scene grid still answers for index 7.
+  CHECK(grid.scene_name(GridModel::kMaxSceneCount - 1) ==
+        std::to_string(GridModel::kMaxSceneCount));
+}
+
+void test_set_scene_name_and_bounds() {
+  GridModel grid;
+  grid.set_scene_name(1, "Chorus");
+  CHECK(grid.scene_name(1) == "Chorus");
+  // A neighbour is untouched.
+  CHECK(grid.scene_name(0) == "1");
+  CHECK(grid.scene_name(2) == "3");
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_name(GridModel::kMaxSceneCount, "should not stick");
+  grid.set_scene_name(GridModel::kMaxSceneCount + 10, "should not stick either");
+
+  // Out-of-range get returns an empty view, not garbage.
+  CHECK(grid.scene_name(GridModel::kMaxSceneCount).empty());
+  CHECK(grid.scene_name(GridModel::kMaxSceneCount + 10).empty());
+}
+
+void test_add_scene_preserves_scene_names() {
+  GridModel grid;
+  grid.set_scene_name(0, "Intro");
+  const std::size_t before = grid.scene_count();
+  grid.add_scene();
+  // Renaming is decoupled from the cell-growth reindex -- add_scene() only
+  // touches m_cells, never m_scene_names.
+  CHECK(grid.scene_name(0) == "Intro");
+  CHECK(grid.scene_count() == before + 1);
+}
+
 void test_launch_wired_is_lit() {
   // Pinned true: the core clip primitive (Phase-5 Item #2, docs/design/
   // clip-primitive-design.md) shipped -- launch/stop/scene-quantize are
@@ -85,6 +123,9 @@ int main() {
   test_set_and_clear_cell();
   test_add_scene_preserves_existing_cells_and_grows_shape();
   test_add_scene_caps_at_max();
+  test_scene_names_default_to_bare_numbers();
+  test_set_scene_name_and_bounds();
+  test_add_scene_preserves_scene_names();
   test_launch_wired_is_lit();
   return sonotron::test::failures();
 }
