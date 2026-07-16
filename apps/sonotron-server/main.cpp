@@ -42,6 +42,7 @@
 #include "param_state_wire.hpp"
 #include "shell.hpp"
 #include "uds_server.hpp"
+#include "version/version.hpp"
 
 namespace {
 
@@ -384,6 +385,10 @@ int main(int argc, char** argv) {
           "  headless backend: no TUI, no REPL -- driven by MIDI input and\n"
           "  the --control UDS socket only. See\n"
           "  docs/design/sonotron-server-phase2-brief.md.\n");
+      return 0;
+    } else if (std::strcmp(argv[i], "--version") == 0) {
+      std::printf("sonotron-server %s (%s)\n", sonotron::version::kVersionString,
+                  sonotron::version::kVersionFull);
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);

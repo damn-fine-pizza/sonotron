@@ -36,6 +36,7 @@
 #include "rc_config.hpp"
 #include "shell.hpp"
 #include "uds_server.hpp"
+#include "version/version.hpp"
 
 namespace {
 
@@ -850,6 +851,10 @@ int main(int argc, char** argv) {
           "  --connect PATH: pure client of an already-running sonotron-server\n"
           "  (or another --control-serving arrangrr/sonotron-server); mutually\n"
           "  exclusive with --script/--control/--init/--motd.\n");
+      return 0;
+    } else if (std::strcmp(argv[i], "--version") == 0) {
+      std::printf("arrangrr %s (%s)\n", sonotron::version::kVersionString,
+                  sonotron::version::kVersionFull);
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);

@@ -84,6 +84,7 @@
 #include "src/theme.hpp"
 #include "src/uds_brain_session.hpp"
 #include "src/workstation_state.hpp"
+#include "version/version.hpp"
 
 namespace {
 
@@ -146,6 +147,17 @@ std::string control_path_from_args(int argc, char** argv) {
     return env;
   }
   return "";
+}
+
+// `--version`: print the release version and exit, before touching GLFW/GL
+// at all -- a version query must work headless (no display needed).
+bool version_requested_from_args(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--version") {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Headless-smoke escape hatch: if SONOTRON_GUI_MAX_FRAMES=N is set, render
@@ -464,6 +476,12 @@ void present_frame(GLFWwindow* window, const char* screenshot_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (version_requested_from_args(argc, argv)) {
+    std::printf("gui-sonotron %s (%s)\n", sonotron::version::kVersionString,
+                sonotron::version::kVersionFull);
+    return 0;
+  }
+
   glfwSetErrorCallback(glfw_error_callback);
   if (glfwInit() == GLFW_FALSE) {
     std::fprintf(stderr, "sonotron: glfwInit failed\n");

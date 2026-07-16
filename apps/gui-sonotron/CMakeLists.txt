@@ -158,7 +158,7 @@ add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
 target_link_libraries(gui_sonotron PRIVATE
   gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine audio
-  gui_sonotron_screenshot imgui)
+  gui_sonotron_screenshot imgui sonotron_version)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # Bakes the source-tree assets/ path into the binary so the vendored TTF
 # (see assets/fonts/ARRGRR_VENDOR.md) is found when running straight out of
