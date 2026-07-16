@@ -1,7 +1,7 @@
 // Unit tests for brain_event_from_outevent() -- the in-process OutEvent ->
 // BrainEvent decode (Phase 2b, docs/design/sonotron-server-phase2-brief.md
 // "Data on the ring", Corelli §15.3/§15.4). Each case mirrors what the
-// EXISTING JSONL wire (components/hostrt/jsonl.cpp's to_jsonl(), and
+// EXISTING JSONL wire (components/platform/hostrt/jsonl.cpp's to_jsonl(), and
 // apps/gui-sonotron/tests/test_app_state.cpp's apply_line() cases) already
 // asserts for the same OutEvent shape, so a drift between the two decode
 // paths would show up here even though this test never touches a socket.

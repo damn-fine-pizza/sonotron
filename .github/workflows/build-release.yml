@@ -1,0 +1,185 @@
+# .github/workflows/build-release.yml
+#
+# Manual (workflow_dispatch) + tag-driven matrix build of the gui-sonotron app
+# across Linux / macOS / Windows, with optional automatic GitHub Release
+# publication of the produced binaries.
+#
+# STATE (scaffold — 2026-07-16): only the LINUX leg is expected to be green.
+# The macOS and Windows legs are wired but marked `continue-on-error` and WILL
+# fail at configure time today, because the host layer is still Linux-only:
+#   - components/platform/hostrt/alsa_midi.*  uses ALSA snd_seq (Linux-only),
+#     and hostrt/CMakeLists.txt does find_package(ALSA REQUIRED).
+#   - components/platform/hostrt/uds_*.cpp    uses POSIX AF_UNIX sockets.
+# They light up automatically once the platform workstream lands the three-way
+# `IMidiHal` MIDI seam (ALSA / CoreMIDI / WinMM) + guards the UDS layer. See the
+# owner memory `platform-backend-three-way`. GitHub's macos-latest runner ships
+# the real Xcode/CoreMIDI SDK, so CI — not local osxcross — is the macOS
+# verification + release mechanism once the seam exists. Until then, flip the
+# `continue-on-error` legs to hard-required by deleting the marker.
+#
+# Triggers:
+#   * workflow_dispatch — manual "Run workflow" button. Optional `release_tag`
+#     input: if set (e.g. v0.3.0), the built binaries are published as a Release
+#     at that tag. Left blank → build + upload run artifacts only, no Release.
+#   * push of a tag matching v*  — always builds and publishes a Release.
+
+name: build-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a GitHub Release at this tag (e.g. v0.3.0). Leave blank to only build + upload run artifacts."
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # needed by the release job to create/upload a Release
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    # macOS/Windows are not portable yet (Linux-only ALSA + UDS host layer) —
+    # keep the overall run green while those legs are red-until-the-seam.
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+            required: true
+          - os: macos-latest
+            name: macos
+            required: false
+          - os: windows-latest
+            name: windows
+            required: false
+
+    steps:
+      - uses: actions/checkout@v4
+        # third_party/ (GLFW, imgui, miniaudio, tinysoundfont) is vendored
+        # in-tree — no submodules to init.
+
+      # --- system dependencies -------------------------------------------------
+      - name: Install deps (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            libasound2-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev
+
+      - name: Install deps (macOS)
+        if: matrix.name == 'macos'
+        run: brew install ninja
+
+      - name: Install deps (Windows)
+        if: matrix.name == 'windows'
+        run: choco install ninja -y
+
+      # --- configure -----------------------------------------------------------
+      # Configure WITHOUT the CMake presets: the `host` preset pins
+      # CMAKE_CXX_COMPILER_LAUNCHER=ccache, which CI runners don't have. GLFW
+      # Wayland is disabled to keep the Linux dep set to X11 only.
+      - name: Configure (Ninja, Unix)
+        if: matrix.name != 'windows'
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DGLFW_BUILD_WAYLAND=OFF
+
+      - name: Configure (Windows, default generator)
+        if: matrix.name == 'windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # --- build ---------------------------------------------------------------
+      # Linux: build EVERYTHING and run the full test suite (the real green
+      # signal). macOS/Windows: just try to build the GUI target.
+      - name: Build all + test (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure --parallel
+
+      - name: Build gui target (macOS)
+        if: matrix.name == 'macos'
+        run: cmake --build build --parallel --target gui_sonotron
+
+      - name: Build gui target (Windows)
+        if: matrix.name == 'windows'
+        run: cmake --build build --config Release --target gui_sonotron
+
+      # --- package the binary --------------------------------------------------
+      - name: Stage artifact (Unix)
+        if: matrix.name != 'windows'
+        run: |
+          mkdir -p dist
+          bin="build/apps/gui-sonotron/gui-sonotron"
+          if [ -x "$bin" ]; then
+            cp "$bin" "dist/gui-sonotron-${{ matrix.name }}"
+          else
+            echo "::warning::gui-sonotron binary not produced on ${{ matrix.name }} (expected until the IMidiHal seam lands)"
+          fi
+
+      - name: Stage artifact (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          bin="build/apps/gui-sonotron/Release/gui-sonotron.exe"
+          if [ -f "$bin" ]; then
+            cp "$bin" "dist/gui-sonotron-windows.exe"
+          else
+            echo "::warning::gui-sonotron.exe not produced on windows (expected until the IMidiHal seam lands)"
+          fi
+
+      - name: Upload run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-sonotron-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Publish a GitHub Release when triggered by a v* tag, or by a manual dispatch
+  # that supplied a release_tag. Attaches whatever binaries the build job made
+  # (today: Linux only; mac/win join automatically once they build).
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != ''
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List collected artifacts
+        run: ls -R artifacts || true
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: false
+          files: artifacts/**/*
+          body: |
+            Automated gui-sonotron build.
+
+            **Scaffold note:** only the Linux binary is currently produced.
+            macOS and Windows binaries are attached automatically once the
+            cross-platform `IMidiHal` seam (ALSA / CoreMIDI / WinMM) lands and
+            those build legs go green. See memory `platform-backend-three-way`.

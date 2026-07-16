@@ -1,0 +1,34 @@
+# Golden: Phase-7 node 9210 (Option-2 generated lead) -- "samba" style, VarD
+# peak section, a |C|F| two-bar change. Locks samba's generated kLeadMotif
+# (the new TrackRole::kLead pattern in samba.hpp's kDP, no other section):
+# seed=1302, length=6, center_degree=7 (a full octave above tonic), vel=78,
+# gate=kGateStaccato, idiom_role=kPerc (onset candidates drawn from
+# kPercRich's own guiro/cowbell even-16th mask, NOT the drums), gm_program=72
+# (Piccolo -- the owner's anti-sameness call vs bossa's Flute, see
+# docs/proposals/phase7-9210-motif-generate-option2-leads.md section 4.1).
+# Two full bars of VarD exercise BOTH halves of the call-and-response repeat
+# policy (motif.hpp's apply_repeat): bar 1 (repeat=0, over C) plays the
+# generated phrase verbatim -- the "statement" -- and bar 2 (repeat=1, over F)
+# applies the seed's own kDiatonicTranspose with a repeat-keyed amount -- the
+# "answer". Routes drums/bass/chord1 following arranger_band.acmd's own
+# convention, plus `style route lead synth:7` -- WITHOUT this route the new
+# kLead content never appears in the golden at all (the gap this fixture
+# closes). Any accidental change to samba's kLeadMotif or to kPercRich's onset
+# mask moves these notes/ticks and fails this test.
+key C major
+port open out virt as synth
+chord out synth:4
+style load samba
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+style route lead synth:7
+style section varD
+seq new verse
+seq add C 1bar
+seq add F 1bar
+seq loop on
+seq play
+transport start
+advance 7680
+quit

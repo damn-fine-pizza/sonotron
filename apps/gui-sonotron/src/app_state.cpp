@@ -36,6 +36,23 @@ std::string format_log_line(const BrainEvent& ev) {
   }
 }
 
+// Decodes the "clip" OutEvent's `clip_state` string label (event_labels.hpp's
+// clip_state_name on the host side) into AppState::ClipLaunchState. An
+// unrecognized label reads as kStopped -- never a crash, never a stale
+// leftover state.
+AppState::ClipLaunchState parse_clip_launch_state(const std::string& s) {
+  if (s == "armed") {
+    return AppState::ClipLaunchState::kArmed;
+  }
+  if (s == "playing") {
+    return AppState::ClipLaunchState::kPlaying;
+  }
+  if (s == "queued_stop") {
+    return AppState::ClipLaunchState::kQueuedStop;
+  }
+  return AppState::ClipLaunchState::kStopped;
+}
+
 }  // namespace
 
 void AppState::apply(const BrainEvent& ev) {
@@ -96,15 +113,18 @@ void AppState::apply(const BrainEvent& ev) {
       // the playhead).
       m_transport = Transport::kPlaying;
       break;
+    case BrainEvent::Kind::kClip:
+      // Real per-cell readback (repeat-zone-real-contract.md §3): the ONLY
+      // consumer of this event was a log line before this fix -- grid_panel.cpp
+      // now reads playing/armed/queued-stop state off this map instead of a
+      // local click-time echo (V02State's former row_playing).
+      m_clip_states[ev.clip_id] = parse_clip_launch_state(ev.clip_state);
+      break;
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:
     case BrainEvent::Kind::kError:
-    case BrainEvent::Kind::kClip:
     case BrainEvent::Kind::kUnknown:
-      break;  // logged above, but no other view-state change (yet) -- a
-              // live per-cell armed/playing indicator on the grid itself is
-              // follow-up work (GridModel has no runtime launch-state field
-              // yet, only authored content, grid_model.hpp)
+      break;  // logged above, no other view-state change
   }
 }
 

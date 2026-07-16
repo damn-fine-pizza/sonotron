@@ -1,24 +1,33 @@
 #pragma once
 
+#include "app_state.hpp"
 #include "brain_session.hpp"
 #include "grid_model.hpp"
+#include "parts_model.hpp"
+#include "seqedit_model.hpp"
+#include "v02_state.hpp"
 
-// Renders the Repeat Zone / Live-Loops launch grid (ux-workstation.md
-// §4.4/§5). Declared here as pure data/interface (GridModel only, no
-// ImGui) — see the *_panel/*_model split invariant.
+// Renders the v02 REPEAT ZONE launch grid (v02-workstation-spec.md §2b).
+// Declared here as pure data/interface (models + BrainSession + V02State, no
+// ImGui) -- see the *_panel/*_model split invariant.
 
 namespace sonotron {
 
-// Renders the matrix inside the CURRENT ImGui window/child: one row per
-// part (GridModel::part_label), one column per scene, plus a "+" to add a
-// scene. Each cell is a real ImGui drop target for a browser style drag
-// (browser_panel.hpp's kStyleDragPayloadId) — dropping sets the cell's
-// content for real (GridModel::set_cell). LAUNCH is wired to the real core
-// clip primitive (Phase-5 Item #2, docs/design/clip-primitive-design.md):
-// clicking a cell sends `launch clip <id> quantize <n>` (id = part_index *
-// scene_count() + scene_index, mirroring the cell's own ImGui PushID);
-// clicking a scene header's "▶" fans out `launch scene <n> quantize <q>`.
-// `brain_session` mirrors render_styles_branch's own BrainSession& param.
-void render_grid_panel(GridModel& model, BrainSession& brain_session);
+// Draws the 6-track x 5-scene launch grid inside the CURRENT ImGui child:
+// track labels, scene headers (click = `launch scene <n> quantize 1`), and
+// launch cells with procedural mini clip previews + an L->R sweep on the
+// playing cell. Clicking a FILLED cell sends `launch clip <id> quantize 1`
+// (real verb) AND opens the clip into Sequence Edit (`seqedit`); clicking an
+// EMPTY cell fills it with a local demo clip (no launch, no verb, no
+// ClipMatrix registration -- only a browser style drop registers for real,
+// repeat-zone-real-contract.md §3/§8b decision 2). Per-cell PLAYING/ARMED/
+// QUEUED-STOP state is a REAL readback (repeat-zone-real-contract.md §3):
+// read from `app_state`'s per-clip map, reduced from the core's own "clip"
+// OutEvent -- not a local click-time guess. Each track row also carries M/S
+// latches in its label column, wired to the REAL `part <role> mute|solo on/off`
+// L1 verb (§7 B8) through `parts` -- they share PartsModel state with the rail
+// mute/solo, and drive the standard solo-implies-others-muted dim in the grid.
+void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+                       BrainSession& brain_session, const AppState& app_state, V02State& fx);
 
 }  // namespace sonotron

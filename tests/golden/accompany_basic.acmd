@@ -10,7 +10,7 @@
 key C major
 port open out virt as synth
 chord out synth:4
-midi-source load components/midisrc/tests/fixtures/tiny.mid
+midi-source load components/platform/midisrc/tests/fixtures/tiny.mid
 @0 play D
 @96 chord stop
 advance 3000

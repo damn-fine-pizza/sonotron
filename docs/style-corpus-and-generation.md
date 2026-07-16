@@ -26,7 +26,7 @@ for owner approval, never smuggled.
 
 Arranger STYLES are C++ source: `inline constexpr StyleEvent[]` tables wired into
 `StylePattern` / `StyleSection` / `Style` (16 built-ins under
-`components/arrangrr/include/arrangrr/arranger/styles/`). They are POD + `Span`,
+`components/core/arrangrr/include/arrangrr/arranger/styles/`). They are POD + `Span`,
 land in flash memory-mapped on the STM32 target, and cost zero RAM and zero parsing
 (D32/D33).
 

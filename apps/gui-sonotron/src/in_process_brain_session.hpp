@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "audio_midi_event.hpp"
+#include "audio/audio_midi_event.hpp"
 #include "brain_session.hpp"
 
 // The SECOND concrete BrainSession (Phase 2b, docs/design/
@@ -64,10 +64,10 @@ class InProcessBrainSession final : public BrainSession {
   // started (no-op) and safe to call from the destructor path (~ calls it).
   void stop();
 
-  // Attaches gui_sonotron_audio::AudioEngine's producer-side ring handle
+  // Attaches sonotron::audio::AudioBackend's producer-side ring handle
   // (Phase-6 Theme 2, Decision 1/2/3): once set, run_engine() pushes every
   // kMidi OutEvent on the primary integrated output port onto `ring` for
-  // AudioEngine's ma_device callback to drain and realize. MUST be called
+  // AudioBackend's ma_device callback to drain and realize. MUST be called
   // BEFORE start() -- the engine thread reads this pointer once at
   // thread-start time, not on every tick; the happens-before edge
   // std::thread's own constructor establishes between this call (on the

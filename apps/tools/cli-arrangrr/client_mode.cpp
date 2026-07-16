@@ -12,7 +12,7 @@
 #include "uds_client.hpp"
 
 // See client_mode.hpp for the design summary. NOT included here, ever:
-// arrangrr/abi.hpp or anything under components/arrangrr -- this file only
+// arrangrr/abi.hpp or anything under components/core/arrangrr -- this file only
 // #includes hostrt's own arrangrr-free client seam (tui_client.hpp,
 // uds_client.hpp) plus plain POSIX/stdlib headers.
 

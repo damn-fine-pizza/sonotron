@@ -15,9 +15,9 @@
 namespace sonotron {
 
 // The 16 builtin styles, in the SAME order as `style load <name>`
-// (components/hostrt/shell_music_commands.cpp::cmd_style's "load" verb
+// (components/platform/hostrt/shell_music_commands.cpp::cmd_style's "load" verb
 // resolves by name via `find_builtin_style`, case-insensitively) and as
-// declared in components/arrangrr/include/arrangrr/arranger/style.hpp's
+// declared in components/core/arrangrr/include/arrangrr/arranger/style.hpp's
 // `styles::kBuiltins` — read (read-only) to source this list; gui-sonotron
 // never includes the core (D38, pure client), so this is a hand-copied
 // literal of what was read, not an invented name list.
@@ -32,6 +32,13 @@ inline constexpr std::array<std::string_view, 16> kBuiltinStyleNames = {
 // no ImGui dependency) so both panels share the exact same id without
 // either including the other's header.
 inline constexpr const char* kStyleDragPayloadId = "SONOTRON_STYLE_INDEX";
+
+// ImGui drag-drop payload id carrying a SectionType byte (repeat-zone-real-
+// contract.md SLICE 4a) from browser_panel.cpp's "variations" list drag
+// source to grid_panel.cpp's scene-header drop target. Distinct from
+// kStyleDragPayloadId above (a style INDEX) so ImGui::AcceptDragDropPayload
+// never confuses the two payload shapes at a shared drop site.
+inline constexpr const char* kVariationDragPayloadId = "SONOTRON_VARIATION_SECTION";
 
 class BrowserModel {
  public:

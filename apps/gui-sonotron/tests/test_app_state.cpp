@@ -166,6 +166,33 @@ void test_log_cap() {
   CHECK(app.log().size() == AppState::kMaxLog);
 }
 
+// Repeat-Zone real readback (repeat-zone-real-contract.md §3/§6 item 2): the
+// "clip" OutEvent reduces into a real per-clip {id -> LaunchState} map, not
+// merely a log line. A clip id never seen on the wire reads as kStopped.
+void test_clip_state_reduction() {
+  AppState app;
+  CHECK(app.clip_state(3) == AppState::ClipLaunchState::kStopped);
+
+  app.apply_line(R"({"ev":"clip","id":3,"state":"armed","@":10})");
+  CHECK(app.clip_state(3) == AppState::ClipLaunchState::kArmed);
+  // A different, never-seen id is unaffected.
+  CHECK(app.clip_state(4) == AppState::ClipLaunchState::kStopped);
+
+  app.apply_line(R"({"ev":"clip","id":3,"state":"playing","@":20})");
+  CHECK(app.clip_state(3) == AppState::ClipLaunchState::kPlaying);
+
+  app.apply_line(R"({"ev":"clip","id":3,"state":"queued_stop","@":30})");
+  CHECK(app.clip_state(3) == AppState::ClipLaunchState::kQueuedStop);
+
+  app.apply_line(R"({"ev":"clip","id":3,"state":"stopped","@":40})");
+  CHECK(app.clip_state(3) == AppState::ClipLaunchState::kStopped);
+
+  // Two ids track independently.
+  app.apply_line(R"({"ev":"clip","id":7,"state":"playing","@":50})");
+  CHECK(app.clip_state(7) == AppState::ClipLaunchState::kPlaying);
+  CHECK(app.clip_state(3) == AppState::ClipLaunchState::kStopped);
+}
+
 void test_warn_and_midi_out_do_not_change_view_state_but_are_logged() {
   AppState app;
   const std::size_t before = app.log().size();
@@ -186,6 +213,7 @@ int main() {
   test_beat_reduction();
   test_harmony_activity_gate();
   test_note_transport_sent_hint();
+  test_clip_state_reduction();
   test_malformed_line_logged_not_applied();
   test_log_cap();
   test_warn_and_midi_out_do_not_change_view_state_but_are_logged();

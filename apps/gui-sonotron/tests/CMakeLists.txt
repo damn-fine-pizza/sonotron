@@ -36,18 +36,6 @@ gui_sonotron_brain_test(test_brain_event unit)
 gui_sonotron_brain_test(test_app_state unit)
 gui_sonotron_brain_test(test_uds_brain_session unit)
 
-# SPSC ring primitive (Phase 2b, docs/design/sonotron-server-phase2-brief.md):
-# header-only, dependency-free beyond STL (no core, no hostrt) -- links only
-# the INTERFACE ring target + Threads for its threaded producer/consumer
-# stress case. See this milestone's report for the separate, manual
-# ThreadSanitizer verification run (no TSan CMake preset exists project-wide
-# yet).
-add_executable(test_spsc_ring test_spsc_ring.cpp)
-target_link_libraries(test_spsc_ring PRIVATE gui_sonotron_ring Threads::Threads)
-target_compile_options(test_spsc_ring PRIVATE -Wall -Wextra -Werror)
-add_test(NAME test_spsc_ring COMMAND test_spsc_ring)
-set_tests_properties(test_spsc_ring PROPERTIES LABELS unit)
-
 # Engine-linking tests (Phase 2b): link gui_sonotron_engine, which pulls in
 # hostrt/runtime/arrangrr/ALSA transitively -- D38 is retired for this
 # milestone (see apps/gui-sonotron/CMakeLists.txt's gui_sonotron_engine
@@ -71,7 +59,7 @@ gui_sonotron_engine_test(test_in_process_brain_session functional)
 # and tests/golden's accompany_basic golden) rather than adding a new binary
 # asset under this tree.
 target_compile_definitions(test_in_process_brain_session PRIVATE
-  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
+  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/platform/midisrc/tests/fixtures/tiny.mid")
 
 # Phase-6 Theme 2 QA pass (docs/phase6-design-reviews.md "Audio in the
 # standalone GUI", Decision 3/4): pins the negative half of the OutEvent ->
@@ -82,23 +70,7 @@ target_compile_definitions(test_in_process_brain_session PRIVATE
 # here.
 gui_sonotron_engine_test(test_audio_port_gate functional)
 target_compile_definitions(test_audio_port_gate PRIVATE
-  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/midisrc/tests/fixtures/tiny.mid")
-
-# Device-independent AudioEngine smoke test (Torquato QA pass): links
-# gui_sonotron_audio directly (melodd + miniaudio + gui_sonotron_ring +
-# Threads) -- construction/destruction, note_ring(), and load_soundfont()'s
-# success/failure paths, none of which require a real audio device to open.
-# See this file's own header comment for what is and is not reachable this
-# way (the private data_callback()/render() path needs a live device).
-add_executable(test_audio_engine_smoke test_audio_engine_smoke.cpp)
-target_link_libraries(test_audio_engine_smoke PRIVATE gui_sonotron_audio)
-target_compile_options(test_audio_engine_smoke PRIVATE -Wall -Wextra -Werror)
-add_test(NAME test_audio_engine_smoke COMMAND test_audio_engine_smoke)
-# NOT a hard SKIP_RETURN_CODE convention: only the LAST block (load_soundfont
-# success path) needs a system SoundFont -- construction/ring/failure-path
-# checks always run for real, so a missing SoundFont degrades this to a
-# partial (still meaningful) pass rather than a full skip.
-set_tests_properties(test_audio_engine_smoke PROPERTIES LABELS functional)
+  GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/platform/midisrc/tests/fixtures/tiny.mid")
 
 # Flips Torquato's RED-by-design QA pin to GREEN (Nazzareno, closing the
 # Theme-2 reachability gap): InProcessBrainSession::send() now auto-routes
@@ -106,6 +78,12 @@ set_tests_properties(test_audio_engine_smoke PROPERTIES LABELS functional)
 # in_process_brain_session.cpp), so primary-port kMidi traffic IS reachable
 # now -- a normal, registered, always-green test like every other one here.
 gui_sonotron_engine_test(test_audio_primary_port_reachable functional)
+
+# Device-independent AudioBackend/SoundfontEngine smoke test (Torquato QA
+# pass): moved to components/platform/audio/tests (docs/proposals/
+# components-restructure-move-plan.md §2/§3 Step 5, docs/proposals/
+# isoundengine-contract.md) -- it links the `audio` component directly, not
+# gui_sonotron_engine, and no longer belongs in this file.
 
 # Zone-model tests (G3, docs/design/gui-fase2-mechanical-plan.md): link only
 # gui_sonotron_models (no ImGui, no GLFW) -- pure model tests, host-only.
@@ -121,3 +99,23 @@ gui_sonotron_model_test(test_browser_model unit)
 gui_sonotron_model_test(test_grid_model unit)
 gui_sonotron_model_test(test_seqedit_model unit)
 gui_sonotron_model_test(test_parts_model unit)
+
+# scenes.json persistence round-trip (repeat-zone-real-contract.md §4/§8b
+# decision 3) -- a functional test in the same load/save/temp-dir shape as
+# test_layout_schema_upgrade.cpp, one directory over for its own file.
+gui_sonotron_model_test(test_scenes_json functional)
+
+# Real-content cell preview (repeat-zone-real-contract.md, "cell preview made
+# real" pass): link gui_sonotron_preview directly, which pulls in arrangrr
+# transitively (see apps/gui-sonotron/CMakeLists.txt's gui_sonotron_preview
+# target comment) -- same shape as gui_sonotron_engine_test above, a second
+# library allowed to touch the core.
+function(gui_sonotron_preview_test name category)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE gui_sonotron_preview)
+  target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS ${category})
+endfunction()
+
+gui_sonotron_preview_test(test_preview unit)

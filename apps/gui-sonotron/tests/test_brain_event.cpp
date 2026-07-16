@@ -125,7 +125,7 @@ void test_parse_warn() {
 }
 
 // The additive "chord-followed" shape (gap P0-1) -- exact wire shape ported
-// from spikes/kchordfollowed and rendered by components/hostrt/jsonl.cpp.
+// from spikes/kchordfollowed and rendered by components/platform/hostrt/jsonl.cpp.
 void test_parse_chord_followed() {
   const BrainEvent ev = parse_brain_event(
       R"({"ev":"chord-followed","cur":"Cmaj7","cur_pcs":2193,"next":"-","next_pcs":0,)"
@@ -151,7 +151,7 @@ void test_parse_chord_followed() {
 }
 
 // The additive "beat" shape (gap P0-2) -- the transport heartbeat rendered
-// by components/hostrt/jsonl.cpp, one line per 24-PPQN pulse while playing.
+// by components/platform/hostrt/jsonl.cpp, one line per 24-PPQN pulse while playing.
 void test_parse_beat() {
   const BrainEvent ev = parse_brain_event(R"({"ev":"beat","bar":3,"beat":2,"pulse":5,"@":1200})");
   CHECK(ev.valid);
@@ -164,7 +164,7 @@ void test_parse_beat() {
 
 // The additive "clip" shape (Phase-5 Item #2, docs/design/
 // clip-primitive-design.md) -- which Repeat-Zone cell is armed/playing/
-// stopped, rendered by components/hostrt/jsonl.cpp.
+// stopped, rendered by components/platform/hostrt/jsonl.cpp.
 void test_parse_clip() {
   const BrainEvent ev = parse_brain_event(R"({"ev":"clip","id":1,"state":"playing","@":6})");
   CHECK(ev.valid);

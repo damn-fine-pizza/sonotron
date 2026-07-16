@@ -1,6 +1,6 @@
 // sonotron-server: the headless backend around the arrangrr host library.
 //
-// `components/hostrt`'s `Shell` (wrapping `runtime::Runtime<Engine,N>` + the
+// `components/platform/hostrt`'s `Shell` (wrapping `runtime::Runtime<Engine,N>` + the
 // arrangrr stage) is the "server library" from
 // docs/design/sonotron-server-phase2-brief.md §Topology — the composition of
 // Runtime + the arrangrr wiring, exposing the Command-in/OutEvent-out ports.
@@ -115,7 +115,7 @@ void broadcast_control_event(UdsServer& control, const OutEvent& ev,
 }
 
 // Mixer roles the `parts` mixer shows, Drums..Phrase (roles 0..7) -- the
-// SAME order components/hostrt/shell_internal.hpp's kMixerParts uses,
+// SAME order components/platform/hostrt/shell_internal.hpp's kMixerParts uses,
 // duplicated here (a plain TrackRole array) rather than exposed as a public
 // hostrt seam, since this is the ONLY caller outside Shell that needs it.
 constexpr TrackRole kMixerRoles[] = {TrackRole::kDrums,  TrackRole::kPerc,   TrackRole::kBass,

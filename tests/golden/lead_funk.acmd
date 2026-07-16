@@ -1,0 +1,36 @@
+# Golden: Phase-7 node 9210 (Option-2 generated lead) -- "funk" style, VarD
+# peak section, a |C|F| two-bar change. Locks funk's generated kLeadMotif (the
+# new TrackRole::kLead pattern in funk.hpp's kDP, no other section): seed=1402,
+# length=3 (the shortest of the four, a short reaffirming stab, not a
+# wandering line), center_degree=0 (the root, mirroring the bass's own
+# "staccato single-note root-pop" idiom), vel=96, gate=kGateStab,
+# idiom_role=kDrums (onset candidates drawn from kDD's own busiest,
+# 13-step syncopated kick/snare/hat mask), gm_program=7 (Clavinet -- the
+# owner's call for funk's own signature texture over the corpus's stock brass
+# stab, see docs/proposals/phase7-9210-motif-generate-option2-leads.md
+# section 4.2). Two full bars of VarD exercise BOTH halves of the
+# call-and-response repeat policy (motif.hpp's apply_repeat): bar 1 (repeat=0,
+# over C) plays the generated phrase verbatim -- the "statement" -- and bar 2
+# (repeat=1, over F) applies the seed's own kDiatonicTranspose with a
+# repeat-keyed amount -- the "answer". Routes drums/bass/chord1 following
+# arranger_band.acmd's own convention, plus `style route lead synth:7` --
+# WITHOUT this route the new kLead content never appears in the golden at all
+# (the gap this fixture closes). Any accidental change to funk's kLeadMotif or
+# to kDD's onset mask moves these notes/ticks and fails this test.
+key C major
+port open out virt as synth
+chord out synth:4
+style load funk
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+style route lead synth:7
+style section varD
+seq new verse
+seq add C 1bar
+seq add F 1bar
+seq loop on
+seq play
+transport start
+advance 7680
+quit

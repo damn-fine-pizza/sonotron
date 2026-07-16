@@ -11,19 +11,24 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/abi.hpp"
+#include "arrangrr/arranger/style_model.hpp"
+#include "arrangrr/clip/clip_matrix.hpp"
+#include "arrangrr/loop/loop_buffer.hpp"
+#include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
 #include "shell.hpp"
-#include "spsc_ring.hpp"
 
 // The engine-thread half of Phase 2b's "integrated" mode (docs/design/
 // sonotron-server-phase2-brief.md). Mirrors apps/sonotron-server/main.cpp's
 // own live loop (AlsaMidi + Shell + a tick clock) closely on purpose --
 // same backend shape, minus the UDS control socket (replaced by the Command
 // ring) and minus the poll()-driven wakeup (replaced by a short sleep, since
-// there is no fd to block on here). MIDI-in hardware is explicitly deferred
-// (Phase 2b scope note): this backend only ever plays what the Command ring
-// drives.
+// there is no fd to block on here). Hardware MIDI-in now reaches the engine
+// too (docs/proposals/looper-in-gui-contract.md §7 item 3, fixing the stale
+// "MIDI-in hardware is explicitly deferred" note this comment used to carry):
+// run_engine() drains ALSA input every iteration, same as sonotron-server's
+// own live loop.
 
 namespace sonotron {
 
@@ -31,9 +36,17 @@ namespace {
 
 using arrangrr::Boundary;
 using arrangrr::Command;
+using arrangrr::ContentKind;
+using arrangrr::kMaxPorts;
+using arrangrr::kNoExplicitClipId;
+using arrangrr::kNoLoopExplicitId;
+using arrangrr::LoopLengthMode;
+using arrangrr::LoopRecordMode;
 using arrangrr::Op;
 using arrangrr::OutEvent;
 using arrangrr::Param;
+using arrangrr::SectionType;
+using arrangrr::Span;
 using arrangrr::TickAccumulator;
 using arrangrr::TrackRole;
 using arrangrr::host::AlsaMidi;
@@ -56,7 +69,7 @@ constexpr std::size_t kOutEventRingCapacity = 1024;
 // owner chose to realize ONLY the primary integrated output port, not every
 // port. Today's default integrated wiring below opens exactly one output
 // port, "out0", and Shell::cmd_port's m_next_out counter starts at 0
-// (components/hostrt/shell_io_commands.cpp) -- so out0 is always index 0. A
+// (components/platform/hostrt/shell_io_commands.cpp) -- so out0 is always index 0. A
 // single named constant, not a magic literal, so a future multi-port
 // realization config only ever needs to change this one spot.
 constexpr std::uint8_t kPrimaryAudioOutPort = 0;
@@ -165,7 +178,7 @@ bool parse_int(std::string_view s, std::int64_t& out) {
 
 // Decodes an optional trailing `quantize <n>` starting at token index `at` in
 // a `launch clip/scene ...` or `stop clip ...` line (mirrors
-// components/hostrt/shell_clip_commands.cpp's own parse_quantize_suffix --
+// components/platform/hostrt/shell_clip_commands.cpp's own parse_quantize_suffix --
 // deliberate small duplication, D38: this pure-client translator never
 // reaches into hostrt's own parsing helpers). `ok` is set false only on a
 // MALFORMED trailing quantize (present but unparsable); an ABSENT suffix is
@@ -193,6 +206,42 @@ bool parse_quantize_suffix(const std::vector<std::string_view>& t, std::size_t a
     n_bars = n > 255 ? static_cast<std::uint8_t>(255) : static_cast<std::uint8_t>(n);
   }
   return true;
+}
+
+// Resolves a section-name token to a SectionType (Repeat-Zone binding
+// contract, docs/proposals/repeat-zone-real-contract.md §3/§8b decision 1's
+// `clip add ... style <section> id <n>` line, grid_panel.cpp's own send()
+// shape). Mirrors components/platform/hostrt/shell_parse.cpp's own
+// parse_section() spellings exactly, duplicated deliberately (D38: this
+// pure-client translator never reaches into hostrt's own parsing helpers --
+// same discipline parse_quantize_suffix above already documents).
+bool parse_section_name(std::string_view s, SectionType& out) {
+  struct Entry {
+    std::string_view name;
+    SectionType type;
+  };
+  static constexpr Entry kSections[] = {
+      {.name = "intro1", .type = SectionType::kIntro1},
+      {.name = "intro2", .type = SectionType::kIntro2},
+      {.name = "varA", .type = SectionType::kVarA},
+      {.name = "varB", .type = SectionType::kVarB},
+      {.name = "varC", .type = SectionType::kVarC},
+      {.name = "varD", .type = SectionType::kVarD},
+      {.name = "fillA", .type = SectionType::kFillA},
+      {.name = "fillB", .type = SectionType::kFillB},
+      {.name = "fillC", .type = SectionType::kFillC},
+      {.name = "fillD", .type = SectionType::kFillD},
+      {.name = "break", .type = SectionType::kBreak},
+      {.name = "ending1", .type = SectionType::kEnding1},
+      {.name = "ending2", .type = SectionType::kEnding2},
+  };
+  for (const Entry& e : kSections) {
+    if (s == e.name) {
+      out = e.type;
+      return true;
+    }
+  }
+  return false;
 }
 
 std::vector<std::string_view> split_ws(std::string_view s) {
@@ -223,7 +272,7 @@ enum class TranslateOutcome {
 
 // Phase-6 Theme 3 Item #2's companion (docs/reflections/phase6-theme3-pad-
 // drum-cc-scope.md): `pad bank <n>` -- the kPadBankSelect host hook Item #4
-// left undriven from either host, mirrors components/hostrt/
+// left undriven from either host, mirrors components/platform/hostrt/
 // shell_pad_commands.cpp's own `pad bank` verb. The engine is the source of
 // truth for the [0, kMaxPadBanks) bound (Engine::pad_bank_select rejects
 // outside it); this parse only rejects an unparsable token. Split out of
@@ -286,9 +335,50 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     return TranslateOutcome::kOk;
   }
 
+  // `style switch <name>` -- the LIVE morph counterpart to `style load` above
+  // (browser_panel.cpp sends this instead of `style load` whenever the
+  // transport is already playing): rides the existing Param::kStyleSwitch
+  // verb (engine.cpp's style_switch()), which quantizes to the next bar
+  // boundary while playing instead of hard-resetting the arranger. The GUI
+  // has no current-section readback (grid_model.hpp's documented gap), so the
+  // target section always defaults to SectionType::kVarA, the arranger's own
+  // default section -- same name resolution as `style load`.
+  if (t.size() == 3 && t[0] == "style" && t[1] == "switch") {
+    const std::string name(t[2]);
+    const int index = Shell::resolve_style_index(name);
+    if (index < 0) {
+      detail = "unknown style: " + name;
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kStyleSwitch;
+    out.a = index;
+    out.b = static_cast<std::int32_t>(SectionType::kVarA);
+    out.boundary = Boundary::kNextBar;
+    return TranslateOutcome::kOk;
+  }
+
+  // `style section <name>` -- SLICE 4a item 5 (docs/proposals/repeat-zone-
+  // real-contract.md): grid_panel.cpp's scene-header ▶ click applies the
+  // COLUMN's own SectionType through the EXISTING Param::kStyleSection verb
+  // (mirrors components/platform/hostrt/shell_music_commands.cpp's own
+  // `style section` L1 verb exactly, including its parse_section_name
+  // spellings above). Quantizes to the next bar while playing, immediate
+  // when stopped -- Engine::cmd_style's own kStyleSection handling
+  // (Arranger::request(section, !playing)), not reimplemented here.
+  if (t.size() == 3 && t[0] == "style" && t[1] == "section") {
+    SectionType section{};
+    if (!parse_section_name(t[2], section)) {
+      detail = "unknown section: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kStyleSection;
+    out.a = static_cast<std::int32_t>(section);
+    return TranslateOutcome::kOk;
+  }
+
   // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
   // scope.md): `transpose <-12..12>`, the live global transpose -- mirrors
-  // components/hostrt/shell_music_commands.cpp's own `transpose` L1 verb.
+  // components/platform/hostrt/shell_music_commands.cpp's own `transpose` L1 verb.
   // The engine itself is the source of truth for the bound
   // (Engine::cmd_master_transpose rejects outside [-12, +12]); this parse
   // only rejects an unparsable token.
@@ -301,6 +391,24 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.op = Op::kSet;
     out.param = Param::kMasterTranspose;
     out.a = static_cast<std::int32_t>(semitones);
+    return TranslateOutcome::kOk;
+  }
+
+  // Tempo nudge (transport_panel.cpp's BPM label): `bpm <N>` sets the global
+  // tempo, mirroring components/platform/hostrt/shell.cpp's own `bpm` L1 verb. The GUI
+  // widget only ever emits an integer BPM; the engine is the source of truth
+  // for the range (it clamps to 20..400, shell_parse.cpp), so we reject only an
+  // unparsable/out-of-range token here for a clean error. a = bpm_x100
+  // (abi.hpp Param::kTransportTempo).
+  if (t.size() == 2 && t[0] == "bpm") {
+    std::int64_t bpm = 0;
+    if (!parse_int(t[1], bpm) || bpm < 20 || bpm > 400) {
+      detail = "bad bpm (20..400): " + std::string(t[1]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = Param::kTransportTempo;
+    out.a = static_cast<std::int32_t>(bpm * 100);
     return TranslateOutcome::kOk;
   }
 
@@ -320,6 +428,45 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.param = t[2] == "mute" ? Param::kPartMute : Param::kPartSolo;
     out.a = static_cast<std::int32_t>(role);
     out.b = t[3] == "on" ? 1 : 0;
+    return TranslateOutcome::kOk;
+  }
+
+  // Repeat-Zone binding contract, Shape A (docs/proposals/repeat-zone-real-
+  // contract.md §3/§8b decision 1): `clip add <role> <scene> style <section>
+  // id <n>` -- grid_panel.cpp's own on-first-fill registration (a browser
+  // style drop), ALWAYS carrying an explicit id (the GUI's own
+  // cell_id(role,scene)), so the core registers AT that stable id instead of
+  // the sequential counter. Only ContentKind::kStyleSection is reachable from
+  // here (owner decision 2, §8b: drag-a-style ONLY for this pass -- no
+  // seq/track authoring from the GUI yet); the CLI/script `clip add` grammar
+  // (shell_clip_commands.cpp) still covers seq/track for host/script use.
+  if (t.size() == 8 && t[0] == "clip" && t[1] == "add" && t[4] == "style" && t[6] == "id") {
+    TrackRole role{};
+    if (!Shell::resolve_track_role(std::string(t[2]), role)) {
+      detail = "unknown role: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t scene = 0;
+    if (!parse_uint(t[3], scene) || scene > 255) {
+      detail = "bad scene index: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    SectionType section{};
+    if (!parse_section_name(t[5], section)) {
+      detail = "unknown section: " + std::string(t[5]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t id = 0;
+    if (!parse_uint(t[7], id) || id >= static_cast<std::uint64_t>(kNoExplicitClipId)) {
+      detail = "bad id: " + std::string(t[7]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kClipAdd;
+    out.idx = static_cast<std::uint16_t>(id);
+    out.a = static_cast<std::int32_t>(role);
+    out.b = static_cast<std::int32_t>(scene);
+    out.c = static_cast<std::int32_t>(ContentKind::kStyleSection) |
+            (static_cast<std::int32_t>(section) << 8);
     return TranslateOutcome::kOk;
   }
 
@@ -365,12 +512,170 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     return TranslateOutcome::kOk;
   }
 
+  // `note <port> on|off <midinote> [velocity]` -- docs/proposals/looper-in-
+  // gui-contract.md §2/§7 items 1/2 (the on-screen-keyboard/pad note path):
+  // the SAME grammar Shell::cmd_note implements as an L1 verb (shell_music_
+  // commands.cpp), so a note sent from the GUI's own note-input surface (a
+  // later slice) reaches the engine exactly like a hardware note. `port` here
+  // is a BARE numeric index only (this translator's existing convention --
+  // e.g. kDefaultStyleRoutes/kPrimaryAudioOutPort above -- never a named
+  // alias like "in0"; run_engine()'s own default topology always opens input
+  // 0 first, so `note 0 ...` addresses it). No ":ch" suffix (every existing
+  // caller here also omits per-command channel overrides); the resulting
+  // Param::kNoteRaw Command carries the SAME idx/a/b/c packing cmd_note
+  // builds -- run_engine()'s Command-ring drain special-cases this Param and
+  // feeds it straight through feed_midi(), never Engine::push_command()
+  // (kNoteRaw has no case there, see that function's own comment).
+  if (t.size() >= 4 && t.size() <= 5 && t[0] == "note") {
+    std::uint64_t port = 0;
+    if (!parse_uint(t[1], port) || port >= kMaxPorts) {
+      detail = "bad note port: " + std::string(t[1]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    if (t[2] != "on" && t[2] != "off") {
+      detail = "note <port> on|off <midinote> [velocity]";
+      return TranslateOutcome::kInvalidArgument;
+    }
+    const bool on = t[2] == "on";
+    std::uint64_t note = 0;
+    if (!parse_uint(t[3], note) || note > 127) {
+      detail = "bad midi note: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    // Default velocity: 100 for note-on, 64 for note-off (matches cmd_note's
+    // own kPianoReleaseVelocity default, shell_internal.hpp -- a private
+    // hostrt constant this pure-client translator never reaches into, D38).
+    std::uint64_t vel = on ? 100 : 64;
+    if (t.size() == 5) {
+      if (!parse_uint(t[4], vel) || vel < 1 || vel > 127) {
+        detail = "bad velocity: " + std::string(t[4]);
+        return TranslateOutcome::kInvalidArgument;
+      }
+    }
+    out.param = Param::kNoteRaw;
+    out.idx = static_cast<std::uint16_t>(port);
+    out.a = static_cast<std::int32_t>(note);
+    out.b = static_cast<std::int32_t>(vel);
+    out.c = on ? 1 : 0;
+    return TranslateOutcome::kOk;
+  }
+
+  // `loop new` / `loop record <slot> record|overdub|replace <port>` /
+  // `loop stop <slot> [grid]` / `loop erase <slot>` / `loop undo <slot>` /
+  // `loop length <slot> auto|fixed <ticks>|quantized <grid>` -- docs/
+  // proposals/looper-in-gui-contract.md §7 item 4: the SAME `loop ...`
+  // grammar shell_loop_commands.cpp implements, translated here so the
+  // integrated GUI backend can drive it too. Unlike kNoteRaw above, every one
+  // of these Params already has an Engine::push_command case (Engine::
+  // cmd_loop, engine.cpp) -- no drain-loop special case is needed, they ride
+  // the normal Command ring exactly like `clip add`/`launch` above. Ports are
+  // BARE numeric indices, same convention as the `note` verb just above.
+  if (t.size() == 2 && t[0] == "loop" && t[1] == "new") {
+    // Always the legacy sequential-append form: no `id <n>` suffix here (that
+    // lands with item 6's `clip add ... loop <slot> id <n>` grammar, a later
+    // slice) -- mirrors shell_loop_commands.cpp's own `loop new` exactly.
+    out.param = Param::kLoopNew;
+    out.idx = kNoLoopExplicitId;
+    return TranslateOutcome::kOk;
+  }
+
+  if (t.size() == 5 && t[0] == "loop" && t[1] == "record") {
+    std::uint64_t slot = 0;
+    if (!parse_uint(t[2], slot) || slot > 0xFFFF) {
+      detail = "bad loop slot: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    LoopRecordMode mode{};
+    if (t[3] == "record") {
+      mode = LoopRecordMode::kRecord;
+    } else if (t[3] == "overdub") {
+      mode = LoopRecordMode::kOverdub;
+    } else if (t[3] == "replace") {
+      mode = LoopRecordMode::kReplace;
+    } else {
+      detail = "loop record mode: record|overdub|replace";
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t port = 0;
+    if (!parse_uint(t[4], port) || port >= kMaxPorts) {
+      detail = "bad loop record port: " + std::string(t[4]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kLoopRecordStart;
+    out.idx = static_cast<std::uint16_t>(slot);
+    out.a = static_cast<std::int32_t>(mode);
+    out.b = static_cast<std::int32_t>(port);
+    return TranslateOutcome::kOk;
+  }
+
+  if (t.size() >= 3 && t.size() <= 4 && t[0] == "loop" && t[1] == "stop") {
+    std::uint64_t slot = 0;
+    if (!parse_uint(t[2], slot) || slot > 0xFFFF) {
+      detail = "bad loop slot: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t grid = 0;
+    if (t.size() == 4 && !parse_uint(t[3], grid)) {
+      detail = "bad grid: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kLoopRecordStop;
+    out.idx = static_cast<std::uint16_t>(slot);
+    out.a = static_cast<std::int32_t>(grid);
+    return TranslateOutcome::kOk;
+  }
+
+  if (t.size() == 3 && t[0] == "loop" && (t[1] == "erase" || t[1] == "undo")) {
+    std::uint64_t slot = 0;
+    if (!parse_uint(t[2], slot) || slot > 0xFFFF) {
+      detail = "bad loop slot: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = t[1] == "erase" ? Param::kLoopErase : Param::kLoopUndo;
+    out.idx = static_cast<std::uint16_t>(slot);
+    return TranslateOutcome::kOk;
+  }
+
+  if (t.size() >= 4 && t.size() <= 5 && t[0] == "loop" && t[1] == "length") {
+    std::uint64_t slot = 0;
+    if (!parse_uint(t[2], slot) || slot > 0xFFFF) {
+      detail = "bad loop slot: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    LoopLengthMode mode{};
+    std::uint64_t value = 0;
+    if (t[3] == "auto") {
+      mode = LoopLengthMode::kAuto;
+    } else if (t[3] == "fixed" && t.size() == 5) {
+      mode = LoopLengthMode::kFixed;
+      if (!parse_uint(t[4], value)) {
+        detail = "bad length (ticks): " + std::string(t[4]);
+        return TranslateOutcome::kInvalidArgument;
+      }
+    } else if (t[3] == "quantized" && t.size() == 5) {
+      mode = LoopLengthMode::kQuantized;
+      if (!parse_uint(t[4], value)) {
+        detail = "bad grid (ticks): " + std::string(t[4]);
+        return TranslateOutcome::kInvalidArgument;
+      }
+    } else {
+      detail = "usage: loop length <slot> auto|fixed <ticks>|quantized <grid>";
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = Param::kLoopLength;
+    out.idx = static_cast<std::uint16_t>(slot);
+    out.a = static_cast<std::int32_t>(mode);
+    out.b = static_cast<std::int32_t>(value);
+    return TranslateOutcome::kOk;
+  }
+
   return TranslateOutcome::kUnknownCommand;
 }
 
 // Builds one `style route <role> <port>:<ch>` Command out of a
 // DefaultStyleRoute entry, through the SAME encoding cmd_style()'s "route"
-// verb uses (components/hostrt/shell_music_commands.cpp): `b = port |
+// verb uses (components/platform/hostrt/shell_music_commands.cpp): `b = port |
 // (channel << 8)`, where `channel` is 0-based (split_port_channel converts
 // the 1-based text form -- shell_parse.cpp -- before encoding). The role
 // name always resolves: kDefaultStyleRoutes only ever holds the fixed,
@@ -402,7 +707,7 @@ struct InProcessBrainSession::Impl {
   SpscRing<OutEvent, kOutEventRingCapacity> out_event_ring;
   SpscRing<PathCommand, kPathCommandRingCapacity> path_command_ring;
   SpscRing<PathResult, kPathResultRingCapacity> path_result_ring;
-  // Phase-6 Theme 2 (Decision 1/2/3): gui_sonotron_audio::AudioEngine's
+  // Phase-6 Theme 2 (Decision 1/2/3): sonotron::audio::AudioBackend's
   // producer-side ring handle, set (or left null) by set_audio_ring()
   // BEFORE start() -- see that method's own doc comment for the
   // synchronization argument. Never touched after run_engine() reads it
@@ -450,8 +755,9 @@ void InProcessBrainSession::Impl::run_engine() {
       alsa.send(ev.port, ev.msg);
     }
     // Phase-6 Theme 2 (Decision 1/3/4): realize ONLY the primary integrated
-    // output port through gui_sonotron_audio's Synth. audio_out_ring is
-    // null in --control mode and whenever no AudioEngine was attached;
+    // output port through the ISoundEngine wired behind AudioBackend.
+    // audio_out_ring is null in --control mode and whenever no AudioBackend
+    // was attached;
     // try_push is best-effort (MAY drop under backpressure, same asymmetric
     // policy as out_event_ring below) -- this is a felt-latency interactive
     // path, never a stall point for the engine thread.
@@ -491,11 +797,38 @@ void InProcessBrainSession::Impl::run_engine() {
     // Drain the Command ring: never silently dropped by the PRODUCER side
     // (see InProcessBrainSession::send()) -- the engine just applies
     // whatever is queued, in FIFO order, through the exact same
-    // Engine::push_command every exec_line handler already calls.
+    // Engine::push_command every exec_line handler already calls. ONE
+    // special case: Param::kNoteRaw (docs/proposals/looper-in-gui-contract.md
+    // §2/§7 items 1/2) has no case in Engine::push_command's own dispatch
+    // switch (it would land on the unhandled-param default and emit
+    // kUnknownCommand, see abi.hpp's own kNoteRaw comment) -- it is decoded
+    // to raw MIDI bytes and fed through the SAME feed_midi() entry point
+    // item 3's ALSA drain below uses, exactly like Shell::cmd_note's own L1
+    // handling (shell_music_commands.cpp).
     Command cmd;
     while (command_ring.try_pop(cmd)) {
+      if (cmd.param == Param::kNoteRaw) {
+        std::uint8_t bytes[3];
+        Shell::note_raw_to_bytes(cmd, bytes);
+        shell.feed_midi(static_cast<std::uint8_t>(cmd.idx & 0xFF),
+                        Span<const std::uint8_t>(bytes, sizeof(bytes)));
+        continue;
+      }
       shell.push_command(cmd);
     }
+
+    // Hardware MIDI-in (docs/proposals/looper-in-gui-contract.md §7 item 3):
+    // drains ALSA input and feeds it through the SAME feed_midi() entry point
+    // the kNoteRaw special case above uses -- mirrors sonotron-server's own
+    // run_server loop exactly (apps/sonotron-server/main.cpp:324-326).
+    // drain_input() is itself a safe no-op when ALSA never opened (m_seq ==
+    // nullptr, alsa_midi.hpp), so this needs no extra alsa_ok gate; before
+    // this fix, physical MIDI hardware plugged into gui-sonotron's `in0`
+    // ALSA port produced literally zero effect (the port was opened, a route
+    // was staged, and no byte was ever read off the wire).
+    alsa.drain_input([&shell](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
+      shell.feed_midi(port, Span<const std::uint8_t>(bytes, len));
+    });
 
     // Drain the path-command ring the same way: apply every queued
     // `midi-source load <path>` straight to the engine-owned Shell (through
@@ -640,12 +973,18 @@ void InProcessBrainSession::send(std::string_view command_line) {
   }
 
   // Auto-route the default band (see kDefaultStyleRoutes's own comment)
-  // right after a successful `style load` -- and only then: routing before a
-  // style is loaded would apply to whatever style loads next, not this one,
-  // and there is no style to route if the load itself never reached the
-  // ring. Same validated Command path as every other verb here (never a
-  // shortcut around push_command).
-  if (cmd.param == Param::kStyleLoad) {
+  // right after a successful `style load` OR `style switch` -- and only then:
+  // routing before a style is active would apply to whatever style comes
+  // next, not this one, and there is nothing to route if the command itself
+  // never reached the ring. `style switch` (the browser's playing-time morph,
+  // browser_panel.cpp) MUST route too: Route::enabled defaults to false and
+  // ONLY kStyleRoute flips it, so a switch that was never preceded by a load
+  // (e.g. the user pressed Play, THEN picked a style) would otherwise emit no
+  // MIDI on out0 and stay silent forever. Re-enabling an already-enabled
+  // route is idempotent, so routing on every load/switch is harmless. Same
+  // validated Command path as every other verb here (never a shortcut around
+  // push_command).
+  if (cmd.param == Param::kStyleLoad || cmd.param == Param::kStyleSwitch) {
     for (const DefaultStyleRoute& route : kDefaultStyleRoutes) {
       if (!m_impl->command_ring.try_push(make_default_style_route_command(route))) {
         BrainEvent warn;

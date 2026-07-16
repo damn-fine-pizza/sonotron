@@ -1,0 +1,39 @@
+# Golden: Phase-7 node 9210 (Option-2 generated lead) -- "ballad" style, VarD
+# peak section, a |C|F| two-bar change. Locks ballad's generated kLeadMotif
+# (the new TrackRole::kLead pattern in ballad.hpp's kVarDPatterns, no other
+# section) -- the reflection's own most-conspicuous model gap, "a ballad style
+# with no vocal-style line at all": seed=1503, length=3, center_degree=2 (the
+# 3rd, the classic vocal-melody color tone), vel=62, gate=kGateHeld (3600
+# ticks -- each onset's tail overlaps the next by design, a single continuous
+# legato line rather than three separate stabs), idiom_role=kDrums (onset
+# candidates drawn from kVarDDrums' own 8-step even-16th kick/snare/ride
+# mask), gm_program=53 (Voice Oohs -- the literal "vocal-style" line, owner
+# sign-off, see docs/proposals/phase7-9210-motif-generate-option2-leads.md
+# section 4.3). Note ballad's OWN existing golden (arranger_voicing.acmd) only
+# exercises varA -- varD (and this kLead line) has zero prior coverage. Two
+# full bars of VarD exercise BOTH halves of the call-and-response repeat
+# policy (motif.hpp's apply_repeat): bar 1 (repeat=0, over C) plays the
+# generated phrase verbatim -- the "statement" -- and bar 2 (repeat=1, over F)
+# applies the seed's own kDiatonicTranspose with a repeat-keyed amount -- the
+# "answer". Routes drums/bass/chord1 following arranger_band.acmd's own
+# convention, plus `style route lead synth:7` -- WITHOUT this route the new
+# kLead content never appears in the golden at all (the gap this fixture
+# closes). Any accidental change to ballad's kLeadMotif or to kVarDDrums'
+# onset mask moves these notes/ticks and fails this test.
+key C major
+port open out virt as synth
+chord out synth:4
+style load ballad
+style route drums synth:10
+style route bass synth:2
+style route chord1 synth:3
+style route lead synth:7
+style section varD
+seq new verse
+seq add C 1bar
+seq add F 1bar
+seq loop on
+seq play
+transport start
+advance 7680
+quit

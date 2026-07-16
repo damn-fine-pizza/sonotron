@@ -14,7 +14,7 @@
 # needed here) so the classifier has a known, deterministic ChordState/Key to
 # work against without exercising live chord-detect in this golden.
 #
-# The shared fixture `components/midisrc/tests/fixtures/tiny.mid` (also used
+# The shared fixture `components/platform/midisrc/tests/fixtures/tiny.mid` (also used
 # by accompany_basic/accompany_melody_detect and midisrc's own tests) carries
 # C4 (a chord tone: the root) then D4 (a scale degree, not a chord tone -- ii
 # over the C-major home chord) on channel 0, plus one drum hit (channel 9,
@@ -27,6 +27,6 @@
 key C major
 style load basic
 restyle blues
-midi-source load components/midisrc/tests/fixtures/tiny.mid
+midi-source load components/platform/midisrc/tests/fixtures/tiny.mid
 advance 3000
 quit

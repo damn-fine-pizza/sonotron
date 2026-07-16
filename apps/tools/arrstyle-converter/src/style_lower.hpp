@@ -8,7 +8,7 @@
 // Style-lowering pass (Phase-5 Item #8, first slice): reads a canonical
 // StyleModel (§4, model.hpp) and EMITS C++ SOURCE TEXT in the device's
 // constexpr Style/StyleSection/StylePattern/StyleEvent format
-// (components/arrangrr/include/arrangrr/arranger/style.hpp,
+// (components/core/arrangrr/include/arrangrr/arranger/style.hpp,
 // arrangrr/arranger/styles/bossa.hpp is the reference shape). This is a
 // text-generating codegen pass, NOT a linker of arrangrr: the tool never
 // includes an arrangrr header and never constructs an arrangrr::Style object;

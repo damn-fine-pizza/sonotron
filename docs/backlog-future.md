@@ -200,7 +200,7 @@ The standalone-over-ALSA wiring is the smallest thing that makes the workstation
 audible; the follow-up is an **in-process peer**, where the GUI/daemon feeds
 arrangrr's `OutEvent` MIDI stream directly to a `melodd::Synth` instance in the
 same process — no ALSA round-trip, no separate binary — via the orchestrator's
-opaque-reference pattern (`components/orchestrator`: consume a peer through a
+opaque-reference pattern (`components/platform/orchestrator`: consume a peer through a
 contract, not a concrete type). The synth is reused unchanged; only the wiring
 (who calls `note_on`/`render`) moves from an ALSA MIDI parser + miniaudio device
 callback to a direct in-process call from the daemon's own output sink. "Deep

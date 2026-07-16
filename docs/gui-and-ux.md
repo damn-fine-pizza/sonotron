@@ -5,8 +5,8 @@ workstation screen, its two working flows, the GUI↔core wire contract, the as-
 shipped binary, the pixel-perfect design target, the product-level flow set, and the sibling TUI
 piano/MIDI-monitor spec. It stays **bound** by:
 
-- `components/arrangrr/include/arrangrr/abi.hpp` — the frozen v1 command/event vocabulary.
-- The shipped UDS-JSONL adapter (`components/hostrt/uds_server.*`, `jsonl.cpp`, `shell.cpp`).
+- `components/core/arrangrr/include/arrangrr/abi.hpp` — the frozen v1 command/event vocabulary.
+- The shipped UDS-JSONL adapter (`components/platform/hostrt/uds_server.*`, `jsonl.cpp`, `shell.cpp`).
 - The naming/architecture locks in `docs/product-vision.md` (sonotron = host workstation, arrangrr =
   core brain, melodd = audio peer).
 
@@ -235,7 +235,9 @@ A searchable tree of the three draggable material kinds:
   field applies a case-insensitive substring filter over style names. Drag a style → a grid cell; a
   style *section* → a grid cell.
 - **Clips** — chord-sequence and step-track material the user authored/recorded. **PLACEHOLDER** —
-  always `(none authored yet)` (no recorder/authoring UI, no clip primitive).
+  always `(none authored yet)`: there is no recorder/authoring UI to populate this browser list. (Not
+  to be confused with the core's `ClipMatrix` launch primitive, §4.4, which the grid now binds to for
+  real — the gap here is specifically *user-authored* content, not the launch mechanism.)
 - **MIDI seqs** — recorded chord progressions (`ChordSequence`, degrees stored relative to key so
   they transpose/re-harmonise, D28). **PLACEHOLDER** — always empty.
 
@@ -253,28 +255,36 @@ kChordSequence, kStepTrack}`:
 - a **step track** (`track` — a hand-authored pattern for that part).
 
 **Drag from browser** drops material into a cell and records which primitive it launches — a cell
-**accepts** a `SONOTRON_STYLE_INDEX` drag and calls `set_cell(kStyleSection, name)`. **REAL** — cell
-*content* is real today; only *launch* is placeholder (only `kEmpty`/`kStyleSection` are reachable
-from the UI).
+**accepts** a `SONOTRON_STYLE_INDEX` drag, calls `set_cell(kStyleSection, name)` for the GUI-local
+display copy, **and** registers a real `ClipMatrix` clip at that cell's own stable id (`clip add
+<role> <scene> style <section> id <id>`, `grid_panel.cpp`'s drop handler). **REAL** — cell *content*
+is real, and (see below) so is *launch*; only `kEmpty`/`kStyleSection` are reachable from the UI (the
+`kChordSequence`/`kStepTrack` kinds have no drag source yet).
 
-**Launching.** Launching a column ("Scene ▶") fans out its cells' launch commands; launching a single
-cell launches just that clip; an empty cell in a launched scene mutes its part. **Launch quantize** (1
-bar / 2 bars / instant) is honoured by the **core** — launch timing is a musical decision that belongs
-where the clock lives, not smeared across the socket. **Today launch is INERT:** the `>` scene button
-and the cells are wrapped in `BeginDisabled(!kGridLaunchWired)` (`inline constexpr bool
-kGridLaunchWired = false`), greyed with a *"Launch awaits the core clip primitive (§4.4/§10.3)"*
-tooltip. Flipping the flag to true — once the core clip primitive + `launch/stop clip` / `launch
-scene` verbs ship — lights the affordance with no panel rewrite.
+**Launching — shipped.** Launching a column ("Scene ▶") applies the column's `SectionType` via the
+existing `style section` verb and sends `launch scene <n> quantize <q>`; launching a single filled
+cell sends `launch clip <id> quantize <q>` (`kDefaultLaunchQuantizeBars = 1`). **Launch quantize** is
+honoured by the **core** — launch timing is a musical decision that belongs where the clock lives, not
+smeared across the socket. `inline constexpr bool kGridLaunchWired = true`
+(`apps/gui-sonotron/src/grid_model.hpp`) — the `>` scene button and the cells are no longer
+`BeginDisabled`; clicking a filled cell sends the real `launch clip` verb and opens it in Sequence
+Edit. Launched state is **read back for real**, not locally echoed: `AppState::clip_state(id)` decodes
+the core's `clip` `OutEvent` into `ClipLaunchState{kStopped, kArmed, kPlaying, kQueuedStop}`
+(`app_state.hpp`/`app_state.cpp`), and armed/playing/queued-stop all render as "lit" in the cell.
 
-**Built on a real core clip primitive (decided — do it at the root, do not fake it).** Today the core
-has *no* first-class clip/scene object: the standalone Looper (node 6000) and recall/song-mode (node
-8000) are unbuilt. Rather than ship a throwaway GUI-side launcher that fakes clips by scripting
-`style section`/`seq*`/`track*`, the restart **brings the real clip/scene primitive forward** as
-front-of-line additive core work (§10): a first-class clip object, `launch/stop clip <id> quantize
-<n>` verbs, and a `clip` state event. The Repeat Zone binds to *that* — each cell is a real clip the
-core owns and launches on the quantize boundary. The primitive is designed to subsume the three
-existing material kinds, not ignore them; `grid_model` holds the matrix and scene structure, the
-launch/stop/quantize semantics live in the core behind the new `clip` verbs.
+**Built on a real core clip primitive — shipped (Phase-5 Item #2).** The core's `ClipMatrix`
+(`components/core/arrangrr/include/arrangrr/clip/clip_matrix.hpp`) is a first-class, Engine-owned
+bounded POD pool of clips (`{part_role, scene_index, kind, content_index, state, n_bars,
+due_bar_index}`); the ABI carries `kClipAdd`/`kClipLaunch`/`kClipStop` (`abi.hpp`). The Repeat Zone
+binds to this real primitive — the GUI does **not** ship a throwaway launcher that fakes clips by
+scripting `style section`/`seq*`/`track*`. Landed across `3398f04` (readback into `AppState` +
+Shape-A `ClipMatrix::add_at` explicit-id binding), `f531d8f` (renamable scenes + `scenes.json`
+persistence), `9ce480d` (real-content cell preview via `preview::preview_for`), `f1fa7d7` (per-scene
+`SectionType` + variations drag palette), and `9382c07` (GUI-driven auto-song scene advance,
+`next_scene_to_launch`). `grid_model.hpp` holds the display matrix/scene structure; the
+launch/stop/quantize/armed-playing state machine lives in the core behind the `clip` verbs, exactly
+as decided (§11 decision 1). The standalone Looper (node 6000) and full recall/song-mode persistence
+(node 8000) remain separately unbuilt — see item 6 below and §13.
 
 ### 4.5 Intention zone — `render_intention_panel`
 
@@ -358,7 +368,7 @@ What crosses:
 - **Trap:** sending `quit`/`exit` over the socket terminates the whole host process for every client.
   Never wire window-close to a bare `quit`.
 - Best client template to imitate:
-  `components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
+  `components/platform/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
 
 ### Pure-client boundary rules
 - **Single binary, single thread, poll-in-frame.** The ImGui render loop (~60 fps, ~16 ms budget)
@@ -382,7 +392,7 @@ window/render libs, isolated from the boundary rules above.
 
 ### 5.1 Commands the GUI SENDS (text line → resolved `Param`)
 
-Exact verb spellings live in `components/hostrt/shell_music_commands.cpp` / `shell_io_commands.cpp`.
+Exact verb spellings live in `components/platform/hostrt/shell_music_commands.cpp` / `shell_io_commands.cpp`.
 
 **Transport / clock**
 
@@ -486,7 +496,7 @@ Events are decoded by `parse_brain_event` (JSONL, UDS backend) or `brain_event_f
 | `warn` | `kWarn` | log only | stdout log only |
 | `error` (`{"error","cmd"}`) | `kError` | log only | stdout log only (untranslated commands / `midi-source` failures) |
 | `param-state` echo | *(dropped)* | — | **NOT decoded** → no live mirror of groove/arp/parts/style. Gap (§10) |
-| `clip` state | *(dropped)* | — | not modeled — yields `kUnknown` |
+| `clip` state | `kClip` | `m_clip_states[clip_id]` (a `ClipLaunchState`) | **Repeat Zone**: armed/playing/queued-stop cells render "lit"; a real per-cell readback (Phase-5 Item #2, §4.4), not a local echo |
 
 **Connection status** is not an event: each frame reads `BrainSession::status()` → the green/red dot.
 **Activity gate** (`harmony_active()`): true when transport is playing OR a chord was steered this
@@ -501,10 +511,15 @@ The product-level flow set is the experience spine; each flow names the L1 verb(
 event(s) reacted to, and the as-built status on today's GUI. The screen that realizes flows #1, #2,
 #4, #5, #10 is this document's §3–§4; where the vision reaches past the built screen it is marked.
 
-**Reality check — the six L1 shapes the GUI sends today:** `transport start|stop|continue`, `panic`,
-`style load <name>`, `part <role> mute|solo on|off`, plus `midi-source load <path>` (wired in the
-session but with **no UI trigger**). Flows the vision lists beyond these are not yet reachable from the
-GUI; each is marked.
+**Reality check — the L1 shapes the GUI sends today:** `transport start|stop|continue`, `panic`,
+`style load <name>`, `part <role> mute|solo on|off`, plus (Phase-5 Item #2, the Repeat Zone, §4.4)
+`style section <type>`, `launch scene <n> quantize <q>`, `launch clip <id> quantize <q>`, `clip add
+<role> <scene> style <section> id <id>` — plus `midi-source load <path>` (wired in the session but
+with **no UI trigger**). Flows the vision lists beyond these are not yet reachable from the GUI; each
+is marked. *(The v02 redesign, outside this reconciliation's scope, has also added at least `bpm <n>`
+and `transpose <n>` sends from the transport panel and a `style switch` send from the browser panel —
+this bullet is not a complete inventory of every send in the current tree; treat it as the
+Repeat-Zone-relevant subset, and see "Aperto per il proprietario" for the broader gap.)*
 
 ### Flow #1 — Start / set the base (from zero to a living band)
 Pick style + key + BPM + meter (a few one-line choices, not menus-deep); press play and a full,
@@ -560,10 +575,10 @@ the path as a recallable Song. **The WOW:** you build a song's shape by launchin
 the shape you played becomes a thing you can recall — no timeline you paint on.
 - **Sends:** `style section <type>`, `launch scene <n> quantize <q>`, `launch clip <id> quantize <q>`,
   `stop clip <id>`. **Reacts to:** `clip`, `section`, `chord`, `midi-out`. **As-built:** drop-to-fill
-  in a grid cell is **REAL**; launch is **INERT** (`kGridLaunchWired==false`, §4.4) until the clip
-  primitive ships. *"You win over the Director" on sections is not yet built — user-wins is shipped for
-  chords (`kLivePriority`); generalizing arbitration to sections is a real ABI commitment
-  (`docs/architecture.md`, NEEDS-DECISION).*
+  in a grid cell is **REAL**; launch is **REAL and shipped** (`kGridLaunchWired==true`, §4.4 — Phase-5
+  Item #2, the core `ClipMatrix`/`clip` event). *"You win over the Director" on sections is not yet
+  built — user-wins is shipped for chords (`kLivePriority`); generalizing arbitration to sections is a
+  real ABI commitment (`docs/architecture.md`, NEEDS-DECISION).*
 
 ### Flow #5 — Shape the feel (you hold the feel; the Director never overwrites your hand)
 The instant you set a value by hand, that lane is marked "yours"; the Director proposes around it,
@@ -663,8 +678,10 @@ States per panel:
   already playing: a stray `kBeat` forces the label to `playing`.
 - **Browser:** empty search → all 16 styles; filtered → case-insensitive substring subset;
   Clips/MIDI-seqs always `(none authored yet)`.
-- **Grid:** at rest → all cells `.`; content dropped → cell shows the style name; launch always
-  disabled/greyed; scene count clamped 3–8 (`+ Scene` hidden at 8).
+- **Grid:** at rest → all cells `.`; content dropped → cell shows the style name AND registers a real
+  `ClipMatrix` clip; a filled cell click sends a real `launch clip` and reads back armed/playing/
+  queued-stop as "lit" from the core's `clip` event (§4.4/§6); scene count clamped 3–8 (`+ Scene`
+  hidden at 8).
 - **Intention:** at rest / no chord → disabled `follows --`, `next --`, header `(at rest)`; pending
   staged at rest → amber `next` shows even while grey elsewhere; active + current → green `follows`;
   energy/tension/valence always disabled zeros.
@@ -691,7 +708,8 @@ namespace sonotron {
 
 struct BrainEvent {                    // one decoded inbound event (JSONL parsed here)
   enum class Kind { MidiOut, Chord, Section, Transport, Warn,
-                    ChordFollowed /*additive, gap P0-1*/, Beat /*additive, gap P0-2*/ };
+                    ChordFollowed /*additive, gap P0-1*/, Beat /*additive, gap P0-2*/,
+                    Clip /*additive, Phase-5 Item #2, shipped*/ };
   Kind kind;
   // small POD payload: port, tick, name/code, note strings … panels never see raw text
 };
@@ -723,7 +741,7 @@ class BrainSession {
   `thru in0 out0`, exchanging `Command`/`OutEvent` over SPSC rings (`src/spsc_ring.hpp`) and bridging
   `OutEvent`→`BrainEvent` in-process (`brain_event_from_outevent.cpp`). Panels are unaffected — they
   only ever see the abstract `BrainSession`, exactly the swap this abstraction was built to allow. Both
-  backends surface the same 7 event kinds and accept the same six command shapes; the in-process one
+  backends surface the same 8 event kinds and accept the same six command shapes; the in-process one
   additionally routes `midi-source load <path>` over a path ring but nothing calls it. Per-OS MIDI
   (ALSA/CoreMIDI/WinMM) lives in this host layer, **never** in a pure ImGui client over the socket.
 - The JSONL decoder lives GUI-side, scoped to the shipped shapes plus the additive ones — same "small
@@ -738,7 +756,7 @@ Zone, the harmony visualiser, and the playhead all depend on core work the GUI m
 additive to the frozen v1 ABI: none touches an existing id, none breaks the freeze. **P0 = blocks the
 central live surface.**
 
-**Front-of-line batch (built before/with the GUI zones that depend on them; the first two are
+**Front-of-line batch (built before/with the GUI zones that depend on them; all three are now
 shipped):**
 1. **[P0, shipped] Followed-chord event.** `chord play` and live detection change harmony *silently*;
    the only `chord` event is the recorded-sequencer path. `kChordFollowed {current, pending, valid,
@@ -747,10 +765,12 @@ shipped):**
 2. **[P0, shipped] Beat/position heartbeat.** `Transport::position()` (bar/beat/tick) was in-process
    only. `kBeat`/`kPosition` (and `kTransport` firing on start/stop/continue) light the playhead and
    bar-progress readout.
-3. **Clip/scene primitive + launch-quantize (nodes 6000/8000, brought forward).** A first-class clip
-   object, `launch/stop clip <id> quantize <n>` and `launch scene <n> quantize <q>` verbs, and a
-   `clip` state event, launch-quantize honoured by the core clock. The Repeat Zone binds to this real
-   primitive — we do **not** ship the throwaway GUI-side launcher.
+3. **[P0, shipped] Clip/scene primitive + launch-quantize (nodes 6000/8000, brought forward).** A
+   first-class clip object (`ClipMatrix`, `abi.hpp`'s `kClipAdd`/`kClipLaunch`/`kClipStop`),
+   `launch/stop clip <id> quantize <n>` and `launch scene <n> quantize <q>` verbs, and a `clip` state
+   event, launch-quantize honoured by the core clock. The Repeat Zone binds to this real primitive —
+   the GUI does **not** ship the throwaway launcher once feared (Phase-5 Item #2, §4.4; landed across
+   `3398f04`/`f531d8f`/`9ce480d`/`f1fa7d7`/`9382c07`).
 
 **Follow-on (after the front batch):**
 4. **State-on-connect snapshot.** All Params are write-only, `Op::kGet` is unwired; a GUI attaching
@@ -759,12 +779,13 @@ shipped):**
    today (§6) — no live mirror of mutes/style/groove/arp.*
 5. **Positive ack / request correlation.** No success ack today; `Command` has no correlation field.
    Add an ack event. Polish.
-6. **Persistence/recall (node 8000).** Saving the grid/Scene/Song; folds into the clip/scene work.
-   Until it lands, the GUI stores its grid in its own config.
+6. **Persistence/recall (node 8000).** Saving the grid/Scene/Song beyond the shipped `scenes.json`
+   host-side rename/section storage (§4.4); full Song/Scene recall still folds into this follow-on
+   item. Until it lands, the GUI stores its grid/scene names in its own config, not the core.
 
-Two further additive proposals flagged but lower priority: a **held-notes / detector state event** ("3
-of 3 fingers held" is in-process introspection only), and the clip/scene primitive (item 3 above).
-Order: **1, 2, 3 up front** (1 and 2 shipped), then 4/5/6.
+One further additive proposal flagged but lower priority: a **held-notes / detector state event** ("3
+of 3 fingers held" is in-process introspection only). Order: **1, 2, 3 up front** (all three shipped),
+then 4/5/6.
 
 **Roadmap orphan.** The `ScaleDegree`/`RelativeInterval` style-data extension (the relative-pattern
 editor's prerequisite) has no node number and needs one (likely under **~3300**), independent of when
@@ -787,8 +808,8 @@ source comfortably (~20 bits of 40 available), packed like the existing `kChord`
 
 Resolved 2026-07-10 in review of the workstation screen:
 1. **Clip primitive.** Wait for the real clip in the core, but **bring it forward** — build the
-   first-class clip/scene primitive (§10.3) as front-of-line core work; do **not** ship the throwaway
-   GUI-side launcher. The Repeat Zone binds to the real primitive.
+   first-class clip/scene primitive (§10 item 3) as front-of-line core work; do **not** ship the throwaway
+   GUI-side launcher. The Repeat Zone binds to the real primitive. (Shipped, Phase-5 Item #2 — §4.4.)
 2. **Two P0 wire gaps.** **Build them, do not degrade.** `kChordFollowed` and `kBeat`/position are
    front-of-line; the harmony visualiser and playhead are real from day one, not inferred. (Both
    shipped.)
@@ -847,8 +868,10 @@ hover-only).
 Play/Stop/Continue, Panic, connection status; TO-BE-WIRED: tempo/BPM, meter, key, clickable style
 chip, graphical bar-progress. Working row — Browser (style library; `style load` on select; drag onto
 a grid cell is real); Repeat-Zone grid THE HERO (launchable clip cells in scenes across part rows;
-states empty / has-content / armed(amber) / playing(green) / stopped; launching INERT today, design
-the full armed→playing→stopped lifecycle; drop-to-fill is real); right rail — Intention (LIVE harmonic
+launching is real and shipped — `launch clip`/`launch scene`, real armed/playing/queued-stop readback
+off the core's `clip` event (§4.4) — but rendered today as a binary lit/unlit cell, not the distinct
+armed(amber)/playing(green)/queued-stop states; design that full lifecycle visually distinct;
+drop-to-fill is real); right rail — Intention (LIVE harmonic
 visualizer: `follows` green + `next` amber + key; TO-BE-WIRED energy/tension/valence sliders) over
 Parts (role/mute/solo/activity; mute/solo real optimistic-local — design a clear "commanded" look;
 TO-BE-WIRED per-part GM + volume). Sequence Edit — piano-roll/step canvas (placeholder today; design
@@ -1006,8 +1029,8 @@ DAW absences — every one exploits NTT / role-arranger / generativity / freesta
 
 ## 16. TUI companion spec — piano / MIDI monitor
 
-The sibling host TUI (`components/hostrt/console.*`, `shell.*`, and new files under
-`components/hostrt/`) carries the keyboard-first live surface the GUI deliberately does not
+The sibling host TUI (`components/platform/hostrt/console.*`, `shell.*`, and new files under
+`components/platform/hostrt/`) carries the keyboard-first live surface the GUI deliberately does not
 re-invent. Feature classification: **host-live + host-tool**. Bound by the same architecture locks as
 the GUI wire, restated here because a piano widget and a MIDI log feel like they belong "close to the
 engine" and they do not.
@@ -1017,7 +1040,7 @@ engine" and they do not.
    management, piano-key drawing, log buffers, filter predicates, monitor views, or color/unicode
    logic in `core/`. If a symbol needed here would have to live in `core/`, the feature is designed
    wrong.
-2. **All TUI code lives in `components/hostrt/`.** Panel manager, piano renderer, MIDI monitor
+2. **All TUI code lives in `components/platform/hostrt/`.** Panel manager, piano renderer, MIDI monitor
    formatter/filter pipeline, key-dispatch, resize handling, color/theme/unicode layers.
 3. **The simulated piano is an input device, not a shortcut.** A computer key produces MIDI bytes
    exactly as external hardware would, injected via `Shell::feed_midi(port, bytes)` on the same input
@@ -1075,7 +1098,7 @@ release, driven by `Shell::piano_key_event(char, bool pressed)` fed from parsed 
 (`\x1b[<code>;<mods>:<event>u`, event 1=press 2=repeat 3=release); autorepeat ignored, polyphonic and
 correct. **`kToggle`** — the Phase 2 behaviour. **SPACE** in piano focus toggles the two modes and logs
 the new mode (a mode switch only, never a musical key). Flags pushed: `0x1|0x2|0x8 = 11`, enabled with
-`CSI > 11 u`, popped with `CSI < 1 u`; parser in `components/hostrt/kitty_keys.{hpp,cpp}`. Enabling is
+`CSI > 11 u`, popped with `CSI < 1 u`; parser in `components/platform/hostrt/kitty_keys.{hpp,cpp}`. Enabling is
 **scoped to piano focus** and gated behind `isatty` (pushing globally would reroute every REPL
 keystroke). **Graceful degradation is mandatory** — on a terminal without the protocol the plain-byte
 toggle path still runs; both coexist across terminal types.

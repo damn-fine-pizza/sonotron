@@ -24,7 +24,7 @@ style route bass synth:2
 style route chord1 synth:3
 chord mode single
 chord detect on
-midi-source load components/midisrc/tests/fixtures/tiny.mid
+midi-source load components/platform/midisrc/tests/fixtures/tiny.mid
 transport start
 advance 3000
 quit

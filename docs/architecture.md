@@ -26,16 +26,19 @@ sonotron/                    project(sonotron)
 │   ├── gui-sonotron/        desktop frontend — ImGui/GLFW; pure-client GUI over an internal engine library
 │   ├── demo/                demonstration apps (clean · jam · shared lib)
 │   └── tools/               cli-arrangrr (host CLI) · arrstyle-converter · arrstyle-extractor · melodd
-├── components/              OUR libraries — flat; target-regime is a declared property, not a folder
-│   ├── common/              base, dual-target — Tick/time types, MidiMessage, ARR_ASSERT, bar constants
-│   ├── runtime/             dual-target kernel — Transport, OutScheduler, Runtime, Stage, Pipeline, MidiParser
-│   ├── arrangrr/            dual-target — the arranger stage (transport/scheduler removed → runtime)
-│   ├── chorddet/            dual-target — live ChordDetector + FollowedContext + theory, as a stage
-│   ├── midisrc/             host — SMF reader + MIDI-source stage (file I/O)
-│   ├── orchestrator/        host — composes named stage pipelines (Accompany)
-│   ├── melodd/              host — audio engine (SoundFont synth)
-│   ├── samplrr/             host — SLOT — sampler
-│   └── hostrt/              host — runtime glue + TUI (jsonl, uds, ALSA, panels, views)
+├── components/              OUR libraries — split on the regime axis (core/ vs platform/, see §3)
+│   ├── core/                platform-AGNOSTIC, freestanding-capable (compiles on STM32 M7 too)
+│   │   ├── common/          base, dual-target — Tick/time types, MidiMessage, ARR_ASSERT, bar constants
+│   │   ├── runtime/         dual-target kernel — Transport, OutScheduler, Runtime, Stage, Pipeline, MidiParser
+│   │   ├── chorddet/        dual-target — live ChordDetector + FollowedContext + theory, as a stage
+│   │   └── arrangrr/        dual-target — the arranger stage (transport/scheduler removed → runtime)
+│   ├── platform/            platform-DEPENDENT, needs a hosted OS — FLAT, no further regime nesting
+│   │   ├── midisrc/         host — SMF reader + MIDI-source stage (file I/O)
+│   │   ├── orchestrator/    host — composes named stage pipelines (Accompany)
+│   │   ├── hostrt/          host — runtime glue + TUI (jsonl, uds, ALSA, panels, views)
+│   │   └── engines/
+│   │       └── melodd/      host — audio engine (SoundFont synth)
+│   └── samplrr/             host — SLOT — sampler (not yet folded into platform/, deferred)
 ├── third_party/             vendored host-only deps: imgui · glfw (off-limits to freestanding)
 ├── tests/                   integration + golden + arm-smoke (freestanding link gate); unit tests live in-component
 ├── build/                   linux-x64/ · arm64/  (per-target output)
@@ -44,16 +47,28 @@ sonotron/                    project(sonotron)
 
 ## 3. Componentization principles
 
-**`components/` is flat; the target boundary is a *contract*, not a folder.** We do not
-split `components/` into `core/` vs `host/` sub-trees — that would force the same axis
-into every top-level dir and read as asymmetric. Instead each component **declares its
-target-regime** (freestanding/STM32-capable vs host-only) in its own CMake. CI
-cross-builds the freestanding components for `arm-none-eabi` and link-checks them
-(`nosys.specs`). Today this proves compile+link, not symbolic heap-absence — a real
-no-heap symbol scan is outstanding hardening — so the boundary is a **verified contract**
-still to be *fully* gated, not a directory. A target specialization is a **sibling
-component**, created only when needed (e.g. `arrangrr-arm64/` beside `arrangrr/`), never
-a pervasive folder split.
+**`components/` splits on the regime axis: `core/` vs `platform/`.** This reverses an
+earlier decision (this section used to say the opposite — components stayed flat and the
+target boundary was a per-component CMake declaration, never a folder). The owner locked
+the two-tier split instead: `components/core/` holds every platform-AGNOSTIC,
+freestanding-capable component (`common`, `runtime`, `chorddet`, `arrangrr` — compiles for
+BOTH host and `arm-none-eabi`, added unconditionally at the top level); `components/
+platform/` holds every component that needs a hosted OS (`midisrc`, `orchestrator`,
+`hostrt`, plus the `engines/` family, e.g. `melodd` — added only in the host `else()`
+branch). `platform/` itself stays **flat** (no further regime nesting inside it, `engines/`
+is a namespacing convenience for audio-realization components, not a third tier) — the
+folder boundary now *is* the regime contract for the two top-level tiers, no per-component
+prose declaration needed to know which side of the line a component sits on.
+
+The regime is still independently **verified**, not just declared by placement: CI
+cross-builds every `core/` component for `arm-none-eabi` and link-checks it (`nosys.specs`).
+Today this proves compile+link, not symbolic heap-absence — a real no-heap symbol scan is
+outstanding hardening. `components/samplrr` is a still-unwired placeholder slot and, as of
+this restructure, deliberately **not yet folded** into `platform/engines/` — a deferred
+follow-up, not an exception to the rule (it has no code and is not `add_subdirectory`'d
+anywhere today). A target specialization that cannot fit the two-tier split (e.g. a genuine
+third regime) would be a **sibling component**, created only when actually needed — not a
+pervasive folder split invented ahead of a real second case.
 
 **`apps/` are the deliverables.** `sonotron-server` (backend — links the components,
 serves the socket), `gui-sonotron` (desktop frontend), `cli-arrangrr` (host CLI), `demo/`
@@ -75,7 +90,8 @@ substitutes a file-fed detector for the live-keyboard one; `harmony`, `midi-fx`,
 
 **Sequencer — one transport, N sequencing-engines.** Two different things:
 1. **Transport / clock master** — *the time*, the "when". There is **one** (subdivisions/
-   polymeter layer on top). It now lives in `components/runtime` (§4), driven host-side.
+   polymeter layer on top). It now lives in `components/core/runtime` (§4), driven
+   host-side.
 2. **Sequencing-engine (per lane)** — *what* is scheduled on a part (step, euclidean,
    generative…). These are **N** and composable; extracted, an engine becomes a component
    (`sequencrr`), instantiated many times and wired by the pipeline. `Timeline` stays a
@@ -94,11 +110,11 @@ linear-timeline free-for-all — that is sonotron's identity.
 ### 4.1 The component dependency graph
 
 ```
-components/common      (base, dual-target, header-only)
+components/core/common      (base, dual-target, header-only)
   Tick/TickOffset/BpmX100/TickAccumulator/kPpqn/kGridPpqn/kMidiClockDivider,
   kBeatsPerBar/kTicksPerBeat/kTicksPerBar, ARR_ASSERT, MidiMessage + midi::*
-      ▲ PUBLIC                    ▲ PUBLIC
-components/runtime            components/arrangrr
+      ▲ PUBLIC                          ▲ PUBLIC
+components/core/runtime            components/core/arrangrr
   Transport, OutScheduler,      Arranger, ChordEngine, ChordSequencer,
   MidiParser,                   ArpeggiatorEngine, Timeline, Router, NoteTracker,
   Runtime<StageT,N>,            + a Stage-adapter implementing runtime's Stage contract
@@ -111,26 +127,29 @@ components/runtime            components/arrangrr
 `arrangrr` depend directly on `common`; the single `arrangrr → runtime` edge is narrow
 (the Stage port only). No edge points from `runtime`/`common` back to `arrangrr`.
 
-- **`components/common`** holds the base primitives every layer shares — the time
+- **`components/core/common`** holds the base primitives every layer shares — the time
   vocabulary, `MidiMessage`, the `ARR_ASSERT` macro, and the three bar constants. Pure
   data/constant/macro layer, header-only, dual-target.
-- **`components/runtime`** owns the clock and the emission machinery: `Transport` (owns no
-  I/O, never reads a clock — time is injected), one `OutScheduler` (the total-order
-  emission queue), `MidiParser`, the `Runtime<StageT,N>` driver, the `Stage`/`StageLike`
-  contract, and the `Pipeline<...>` composite. Dual-target, freestanding, no-heap.
-- **`components/arrangrr`** is reduced to a **pure arranger stage**: harmonic context +
-  transport tick in → band MIDI `OutEvent`s out. It keeps `Arranger`, `ChordEngine` (the
-  D47 gate), `ChordSequencer`, `ArpeggiatorEngine`, `Timeline`, `Router`, `NoteTracker`;
-  it lost `Transport`, `OutScheduler`, and the `advance_ticks` fire-loop to `runtime`.
-- **`components/chorddet`** holds the live `ChordDetector` + `FollowedContext` + `theory`,
-  promoted out of `arrangrr` as a dual-target-capable stage (`constexpr` throughout, a
-  128-bit held-note bitset, zero heap).
-- **`components/midisrc`** (host-only, file I/O) wraps a dependency-free SMF reader as a
-  MIDI-source stage. **`components/orchestrator`** (host-only) is the layer that
-  **instantiates and names** specific pipelines (e.g. `orchestrator::AccompanyPipeline`);
-  it composes stage instances but does not reimplement time or total order. VST/CLAP/LV2
-  and audio-source adapters live here (future). **`components/melodd`** is the host audio
-  engine (SoundFont synth); **`components/samplrr`** is a still-empty slot.
+- **`components/core/runtime`** owns the clock and the emission machinery: `Transport`
+  (owns no I/O, never reads a clock — time is injected), one `OutScheduler` (the
+  total-order emission queue), `MidiParser`, the `Runtime<StageT,N>` driver, the
+  `Stage`/`StageLike` contract, and the `Pipeline<...>` composite. Dual-target,
+  freestanding, no-heap.
+- **`components/core/arrangrr`** is reduced to a **pure arranger stage**: harmonic
+  context + transport tick in → band MIDI `OutEvent`s out. It keeps `Arranger`,
+  `ChordEngine` (the D47 gate), `ChordSequencer`, `ArpeggiatorEngine`, `Timeline`,
+  `Router`, `NoteTracker`; it lost `Transport`, `OutScheduler`, and the `advance_ticks`
+  fire-loop to `runtime`.
+- **`components/core/chorddet`** holds the live `ChordDetector` + `FollowedContext` +
+  `theory`, promoted out of `arrangrr` as a dual-target-capable stage (`constexpr`
+  throughout, a 128-bit held-note bitset, zero heap).
+- **`components/platform/midisrc`** (host-only, file I/O) wraps a dependency-free SMF
+  reader as a MIDI-source stage. **`components/platform/orchestrator`** (host-only) is
+  the layer that **instantiates and names** specific pipelines (e.g.
+  `orchestrator::AccompanyPipeline`); it composes stage instances but does not
+  reimplement time or total order. VST/CLAP/LV2 and audio-source adapters live here
+  (future). **`components/platform/engines/melodd`** is the host audio engine
+  (SoundFont synth); **`components/samplrr`** is a still-empty slot.
 
 ### 4.2 The Stage port / pipeline contract
 
@@ -141,7 +160,7 @@ class (per doctrine `DESIGN.md:577`, "compile-time polymorphism in the hot path;
 only at HAL boundaries" — a per-tick stage dispatch is the hot path):
 
 ```cpp
-// components/runtime/include/runtime/stage.hpp — no arrangrr include, no OutEvent named.
+// components/core/runtime/include/runtime/stage.hpp — no arrangrr include, no OutEvent named.
 struct StageContext {
   Tick now;                    // stream tick — the SAME injected clock every stage sees
   Tick transport_tick;         // transport's own musical position; meaningless if !playing
@@ -263,13 +282,13 @@ sequenced follow-up.
 ## 6. Placement rules — where new things go
 
 - **A new arrangrr module** (new header/source inside the freestanding brain, e.g. a new
-  MIDI-FX): `components/arrangrr/include/arrangrr/<module>/*.hpp` + `src/*.cpp` if it needs
-  a translation unit (most of `arrangrr` is header-only) — never a `host/` subfolder; the
-  component stays flat and the target-regime is declared in `CMakeLists.txt`
-  (`-fno-exceptions -fno-rtti`).
-- **A new base primitive** shared by both `runtime` and `arrangrr`: `components/common`.
+  MIDI-FX): `components/core/arrangrr/include/arrangrr/<module>/*.hpp` + `src/*.cpp` if it
+  needs a translation unit (most of `arrangrr` is header-only) — never a `host/`
+  subfolder; the component stays flat and the target-regime is declared by its placement
+  under `components/core/` (`CMakeLists.txt`'s `-fno-exceptions -fno-rtti`).
+- **A new base primitive** shared by both `runtime` and `arrangrr`: `components/core/common`.
 - **A new host-only runtime facility** (a new Shell command family, a TUI panel, a host
-  adapter): `components/hostrt/<name>.{cpp,hpp}` — flat.
+  adapter): `components/platform/hostrt/<name>.{cpp,hpp}` — flat.
 - **A new CLI-only concern** (argument parsing, a subcommand's wiring):
   `apps/tools/cli-arrangrr/main.cpp`.
 - **A new dev/import tool**: its own `apps/tools/<name>/` sibling, self-contained,
@@ -283,16 +302,16 @@ sequenced follow-up.
 **Naming/coverage anchors:** target names `arrangrr` (freestanding lib), `hostrt` (host
 lib), `cli_arrangrr` (CLI exe, dir `apps/tools/cli-arrangrr`, `OUTPUT_NAME cli-arrangrr` —
 demo launch scripts `pgrep` it by that name). The enforced CORE coverage gate measures
-`components/arrangrr/` + `components/runtime/` (with their own `tests/` and `tests/`
-excluded); `components/common/` is excluded from the branch gate (a header-only
-data/constant/macro layer with no branches). Golden tests run against
+`components/core/arrangrr/` + `components/core/runtime/` (with their own `tests/` and
+`tests/` excluded); `components/core/common/` is excluded from the branch gate (a
+header-only data/constant/macro layer with no branches). Golden tests run against
 `sonotron_server --script`.
 
 ## 7. The command/event ABI and the hook interface
 
 ### 7.1 The as-built binary ABI
 
-`components/arrangrr/include/arrangrr/abi.hpp` defines the typed binary contract (D26/
+`components/core/arrangrr/include/arrangrr/abi.hpp` defines the typed binary contract (D26/
 `0700`), enforced by `test_abi_frozen.cpp`'s `static_assert` wall:
 
 - `Op { kSet, kDo, kGet }`. `Command { op, param, idx, a, b, c }` (`sizeof <= 20`).
@@ -403,7 +422,7 @@ The style has no progression of its own; every part re-roots to a single *follow
 Play a chord → the band follows and **holds** it until you play another. This is the
 default and what a player expects.
 
-- **`FollowedContext`** (`components/chorddet/include/chorddet/followed_context.hpp`) is the
+- **`FollowedContext`** (`components/core/chorddet/include/chorddet/followed_context.hpp`) is the
   single owner of the followed chord. Live detection commits it immediately; it persists
   (nothing overwrites it) until the next live chord.
 - **Single-finger vs fingered** (`ChordDetector`): single-finger = one key names a

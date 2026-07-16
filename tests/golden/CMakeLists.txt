@@ -85,3 +85,19 @@ accompany_golden(accompany_melody_detect)
 # instead of Accompany's verbatim melody-thru (see accompany_restyle.acmd's
 # own header comment for the exact transform this pins).
 accompany_golden(accompany_restyle)
+
+# Phase 7 / node 9210 (Option-2 generated leads, owner sign-off in
+# docs/proposals/phase7-9210-motif-generate-option2-leads.md): bossa, samba,
+# funk and ballad each gained a brand-new TrackRole::kLead motif::generate
+# pattern in their VarD peak section with ZERO prior golden coverage (ballad's
+# only other golden, arranger_voicing.acmd, exercises varA, never varD/kLead).
+# Each fixture routes `lead` explicitly (`style route lead synth:7`) alongside
+# drums/bass/chord1 over a |C|F| two-bar change -- without that route the new
+# content never reaches the golden at all. Two full bars of VarD pin BOTH
+# halves of the call-and-response repeat policy: bar 1's verbatim "statement"
+# and bar 2's transposed "answer" (see each .acmd's own header comment for the
+# exact seed/center_degree/gate/gm_program this locks).
+arrangrr_golden(lead_bossa)
+arrangrr_golden(lead_samba)
+arrangrr_golden(lead_funk)
+arrangrr_golden(lead_ballad)
