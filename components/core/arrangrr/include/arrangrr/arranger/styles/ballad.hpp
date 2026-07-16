@@ -31,6 +31,19 @@ namespace ballad {
 inline constexpr std::int16_t kPadVoice = 48;
 inline constexpr std::int16_t kChord2Voice = 4;
 inline constexpr std::int16_t kArpVoice = 46;
+// Motif engine (9210, Option 2 / generated seed, node 9210 owner sign-off):
+// ballad's kLead model gap closed by generation -- "a ballad style with no
+// vocal-style line at all" was the most conspicuous corpus gap. Warm,
+// singing 3rd-centered contour on a wordless vocal voice; length 3 combined
+// with kGateHeld overlaps each onset's tail with the next by design, a
+// single continuous legato line rather than three separate stabs. Draws its
+// onset candidates from kVarDDrums' own even-16th kick/snare/ride mask.
+inline constexpr std::int16_t kLeadVoice = 53;  // Voice Oohs
+inline constexpr MotifSpec kLeadMotif{
+    .transform = MotifTransform::kDiatonicTranspose,
+    .seed = 1503, .length = 3, .center_degree = 2, .vel = 62, .gate = kGateHeld,
+    .idiom_role = TrackRole::kDrums,
+};
 inline constexpr StyleEvent kPadTriad[] = {
     {.step=0, .tone=kRoot, .octave=0, .vel=50, .gate=kGateHeld}, {.step=0, .tone=kThird, .octave=0, .vel=48, .gate=kGateHeld}, {.step=0, .tone=kFifth, .octave=0, .vel=50, .gate=kGateHeld},
 };
@@ -232,6 +245,7 @@ inline constexpr StylePattern kVarDPatterns[] = {{.role=TrackRole::kDrums, .poli
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2Beat13), .gm_program=kChord2Voice, .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kArp, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kArpHarp), .gm_program=kArpVoice, .motif=&kArpHarpMotif},
+    {.role=TrackRole::kLead, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(), .gm_program=kLeadVoice, .motif=&kLeadMotif},
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercSoft)}};
 
 inline constexpr StyleSection kSections[] = {
