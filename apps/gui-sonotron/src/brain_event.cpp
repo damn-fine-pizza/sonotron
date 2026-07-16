@@ -341,6 +341,11 @@ BrainEvent parse_brain_event(const std::string& line) {
     ev.valid = true;
     ev.clip_id = static_cast<int>(obj.get_int("id", 0));
     ev.clip_state = obj.get_string("state", "stopped");
+  } else if (kind == "loop") {
+    ev.kind = BrainEvent::Kind::kLoop;
+    ev.valid = true;
+    ev.loop_slot_id = static_cast<int>(obj.get_int("id", 0));
+    ev.loop_event_kind = obj.get_string("state", "record_started");
   }
   // Any other unrecognized "ev" value falls through to kind == kUnknown,
   // valid == false.

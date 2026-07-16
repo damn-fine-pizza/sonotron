@@ -15,17 +15,23 @@
 // The framing logic mirrors components/platform/hostrt/uds_server.hpp's LineBuffer (a
 // deliberate OWN copy, not an #include of the host header -- the pure-client
 // boundary rule forbids reusing host-side code) and the decoder understands
-// the 8 JSONL event shapes the host currently emits (see gui-contract-map.md
+// the 9 JSONL event shapes the host currently emits (see gui-contract-map.md
 // §3 for the original 5, plus the additive "chord-followed" shape landed by
 // pipeline-p0-mechanical-plan.md P0-1, the additive "beat" shape landed by
-// P0-2, plus the additive "clip" shape, Phase-5 Item #2): midi-out, chord,
-// section, transport, warn, chord-followed, beat, clip, plus the per-client
-// {"error":...} line. `kBeat` (P0-2, the transport heartbeat) is decoded:
-// {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick} -- bar/beat/pulse are
-// purely numeric (core concern), a live playhead is a HOST/GUI rendering
-// choice built on top of them. `kClip` (Phase-5 Item #2) is decoded:
-// {"ev":"clip","id":N,"state":"stopped"|"armed"|"playing"|"queued_stop","@":
-// tick} -- which Repeat-Zone cell is armed/playing/stopped.
+// P0-2, the additive "clip" shape, Phase-5 Item #2, plus the additive "loop"
+// shape, Phase 7 node 6000 / looper-in-gui-contract.md §7 item 9): midi-out,
+// chord, section, transport, warn, chord-followed, beat, clip, loop, plus
+// the per-client {"error":...} line. `kBeat` (P0-2, the transport heartbeat)
+// is decoded: {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick} --
+// bar/beat/pulse are purely numeric (core concern), a live playhead is a
+// HOST/GUI rendering choice built on top of them. `kClip` (Phase-5 Item #2)
+// is decoded: {"ev":"clip","id":N,"state":"stopped"|"armed"|"playing"|
+// "queued_stop","@":tick} -- which Repeat-Zone cell is armed/playing/
+// stopped. `kLoop` (Phase 7, node 6000) is decoded: {"ev":"loop","id":N,
+// "state":"record_started"|"record_stopped"|"erased"|"undone"|"grabbed","@":
+// tick} -- a LoopBuffer slot's OWN recording-side state change (mirrors
+// `kClip`'s shape exactly; a launch/stop of an already-captured loop still
+// rides `kClip`, not this).
 
 namespace sonotron {
 
@@ -94,11 +100,9 @@ struct BrainEvent {
     kBeat,           // additive, gap P0-2 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-2)
     kClip,           // additive, Phase-5 Item #2 (docs/design/clip-primitive-design.md) -- decoded
     // additive, Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-
-    // gui-contract.md §7 item 9) -- decoded on the IN-PROCESS path
-    // (brain_event_from_outevent.cpp). NOT yet decoded on the JSONL text
-    // path (jsonl.cpp's to_jsonl()/to_human() and brain_event.cpp's own
-    // parse_brain_event() have no "loop" case yet -- a separate, pre-
-    // existing gap, out of scope for item 9).
+    // gui-contract.md §7 item 9) -- decoded on BOTH the in-process path
+    // (brain_event_from_outevent.cpp) and the JSONL text path (jsonl.cpp's
+    // to_jsonl()/to_human(), and parse_brain_event() below).
     kLoop,
   };
 

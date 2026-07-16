@@ -94,6 +94,13 @@ std::string to_jsonl(const OutEvent& ev, bool prefer_flats) {
       // `code`, the LaunchState rides msg.status.
       return format(R"({"ev":"clip","id":%u,"state":"%s","@":%u})", ev.code,
                     clip_state_name(ev.msg.status), ev.tick);
+    case OutEvent::Kind::kLoop:
+      // Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-gui-
+      // contract.md §7 item 9, JSONL-channel follow-up): a LoopBuffer slot's
+      // OWN recording-side state changed -- slot id rides `code`, the
+      // LoopEventKind rides msg.status. Mirrors the kClip case above exactly.
+      return format(R"({"ev":"loop","id":%u,"state":"%s","@":%u})", ev.code,
+                    loop_event_kind_name(ev.msg.status), ev.tick);
     case OutEvent::Kind::kWarn:
     default:
       return format(R"({"ev":"warn","code":"%s","@":%u})", warn_name(ev.code), ev.tick);
@@ -151,6 +158,8 @@ std::string to_human(const OutEvent& ev, bool prefer_flats) {
       return {};
     case OutEvent::Kind::kClip:
       return format("@%-8u clip %u %s", ev.tick, ev.code, clip_state_name(ev.msg.status));
+    case OutEvent::Kind::kLoop:
+      return format("@%-8u loop %u %s", ev.tick, ev.code, loop_event_kind_name(ev.msg.status));
     case OutEvent::Kind::kWarn:
     default:
       return format("@%-8u WARN %s", ev.tick, warn_name(ev.code));
