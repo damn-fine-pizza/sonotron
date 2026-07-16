@@ -11,6 +11,7 @@ GridModel::GridModel(std::size_t scene_count)
     m_scene_names[i] = std::to_string(i + 1);
   }
   m_scene_sections.fill(kDefaultSectionType);
+  m_scene_bars.fill(kDefaultSceneBars);
 }
 
 std::string_view GridModel::part_label(std::size_t part_index) const {
@@ -79,6 +80,20 @@ void GridModel::set_scene_section(std::size_t scene_index, std::uint8_t section)
     return;
   }
   m_scene_sections[scene_index] = section;
+}
+
+int GridModel::scene_bars(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return kDefaultSceneBars;
+  }
+  return m_scene_bars[scene_index];
+}
+
+void GridModel::set_scene_bars(std::size_t scene_index, int bars) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  m_scene_bars[scene_index] = std::max(bars, 1);
 }
 
 std::string_view section_wire_name(std::uint8_t section) {

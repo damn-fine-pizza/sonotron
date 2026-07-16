@@ -28,26 +28,32 @@ namespace sonotron {
 // array, PLUS (SLICE 4a, additive format extension) every section found into
 // `model` via GridModel::set_scene_section, index-by-position in a sibling
 // top-level "sections" array of small integers (the raw SectionType byte,
-// GridModel::scene_section's own storage shape). Fewer than kMaxSceneCount
-// entries in EITHER array leaves the remaining indices at whatever `model`
-// already had (its own constructor default: the bare column number for
-// names, GridModel::kDefaultSectionType for sections); more than
+// GridModel::scene_section's own storage shape), PLUS (auto-song fix,
+// additive format extension) every per-scene length found into `model` via
+// GridModel::set_scene_bars, index-by-position in a sibling top-level
+// "bars" array of small positive integers (GridModel::scene_bars' own
+// storage shape). Fewer than kMaxSceneCount entries in ANY array leaves the
+// remaining indices at whatever `model` already had (its own constructor
+// default: the bare column number for names, GridModel::kDefaultSectionType
+// for sections, GridModel::kDefaultSceneBars for bars); more than
 // kMaxSceneCount entries are ignored past that bound, forward-compatible
-// with a file written by a future binary with a larger grid. The "sections"
-// key is OPTIONAL: a scenes.json written by a pre-SLICE-4a binary (no
-// "sections" key at all) parses cleanly and every scene keeps the
-// constructor default section -- old files are not a parse failure. Returns
-// true on success; on failure returns false and fills `error` with a
-// 1-based line/column message, leaving `model` partially updated (same
-// "parse failure is a whole-file failure" discipline as layout_json.hpp's
-// parse_layout -- the caller is expected to discard `model`'s scene state on
-// a `false` return, not trust a partial parse).
+// with a file written by a future binary with a larger grid. The
+// "sections"/"bars" keys are OPTIONAL: a scenes.json written by an older
+// binary (missing either key, or both) parses cleanly and every scene keeps
+// the constructor default for the missing field(s) -- old files are not a
+// parse failure. Returns true on success; on failure returns false and
+// fills `error` with a 1-based line/column message, leaving `model`
+// partially updated (same "parse failure is a whole-file failure"
+// discipline as layout_json.hpp's parse_layout -- the caller is expected to
+// discard `model`'s scene state on a `false` return, not trust a partial
+// parse).
 bool parse_scenes(const std::string& text, GridModel& model, std::string& error);
 
-// Serializes every one of `model`'s kMaxSceneCount scene names AND sections
-// to canonical JSON text (deterministic key order -- "scenes" then
-// "sections" -- fixed 2-space indentation, no trailing newline -- callers
-// add one), the exact on-disk format read back by `parse_scenes`.
+// Serializes every one of `model`'s kMaxSceneCount scene names, sections,
+// AND per-scene bar lengths to canonical JSON text (deterministic key order
+// -- "scenes" then "sections" then "bars" -- fixed 2-space indentation, no
+// trailing newline -- callers add one), the exact on-disk format read back
+// by `parse_scenes`.
 std::string write_scenes(const GridModel& model);
 
 // Loads scene names from `path` into `model`. If the file does not exist,

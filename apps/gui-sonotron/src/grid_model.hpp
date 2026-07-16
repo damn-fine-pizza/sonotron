@@ -126,6 +126,28 @@ class GridModel {
   std::uint8_t scene_section(std::size_t scene_index) const;
   void set_scene_section(std::size_t scene_index, std::uint8_t section);
 
+  // Host-side per-scene LENGTH, in bars (auto-song fix: the advance decision
+  // and the launch-cell playhead sweep must both use the SAME per-scene
+  // length, not the style's own section length, which is what the pre-fix
+  // code used and why the sprint was locked to 1 bar per scene for every
+  // built-in style). Every scene defaults to kDefaultSceneBars, so a fresh
+  // grid loops each column for a musically reasonable stretch before
+  // auto-song ever advances it. Bounds-checked exactly like scene_section
+  // above: an out-of-range `scene_index` is a no-op for the setter and
+  // returns kDefaultSceneBars from the getter. The setter also clamps
+  // `bars` to >= 1 -- a zero-or-negative scene length would make the
+  // auto-song "elapsed >= length" check trivially and permanently true
+  // (the same reasoning preview::section_bars' own header comment gives for
+  // why IT never returns <= 0 either).
+  //
+  // Reserved for a future extension (memory: auto-song-playhead-and-
+  // repeats): a per-scene REPEAT COUNT (play K times, or infinite, before
+  // advancing) will hook in here, alongside this length, once that decision
+  // is made -- not implemented yet.
+  static constexpr int kDefaultSceneBars = 8;
+  int scene_bars(std::size_t scene_index) const;
+  void set_scene_bars(std::size_t scene_index, int bars);
+
  private:
   std::size_t index_of(std::size_t part_index, std::size_t scene_index) const;
 
@@ -133,6 +155,7 @@ class GridModel {
   std::vector<GridCell> m_cells;  // row-major: part_index * m_scene_count + scene_index
   std::array<std::string, kMaxSceneCount> m_scene_names;
   std::array<std::uint8_t, kMaxSceneCount> m_scene_sections;
+  std::array<int, kMaxSceneCount> m_scene_bars;
 };
 
 // Section-type wire-name table, numerically/spelling-IDENTICAL to

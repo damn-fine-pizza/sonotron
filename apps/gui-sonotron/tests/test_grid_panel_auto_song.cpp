@@ -30,6 +30,7 @@
 #include "test.hpp"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 using sonotron::AppState;
@@ -90,6 +91,19 @@ void click_arm_auto_song(V02State& fx, const AppState& app_state) {
   fx.auto_song_last_bar = app_state.bar();
 }
 
+// Shared assertion helper (auto-song fix follow-up, Torquato QA): checks
+// whether any recorded sent line starts with the given prefix, used below to
+// assert the presence/ABSENCE of a `launch scene ` send across a per-scene
+// cadence window.
+bool any_sent_line_starts_with(const std::vector<std::string>& sent, std::string_view prefix) {
+  for (const std::string& line : sent) {
+    if (line.rfind(prefix, 0) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // THE PINNED BUG: auto-song armed while playing, section length elapsed ->
 // the active scene column must advance (wrapping) and a real
 // `style section <name>` send must fire. This is the exact behavior the
@@ -116,6 +130,16 @@ void test_auto_song_advances_scene_after_section_elapses() {
   AppState app_state;
   V02State fx;
 
+  // Scene 0 (the active scene at arm time) gets an explicit, short 1-bar
+  // length via the new per-scene length GridModel::set_scene_bars -- the
+  // advance decision now reads THIS, not preview::section_bars (the style's
+  // own section length, which used to be the ONLY thing available and was
+  // always 1 bar for every built-in style, the very reason auto-song used to
+  // sprint one bar per scene regardless of what a column held). Pinning it
+  // explicitly keeps this test's single-bar crossing deterministic and
+  // independent of any built-in style.
+  model.set_scene_bars(0, 1);
+
   // Transport starts playing; the first beat lands at bar 1 (kBeat's
   // beat_bar is a 1-based absolute bar counter, abi.hpp/app_state.cpp).
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
@@ -124,10 +148,8 @@ void test_auto_song_advances_scene_after_section_elapses() {
   CHECK(app_state.transport() == AppState::Transport::kPlaying);
 
   // Click "auto-song" while playing, at bar 1. fx.active_scene defaults to
-  // 0; fx.active_style defaults to -1 (no `style load` sent this run), so
-  // the active section's length falls back to 1 bar (preview::section_bars'
-  // honest out-of-range default, preview.cpp:109-117) -- the active scene's
-  // own section should therefore already be "done" after just one more bar.
+  // 0, whose length is now pinned to 1 bar above -- the active scene's own
+  // length should therefore already be "done" after just one more bar.
   click_arm_auto_song(fx, app_state);
   CHECK(fx.auto_song);
   CHECK(fx.active_scene == 0);
@@ -138,14 +160,13 @@ void test_auto_song_advances_scene_after_section_elapses() {
   CHECK(fx.active_scene == 0);
   CHECK(brain.sent.empty());
 
-  // Every scene column defaults to the SAME section (kVarA), which -- with
-  // no `style load` sent this run -- resolves to the same 1-bar fallback
-  // length everywhere. So a single further bar (bar 2, one whole bar past
-  // the arm bar) is exactly one full section boundary for the CURRENT active
-  // scene: this is the realistic, single-crossing repro (not a multi-bar
-  // loop, which would cross the same 1-bar boundary again on every
-  // subsequent bar and cycle through several scenes -- a different, already
-  //-covered case of the pure next_scene_to_launch()/bar_just_advanced units).
+  // Scene 0's own length is pinned to 1 bar above, so a single further bar
+  // (bar 2, one whole bar past the arm bar) is exactly one full boundary for
+  // the CURRENT active scene: this is the realistic, single-crossing repro
+  // (not a multi-bar loop, which would cross the same 1-bar boundary again
+  // on every subsequent bar and cycle through several scenes -- a different,
+  // already-covered case of the pure next_scene_to_launch()/bar_just_
+  // advanced units).
   app_state.apply_line(R"({"ev":"beat","bar":2,"beat":0,"pulse":0,"@":500})");
   CHECK(app_state.bar() == 2);
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
@@ -201,6 +222,16 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   AppState app_state;
   V02State fx;
 
+  // Every scene column gets an explicit, short 1-bar length (the new
+  // per-scene length the advance decision reads, GridModel::set_scene_bars)
+  // so the ten-bar loop below is guaranteed to cross a boundary on every
+  // single bar as fx.active_scene cycles through all five columns -- proving
+  // the stuck-after-restart bug stays fixed regardless of which column is
+  // active at any given bar.
+  for (std::size_t scene = 0; scene < model.scene_count(); ++scene) {
+    model.set_scene_bars(scene, 1);
+  }
+
   // First session: the user has already been playing for a while (bar 25)
   // before arming auto-song -- a perfectly ordinary sequence (play first,
   // arm auto-song later, mid-song).
@@ -235,13 +266,76 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   CHECK(app_state.bar() == 10);
 
   // THE BUG, PINNED: ten full bars into the NEW session -- with auto_song
-  // still ON, the transport PLAYING, and a 1-bar section length (the same
-  // fallback both prior tests establish) that should have advanced the
-  // active scene column NINE separate times over by now -- the active scene
-  // has not moved AT ALL. A correct implementation must not get stuck this
-  // way after an ordinary stop/restart.
+  // still ON, the transport PLAYING, and every scene column pinned to a
+  // 1-bar length above -- that should have advanced the active scene column
+  // NINE separate times over by now -- the active scene has not moved AT
+  // ALL. A correct implementation must not get stuck this way after an
+  // ordinary stop/restart.
   CHECK(fx.active_scene != 0);
   CHECK(!brain.sent.empty());
+
+  ImGui::DestroyContext();
+}
+
+// POSITIVE COVERAGE (Torquato QA, auto-song fix follow-up): pins that
+// GridModel::scene_bars actually GOVERNS the advance cadence, not just that
+// an advance eventually fires. Scene 0 is given an explicit 4-bar length: the
+// active scene column must NOT advance (and no `launch scene ` line may be
+// sent) after 1, 2, or 3 bars have elapsed, and MUST advance (with a
+// `launch scene <n> ...` send) exactly once 4 full bars have elapsed --
+// proving the per-scene length, not some fixed 1-bar sprint, is what gates
+// every crossing.
+void test_scene_bars_governs_advance_cadence() {
+  ImGui::CreateContext();
+  ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
+  unsigned char* tex_pixels = nullptr;
+  int tex_w = 0;
+  int tex_h = 0;
+  ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
+
+  GridModel model(5);  // same scene count main.cpp actually boots with
+  SeqEditModel seqedit;
+  PartsModel parts;
+  SpyBrainSession brain;
+  AppState app_state;
+  V02State fx;
+
+  // Scene 0 (the active scene at arm time) gets an explicit 4-bar length.
+  model.set_scene_bars(0, 4);
+  CHECK(model.scene_bars(0) == 4);
+
+  // Transport starts playing; the first beat lands at bar 1.
+  app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
+  app_state.apply_line(R"({"ev":"beat","bar":1,"beat":0,"pulse":0,"@":0})");
+  CHECK(app_state.bar() == 1);
+
+  // Arm auto-song at bar 1, scene 0 active.
+  click_arm_auto_song(fx, app_state);
+  CHECK(fx.auto_song);
+  CHECK(fx.active_scene == 0);
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 0);
+  CHECK(brain.sent.empty());
+
+  // Bars 2, 3, 4 are 1, 2, and 3 bars past the arm bar -- all strictly less
+  // than the pinned 4-bar length, so the active scene must stay put and no
+  // `launch scene ` line may be sent yet, on any of these three bars.
+  for (int bar = 2; bar <= 4; ++bar) {
+    app_state.apply_line(R"({"ev":"beat","bar":)" + std::to_string(bar) +
+                         R"(,"beat":0,"pulse":0,"@":)" + std::to_string(bar * 500) + "}");
+    render_one_frame(model, seqedit, parts, brain, app_state, fx);
+    CHECK(fx.active_scene == 0);
+    CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
+  }
+
+  // Bar 5 is exactly 4 bars past the arm bar -- the pinned length is now
+  // fully elapsed: the active scene column MUST advance and a
+  // `launch scene <n> ...` command MUST be sent for the newly-active column.
+  app_state.apply_line(R"({"ev":"beat","bar":5,"beat":0,"pulse":0,"@":2500})");
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 1);
+  CHECK(any_sent_line_starts_with(brain.sent, "style section "));
+  CHECK(any_sent_line_starts_with(brain.sent, "launch scene "));
 
   ImGui::DestroyContext();
 }
@@ -251,5 +345,6 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
 int main() {
   test_auto_song_advances_scene_after_section_elapses();
   test_auto_song_stuck_after_transport_stop_then_restart();
+  test_scene_bars_governs_advance_cadence();
   return sonotron::test::failures();
 }

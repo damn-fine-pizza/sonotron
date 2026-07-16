@@ -111,15 +111,22 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
   V02State fx;
   AppState app_state;
 
+  // Scene 0 (the active scene at arm time) gets an explicit, short 1-bar
+  // length via the new per-scene length GridModel::set_scene_bars -- the
+  // advance decision now reads THIS, not preview::section_bars, so this
+  // pins the advance to fire well within the wall-clock deadline below
+  // regardless of which style is loaded or its own section length.
+  model.set_scene_bars(0, 1);
+
   InProcessBrainSession session;
   CHECK(session.start());
 
   // Real content, exactly main.cpp's own default-boot behavior
   // (main.cpp:653-661): `style load basic` through the SAME send() a browser
-  // drop uses, and the SAME active_style echo main.cpp itself sets -- so
-  // preview::section_bars resolves the REAL "basic" style's varA section
-  // length (1 bar, arrangrr/arranger/styles/basic.hpp) instead of relying on
-  // the -1/out-of-range 1-bar fallback the pure SpyBrainSession test uses.
+  // drop uses, and the SAME active_style echo main.cpp itself sets -- so the
+  // real "basic" style is genuinely loaded and playing audio end to end,
+  // even though the auto-song advance decision itself is now governed by
+  // GridModel::scene_bars above, not this style's own section length.
   for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
     if (sonotron::kBuiltinStyleNames[i] == "basic") {
       session.send("style load basic");
@@ -137,11 +144,11 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
 
   // Pump the REAL per-frame pipeline (poll -> apply -> render, main.cpp's
   // own shape) across up to 6 REAL wall-clock seconds -- ample headroom at
-  // the default 120 BPM (a 4/4 bar is 2 real seconds, and "basic"'s varA
-  // section is only 1 bar), bounded on WALL TIME (not iteration/frame
-  // count) so this stays robust to scheduler jitter rather than flaky, per
-  // the same discipline test_in_process_brain_session.cpp's own poll_until
-  // already uses.
+  // the default 120 BPM (a 4/4 bar is 2 real seconds, and scene 0's own
+  // pinned length above is only 1 bar), bounded on WALL TIME (not
+  // iteration/frame count) so this stays robust to scheduler jitter rather
+  // than flaky, per the same discipline test_in_process_brain_session.cpp's
+  // own poll_until already uses.
   const int first_bar = app_state.bar();
   int max_bar_seen = first_bar;
   bool armed = false;

@@ -147,6 +147,15 @@ endfunction()
 
 gui_sonotron_grid_panel_test(test_grid_panel_auto_song functional)
 
+# FIX PIN (Torquato QA, root-caused via a live SONOTRON_AUTOSONG_TRACE stderr
+# trace, since removed): auto-song's advance branch (update_auto_song,
+# grid_panel.cpp) advances fx.active_scene and re-sends `style section
+# <name>`, AND now also sends `launch scene <n> quantize <q>` for the
+# newly-active column -- exactly like the manual scene-header launch already
+# did. This test proves the fix stays fixed; do not weaken or remove this
+# assertion.
+gui_sonotron_grid_panel_test(test_grid_panel_auto_song_launches_next_scene functional)
+
 # Torquato QA pass, UI-AUTOMATING flavor of the live-bug repro (owner steer):
 # the same headless-ImGui render loop as test_grid_panel_auto_song.cpp above,
 # but wired end-to-end to a REAL InProcessBrainSession (real engine thread,

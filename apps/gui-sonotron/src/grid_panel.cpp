@@ -293,9 +293,16 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   const int bars_elapsed = current_bar - fx.active_scene_start_bar;
   const std::size_t active_scene_index =
       fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
-  const auto active_section =
-      static_cast<preview::Section>(model.scene_section(active_scene_index));
-  const int active_section_bars = preview::section_bars(fx.active_style, active_section);
+  // Per-scene length (auto-song fix), NOT preview::section_bars: the style's
+  // own section length was always 1 bar for every built-in style (preview.
+  // hpp's own "every built-in style's own sections are 1 bar today"
+  // comment), which is why the advance used to sprint one bar per scene
+  // regardless of what the column actually held. model.scene_bars() gives
+  // each scene column its own configurable length (default GridModel::
+  // kDefaultSceneBars) -- this is the SAME lookup render_grid_panel's own
+  // playhead uses below, so the sweep fills exactly over the length that
+  // gates this advance.
+  const int active_section_bars = model.scene_bars(active_scene_index);
   const std::optional<int> next =
       next_scene_to_launch(fx.auto_song, fx.playing, fx.active_scene, static_cast<int>(scene_count),
                            bars_elapsed, active_section_bars);
@@ -309,6 +316,15 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   if (!section_name.empty()) {
     brain_session.send("style section " + std::string(section_name));
   }
+  // Root-cause fix: `style section` alone only selects WHICH section a
+  // future launch will use -- it never fires the newly-active column's own
+  // clips. The manual scene-header launch (render_scene_header_cell below)
+  // already sends BOTH verbs together; auto-song's advance must mirror that
+  // exactly, or the newly-active column's audio never actually starts (the
+  // proven "scene 1 forever" bug -- fx.active_scene DID advance internally,
+  // but nothing ever launched the column it pointed at).
+  brain_session.send("launch scene " + std::to_string(fx.active_scene) + " quantize " +
+                     std::to_string(kDefaultLaunchQuantizeBars));
 }
 
 // Standard solo semantics: any part soloed makes the non-soloed rows read as
@@ -617,17 +633,19 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   update_auto_song(model, brain_session, app_state, fx, scenes);
 
   // Beat-synchronized playhead (owner-locked): resolved ONCE per frame, here,
-  // from the active scene's own section length (preview::section_bars, the
-  // SAME lookup update_auto_song's advance decision uses) and the
-  // authoritative beat/bar/pulse -- never wall-clock time. `active_section_
-  // bars` deliberately duplicates update_auto_song's own lookup (rather than
-  // sharing a helper) so this purely-visual addition can never perturb the
-  // auto-song advance logic above it.
+  // from the active scene's own PER-SCENE length (model.scene_bars(), the
+  // SAME lookup update_auto_song's advance decision uses -- auto-song fix:
+  // this used to be preview::section_bars, the STYLE's section length,
+  // which is 1 bar for every built-in style and so is NOT the length the
+  // advance now gates on) and the authoritative beat/bar/pulse -- never
+  // wall-clock time. `active_section_bars` deliberately duplicates update_
+  // auto_song's own lookup (rather than sharing a helper) so this purely-
+  // visual addition can never perturb the auto-song advance logic above it;
+  // the two lookups must nonetheless stay identical, or the sweep would
+  // reach the cell edge at a different bar than auto-song actually advances.
   const std::size_t active_scene_index =
       fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
-  const auto active_section =
-      static_cast<preview::Section>(model.scene_section(active_scene_index));
-  const int active_section_bars = preview::section_bars(fx.active_style, active_section);
+  const int active_section_bars = model.scene_bars(active_scene_index);
   const float active_section_phase =
       section_playhead_phase(app_state.bar(), fx.active_scene_start_bar, app_state.beat_num(),
                              app_state.pulse(), app_state.beats_per_bar(), active_section_bars);
