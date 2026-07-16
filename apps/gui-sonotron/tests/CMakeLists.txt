@@ -119,3 +119,23 @@ function(gui_sonotron_preview_test name category)
 endfunction()
 
 gui_sonotron_preview_test(test_preview unit)
+
+# Repeat-Zone auto-song functional/integration test (Torquato QA pass, red-
+# before-green bug repro): drives the REAL render_grid_panel entry point
+# (grid_panel.hpp) inside a headless ImGui context (no GPU, no window, no
+# backend -- font atlas self-builds on first NewFrame()), because the
+# reported bug lives in grid_panel.cpp's file-local (anonymous-namespace)
+# update_auto_song, not in the already-green pure next_scene_to_launch() unit
+# (test_grid_model.cpp). Links gui_sonotron_layout (render_grid_panel + imgui
+# + gui_sonotron_preview transitively) AND gui_sonotron_brain (AppState::
+# apply/apply_line's out-of-line implementation, needed to feed realistic
+# "beat" events) -- the only test in this directory that needs both.
+function(gui_sonotron_grid_panel_test name category)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE gui_sonotron_layout gui_sonotron_brain)
+  target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS ${category})
+endfunction()
+
+gui_sonotron_grid_panel_test(test_grid_panel_auto_song functional)

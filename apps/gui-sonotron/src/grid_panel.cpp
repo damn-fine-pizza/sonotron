@@ -254,8 +254,25 @@ void render_header(V02State& fx, const AppState& app_state) {
 void update_auto_song(const GridModel& model, BrainSession& brain_session,
                       const AppState& app_state, V02State& fx, std::size_t scene_count) {
   const int current_bar = app_state.bar();
+  // Captured BEFORE bar_just_advanced mutates auto_song_last_bar in place, so
+  // it still holds the LAST bar this function actually evaluated (which, for
+  // a session that just resumed after a transport stop, is a stale bar from
+  // BEFORE the stop -- the core rewinds its bar counter to 0 on every fresh
+  // Start, runtime/transport.hpp's "MIDI Start semantics: rewind to zero",
+  // mirrored by AppState's own "stopped" reset).
+  const int previous_last_bar = fx.auto_song_last_bar;
   if (!bar_just_advanced(current_bar, fx.auto_song_last_bar)) {
     return;
+  }
+  // Bar REWIND detected (current bar fell behind the last one evaluated): a
+  // stop/restart cycle, not an ordinary forward tick. active_scene_start_bar
+  // is still anchored to the pre-stop bar count, so leaving it as-is would
+  // make bars_elapsed go deeply negative and stay there until the new
+  // session's bar count climbs all the way back past the stale anchor --
+  // "the active scene never advances". Re-anchor to the fresh bar so
+  // bars_elapsed measures from the restart, not from the stale pre-stop bar.
+  if (current_bar < previous_last_bar) {
+    fx.active_scene_start_bar = current_bar;
   }
   const int bars_elapsed = current_bar - fx.active_scene_start_bar;
   const std::size_t active_scene_index =
