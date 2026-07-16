@@ -1,7 +1,7 @@
 #pragma once
 
 // Minimal host-only test harness -- no external dependency, mirroring
-// components/midisrc/tests/test.hpp. Usage: CHECK(expr); return
+// components/platform/midisrc/tests/test.hpp. Usage: CHECK(expr); return
 // melodd::test::failures() from main().
 
 #include <cstdio>

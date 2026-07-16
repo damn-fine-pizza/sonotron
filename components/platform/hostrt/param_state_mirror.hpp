@@ -23,7 +23,7 @@
 // unit-tested entirely in-process, per §17.5's sequencing, before any socket
 // code exists) -- ParamStateMirror::apply() is exercised directly against
 // synthetic ParamStateWire values AND against a real Shell's own emitted
-// OutEvents in components/hostrt/tests/test_param_state_wire.cpp, proving
+// OutEvents in components/platform/hostrt/tests/test_param_state_wire.cpp, proving
 // the decoded mirror matches the live Shell's own view structs field-for-
 // field for the same script of actions.
 

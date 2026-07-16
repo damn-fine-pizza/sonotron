@@ -154,7 +154,8 @@ void capture_screenshot(int width, int height, const char* path) {
   if (width <= 0 || height <= 0) {
     return;
   }
-  std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * height * 4);
+  std::vector<unsigned char> pixels(static_cast<std::size_t>(width) *
+                                    static_cast<std::size_t>(height) * 4);
   glPixelStorei(GL_PACK_ALIGNMENT, 1);
   glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
   if (sonotron::write_png_rgba_bottom_up(path, width, height, pixels.data())) {

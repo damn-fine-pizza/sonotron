@@ -12,7 +12,7 @@
 // Phase-6 Theme 2 (docs/phase6-design-reviews.md "Audio in the standalone
 // GUI", Decision 5): proves melodd::dispatch_midi_message -- the ONE shared
 // MidiMessage -> Synth decode both apps/tools/melodd's main.cpp and
-// gui_sonotron_audio::AudioEngine now call -- routes every branch the OLD
+// sonotron::audio::SoundfontEngine now call -- routes every branch the OLD
 // per-caller switches used to hand-roll: note-on, note-on-with-velocity-0-
 // as-note-off, note-off, program_change, pitch_bend (14-bit LSB/MSB
 // assembly, including an asymmetric-byte case that pins the byte ORDER, not

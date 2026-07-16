@@ -11,7 +11,7 @@
 // (D19/D20) via explicit qualities.
 //
 // Phase-4b promotion (docs/design/orchestrator-pipeline-extraction.md
-// §16.1/§16.8): moved byte-for-byte out of components/arrangrr alongside
+// §16.1/§16.8): moved byte-for-byte out of components/core/arrangrr alongside
 // ChordDetector/FollowedContext, which both need Key/ChordQuality/ChordState
 // and the theory:: functions -- chorddet must not depend on arrangrr (D43),
 // so this pure-theory vocabulary travels with them. arrangrr's own chord/

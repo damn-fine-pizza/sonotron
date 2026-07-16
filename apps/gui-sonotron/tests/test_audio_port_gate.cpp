@@ -7,7 +7,7 @@
 // ring.
 //
 // `midi-source load <path>` (midisrc::MidiSourceStage, constructed at a
-// FIXED, distinct port -- components/hostrt/shell.cpp's kMidiSourcePort ==
+// FIXED, distinct port -- components/platform/hostrt/shell.cpp's kMidiSourcePort ==
 // 1) is the negative-case traffic source: it is NOT gated on transport state
 // (its on_tick fires straight off the shared tick clock) and needs no
 // pattern-engine routing, so it is an always-reachable, known-non-primary-
@@ -43,7 +43,7 @@ using sonotron::InProcessBrainSession;
 
 namespace {
 
-constexpr int kSecondaryPort = 1;  // mirrors components/hostrt/shell.cpp's kMidiSourcePort
+constexpr int kSecondaryPort = 1;  // mirrors components/platform/hostrt/shell.cpp's kMidiSourcePort
 
 // Checked CONTINUOUSLY across the whole wait window, not just once at the
 // end, so a transient wrong-port push cannot hide behind a final

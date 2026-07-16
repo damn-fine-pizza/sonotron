@@ -1,4 +1,4 @@
-// libFuzzer harness for arrstyle::parse_smf (components/midisrc/src/smf.cpp).
+// libFuzzer harness for arrstyle::parse_smf (components/platform/midisrc/src/smf.cpp).
 //
 // This targets the exact entry point and trust boundary that
 // `midisrc::MidiSourceStage::load()` (include/midisrc/midi_source_stage.hpp)
@@ -11,7 +11,7 @@
 // Diagnostics collaborator.
 //
 // Host-only, dev/CI tooling: gated behind `option(SONOTRON_FUZZ ...)` in
-// components/midisrc/CMakeLists.txt, OFF by default. Uses ONLY clang's
+// components/platform/midisrc/CMakeLists.txt, OFF by default. Uses ONLY clang's
 // built-in libFuzzer + AddressSanitizer + UndefinedBehaviorSanitizer -- no new
 // dependency, never linked into the arm-none-eabi cross build, never part of
 // the default `host`/`ci.sh` target set.
@@ -19,8 +19,8 @@
 // Build + run:
 //   cmake --preset host -DCMAKE_CXX_COMPILER=clang++ -DSONOTRON_FUZZ=ON
 //   cmake --build build/host --target midisrc_fuzz_smf
-//   ./build/host/components/midisrc/midisrc_fuzz_smf \
-//       -max_len=4096 -runs=100000 components/midisrc/fuzz/seeds
+//   ./build/host/components/platform/midisrc/midisrc_fuzz_smf \
+//       -max_len=4096 -runs=100000 components/platform/midisrc/fuzz/seeds
 
 #include <cstddef>
 #include <cstdint>

@@ -23,7 +23,7 @@
 // set, 16 bytes), no host/UI dependency.
 //
 // Phase-4b promotion (docs/design/orchestrator-pipeline-extraction.md
-// §16.1/§16.8): moved byte-for-byte out of components/arrangrr into its own
+// §16.1/§16.8): moved byte-for-byte out of components/core/arrangrr into its own
 // dual-target component. Namespace stays `arrangrr` (minimal churn, same
 // precedent as the Phase-1 runtime extraction) even though the physical
 // component is now `chorddet`, which links common+runtime but NEVER

@@ -37,7 +37,7 @@
 // versioned binary format... magic + version + CRC"): the ON-DISK shape is
 // target-agnostic and host/firmware neutral; the file I/O ITSELF (fopen/
 // fstream) is HOST-ONLY (a HAL the core never touches, D-locked Principle #2)
-// -- see components/hostrt's `perf save`/`perf load` L1 verbs.
+// -- see components/platform/hostrt's `perf save`/`perf load` L1 verbs.
 
 namespace arrangrr {
 
@@ -104,7 +104,7 @@ struct Performance {
   // (Engine::capture_performance/apply_performance). 0 still means "no
   // transpose" -- every pre-existing v1 on-disk record (where this field was
   // always 0) keeps that meaning unchanged across the v1->v2 migration
-  // (components/hostrt's migrate_performance_v1_to_v2, P4).
+  // (components/platform/hostrt's migrate_performance_v1_to_v2, P4).
   std::int16_t master_transpose = 0;
   std::uint16_t pad_bank_id = 0;
   std::uint16_t chord_sequence_id = 0xFFFF;  // 0xFFFF = none
@@ -160,7 +160,7 @@ inline constexpr std::uint32_t kPerformanceMagic =
 // own) -- deserialize() below hard-rejects anything != 2, exactly the same
 // discipline it always applied to v1 (Architectural Principle #8 /
 // docs/DESIGN.md line 588: the DEVICE never migrates). A v1 file's own
-// migration to v2 lives HOST-ONLY, in components/hostrt's
+// migration to v2 lives HOST-ONLY, in components/platform/hostrt's
 // migrate_performance_v1_to_v2 (P4) -- NOT here. format_version 3 (Phase 7,
 // node T0) appends beats_per_bar, funded by shrinking `reserved` by one more
 // byte (5 -> 3 -> 2) -- ANOTHER real bump (a genuine new field, not a

@@ -4,7 +4,7 @@
 
 // Phase-6 Theme 3 Item #3 (Performance format_version 2, P4, docs/reflections/
 // phase6-theme3-performance-format-v2-review.md): the v1 -> v2 migrator.
-// HOST-ONLY (components/hostrt), never linked into the core/arm-none-eabi
+// HOST-ONLY (components/platform/hostrt), never linked into the core/arm-none-eabi
 // build -- docs/DESIGN.md line 588 ("Versioning with migration tool-side
 // only -- the device reads its own version or refuses with a message") means
 // the DEVICE's own arrangrr::deserialize() must keep hard-rejecting anything

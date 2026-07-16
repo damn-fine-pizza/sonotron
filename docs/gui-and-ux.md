@@ -5,8 +5,8 @@ workstation screen, its two working flows, the GUI↔core wire contract, the as-
 shipped binary, the pixel-perfect design target, the product-level flow set, and the sibling TUI
 piano/MIDI-monitor spec. It stays **bound** by:
 
-- `components/arrangrr/include/arrangrr/abi.hpp` — the frozen v1 command/event vocabulary.
-- The shipped UDS-JSONL adapter (`components/hostrt/uds_server.*`, `jsonl.cpp`, `shell.cpp`).
+- `components/core/arrangrr/include/arrangrr/abi.hpp` — the frozen v1 command/event vocabulary.
+- The shipped UDS-JSONL adapter (`components/platform/hostrt/uds_server.*`, `jsonl.cpp`, `shell.cpp`).
 - The naming/architecture locks in `docs/product-vision.md` (sonotron = host workstation, arrangrr =
   core brain, melodd = audio peer).
 
@@ -358,7 +358,7 @@ What crosses:
 - **Trap:** sending `quit`/`exit` over the socket terminates the whole host process for every client.
   Never wire window-close to a bare `quit`.
 - Best client template to imitate:
-  `components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
+  `components/platform/hostrt/tests/test_host.cpp::test_uds_server_end_to_end()`.
 
 ### Pure-client boundary rules
 - **Single binary, single thread, poll-in-frame.** The ImGui render loop (~60 fps, ~16 ms budget)
@@ -382,7 +382,7 @@ window/render libs, isolated from the boundary rules above.
 
 ### 5.1 Commands the GUI SENDS (text line → resolved `Param`)
 
-Exact verb spellings live in `components/hostrt/shell_music_commands.cpp` / `shell_io_commands.cpp`.
+Exact verb spellings live in `components/platform/hostrt/shell_music_commands.cpp` / `shell_io_commands.cpp`.
 
 **Transport / clock**
 
@@ -1006,8 +1006,8 @@ DAW absences — every one exploits NTT / role-arranger / generativity / freesta
 
 ## 16. TUI companion spec — piano / MIDI monitor
 
-The sibling host TUI (`components/hostrt/console.*`, `shell.*`, and new files under
-`components/hostrt/`) carries the keyboard-first live surface the GUI deliberately does not
+The sibling host TUI (`components/platform/hostrt/console.*`, `shell.*`, and new files under
+`components/platform/hostrt/`) carries the keyboard-first live surface the GUI deliberately does not
 re-invent. Feature classification: **host-live + host-tool**. Bound by the same architecture locks as
 the GUI wire, restated here because a piano widget and a MIDI log feel like they belong "close to the
 engine" and they do not.
@@ -1017,7 +1017,7 @@ engine" and they do not.
    management, piano-key drawing, log buffers, filter predicates, monitor views, or color/unicode
    logic in `core/`. If a symbol needed here would have to live in `core/`, the feature is designed
    wrong.
-2. **All TUI code lives in `components/hostrt/`.** Panel manager, piano renderer, MIDI monitor
+2. **All TUI code lives in `components/platform/hostrt/`.** Panel manager, piano renderer, MIDI monitor
    formatter/filter pipeline, key-dispatch, resize handling, color/theme/unicode layers.
 3. **The simulated piano is an input device, not a shortcut.** A computer key produces MIDI bytes
    exactly as external hardware would, injected via `Shell::feed_midi(port, bytes)` on the same input
@@ -1075,7 +1075,7 @@ release, driven by `Shell::piano_key_event(char, bool pressed)` fed from parsed 
 (`\x1b[<code>;<mods>:<event>u`, event 1=press 2=repeat 3=release); autorepeat ignored, polyphonic and
 correct. **`kToggle`** — the Phase 2 behaviour. **SPACE** in piano focus toggles the two modes and logs
 the new mode (a mode switch only, never a musical key). Flags pushed: `0x1|0x2|0x8 = 11`, enabled with
-`CSI > 11 u`, popped with `CSI < 1 u`; parser in `components/hostrt/kitty_keys.{hpp,cpp}`. Enabling is
+`CSI > 11 u`, popped with `CSI < 1 u`; parser in `components/platform/hostrt/kitty_keys.{hpp,cpp}`. Enabling is
 **scoped to piano focus** and gated behind `isatty` (pushing globally would reroute every REPL
 keystroke). **Graceful degradation is mandatory** — on a terminal without the protocol the plain-byte
 toggle path still runs; both coexist across terminal types.

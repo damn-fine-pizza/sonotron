@@ -1,6 +1,6 @@
 // Unit + functional tests for the Performance v1 -> v2 migrator (Phase-6
 // Theme 3 Item #3, P4, docs/reflections/phase6-theme3-performance-format-v2-
-// review.md): components/hostrt::migrate_performance_v1_to_v2 and its wiring
+// review.md): components/platform/hostrt::migrate_performance_v1_to_v2 and its wiring
 // into Shell::perf_load's fallback path. Pure-unit coverage (no Shell) mirrors
 // test_performance_wire.cpp's own style; the ONE functional test proves the
 // end-to-end `perf load` fallback actually fires.

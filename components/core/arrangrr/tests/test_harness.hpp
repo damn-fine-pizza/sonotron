@@ -13,7 +13,7 @@
 // its exact old spelling, dispatched through the 2-stage pipeline instead of
 // a bare Engine.
 //
-// Deliberate small duplication (not a shared library): components/runtime/
+// Deliberate small duplication (not a shared library): components/core/runtime/
 // tests/test_harness.hpp is a near-identical twin, matching the same
 // per-component test-local-header precedent as test.hpp itself.
 

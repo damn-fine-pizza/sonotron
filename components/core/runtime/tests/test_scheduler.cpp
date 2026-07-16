@@ -360,7 +360,7 @@ void test_cancel_guards_n8() {
   CHECK(matching_offs == 0);  // every (0,0,60) NoteOff was cancelled
 }
 
-// Merged from components/arrangrr/tests/test_midi.cpp (Phase-1 runtime
+// Merged from components/core/arrangrr/tests/test_midi.cpp (Phase-1 runtime
 // extraction, Palladio §4 dedup flag): these two randomized stress cases add
 // distinct coverage over the existing suite above (seeded-LCG heap-permutation
 // and tight schedule/pop interleaving), unlike test_midi.cpp's other three

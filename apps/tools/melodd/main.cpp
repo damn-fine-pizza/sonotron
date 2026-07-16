@@ -1,21 +1,21 @@
-// melodd: the standalone drop-in-synth binary (components/melodd/README.md).
+// melodd: the standalone drop-in-synth binary (components/platform/engines/melodd/README.md).
 // Opens an ALSA sequencer MIDI input port named "melodd" and a miniaudio
 // playback device; the miniaudio callback pulls rendered frames from a
 // melodd::Synth, incoming ALSA MIDI drives that same Synth. A DIRECT
 // replacement for the demo launcher's FluidSynth wiring
 // (apps/demo/lib/launch.sh): `aconnect sonotron:1 melodd:0` and you hear the
 // band, no external synth required. Every arrangrr MIDI-emitting frontend
-// presents as ALSA client "sonotron" (components/hostrt/alsa_midi.hpp's
+// presents as ALSA client "sonotron" (components/platform/hostrt/alsa_midi.hpp's
 // kAlsaClientName); port 1 is the outbound MIDI port each frontend opens
 // right after its inbound port 0 at startup, so it is stable across launches.
 //
 // HOST-ONLY. This binary talks to melodd::Synth through raw MIDI bytes only
 // -- it links neither arrangrr nor hostrt (D43: a realizer does not know its
 // callers). Its own MIDI decode (dispatch_message() below) and
-// apps/gui-sonotron's in-process peer (gui_sonotron_audio::AudioEngine,
+// apps/gui-sonotron's in-process peer (sonotron::audio::SoundfontEngine,
 // Phase-6 Theme 2, docs/phase6-design-reviews.md "Audio in the standalone
 // GUI") both funnel into the ONE shared melodd::dispatch_midi_message()
-// entry point (components/melodd/include/melodd/dispatch.hpp) instead of
+// entry point (components/platform/engines/melodd/include/melodd/dispatch.hpp) instead of
 // each hand-rolling its own MIDI-status switch.
 
 #include <alsa/asoundlib.h>
@@ -65,8 +65,8 @@ void data_callback(ma_device* device, void* output, const void* /*input*/, ma_ui
 // arrangrr::midi::data_length, common/midi/message.hpp -- i.e. a malformed/
 // truncated packet, exactly as the previous per-type length guards did) and
 // hands it to melodd::dispatch_midi_message, the shared decode both this
-// binary and gui_sonotron_audio now call (Phase-6 Theme 2 design review,
-// Decision 5).
+// binary and sonotron::audio::SoundfontEngine now call (Phase-6 Theme 2
+// design review, Decision 5).
 void dispatch_message(AppState& app, const std::uint8_t* bytes, long len) {
   if (len < 1 || !arrangrr::midi::is_channel_voice(bytes[0])) {
     return;

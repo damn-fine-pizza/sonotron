@@ -1,4 +1,4 @@
-// Unit tests for MidiParser (components/runtime/midi_parser.hpp): a pure
+// Unit tests for MidiParser (components/core/runtime/midi_parser.hpp): a pure
 // byte-stream -> MidiMessage parser, one instance per input port. Pure,
 // freestanding, no Engine/Runtime.
 //

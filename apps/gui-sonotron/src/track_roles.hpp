@@ -5,9 +5,9 @@
 #include <string_view>
 
 // The 9 Live-Loops grid part rows (ux-workstation.md §4.4, §4.6): the exact,
-// ordered TrackRole vocabulary read (read-only) from components/arrangrr/
+// ordered TrackRole vocabulary read (read-only) from components/core/arrangrr/
 // include/arrangrr/timeline/timeline.hpp (`kDrums..kLead`, in that enum
-// order) and components/hostrt/shell_parse.cpp's `parse_role()` (the lower-
+// order) and components/platform/hostrt/shell_parse.cpp's `parse_role()` (the lower-
 // case wire tokens `part <role> mute|solo on|off` expects). gui-sonotron
 // never includes the core (D38, pure client) — these two arrays are a
 // hand-copied literal of what was read, not an invented list, shared by
@@ -25,7 +25,7 @@ inline constexpr std::array<std::string_view, kTrackRoleCount> kTrackRoleLabels 
     "Drums", "Perc", "Bass", "Chord1", "Chord2", "Pad", "Arp", "Phrase", "Lead",
 };
 
-// Wire tokens, exactly as `components/hostrt/shell_parse.cpp::parse_role()`
+// Wire tokens, exactly as `components/platform/hostrt/shell_parse.cpp::parse_role()`
 // matches them (lower-case, no spaces) — what a panel puts into a
 // `part <role> mute|solo on|off` L1 command line.
 inline constexpr std::array<std::string_view, kTrackRoleCount> kTrackRoleWireTokens = {

@@ -15,9 +15,9 @@
 namespace sonotron {
 
 // The 16 builtin styles, in the SAME order as `style load <name>`
-// (components/hostrt/shell_music_commands.cpp::cmd_style's "load" verb
+// (components/platform/hostrt/shell_music_commands.cpp::cmd_style's "load" verb
 // resolves by name via `find_builtin_style`, case-insensitively) and as
-// declared in components/arrangrr/include/arrangrr/arranger/style.hpp's
+// declared in components/core/arrangrr/include/arrangrr/arranger/style.hpp's
 // `styles::kBuiltins` — read (read-only) to source this list; gui-sonotron
 // never includes the core (D38, pure client), so this is a hand-copied
 // literal of what was read, not an invented name list.

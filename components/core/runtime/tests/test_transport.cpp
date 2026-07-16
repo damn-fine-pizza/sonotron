@@ -1,6 +1,6 @@
 // Torquato QA (Phase 7, node 8100 hardening pass): pure unit tests for
 // Transport itself -- no Engine/Runtime harness needed, mirroring
-// components/arrangrr/tests/test_boundary_latch.cpp's own precedent for a
+// components/core/arrangrr/tests/test_boundary_latch.cpp's own precedent for a
 // small POD primitive. Covers the re-anchored bar-boundary gate
 // (at_bar_boundary/advance_bar_tick) directly, plus start()/stop()/locate()'s
 // own re-anchoring contract -- the seams node 8100 (SceneChain) and every

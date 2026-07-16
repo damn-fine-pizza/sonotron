@@ -9,8 +9,8 @@
 // the host real-clock thread or the virtual-clock driver calls the engine,
 // which advances the transport. Start/stop/continue are timeline events (D29).
 //
-// Phase-1 runtime extraction: moved out of components/arrangrr into
-// components/runtime byte-for-byte, minus the 3 bar/beat constants (now in
+// Phase-1 runtime extraction: moved out of components/core/arrangrr into
+// components/core/runtime byte-for-byte, minus the 3 bar/beat constants (now in
 // common/time.hpp, needed by arrangrr-side modules that must not depend on
 // runtime). Namespace stays `arrangrr` for Phase 1 (minimal churn); a later
 // pass may rename to `namespace runtime` once the Stage port stabilizes.

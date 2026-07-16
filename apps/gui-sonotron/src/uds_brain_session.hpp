@@ -9,9 +9,9 @@
 
 // First concrete BrainSession (ux-workstation.md §9, decision §14.4): a
 // non-blocking AF_UNIX/SOCK_STREAM client that speaks the GUI's OWN wire
-// protocol -- it never links components/hostrt's UdsServer, it just connects
+// protocol -- it never links components/platform/hostrt's UdsServer, it just connects
 // as a plain client (mirrors
-// components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end). The
+// components/platform/hostrt/tests/test_host.cpp::test_uds_server_end_to_end). The
 // render loop drives it once per frame: send() to push an L1 command line,
 // poll() to drain and decode whatever the core streamed back. No background
 // reader thread (matches the server's own best-effort broadcast -- see

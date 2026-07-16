@@ -86,7 +86,7 @@ inline constexpr std::uint8_t kPadDrumDefaultVelocity = 100;
 //
 // Phase-4b promotion (§16.1/§16.2c/§16.4, Seam C): live piano->chord
 // recognition (`ChordDetector`) and its owner (`FollowedContext`) moved to
-// the peer `components/chorddet` component.
+// the peer `components/core/chorddet` component.
 //
 // Phase-4d (§16.3/§16.4/§16.9): `ChorddetStage` stops being an Engine-owned
 // VALUE member (`m_chorddet`) and becomes a Pipeline-owned SIBLING stage,

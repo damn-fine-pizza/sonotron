@@ -12,7 +12,7 @@
 // the UDS-JSONL adapter; it never links the core and never sees a core enum.
 // Everything here is unit-testable without a GPU or a display.
 //
-// The framing logic mirrors components/hostrt/uds_server.hpp's LineBuffer (a
+// The framing logic mirrors components/platform/hostrt/uds_server.hpp's LineBuffer (a
 // deliberate OWN copy, not an #include of the host header -- the pure-client
 // boundary rule forbids reusing host-side code) and the decoder understands
 // the 8 JSONL event shapes the host currently emits (see gui-contract-map.md

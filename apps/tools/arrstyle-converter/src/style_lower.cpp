@@ -22,7 +22,7 @@ struct ChordShape {
   int offsets[4] = {0, 0, 0, 0};
 };
 
-// Mirrors components/chorddet/include/chorddet/theory.hpp: theory::shape_of().
+// Mirrors components/core/chorddet/include/chorddet/theory.hpp: theory::shape_of().
 ChordShape shape_for(ChordQuality q) noexcept {
   switch (q) {
     case ChordQuality::kMaj:
@@ -53,7 +53,7 @@ ChordShape shape_for(ChordQuality q) noexcept {
   return {};
 }
 
-// Mirrors components/arrangrr/include/arrangrr/arranger/arranger.hpp's private
+// Mirrors components/core/arrangrr/include/arrangrr/arranger/arranger.hpp's private
 // Arranger::kRoleAnchor (the per-role register anchor the NTT kernel resolves
 // against at playback: note = anchor + chord.root_pc + shape.offsets[tone] +
 // 12*octave). Only entries for roles that can legitimately carry a kChordTone

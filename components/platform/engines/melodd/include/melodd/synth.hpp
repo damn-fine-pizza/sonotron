@@ -11,8 +11,8 @@ namespace melodd {
 // The sample rate every host binary that instantiates a Synth defaults to
 // (Phase-6 Theme 2 design review, Decision 5): the single point of change
 // for "what sample rate does realization run at" -- apps/tools/melodd and
-// gui_sonotron_audio both construct their Synth at this rate instead of
-// each hardcoding the literal independently.
+// sonotron::audio::SoundfontEngine both construct their Synth at this rate
+// instead of each hardcoding the literal independently.
 inline constexpr int kDefaultSampleRate = 44100;
 
 // Synth: the melodd "realizer" — a General MIDI SoundFont player built on
@@ -53,7 +53,7 @@ class Synth {
   bool load_soundfont(const std::string& path, std::string& error);
 
   // Split of load_soundfont() for a caller that renders concurrently on
-  // another thread (gui_sonotron_audio::AudioEngine, Phase-6 Theme 2 design
+  // another thread (sonotron::audio::AudioBackend, Phase-6 Theme 2 design
   // review Decision 1/4): the disk read (this function) is slow and must
   // run OUTSIDE whatever lock also guards render(); the state swap
   // (adopt_soundfont() below) is fast and is the only half that actually
@@ -97,7 +97,7 @@ class Synth {
   // can be pinned deterministically by a unit test without rendering/DSP
   // heuristics. No production call site uses these; flagged to Nazzareno per
   // QA policy as a minimal, behavior-preserving accessor (request, not a
-  // silent addition) -- see components/melodd/tests/test_dispatch.cpp.
+  // silent addition) -- see components/platform/engines/melodd/tests/test_dispatch.cpp.
   // Blessed (Nazzareno): const, zero-logic, no side effect -- fits the
   // accessor exception cleanly; kept as-is.
   int debug_program(int channel) const;

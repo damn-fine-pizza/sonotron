@@ -39,7 +39,7 @@
 // pitch, only requantized -- never reharmonized. That is a deliberate,
 // conservative choice, not an oversight.
 //
-// PLACEMENT: a new declared Pipeline stage inside `components/arrangrr`
+// PLACEMENT: a new declared Pipeline stage inside `components/core/arrangrr`
 // (restyle-placement.md §1), inserted between ChorddetStage and Engine in the
 // (grown) orchestrator::AccompanyPipeline. Inert by default -- push_midi_in is
 // a no-op until load_style() succeeds (the `restyle <style>` L1 verb, host-
@@ -65,7 +65,7 @@
 // Dual-target/freestanding: every buffer here is fixed-size (a 128-entry
 // pending-note table, one MidiParser per port), no heap, matching
 // VoicingState/Arranger's own discipline. This header lives under
-// components/arrangrr/include, so arrangrr's PUBLIC -fno-exceptions/-fno-rtti
+// components/core/arrangrr/include, so arrangrr's PUBLIC -fno-exceptions/-fno-rtti
 // apply to every dependent TU automatically; its only real-world producer
 // (midisrc::MidiSourceStage) is HOST-ONLY, but this class itself stays
 // portable so a future non-SMF, live-input restyle mode never needs a

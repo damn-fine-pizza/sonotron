@@ -56,7 +56,7 @@ constexpr std::size_t kOutEventRingCapacity = 1024;
 // owner chose to realize ONLY the primary integrated output port, not every
 // port. Today's default integrated wiring below opens exactly one output
 // port, "out0", and Shell::cmd_port's m_next_out counter starts at 0
-// (components/hostrt/shell_io_commands.cpp) -- so out0 is always index 0. A
+// (components/platform/hostrt/shell_io_commands.cpp) -- so out0 is always index 0. A
 // single named constant, not a magic literal, so a future multi-port
 // realization config only ever needs to change this one spot.
 constexpr std::uint8_t kPrimaryAudioOutPort = 0;
@@ -165,7 +165,7 @@ bool parse_int(std::string_view s, std::int64_t& out) {
 
 // Decodes an optional trailing `quantize <n>` starting at token index `at` in
 // a `launch clip/scene ...` or `stop clip ...` line (mirrors
-// components/hostrt/shell_clip_commands.cpp's own parse_quantize_suffix --
+// components/platform/hostrt/shell_clip_commands.cpp's own parse_quantize_suffix --
 // deliberate small duplication, D38: this pure-client translator never
 // reaches into hostrt's own parsing helpers). `ok` is set false only on a
 // MALFORMED trailing quantize (present but unparsable); an ABSENT suffix is
@@ -223,7 +223,7 @@ enum class TranslateOutcome {
 
 // Phase-6 Theme 3 Item #2's companion (docs/reflections/phase6-theme3-pad-
 // drum-cc-scope.md): `pad bank <n>` -- the kPadBankSelect host hook Item #4
-// left undriven from either host, mirrors components/hostrt/
+// left undriven from either host, mirrors components/platform/hostrt/
 // shell_pad_commands.cpp's own `pad bank` verb. The engine is the source of
 // truth for the [0, kMaxPadBanks) bound (Engine::pad_bank_select rejects
 // outside it); this parse only rejects an unparsable token. Split out of
@@ -288,7 +288,7 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
 
   // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
   // scope.md): `transpose <-12..12>`, the live global transpose -- mirrors
-  // components/hostrt/shell_music_commands.cpp's own `transpose` L1 verb.
+  // components/platform/hostrt/shell_music_commands.cpp's own `transpose` L1 verb.
   // The engine itself is the source of truth for the bound
   // (Engine::cmd_master_transpose rejects outside [-12, +12]); this parse
   // only rejects an unparsable token.
@@ -305,7 +305,7 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
   }
 
   // Tempo nudge (transport_panel.cpp's BPM label): `bpm <N>` sets the global
-  // tempo, mirroring components/hostrt/shell.cpp's own `bpm` L1 verb. The GUI
+  // tempo, mirroring components/platform/hostrt/shell.cpp's own `bpm` L1 verb. The GUI
   // widget only ever emits an integer BPM; the engine is the source of truth
   // for the range (it clamps to 20..400, shell_parse.cpp), so we reject only an
   // unparsable/out-of-range token here for a clean error. a = bpm_x100
@@ -388,7 +388,7 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
 
 // Builds one `style route <role> <port>:<ch>` Command out of a
 // DefaultStyleRoute entry, through the SAME encoding cmd_style()'s "route"
-// verb uses (components/hostrt/shell_music_commands.cpp): `b = port |
+// verb uses (components/platform/hostrt/shell_music_commands.cpp): `b = port |
 // (channel << 8)`, where `channel` is 0-based (split_port_channel converts
 // the 1-based text form -- shell_parse.cpp -- before encoding). The role
 // name always resolves: kDefaultStyleRoutes only ever holds the fixed,

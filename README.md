@@ -9,11 +9,11 @@ subordinate *color*, never a mixing/editing surface.
 Three names, one product:
 
 - **sonotron** — the outer, host-only workstation product described above.
-- **arrangrr** (`components/arrangrr`) — the symbolic MIDI-brain core: arranger
+- **arrangrr** (`components/core/arrangrr`) — the symbolic MIDI-brain core: arranger
   + sequencers + MIDI-FX + live harmony. Dual-target (Linux host + STM32),
   no-heap, and **realization-free** — it decides, it never renders sound; MIDI
   goes to external synths/DAWs, audio-clip decisions go to a peer realizer.
-- **melodd** (`components/melodd` + `apps/tools/melodd`) — the optional,
+- **melodd** (`components/platform/engines/melodd` + `apps/tools/melodd`) — the optional,
   host-only audio peer that realizes sound for arrangrr: a General MIDI
   SoundFont player (TinySoundFont + miniaudio). Absent on the STM32 target or
   on a host without audio, arrangrr degrades gracefully — melodd owns sound,
@@ -54,16 +54,26 @@ The design docs were consolidated into a flat set of canonical files under
 
 ## Layout
 
-`components/` — dual-target and host-only building blocks:
+`components/` splits on the regime axis — `core/` (platform-agnostic,
+freestanding-capable, cross-builds for STM32 too) vs `platform/` (host-only,
+needs a hosted OS). See `docs/architecture.md` §2/§3 for the full doctrine.
+
+`components/core/` — dual-target building blocks:
 
 - `arrangrr` — the symbolic MIDI-brain core (see above).
-- `melodd` — the optional GM SoundFont audio realizer (host-only).
 - `chorddet` — dual-target, freestanding chord-detection peer (`ChordDetector`
   + `FollowedContext`), no heap.
 - `runtime` — the dual-target, no-heap kernel (`Transport` + `OutScheduler` +
   the generic `Pipeline`/`Stage` mechanism) shared by host and firmware.
 - `common` — the base, dependency-free header-only layer `runtime` and
   `arrangrr` both build on.
+- `audio_engine` — the `ISoundEngine` contract (dispatch/all_notes_off/render/
+  name), POD-only, no deps; the pluggable sound-engine seam a concrete engine
+  implements.
+
+`components/platform/` — host-only building blocks (flat, no further regime
+nesting):
+
 - `hostrt` — host-only runtime/shell: ALSA MIDI I/O, the UDS control-socket
   server/client, the REPL/console, and the TUI panels (piano, groove, arp,
   parts, style chooser) that drive arrangrr interactively.
@@ -72,8 +82,14 @@ The design docs were consolidated into a flat set of canonical files under
   `midisrc`'s MIDI-source stage.
 - `midisrc` — host-only MIDI-source material: the hand-rolled SMF reader and
   its `Diagnostics` reporting.
-- `samplrr` — a reserved slot for a future host-only sampler engine; no code
-  yet.
+- `audio` — the concrete host audio backend (`AudioBackend`, the miniaudio
+  device layer) and `SoundfontEngine`, the first concrete `ISoundEngine`
+  implementation (wraps `melodd::Synth`). Promoted out of `apps/gui-sonotron`
+  so any pure-client app can reuse it.
+- `engines/melodd` — the optional GM SoundFont audio realizer (host-only).
+
+`components/samplrr` — a reserved slot for a future host-only sampler engine,
+not yet folded into `platform/`; no code yet.
 
 `apps/` — the deployable binaries:
 

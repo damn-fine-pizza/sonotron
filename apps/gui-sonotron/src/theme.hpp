@@ -9,7 +9,7 @@
 // from the shipped GUI itself (design ref: tokens/colors.css,
 // tokens/spacing.css -- both derived from THIS app's own
 // ImGui::StyleColorsDark() baseline, the hardcoded ImVec4 accents the panels
-// used to carry, and components/hostrt/ui_style.cpp's ANSI role theme).
+// used to carry, and components/platform/hostrt/ui_style.cpp's ANSI role theme).
 // apply() overwrites the relevant ImGuiStyle knobs with the resolved
 // sonotron values; the named constants below let every *_panel.cpp
 // reference a semantic token instead of hardcoding an ImVec4, per the

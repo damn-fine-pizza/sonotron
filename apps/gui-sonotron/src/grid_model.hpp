@@ -17,7 +17,7 @@ namespace sonotron {
 // Whether a launched cell/scene actually fires anything on the core. TRUE:
 // the core clip/scene primitive shipped (Phase-5 Item #2, docs/design/
 // clip-primitive-design.md) -- `launch clip <id> quantize <n>` / `launch
-// scene <n> quantize <q>` are real L1 verbs (components/hostrt/
+// scene <n> quantize <q>` are real L1 verbs (components/platform/hostrt/
 // shell_clip_commands.cpp), the core emits a real `clip` event, and
 // grid_panel.cpp's cell/scene-header buttons send() them for real. Kept as
 // one named constant (rather than deleting it outright) so a future full

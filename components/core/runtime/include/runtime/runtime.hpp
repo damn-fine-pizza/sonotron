@@ -37,7 +37,7 @@ namespace runtime {
 // `N` is the scheduler capacity (arrangrr::kSchedulerCapacity at every real
 // call site) — a non-type template parameter, NOT an `arrangrr/config.hpp`
 // include, so this header stays free of any arrangrr dependency (Decision A:
-// no `runtime -> arrangrr` edge). The instantiator (components/hostrt,
+// no `runtime -> arrangrr` edge). The instantiator (components/platform/hostrt,
 // tests/arm-smoke's link_gate.cpp) already includes arrangrr/config.hpp for
 // its own reasons and supplies the constant explicitly.
 template <typename StageT, std::size_t N>

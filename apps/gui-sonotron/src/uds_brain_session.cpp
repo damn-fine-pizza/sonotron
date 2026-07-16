@@ -30,7 +30,7 @@ bool set_nonblocking(int fd) {
   return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) >= 0;
 }
 
-// The shell (components/hostrt/shell.cpp::dispatch_ui) treats a first token
+// The shell (components/platform/hostrt/shell.cpp::dispatch_ui) treats a first token
 // of exactly "quit" or "exit" as "tear down the whole shared host, for every
 // connected client". A GUI window-close or a stray Enter must never forward
 // that verb over a socket other clients share, so we refuse it here, before

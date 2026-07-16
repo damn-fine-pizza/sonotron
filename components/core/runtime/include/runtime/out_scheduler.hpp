@@ -9,8 +9,8 @@
 // Timestamped MIDI output queue with the D29 total order:
 //   (tick, class_priority, seq_no)
 //
-// Phase-1 runtime extraction: moved out of components/arrangrr into
-// components/runtime byte-for-byte. Namespace stays `arrangrr` for Phase 1
+// Phase-1 runtime extraction: moved out of components/core/arrangrr into
+// components/core/runtime byte-for-byte. Namespace stays `arrangrr` for Phase 1
 // (minimal churn); see runtime/transport.hpp's header comment.
 // class_priority: realtime/clock < NoteOff < CC/other < NoteOn, so a NoteOff
 // always precedes a NoteOn scheduled on the same tick and clock always leads.
@@ -51,7 +51,7 @@ struct ScheduledEvent {
   // pending note-off whose `source` matches the incoming note-on's own, so
   // two independent producers sharing a (port, channel, note) triple never
   // cancel each other's legitimate note-off. Meaning is entirely up to the
-  // caller (arrangrr::kScheduleSource* in components/arrangrr/config.hpp);
+  // caller (arrangrr::kScheduleSource* in components/core/arrangrr/config.hpp);
   // this component stays producer-agnostic. Defaults to 0, so every EXISTING
   // caller that never passes a source (this file's own schedule()/
   // cancel_note_off() default arguments) keeps today's single shared-pool

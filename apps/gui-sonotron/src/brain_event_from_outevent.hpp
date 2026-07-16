@@ -10,8 +10,8 @@
 // ring, populating the SAME sonotron::BrainEvent shape parse_brain_event()
 // (brain_event.cpp) produces from the socket's JSONL text.
 //
-// Both this function and components/hostrt/jsonl.cpp's to_jsonl()/to_human()
-// call the SAME shared label helpers (components/hostrt/event_labels.hpp) --
+// Both this function and components/platform/hostrt/jsonl.cpp's to_jsonl()/to_human()
+// call the SAME shared label helpers (components/platform/hostrt/event_labels.hpp) --
 // one enum/code -> label computation, two thin front ends (a text serializer
 // and this struct populator). That is what keeps the ring's in-process decode
 // and the socket's JSONL wire from drifting into two independently

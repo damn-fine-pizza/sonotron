@@ -424,8 +424,8 @@ void test_deserialize_rejects_wrong_format_version() {
 
 // Phase-6 Theme 3 Item #3 (P4, docs/DESIGN.md line 588): the OLD v1 version
 // number is likewise hard-rejected by the core -- the device NEVER migrates,
-// only components/hostrt's migrate_performance_v1_to_v2 (host-only) does,
-// tested separately in components/hostrt/tests/test_perf_migrate.cpp.
+// only components/platform/hostrt's migrate_performance_v1_to_v2 (host-only) does,
+// tested separately in components/platform/hostrt/tests/test_perf_migrate.cpp.
 void test_deserialize_rejects_v1_format_version() {
   PerformanceStore store;
   CHECK(store.store(0, distinctive_performance(1)));

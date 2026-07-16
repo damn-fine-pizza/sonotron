@@ -7,8 +7,8 @@
 // Phase-6 Theme 2 (docs/phase6-design-reviews.md "Audio in the standalone
 // GUI", Decision 4): Synth::load_soundfont() was split into
 // read_soundfont_file() (disk I/O, no mutex -- the GUI-thread-only half) and
-// adopt_soundfont() (the fast pointer-swap tail gui_sonotron_audio::
-// AudioEngine guards with its mutex). Proves the split stays behavior-
+// adopt_soundfont() (the fast pointer-swap tail sonotron::audio::
+// AudioBackend guards with its render_mutex()). Proves the split stays behavior-
 // identical to the single-call load_soundfont() it used to be:
 //   - success loads and resets every channel to the GM default (program 0);
 //   - a failed read leaves any PREVIOUSLY loaded SoundFont's state (both

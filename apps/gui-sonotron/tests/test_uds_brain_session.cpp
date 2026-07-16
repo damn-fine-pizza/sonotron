@@ -1,6 +1,6 @@
 // Round-trip test for UdsBrainSession (ux-workstation.md §9) against a real
 // AF_UNIX listen socket driven synchronously in-process (same style as
-// components/hostrt/tests/test_host.cpp::test_uds_server_end_to_end): no
+// components/platform/hostrt/tests/test_host.cpp::test_uds_server_end_to_end): no
 // threads, no sleeps. Exercises connect -> send -> the server reads the
 // exact bytes, and the server writes JSONL lines -> poll() decodes them.
 // Also pins the quit/exit blacklist (gui-contract-map.md §0): a GUI

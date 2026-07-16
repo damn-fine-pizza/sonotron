@@ -4,7 +4,7 @@
 #include "event_labels.hpp"
 #include "note_names.hpp"
 
-// See the header comment: this mirrors components/hostrt/jsonl.cpp's
+// See the header comment: this mirrors components/platform/hostrt/jsonl.cpp's
 // to_jsonl()/to_human() switch, field-for-field, but populates a
 // sonotron::BrainEvent instead of formatting text -- both call the exact same
 // arrangrr::host label helpers (event_labels.hpp), so a chord-quality suffix,

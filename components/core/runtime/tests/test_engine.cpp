@@ -5,7 +5,7 @@
 #include "test_harness.hpp"
 
 // Phase-1 runtime extraction: the Transport/clock/scheduler-drain-driven
-// subset of components/arrangrr/tests/test_engine.cpp, moved here because the
+// subset of components/core/arrangrr/tests/test_engine.cpp, moved here because the
 // subject is now genuinely runtime concern (Corelli/Palladio's move plan).
 // Harness is `arrangrr::test::TestEngine` (a Runtime<Engine> wrapper) rather
 // than a bare `Engine`, since Transport/OutScheduler no longer live on Engine

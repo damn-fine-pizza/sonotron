@@ -1,4 +1,4 @@
-// Unit tests for FunctionRef (components/arrangrr/common/function_ref.hpp):
+// Unit tests for FunctionRef (components/core/arrangrr/common/function_ref.hpp):
 // the non-owning, two-word callable reference used across the engine ABI
 // boundary (EventSink and friends). Pure, freestanding, no Engine.
 //

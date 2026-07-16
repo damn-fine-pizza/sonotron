@@ -5,7 +5,7 @@
 #include "test_harness.hpp"
 
 // Phase-1 runtime extraction: the Transport/clock/scheduler-drain-driven
-// subset of this file moved to components/runtime/tests/test_engine.cpp
+// subset of this file moved to components/core/runtime/tests/test_engine.cpp
 // (Corelli/Palladio: "genuinely runtime concerns"). What stays here exercises
 // the Stage's OWN command dispatch/warn-code surface — arrangrr's domain.
 
