@@ -5,6 +5,8 @@
 
 #include "src/grid_model.hpp"
 
+#include <cmath>
+
 #include "test.hpp"
 
 using sonotron::GridCellKind;
@@ -244,6 +246,105 @@ void test_bar_just_advanced_fires_once_per_distinct_bar() {
   CHECK(!bar_just_advanced(1, last));  // settles again until the next change
 }
 
+// section_playhead_phase: beat-synchronized playhead phase for the launch-cell
+// sweep bar, advancing 0->100% over the active scene's section length.
+using sonotron::section_playhead_phase;
+
+void test_section_playhead_phase_at_start_of_section() {
+  // current_bar == active_scene_start_bar, at beat 1, pulse 0: phase ≈ 0.0
+  const float phase = section_playhead_phase(
+      /*current_bar=*/5, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/4);
+  CHECK(std::fabs(phase - 0.0F) < 1e-4F);
+}
+
+void test_section_playhead_phase_mid_section_whole_bar() {
+  // 2 bars elapsed of a 4-bar section, at downbeat: phase ≈ 0.5
+  const float phase = section_playhead_phase(
+      /*current_bar=*/7, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/4);
+  CHECK(std::fabs(phase - 0.5F) < 1e-4F);
+}
+
+void test_section_playhead_phase_within_bar_beat_advance() {
+  // 0 bars elapsed, beat_num=3 (at beat 3), pulse=0, bpb=4, section_bars=1.
+  // within_bar = (max(3-1, 0) + 0/24) / 4 = 2/4 = 0.5
+  // phase = (0 + 0.5) / 1 = 0.5
+  const float phase = section_playhead_phase(
+      /*current_bar=*/1, /*active_scene_start_bar=*/1, /*beat_num=*/3, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/1);
+  CHECK(std::fabs(phase - 0.5F) < 1e-4F);
+}
+
+void test_section_playhead_phase_within_bar_pulse_advance() {
+  // 0 bars elapsed, beat_num=1, pulse=12 (half a beat), bpb=4, section_bars=1.
+  // within_bar = (0 + 12/24) / 4 = 0.5 / 4 = 0.125
+  // phase = (0 + 0.125) / 1 = 0.125
+  const float phase = section_playhead_phase(
+      /*current_bar=*/2, /*active_scene_start_bar=*/2, /*beat_num=*/1, /*pulse=*/12,
+      /*beats_per_bar=*/4, /*section_bars=*/1);
+  CHECK(std::fabs(phase - 0.125F) < 1e-4F);
+}
+
+void test_section_playhead_phase_clamps_to_one_at_section_end() {
+  // bars_elapsed == section_bars (at boundary): phase clamps to 1.0
+  const float phase = section_playhead_phase(
+      /*current_bar=*/9, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/4);
+  CHECK(std::fabs(phase - 1.0F) < 1e-4F);
+}
+
+void test_section_playhead_phase_clamps_beyond_section_end() {
+  // bars_elapsed beyond section_bars: phase still clamps to 1.0
+  const float phase = section_playhead_phase(
+      /*current_bar=*/15, /*active_scene_start_bar=*/5, /*beat_num=*/2, /*pulse=*/12,
+      /*beats_per_bar=*/4, /*section_bars=*/4);
+  CHECK(phase <= 1.0F);
+  CHECK(std::fabs(phase - 1.0F) < 1e-4F);
+}
+
+void test_section_playhead_phase_not_started_current_bar_zero() {
+  // current_bar == 0 (transport parked): sentinel -1.0F
+  const float phase = section_playhead_phase(
+      /*current_bar=*/0, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/4);
+  CHECK(phase < 0.0F);
+}
+
+void test_section_playhead_phase_sentinel_section_bars_zero() {
+  // section_bars == 0 (invalid): sentinel -1.0F
+  const float phase = section_playhead_phase(
+      /*current_bar=*/5, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/0);
+  CHECK(phase < 0.0F);
+}
+
+void test_section_playhead_phase_sentinel_beats_per_bar_zero() {
+  // beats_per_bar == 0 (invalid): sentinel -1.0F
+  const float phase = section_playhead_phase(
+      /*current_bar=*/5, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/0, /*section_bars=*/4);
+  CHECK(phase < 0.0F);
+}
+
+void test_section_playhead_phase_rewind_bar_less_than_anchor() {
+  // current_bar < active_scene_start_bar (bar rewind): sentinel -1.0F
+  const float phase = section_playhead_phase(
+      /*current_bar=*/3, /*active_scene_start_bar=*/5, /*beat_num=*/1, /*pulse=*/0,
+      /*beats_per_bar=*/4, /*section_bars=*/4);
+  CHECK(phase < 0.0F);
+}
+
+void test_section_playhead_phase_different_time_signature_3_4() {
+  // bpb=3 (3/4 time), section_bars=2, beat_num=2, pulse=0
+  // within_bar = (1 + 0) / 3 = 0.333...
+  // phase = 0.333... / 2 ≈ 0.1667
+  const float phase = section_playhead_phase(
+      /*current_bar=*/1, /*active_scene_start_bar=*/1, /*beat_num=*/2, /*pulse=*/0,
+      /*beats_per_bar=*/3, /*section_bars=*/2);
+  CHECK(std::fabs(phase - (1.0F / 6.0F)) < 1e-4F);  // 1/6 ≈ 0.1667
+}
+
 }  // namespace
 
 int main() {
@@ -268,5 +369,16 @@ int main() {
   test_next_scene_wraps_at_last_scene();
   test_next_scene_zero_scene_count_stays();
   test_bar_just_advanced_fires_once_per_distinct_bar();
+  test_section_playhead_phase_at_start_of_section();
+  test_section_playhead_phase_mid_section_whole_bar();
+  test_section_playhead_phase_within_bar_beat_advance();
+  test_section_playhead_phase_within_bar_pulse_advance();
+  test_section_playhead_phase_clamps_to_one_at_section_end();
+  test_section_playhead_phase_clamps_beyond_section_end();
+  test_section_playhead_phase_not_started_current_bar_zero();
+  test_section_playhead_phase_sentinel_section_bars_zero();
+  test_section_playhead_phase_sentinel_beats_per_bar_zero();
+  test_section_playhead_phase_rewind_bar_less_than_anchor();
+  test_section_playhead_phase_different_time_signature_3_4();
   return sonotron::test::failures();
 }
