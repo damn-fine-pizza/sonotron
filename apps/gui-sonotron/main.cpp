@@ -47,6 +47,21 @@
 // ring handle (set_audio_ring()). `--control` stays silent, as before. See
 // render_soundfont_dialog()/kSoundFontPathBufferSize below for the
 // "Load SoundFont…" surface (File menu).
+//
+// INPUT RECORD/REPLAY (owner ask: close the "green tests, broken app" gap --
+// see src/input_trace.hpp for the JSONL wire format): `--trace-input <path>`
+// / SONOTRON_INPUT_TRACE record every mouse/keyboard event ImGui consumes
+// each frame; `--replay-input <path>` / SONOTRON_INPUT_REPLAY feed a
+// previously recorded trace back in, suppressing real mouse/keyboard input
+// for the duration. Replay is NOT a headless-only mode: it runs in the
+// normal, visible windowed app (composes with, but does not require,
+// SONOTRON_GUI_MAX_FRAMES/SONOTRON_GUI_SCREENSHOT for headless CI use) --
+// the owner can watch a replay drive the UI live, or attach a debugger to
+// it (`gdb --args ./gui-sonotron --replay-input trace.jsonl`) and break at
+// the frame a bug shows, read off render_replay_badge()'s on-screen frame
+// counter to know which one that is. Either way the app's own per-frame
+// counter (the same one SONOTRON_GUI_MAX_FRAMES counts against) is the
+// shared clock, so record and replay always agree on framing.
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -74,6 +89,7 @@
 #include "src/browser_model.hpp"
 #include "src/grid_model.hpp"
 #include "src/in_process_brain_session.hpp"
+#include "src/input_trace.hpp"
 #include "src/layout_json.hpp"
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
@@ -144,6 +160,36 @@ std::string control_path_from_args(int argc, char** argv) {
     }
   }
   if (const char* env = std::getenv("SONOTRON_CONTROL_PATH"); env != nullptr) {
+    return env;
+  }
+  return "";
+}
+
+// INPUT RECORD/REPLAY (owner ask: close the "green tests, broken app" gap;
+// see src/input_trace.hpp for the JSONL wire format and the exact capture
+// point). `--trace-input <path>` wins over SONOTRON_INPUT_TRACE, same
+// flag-over-env discipline as --control/SONOTRON_CONTROL_PATH above.
+std::string trace_input_path_from_args(int argc, char** argv) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--trace-input") {
+      return argv[i + 1];
+    }
+  }
+  if (const char* env = std::getenv("SONOTRON_INPUT_TRACE"); env != nullptr) {
+    return env;
+  }
+  return "";
+}
+
+// `--replay-input <path>` wins over SONOTRON_INPUT_REPLAY, sibling to
+// trace_input_path_from_args above.
+std::string replay_input_path_from_args(int argc, char** argv) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--replay-input") {
+      return argv[i + 1];
+    }
+  }
+  if (const char* env = std::getenv("SONOTRON_INPUT_REPLAY"); env != nullptr) {
     return env;
   }
   return "";
@@ -435,11 +481,60 @@ void render_menu_bar(sonotron::Layout& layout, sonotron::BrainSession& brain_ses
   }
 }
 
+// INPUT REPLAY on-screen tell (owner ask): a small, always-on-top badge in
+// the corner so it is visually obvious a session is being driven from a
+// trace rather than by the person at the keyboard -- and so the owner can
+// read off the exact frame number to cite when a bug shows up (or to break
+// on in a debugger, see src/input_trace.hpp / this file's own header
+// comment). Deliberately tiny: one auto-sized, non-interactive window, no
+// new dependency, no state of its own beyond what the caller already has.
+void render_replay_badge(int frame) {
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 10.0F, 10.0F), ImGuiCond_Always,
+                          ImVec2(1.0F, 0.0F));
+  ImGui::SetNextWindowBgAlpha(0.65F);
+  constexpr ImGuiWindowFlags kBadgeFlags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
+  if (ImGui::Begin("##replay_badge", nullptr, kBadgeFlags)) {
+    ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F), "REPLAY  frame %d", frame);
+  }
+  ImGui::End();
+}
+
+// INPUT RECORD/REPLAY timing (src/input_trace.hpp): io.AddMousePosEvent/
+// AddMouseButtonEvent/AddKeyEvent only QUEUE an event -- Dear ImGui applies
+// the queue to io.MousePos/io.MouseDown/io.KeysData inside ImGui::NewFrame()
+// itself, not immediately and not inside ImGui_ImplGlfw_NewFrame(). Two
+// consequences, both handled right here rather than in main()'s outer loop:
+//   - REPLAY must feed AFTER ImGui_ImplGlfw_NewFrame() (which, with
+//     install_callbacks=false, still unconditionally re-queues the REAL OS
+//     cursor position every focused frame -- imgui_impl_glfw.cpp's
+//     UpdateMouseData() "fallback for when callbacks aren't installed" has
+//     no way to know we deliberately want that suppressed) and BEFORE
+//     ImGui::NewFrame(), so our replayed position is the LAST one queued
+//     this frame and wins over that leaked real one. InputTraceReplayer
+//     additionally re-asserts its last known position every frame even when
+//     the trace has no new "mp" line for this exact frame (see its own doc
+//     comment) -- otherwise that same leak would show through on every
+//     frame the trace itself does not touch the mouse. Mouse buttons/keys
+//     have no such polling fallback in the backend, so install_callbacks=
+//     false alone fully suppresses real ones for those.
+//   - RECORD must capture AFTER ImGui::NewFrame() has applied the queue,
+//     or it would read last frame's stale io state.
 void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state, AudioHandles* audio,
-                  SoundFontDialogState& soundfont_dialog, bool& quit_requested) {
+                  SoundFontDialogState& soundfont_dialog, bool& quit_requested, int frame,
+                  bool replay_active, sonotron::InputTraceReplayer& input_replayer,
+                  sonotron::InputTraceRecorder& input_recorder) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
+
+  input_replayer.feed_frame(frame, ImGui::GetIO());
+
   ImGui::NewFrame();
+
+  input_recorder.capture_frame(frame, ImGui::GetIO());
 
   render_menu_bar(layout, state.brain_session, audio, soundfont_dialog, quit_requested);
 
@@ -451,6 +546,10 @@ void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state, A
                    ImGuiWindowFlags_NoBringToFrontOnFocus);
   sonotron::render_layout(layout, state);
   ImGui::End();
+
+  if (replay_active) {
+    render_replay_badge(frame);
+  }
 
   ImGui::Render();
 }
@@ -537,7 +636,35 @@ int main(int argc, char** argv) {
                static_cast<double>(content_scale), static_cast<double>(base_font_size_px),
                static_cast<double>(base_font_size_px * content_scale));
 
-  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  // INPUT RECORD/REPLAY (owner ask: close the "green tests, broken app"
+  // gap, src/input_trace.hpp). Recording is additive (the real GLFW->ImGui
+  // callback chain stays installed); replaying instead DISABLES it
+  // (install_callbacks=false below) so real mouse/keyboard input never
+  // reaches ImGui while a trace is being fed in frame-by-frame. `w`/`h` in
+  // the meta line are the GLFW logical window size, matching
+  // ImGuiIO::DisplaySize (see input_trace.hpp for why that is what replay
+  // needs to hit the same widgets).
+  const std::string trace_input_path = trace_input_path_from_args(argc, argv);
+  const std::string replay_input_path = replay_input_path_from_args(argc, argv);
+  const bool replay_active = !replay_input_path.empty();
+
+  sonotron::InputTraceRecorder input_recorder;
+  if (!trace_input_path.empty()) {
+    int window_w = 0;
+    int window_h = 0;
+    glfwGetWindowSize(window, &window_w, &window_h);
+    if (input_recorder.start(trace_input_path, window_w, window_h)) {
+      std::fprintf(stdout, "sonotron: recording input trace to %s\n", trace_input_path.c_str());
+    }
+  }
+
+  sonotron::InputTraceReplayer input_replayer;
+  if (replay_active && input_replayer.load(replay_input_path)) {
+    std::fprintf(stdout, "sonotron: replaying input trace from %s (%zu events)\n",
+                 replay_input_path.c_str(), input_replayer.event_count());
+  }
+
+  ImGui_ImplGlfw_InitForOpenGL(window, /*install_callbacks=*/!replay_active);
   ImGui_ImplOpenGL3_Init("#version 130");
 
   std::fprintf(stdout, "sonotron: window open, GL renderer: %s\n",
@@ -705,8 +832,14 @@ int main(int argc, char** argv) {
     app_state.set_connected(brain_connected);
 
     render_frame(layout, workstation_state, audio_handles ? &*audio_handles : nullptr,
-                 soundfont_dialog, quit_requested);
+                 soundfont_dialog, quit_requested, frame, replay_active, input_replayer,
+                 input_recorder);
     present_frame(window, capture_this_frame ? screenshot_path : nullptr);
+  }
+
+  if (replay_active) {
+    std::fprintf(stderr, "sonotron: replay: %d events consumed\n",
+                 input_replayer.events_consumed());
   }
 
   ImGui_ImplOpenGL3_Shutdown();

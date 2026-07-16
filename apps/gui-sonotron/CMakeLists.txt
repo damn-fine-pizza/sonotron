@@ -96,9 +96,19 @@ target_compile_options(gui_sonotron_preview PRIVATE -Wall -Wextra -Werror)
 # this stays a pure library-boundary dependency, not a core-free violation --
 # see preview.hpp's own header comment and gui_sonotron_preview's target
 # comment above.
+# input_trace.cpp (INPUT RECORD/REPLAY, owner ask: close the "green tests,
+# broken app" gap -- see src/input_trace.hpp) sits here rather than being
+# compiled straight into the gui_sonotron executable: it only needs ImGuiIO
+# + STL, but main.cpp's OWN translation unit inherits -fno-exceptions
+# transitively (through gui_sonotron_engine -> hostrt, the core's
+# no-exceptions discipline), which would forbid the try/catch its
+# hand-rolled JSONL number parser uses. Living in this core-free library
+# instead (same discipline as theme.cpp/neon_widgets.cpp above) keeps that
+# parser free to use ordinary exception-based std::stod.
 add_library(gui_sonotron_layout STATIC
   src/theme.cpp
   src/neon_widgets.cpp
+  src/input_trace.cpp
   src/layout_model.cpp
   src/layout_json.cpp
   src/layout_renderer.cpp

@@ -8,6 +8,8 @@
 # Builds the host target first if the binary is missing, then execs it. Any
 # arguments after `--` (or all arguments) are forwarded to the app, e.g.:
 #   launch-gui.sh --control /tmp/sonotron.sock
+#   launch-gui.sh -- --trace-input /tmp/session.jsonl     # record a repro
+#   launch-gui.sh -- --replay-input /tmp/session.jsonl     # replay it back
 #
 # A launch-gui.bat / .cmd sibling can be added the day we ship on Windows; for
 # now this POSIX shell launcher covers the Linux and macOS hosts.
