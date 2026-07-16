@@ -8,7 +8,7 @@
 // CMake preset yet, so that run is a manual, documented verification step
 // alongside the normal ctest-registered run below).
 
-#include "src/spsc_ring.hpp"
+#include "audio/spsc_ring.hpp"
 
 #include <atomic>
 #include <cstdint>

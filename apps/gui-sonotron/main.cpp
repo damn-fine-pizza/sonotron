@@ -10,7 +10,8 @@
 //   - DEFAULT (no `--control`): InProcessBrainSession -- the "integrated"
 //     conserver: a dedicated engine thread inside THIS binary runs the
 //     arrangrr Runtime/Stage + AlsaMidi, talking to the render thread over
-//     two SPSC rings (src/spsc_ring.hpp). No external process.
+//     two SPSC rings (components/platform/audio's spsc_ring.hpp). No
+//     external process.
 //   - `--control <path>`: UdsBrainSession -- unchanged pure client of an
 //     external `sonotron-server`, exactly as before Phase 2b (regression
 //     preserved).
@@ -36,11 +37,14 @@
 // dependency — no new third-party code library was added for this.
 //
 // Audio (Phase-6 Theme 2, docs/phase6-design-reviews.md "Audio in the
-// standalone GUI"): in integrated mode ONLY (control_path.empty()), main()
-// also owns a sonotron::AudioEngine (arrangrr-free, gui_sonotron_audio) that
-// realizes the engine thread's MIDI through a melodd::Synth + miniaudio
-// device, wired to InProcessBrainSession through one narrow ring handle
-// (set_audio_ring()). `--control` stays silent, as before. See
+// standalone GUI"; generalized behind the ISoundEngine seam, docs/proposals/
+// isoundengine-contract.md): in integrated mode ONLY (control_path.empty()),
+// main() also owns a sonotron::audio::SoundfontEngine (this build's one
+// concrete ISoundEngine, wrapping melodd::Synth) and a
+// sonotron::audio::AudioBackend (the arrangrr-free device layer, holding a
+// reference to the engine + a miniaudio device) that together realize the
+// engine thread's MIDI, wired to InProcessBrainSession through one narrow
+// ring handle (set_audio_ring()). `--control` stays silent, as before. See
 // render_soundfont_dialog()/kSoundFontPathBufferSize below for the
 // "Load SoundFont…" surface (File menu).
 
@@ -55,12 +59,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "audio/audio_backend.hpp"
+#include "audio/soundfont_engine.hpp"
 #include "melodd/soundfont_discovery.hpp"
 #include "src/app_state.hpp"
-#include "src/audio_engine.hpp"
 #include "src/brain_event.hpp"
 #include "src/brain_session.hpp"
 #include "src/browser_model.hpp"
@@ -267,13 +273,27 @@ void set_soundfont_path(SoundFontDialogState& dialog, const std::string& value) 
   dialog.path[n] = '\0';
 }
 
+// Bundles the two Theme-2/ISoundEngine-seam objects main() owns together in
+// integrated mode (control_path.empty()) -- SoundfontEngine (this build's
+// one concrete ISoundEngine) and AudioBackend (the device layer holding a
+// reference to it). A plain aggregate of references, not a class: main() is
+// the composition root, the one place allowed to name both the concrete
+// engine type and AudioBackend together (docs/proposals/
+// isoundengine-contract.md, Corelli §1's "the composition root talks to the
+// concrete type for configuration").
+struct AudioHandles {
+  sonotron::audio::SoundfontEngine& engine;
+  sonotron::audio::AudioBackend& backend;
+};
+
 // The "Load SoundFont…" modal (Decision 6): an InputText bound to
-// dialog.path plus a Load button that calls AudioEngine::load_soundfont()
-// on THIS (GUI) thread -- load_soundfont()'s own doc comment is explicit
-// that the disk read must never happen inside the audio callback. Must be
-// called every frame (the standard ImGui OpenPopup/BeginPopupModal idiom)
-// so the popup stays reachable after open_requested triggers it once.
-void render_soundfont_dialog(sonotron::AudioEngine& audio_engine, SoundFontDialogState& dialog) {
+// dialog.path plus a Load button that calls SoundfontEngine::load() on THIS
+// (GUI) thread, serialized against AudioBackend's render callback through
+// render_mutex() -- load()'s own doc comment is explicit that the disk read
+// must never happen inside the audio callback. Must be called every frame
+// (the standard ImGui OpenPopup/BeginPopupModal idiom) so the popup stays
+// reachable after open_requested triggers it once.
+void render_soundfont_dialog(AudioHandles& audio, SoundFontDialogState& dialog) {
   if (dialog.open_requested) {
     ImGui::OpenPopup("Load SoundFont");
     dialog.open_requested = false;
@@ -284,7 +304,7 @@ void render_soundfont_dialog(sonotron::AudioEngine& audio_engine, SoundFontDialo
   ImGui::InputText("Path (.sf2)", dialog.path.data(), dialog.path.size());
   if (ImGui::Button("Load")) {
     std::string error;
-    if (audio_engine.load_soundfont(dialog.path.data(), error)) {
+    if (audio.engine.load(dialog.path.data(), error, audio.backend.render_mutex())) {
       dialog.status = "Loaded.";
     } else {
       dialog.status = error;
@@ -309,10 +329,10 @@ void render_soundfont_dialog(sonotron::AudioEngine& audio_engine, SoundFontDialo
 // NEVER a bare `quit` on the socket (that tears down the shared host for
 // every client, gui-contract-map.md §0; BrainSession::send() blacklists it
 // anyway as defense-in-depth, but the menu never even attempts it).
-// `audio_engine` is null in --control mode (Decision 2's integrated-mode-
-// only scope cut) -- the File > Load SoundFont... item is disabled then.
+// `audio` is null in --control mode (Decision 2's integrated-mode-only
+// scope cut) -- the File > Load SoundFont... item is disabled then.
 void render_menu_bar(sonotron::Layout& layout, sonotron::BrainSession& brain_session,
-                     sonotron::AudioEngine* audio_engine, SoundFontDialogState& soundfont_dialog,
+                     AudioHandles* audio, SoundFontDialogState& soundfont_dialog,
                      bool& quit_requested) {
   if (!ImGui::BeginMainMenuBar()) {
     return;
@@ -323,7 +343,7 @@ void render_menu_bar(sonotron::Layout& layout, sonotron::BrainSession& brain_ses
     ImGui::MenuItem("Open set...", nullptr, false, false);
     ImGui::MenuItem("Save set", nullptr, false, false);
     ImGui::Separator();
-    if (ImGui::MenuItem("Load SoundFont...", nullptr, false, audio_engine != nullptr)) {
+    if (ImGui::MenuItem("Load SoundFont...", nullptr, false, audio != nullptr)) {
       soundfont_dialog.open_requested = true;
     }
     ImGui::Separator();
@@ -377,19 +397,18 @@ void render_menu_bar(sonotron::Layout& layout, sonotron::BrainSession& brain_ses
 
   ImGui::EndMainMenuBar();
 
-  if (audio_engine != nullptr) {
-    render_soundfont_dialog(*audio_engine, soundfont_dialog);
+  if (audio != nullptr) {
+    render_soundfont_dialog(*audio, soundfont_dialog);
   }
 }
 
-void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state,
-                  sonotron::AudioEngine* audio_engine, SoundFontDialogState& soundfont_dialog,
-                  bool& quit_requested) {
+void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state, AudioHandles* audio,
+                  SoundFontDialogState& soundfont_dialog, bool& quit_requested) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
 
-  render_menu_bar(layout, state.brain_session, audio_engine, soundfont_dialog, quit_requested);
+  render_menu_bar(layout, state.brain_session, audio, soundfont_dialog, quit_requested);
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -495,12 +514,18 @@ int main(int argc, char** argv) {
   // them.
   const std::string control_path = control_path_from_args(argc, argv);
   std::unique_ptr<sonotron::BrainSession> brain_session_holder;
-  // Phase-6 Theme 2 (Decision 5, docs/phase6-design-reviews.md): declared
-  // AFTER brain_session_holder so C++'s reverse-destruction-order rule tears
-  // AudioEngine down (device stopped, panic sent) BEFORE InProcessBrainSession
-  // joins its engine thread at function-scope exit. Stays null in --control
-  // mode (Decision 2's integrated-mode-only scope cut).
-  std::unique_ptr<sonotron::AudioEngine> audio_engine;
+  // Phase-6 Theme 2 (Decision 5, docs/phase6-design-reviews.md), promoted
+  // alongside the ISoundEngine seam (docs/proposals/
+  // isoundengine-contract.md): both declared AFTER brain_session_holder so
+  // C++'s reverse-destruction-order rule tears AudioBackend down (device
+  // stopped, panic sent) BEFORE InProcessBrainSession joins its engine
+  // thread at function-scope exit -- soundfont_engine outlives audio_backend
+  // (declared first, destructed last) since AudioBackend only holds a
+  // reference to it. Both stay null in --control mode (Decision 2's
+  // integrated-mode-only scope cut).
+  std::unique_ptr<sonotron::audio::SoundfontEngine> soundfont_engine;
+  std::unique_ptr<sonotron::audio::AudioBackend> audio_backend;
+  std::optional<AudioHandles> audio_handles;
   SoundFontDialogState soundfont_dialog;
   if (!control_path.empty()) {
     auto uds_session = std::make_unique<sonotron::UdsBrainSession>();
@@ -512,15 +537,19 @@ int main(int argc, char** argv) {
     }
     brain_session_holder = std::move(uds_session);
   } else {
-    // AudioEngine is constructed (and its default SoundFont loaded) BEFORE
-    // the engine thread starts, so note_ring() is a valid, already-wired
-    // handle the instant run_engine() can read it (set_audio_ring() below
-    // is called before start(), see that method's own doc comment).
-    audio_engine = std::make_unique<sonotron::AudioEngine>();
+    // SoundfontEngine/AudioBackend are constructed (and the default
+    // SoundFont loaded) BEFORE the engine thread starts, so note_ring() is
+    // a valid, already-wired handle the instant run_engine() can read it
+    // (set_audio_ring() below is called before start(), see that method's
+    // own doc comment).
+    soundfont_engine = std::make_unique<sonotron::audio::SoundfontEngine>();
+    audio_backend = std::make_unique<sonotron::audio::AudioBackend>(*soundfont_engine);
+    audio_handles.emplace(AudioHandles{.engine = *soundfont_engine, .backend = *audio_backend});
     const std::string default_soundfont = melodd::find_system_soundfont();
     if (!default_soundfont.empty()) {
       std::string soundfont_error;
-      if (audio_engine->load_soundfont(default_soundfont, soundfont_error)) {
+      if (soundfont_engine->load(default_soundfont, soundfont_error,
+                                 audio_backend->render_mutex())) {
         std::fprintf(stdout, "sonotron: loaded SoundFont '%s'\n", default_soundfont.c_str());
       } else {
         std::fprintf(stderr, "sonotron: %s\n", soundfont_error.c_str());
@@ -533,7 +562,7 @@ int main(int argc, char** argv) {
     set_soundfont_path(soundfont_dialog, default_soundfont);
 
     auto in_process_session = std::make_unique<sonotron::InProcessBrainSession>();
-    in_process_session->set_audio_ring(&audio_engine->note_ring());
+    in_process_session->set_audio_ring(&audio_backend->note_ring());
     in_process_session->start();
     std::fprintf(stdout,
                  "sonotron: no control socket given (--control <path> or "
@@ -596,7 +625,8 @@ int main(int argc, char** argv) {
         brain_session.status() == sonotron::BrainSession::Status::kConnected;
     app_state.set_connected(brain_connected);
 
-    render_frame(layout, workstation_state, audio_engine.get(), soundfont_dialog, quit_requested);
+    render_frame(layout, workstation_state, audio_handles ? &*audio_handles : nullptr,
+                 soundfont_dialog, quit_requested);
     present_frame(window, capture_this_frame ? screenshot_path : nullptr);
   }
 

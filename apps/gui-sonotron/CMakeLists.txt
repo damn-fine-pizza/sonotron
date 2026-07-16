@@ -19,15 +19,6 @@
 
 find_package(Threads REQUIRED)
 
-# Header-only lock-free SPSC ring (Phase 2b, docs/design/
-# sonotron-server-phase2-brief.md's "Thread-boundary mechanism"). INTERFACE
-# so both the engine-linking library below AND its standalone unit/stress
-# test can reach the header without depending on anything else -- the ring
-# itself names no core type (it is a generic template over any trivially
-# copyable POD).
-add_library(gui_sonotron_ring INTERFACE)
-target_include_directories(gui_sonotron_ring INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
-
 # Pure-data zone models (G3, docs/design/gui-fase2-mechanical-plan.md,
 # ux-workstation.md §4): Browser/Grid/SeqEdit state feeding the workstation
 # zone panels below. Dependency-free beyond STL -- no ImGui, no GLFW -- so
@@ -100,31 +91,19 @@ target_compile_options(gui_sonotron_layout PRIVATE -Wall -Wextra -Werror)
 # label tables. Depends on gui_sonotron_brain only for the BrainSession
 # interface + BrainEvent shape (both stay exactly as core-free as before);
 # every OTHER library in this directory is untouched by this addition.
+# audio_ring (components/platform/audio, promoted out of this app per docs/
+# proposals/components-restructure-move-plan.md §2/§3 Step 5) supplies the
+# SPSC ring template + the shared AudioMidiEvent POD this library's producer
+# side (in_process_brain_session.cpp) needs, without linking melodd/
+# miniaudio.
 add_library(gui_sonotron_engine STATIC
   src/brain_event_from_outevent.cpp
   src/in_process_brain_session.cpp
 )
 target_include_directories(gui_sonotron_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(gui_sonotron_engine PUBLIC gui_sonotron_brain gui_sonotron_ring hostrt
+target_link_libraries(gui_sonotron_engine PUBLIC gui_sonotron_brain audio_ring hostrt
   Threads::Threads)
 target_compile_options(gui_sonotron_engine PRIVATE -Wall -Wextra -Werror)
-
-# Host-only, arrangrr-free audio realization library (Phase-6 Theme 2,
-# docs/phase6-design-reviews.md "Audio in the standalone GUI", Decision 2):
-# melodd::Synth + a miniaudio playback device + the AudioMidi ring's
-# consumer + the render/load/panic mutex (AudioEngine, src/audio_engine.hpp).
-# Links ONLY melodd (Synth + find_system_soundfont + the shared MidiMessage
-# -> Synth dispatch), miniaudio, gui_sonotron_ring (the SPSC ring template +
-# the AudioMidiEvent/AudioMidiRing POD src/audio_midi_event.hpp shares with
-# gui_sonotron_engine's producer side) and Threads -- deliberately NOT
-# hostrt/arrangrr/runtime, so this library never includes arrangrr/abi.hpp
-# and never inherits arrangrr's PUBLIC -fno-exceptions -fno-rtti compile
-# flags, keeping gui_sonotron_engine "this library, and only this library,
-# touches arrangrr" true.
-add_library(gui_sonotron_audio STATIC src/audio_engine.cpp)
-target_include_directories(gui_sonotron_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(gui_sonotron_audio PUBLIC melodd gui_sonotron_ring miniaudio Threads::Threads)
-target_compile_options(gui_sonotron_audio PRIVATE -Wall -Wextra -Werror)
 
 # Host-only screenshot helper: a thin wrapper over the stb_image_write.h
 # already vendored under third_party/glfw/deps (no new dependency). Kept in
@@ -141,7 +120,7 @@ target_compile_options(gui_sonotron_screenshot PRIVATE -w)
 add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
 target_link_libraries(gui_sonotron PRIVATE
-  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine gui_sonotron_audio
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine audio
   gui_sonotron_screenshot imgui)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # Bakes the source-tree assets/ path into the binary so the vendored TTF

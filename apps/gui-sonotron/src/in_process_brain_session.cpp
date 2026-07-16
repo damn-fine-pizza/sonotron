@@ -11,10 +11,10 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/abi.hpp"
+#include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
 #include "shell.hpp"
-#include "spsc_ring.hpp"
 
 // The engine-thread half of Phase 2b's "integrated" mode (docs/design/
 // sonotron-server-phase2-brief.md). Mirrors apps/sonotron-server/main.cpp's
@@ -420,7 +420,7 @@ struct InProcessBrainSession::Impl {
   SpscRing<OutEvent, kOutEventRingCapacity> out_event_ring;
   SpscRing<PathCommand, kPathCommandRingCapacity> path_command_ring;
   SpscRing<PathResult, kPathResultRingCapacity> path_result_ring;
-  // Phase-6 Theme 2 (Decision 1/2/3): gui_sonotron_audio::AudioEngine's
+  // Phase-6 Theme 2 (Decision 1/2/3): sonotron::audio::AudioBackend's
   // producer-side ring handle, set (or left null) by set_audio_ring()
   // BEFORE start() -- see that method's own doc comment for the
   // synchronization argument. Never touched after run_engine() reads it
@@ -468,8 +468,9 @@ void InProcessBrainSession::Impl::run_engine() {
       alsa.send(ev.port, ev.msg);
     }
     // Phase-6 Theme 2 (Decision 1/3/4): realize ONLY the primary integrated
-    // output port through gui_sonotron_audio's Synth. audio_out_ring is
-    // null in --control mode and whenever no AudioEngine was attached;
+    // output port through the ISoundEngine wired behind AudioBackend.
+    // audio_out_ring is null in --control mode and whenever no AudioBackend
+    // was attached;
     // try_push is best-effort (MAY drop under backpressure, same asymmetric
     // policy as out_event_ring below) -- this is a felt-latency interactive
     // path, never a stall point for the engine thread.

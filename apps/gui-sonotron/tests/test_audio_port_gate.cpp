@@ -32,7 +32,7 @@
 #include <thread>
 #include <vector>
 
-#include "src/audio_midi_event.hpp"
+#include "audio/audio_midi_event.hpp"
 #include "src/brain_event.hpp"
 #include "test.hpp"
 

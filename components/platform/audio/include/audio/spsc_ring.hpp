@@ -28,8 +28,13 @@
 //     index before reading the payload (memory_order_acquire) -- and
 //     symmetrically for the tail index the consumer publishes back.
 //
-// Host-side glue only (this lives in the GUI app, never in the freestanding
-// core): plain <atomic>, no new dependency.
+// Platform-tier glue (components/platform/audio, promoted out of
+// apps/gui-sonotron per docs/proposals/components-restructure-move-plan.md
+// §2/§3 Step 5): plain <atomic>, no new dependency. Content-wise
+// regime-neutral (no heap, no exceptions, trivially-copyable-only), but not
+// itself claimed core-capable by this move -- it stays a platform-tier
+// primitive until/unless a future pass promotes it alongside
+// components/core/runtime's own ring/queue primitives.
 
 namespace sonotron {
 

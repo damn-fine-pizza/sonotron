@@ -50,6 +50,16 @@ add_subdirectory(components/core/runtime)
 # dependency runs arrangrr -> chorddet, chorddet never depends on arrangrr).
 add_subdirectory(components/core/chorddet)
 add_subdirectory(components/core/arrangrr)
+# `0910`/D43 + docs/proposals/isoundengine-contract.md (Corelli): ISoundEngine
+# is the render/synthesis seam a future host-only audio engine talks to the
+# rest of the system through -- a pure-virtual, POD-only-signature interface
+# (dispatch/all_notes_off/render/name), core-capable NOW even though every
+# concrete implementation today is host-only. Unconditional, alongside the
+# other three core components above, because nothing in the contract itself
+# needs a hosted OS; tests/arm-smoke/null_sound_engine_check.cpp compiles a
+# trivial ISoundEngine implementation on arm-none-eabi so this claim is a
+# CI-verified fact, not an aspirational one.
+add_subdirectory(components/core/audio_engine)
 
 if(ARRANGRR_FIRMWARE)
   add_subdirectory(tests/arm-smoke)
@@ -88,11 +98,18 @@ else()
   # third_party/tinysoundfont (just entered above) -- never on the
   # arm-none-eabi branch above, same placement discipline as
   # components/midisrc / components/orchestrator. Ordered BEFORE
-  # apps/gui-sonotron (Phase-6 Theme 2, docs/phase6-design-reviews.md "Audio
-  # in the standalone GUI"): gui_sonotron_audio links `melodd` directly now,
-  # so the component target must exist first (CMake target_link_libraries
-  # requires the target to already be defined).
+  # components/platform/audio (Phase-6 Theme 2, docs/phase6-design-reviews.md
+  # "Audio in the standalone GUI"): the `audio` component's SoundfontEngine
+  # links `melodd` directly, so the component target must exist first (CMake
+  # target_link_libraries requires the target to already be defined).
   add_subdirectory(components/platform/engines/melodd)
+  # The audio device layer + ISoundEngine's first concrete implementation
+  # (docs/proposals/isoundengine-contract.md, docs/proposals/
+  # components-restructure-move-plan.md §2/§3 Step 5), promoted OUT of
+  # apps/gui-sonotron. HOST-ONLY, ordered BEFORE apps/gui-sonotron: the GUI
+  # binary links both `audio_ring` (gui_sonotron_engine) and `audio`
+  # (gui_sonotron) directly.
+  add_subdirectory(components/platform/audio)
   add_subdirectory(apps/gui-sonotron)
   # The melodd standalone drop-in-synth binary; unaffected by the reorder
   # above (it only needs components/melodd + third_party, both already
