@@ -56,7 +56,11 @@ jobs:
           - os: macos-latest
             name: macos
             required: false
-          - os: windows-latest
+          # windows-2022 pins the stable MSVC 19.4x (VS2022): windows-latest now
+          # ships VS18-preview MSVC 19.51, which is newer than any released CMake
+          # knows how to map to the CXX26 dialect. The stable toolchain is in
+          # CMake's feature table, so the C++26 requirement resolves.
+          - os: windows-2022
             name: windows
             required: false
 
