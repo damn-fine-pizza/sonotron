@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -100,6 +101,7 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
   fx.open_row = 1;
   fx.open_cell = static_cast<int>(cell_id(kRows[1].role_index, 0, model.scene_count()));
   fx.open_audio = kRows[1].audio;
+  fx.open_section = model.scene_section(0);
   seqedit.set_part_index(kRows[1].role_index);
   seqedit.set_clip_label("wlk");
 }
@@ -276,6 +278,20 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       ImGui::Dummy(ImVec2(cz, std::max(0.0F, cz * 0.5F - ImGui::GetFrameHeight())));
     } else {
       const bool go = ImGui::InvisibleButton("head", ImVec2(cz, cz * 0.5F));
+      // Drop target (repeat-zone-real-contract.md SLICE 4a item 4): a
+      // "variations" row dragged from the browser (kVariationDragPayloadId,
+      // browser_panel.cpp) sets THIS column's SectionType through GridModel
+      // -- host-side state only, no wire send here (the section only takes
+      // musical effect once the header's own ▶ below applies it, or a launch
+      // happens). Deliberately minimal per owner judgment: the scene's
+      // stored NAME is left untouched by a drop -- only the section changes.
+      if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVariationDragPayloadId)) {
+          const std::uint8_t section = *static_cast<const std::uint8_t*>(payload->Data);
+          model.set_scene_section(s, section);
+        }
+        ImGui::EndDragDropTarget();
+      }
       const bool double_clicked =
           ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
       const std::string name(model.scene_name(s));
@@ -292,9 +308,21 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
         std::snprintf(fx.rename_buffer.data(), fx.rename_buffer.size(), "%s", name.c_str());
         fx.rename_focus_pending = true;
       } else if (go) {
+        // SLICE 4a item 5: the header's PRIMARY job is now applying this
+        // column's own SectionType through the existing `style section`
+        // verb (Param::kStyleSection, quantized to the next bar while
+        // playing, immediate when stopped -- Engine::cmd_style's own
+        // handling, not reimplemented here). The `launch scene ... quantize`
+        // send (kSceneQuantize, the grid-column clip-launch verb) is KEPT
+        // alongside it -- a genuinely different, still-useful effect (fires
+        // every filled cell in this column) that this slice does not retire.
         // Real per-cell readback (app_state.clip_state) reports the launched
         // state on the NEXT poll(), so no local echo is written here -- see
         // render_grid_panel's own header comment.
+        const std::string_view section_name = section_wire_name(model.scene_section(s));
+        if (!section_name.empty()) {
+          brain_session.send("style section " + std::string(section_name));
+        }
         brain_session.send("launch scene " + std::to_string(s) + " quantize " +
                            std::to_string(kDefaultLaunchQuantizeBars));
       }
@@ -359,15 +387,18 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       const bool opened = fx.open_cell == static_cast<int>(id);
       // Real content (repeat-zone-real-contract.md "cell preview made
       // real"): the SAME preview_for(...) the opened cell's Sequence Edit
-      // canvas uses, keyed by this cell's own role and the (today: single,
-      // browser-highlight) active style -- so the two views match by
-      // construction. Empty cells never draw a preview, so this is only
-      // computed for a filled one.
+      // canvas uses, keyed by this cell's own role, the (today: single,
+      // browser-highlight) active style, AND (SLICE 4a) THIS COLUMN's own
+      // SectionType (model.scene_section(s)) instead of a hardcoded kVarA --
+      // so a column carrying e.g. kVarB previews visibly different content
+      // from one still at the kVarA default. Empty cells never draw a
+      // preview, so this is only computed for a filled one.
       neon::ClipPattern pattern{};
       bool approx = false;
       if (filled) {
+        const auto section = static_cast<preview::Section>(model.scene_section(s));
         const preview::PreviewPattern pp =
-            preview::preview_for(fx.active_style, preview::Section::kVarA, row.role_index);
+            preview::preview_for(fx.active_style, section, row.role_index);
         pattern = neon::clip_pattern_from_pitches(pp.pitch);
         approx = pp.approx;
       }
@@ -389,6 +420,9 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
           fx.open_cell = static_cast<int>(id);
           fx.open_row = static_cast<int>(r);
           fx.open_audio = row.audio;
+          // SLICE 4a: seqedit_panel.cpp's own preview_for() call needs THIS
+          // column's SectionType (parity with the cell preview above).
+          fx.open_section = model.scene_section(s);
           seqedit.set_part_index(row.role_index);
           seqedit.set_clip_label(cell.label);
         }

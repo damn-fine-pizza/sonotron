@@ -134,6 +134,89 @@ void test_write_then_parse_round_trips() {
   }
 }
 
+// A freshly-constructed GridModel already carries the kDefaultSectionType
+// default on every scene column (SLICE 4a, docs/proposals/repeat-zone-real-
+// contract.md).
+void test_default_sections_are_var_a() {
+  sonotron::GridModel model;
+  for (std::size_t i = 0; i < sonotron::GridModel::kMaxSceneCount; ++i) {
+    CHECK(model.scene_section(i) == sonotron::GridModel::kDefaultSectionType);
+  }
+}
+
+// Per-scene SECTIONS round-trip through save + a separate load into a fresh
+// GridModel exactly, alongside names -- the load path a GUI restart takes
+// (SLICE 4a gate 5a).
+void test_section_survives_save_and_reload() {
+  const std::filesystem::path path = unique_temp_path();
+  std::error_code remove_error;
+  std::filesystem::remove_all(path.parent_path(), remove_error);
+
+  sonotron::GridModel writer(5);
+  writer.set_scene_name(0, "Intro");
+  writer.set_scene_section(0, 0);   // kIntro1
+  writer.set_scene_section(1, 3);   // kVarB
+  writer.set_scene_section(4, 11);  // kEnding1
+
+  std::string error;
+  CHECK(sonotron::save_scenes(path.string(), writer, error));
+
+  sonotron::GridModel reader(5);
+  CHECK(sonotron::load_scenes_or_create_default(path.string(), reader, error));
+  CHECK(reader.scene_name(0) == "Intro");
+  CHECK(reader.scene_section(0) == 0);
+  CHECK(reader.scene_section(1) == 3);
+  CHECK(reader.scene_section(4) == 11);
+  // An untouched column keeps the constructor default.
+  CHECK(reader.scene_section(2) == sonotron::GridModel::kDefaultSectionType);
+
+  std::filesystem::remove_all(path.parent_path(), remove_error);
+}
+
+// A scenes.json written by a PRE-SLICE-4a binary (no "sections" key at all)
+// is not a parse failure -- every scene keeps the constructor default
+// section, exactly like GridModel's own fresh-construction default (gate 5a:
+// old-format-without-sections -> default fallback).
+void test_missing_sections_key_falls_back_to_default() {
+  sonotron::GridModel model;
+  std::string error;
+  const bool ok = sonotron::parse_scenes(R"({ "scenes": ["Intro", "Verse"] })", model, error);
+  CHECK(ok);
+  CHECK(model.scene_name(0) == "Intro");
+  CHECK(model.scene_name(1) == "Verse");
+  for (std::size_t i = 0; i < sonotron::GridModel::kMaxSceneCount; ++i) {
+    CHECK(model.scene_section(i) == sonotron::GridModel::kDefaultSectionType);
+  }
+}
+
+// A "sections" array shorter than kMaxSceneCount leaves the remaining
+// indices at the constructor default, same discipline as the "scenes" array
+// (test_short_array_leaves_remaining_indices_untouched above).
+void test_short_sections_array_leaves_remaining_indices_untouched() {
+  sonotron::GridModel model;
+  std::string error;
+  const bool ok = sonotron::parse_scenes(R"({ "scenes": [], "sections": [7] })", model, error);
+  CHECK(ok);
+  CHECK(model.scene_section(0) == 7);
+  CHECK(model.scene_section(1) == sonotron::GridModel::kDefaultSectionType);
+}
+
+// write_scenes() -> parse_scenes() round-trips sections exactly, alongside
+// names, through in-memory text alone.
+void test_write_then_parse_round_trips_sections() {
+  sonotron::GridModel writer;
+  writer.set_scene_section(1, 6);
+  writer.set_scene_section(3, 10);
+  const std::string text = sonotron::write_scenes(writer);
+
+  sonotron::GridModel reader;
+  std::string error;
+  CHECK(sonotron::parse_scenes(text, reader, error));
+  for (std::size_t i = 0; i < sonotron::GridModel::kMaxSceneCount; ++i) {
+    CHECK(reader.scene_section(i) == writer.scene_section(i));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -143,5 +226,10 @@ int main() {
   test_short_array_leaves_remaining_indices_untouched();
   test_malformed_file_fails_with_error_message();
   test_write_then_parse_round_trips();
+  test_default_sections_are_var_a();
+  test_section_survives_save_and_reload();
+  test_missing_sections_key_falls_back_to_default();
+  test_short_sections_array_leaves_remaining_indices_untouched();
+  test_write_then_parse_round_trips_sections();
   return sonotron::test::failures();
 }

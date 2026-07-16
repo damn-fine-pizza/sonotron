@@ -33,6 +33,13 @@ inline constexpr std::array<std::string_view, 16> kBuiltinStyleNames = {
 // either including the other's header.
 inline constexpr const char* kStyleDragPayloadId = "SONOTRON_STYLE_INDEX";
 
+// ImGui drag-drop payload id carrying a SectionType byte (repeat-zone-real-
+// contract.md SLICE 4a) from browser_panel.cpp's "variations" list drag
+// source to grid_panel.cpp's scene-header drop target. Distinct from
+// kStyleDragPayloadId above (a style INDEX) so ImGui::AcceptDragDropPayload
+// never confuses the two payload shapes at a shared drop site.
+inline constexpr const char* kVariationDragPayloadId = "SONOTRON_VARIATION_SECTION";
+
 class BrowserModel {
  public:
   std::size_t style_count() const { return kBuiltinStyleNames.size(); }

@@ -83,12 +83,44 @@ class GridModel {
   std::string_view scene_name(std::size_t scene_index) const;
   void set_scene_name(std::size_t scene_index, std::string name);
 
+  // Host-side per-scene SECTION (repeat-zone-real-contract.md SLICE 4a,
+  // owner-locked model decision: a scene/grid COLUMN carries a SectionType,
+  // applied through the EXISTING `style section` verb -- NOT a ClipMatrix
+  // change, NOT a new core mechanism). Stored as the raw underlying byte of
+  // arrangrr::SectionType (components/core/arrangrr/include/arrangrr/
+  // arranger/style_model.hpp) to keep GridModel exactly as core-free as its
+  // GridCellKind/scene-name fields already are (D38) -- callers on both
+  // sides of the boundary (grid_panel.cpp/preview.hpp/in_process_brain_
+  // session.cpp) already share this same "numerically identical, hand-copied
+  // literal" discipline (see preview.hpp's own Section enum). Every scene
+  // defaults to kDefaultSectionType (SectionType::kVarA == 2 -- the
+  // arranger's own default/most-common section, and the value every launch
+  // cell preview already hardcoded before this slice), so a fresh grid with
+  // no drag-drop yet behaves identically to before. Bounds-checked exactly
+  // like scene_name/set_scene_name above: an out-of-range `scene_index` is a
+  // no-op for the setter and returns kDefaultSectionType from the getter.
+  static constexpr std::uint8_t kDefaultSectionType = 2;
+  std::uint8_t scene_section(std::size_t scene_index) const;
+  void set_scene_section(std::size_t scene_index, std::uint8_t section);
+
  private:
   std::size_t index_of(std::size_t part_index, std::size_t scene_index) const;
 
   std::size_t m_scene_count;
   std::vector<GridCell> m_cells;  // row-major: part_index * m_scene_count + scene_index
   std::array<std::string, kMaxSceneCount> m_scene_names;
+  std::array<std::uint8_t, kMaxSceneCount> m_scene_sections;
 };
+
+// Section-type wire-name table, numerically/spelling-IDENTICAL to
+// in_process_brain_session.cpp's own `parse_section_name` (and components/
+// platform/hostrt/shell_parse.cpp's `parse_section()`/event_labels.cpp's
+// `section_name()`) -- the exact spellings the `style section <name>` L1
+// verb accepts, duplicated deliberately (D38: GridModel/grid_panel.cpp never
+// reach into hostrt's own parsing helpers, same discipline every other
+// hand-copied literal in this file already uses). Returns an empty view for
+// an out-of-range `section` byte (there is no wire verb to send in that
+// case).
+std::string_view section_wire_name(std::uint8_t section);
 
 }  // namespace sonotron

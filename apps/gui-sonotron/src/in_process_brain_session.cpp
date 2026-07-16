@@ -349,6 +349,25 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     return TranslateOutcome::kOk;
   }
 
+  // `style section <name>` -- SLICE 4a item 5 (docs/proposals/repeat-zone-
+  // real-contract.md): grid_panel.cpp's scene-header ▶ click applies the
+  // COLUMN's own SectionType through the EXISTING Param::kStyleSection verb
+  // (mirrors components/platform/hostrt/shell_music_commands.cpp's own
+  // `style section` L1 verb exactly, including its parse_section_name
+  // spellings above). Quantizes to the next bar while playing, immediate
+  // when stopped -- Engine::cmd_style's own kStyleSection handling
+  // (Arranger::request(section, !playing)), not reimplemented here.
+  if (t.size() == 3 && t[0] == "style" && t[1] == "section") {
+    SectionType section{};
+    if (!parse_section_name(t[2], section)) {
+      detail = "unknown section: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kStyleSection;
+    out.a = static_cast<std::int32_t>(section);
+    return TranslateOutcome::kOk;
+  }
+
   // Phase-6 Theme 3 Item #1 (docs/reflections/phase6-theme3-master-transpose-
   // scope.md): `transpose <-12..12>`, the live global transpose -- mirrors
   // components/platform/hostrt/shell_music_commands.cpp's own `transpose` L1 verb.

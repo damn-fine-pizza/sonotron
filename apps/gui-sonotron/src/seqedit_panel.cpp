@@ -36,11 +36,14 @@ void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
   // Real content (repeat-zone-real-contract.md "cell preview made real"):
   // the SAME preview_for(...) call grid_panel.cpp's mini-thumbnail uses,
   // keyed by the SAME (style, section, role) the opened cell represents --
-  // model.part_index() is the role this clip was opened from (set by
-  // grid_panel.cpp at every cell-open site), so the two views match by
-  // construction. Only computed while a cell is actually open.
+  // model.part_index() is the role this clip was opened from, and (SLICE 4a)
+  // fx.open_section is that cell's own COLUMN's SectionType byte (set by
+  // grid_panel.cpp at every cell-open site, GridModel::scene_section), so
+  // the two views match by construction. Only computed while a cell is
+  // actually open.
   const preview::PreviewPattern pp =
-      open ? preview::preview_for(fx.active_style, preview::Section::kVarA, model.part_index())
+      open ? preview::preview_for(fx.active_style, static_cast<preview::Section>(fx.open_section),
+                                  model.part_index())
            : preview::PreviewPattern{};
 
   // Header.

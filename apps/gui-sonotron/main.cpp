@@ -615,6 +615,32 @@ int main(int argc, char** argv) {
   sonotron::SeqEditModel seqedit_model;
   sonotron::PartsModel parts_model;
   sonotron::V02State v02_state;  // v02 redesign: glow flag, frame clock, local intent
+
+  // SLICE 4a item 1 (docs/proposals/repeat-zone-real-contract.md): boot
+  // ALIVE. Only the integrated (non `--control`) path -- an external
+  // sonotron-server is not ours to command blindly on connect, it may
+  // already have a style loaded / a session in progress. Resolves "basic"
+  // through kBuiltinStyleNames (the SAME host-only list browser_panel.cpp's
+  // style leaf loop iterates, sonotron never re-deriving the index a
+  // different way) and sends the REAL `style load <name>` verb -- never
+  // faking active_style without it (that would be exactly the GUI/engine
+  // desync this workstream forbids). `style load` already auto-routes the
+  // default band (in_process_brain_session.cpp's kDefaultStyleRoutes), so
+  // this also makes a fresh `transport start` audible with zero other user
+  // action, and the Repeat Zone's launch-cell/Sequence-Edit previews are
+  // populated from the very first frame instead of staying empty until a
+  // browser click.
+  if (control_path.empty()) {
+    constexpr std::string_view kDefaultStyleName = "basic";
+    for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
+      if (sonotron::kBuiltinStyleNames[i] == kDefaultStyleName) {
+        brain_session.send("style load " + std::string(kDefaultStyleName));
+        v02_state.active_style = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+
   sonotron::WorkstationState workstation_state{.app_state = app_state,
                                                .brain_session = brain_session,
                                                .browser = browser_model,

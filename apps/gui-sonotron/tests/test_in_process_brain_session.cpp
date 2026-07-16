@@ -155,6 +155,50 @@ void test_style_load_invalid_name_surfaces_clean_error() {
   session.stop();
 }
 
+// SLICE 4a item 5 (docs/proposals/repeat-zone-real-contract.md): `style
+// section <name>` resolves the section name through parse_section_name and
+// reaches the engine as a real kStyleSection Command -- mirrors
+// test_style_load_valid_name_is_accepted_without_error()'s own shape exactly,
+// but proves the Command actually landed via the CORE's own "section"
+// OutEvent (Engine::cmd_style's kStyleSection handling emits
+// OutEvent::section() immediately while the transport is stopped) rather
+// than merely the absence of an error -- a stronger, more direct proof that
+// this specific Param reached Engine::cmd_style, not just "some Command".
+void test_style_section_valid_name_reaches_style_section_command() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> after_load;
+  session.send("style load basic");
+  CHECK(never_seen(session, after_load,
+                   [](const BrainEvent& ev) { return ev.kind == BrainEvent::Kind::kError; }));
+
+  std::vector<BrainEvent> collected;
+  session.send("style section varB");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kSection && ev.section_name == "varB";
+  }));
+
+  session.stop();
+}
+
+// An unknown section name must still surface a clean kError (no crash, no
+// silence) -- the translator's own name resolution fails BEFORE a Command is
+// ever built, mirroring test_style_load_invalid_name_surfaces_clean_error().
+void test_style_section_invalid_name_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("style section not-a-real-section");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("unknown section") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 // `part <role> mute|solo on|off` now resolves the role through
 // Shell::resolve_track_role() the same way, closing the second half of the
 // gap this milestone's report flagged.
@@ -469,6 +513,8 @@ int main() {
   test_untranslated_command_surfaces_as_error_note();
   test_style_load_valid_name_is_accepted_without_error();
   test_style_load_invalid_name_surfaces_clean_error();
+  test_style_section_valid_name_reaches_style_section_command();
+  test_style_section_invalid_name_surfaces_clean_error();
   test_part_mute_and_solo_valid_role_is_accepted_without_error();
   test_part_invalid_role_surfaces_clean_error();
   test_transpose_valid_value_is_accepted_without_error();

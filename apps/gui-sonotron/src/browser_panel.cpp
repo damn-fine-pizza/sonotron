@@ -3,6 +3,7 @@
 #include <array>
 #include <cctype>
 #include <cfloat>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -17,10 +18,29 @@ namespace {
 
 constexpr int kFilterBufferSize = 64;
 
-// The v02 non-style sections (spec §2a). These are design-intent lists with no
-// load verb wired from the browser -> local-only (see docs/v02-feature-list).
+// The v02 non-style sections (spec §2a). "variations" is now a REAL drag
+// source (repeat-zone-real-contract.md SLICE 4a): each row carries a
+// SectionType byte a scene header (grid_panel.cpp) accepts as a drop target
+// to set that column's section. "kits" stays a design-intent, local-only list
+// (see docs/v02-feature-list) -- no kit-load verb is wired from here.
 constexpr std::array<std::string_view, 8> kVariations = {
     "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro",
+};
+// SectionType byte each kVariations row drags onto a scene header --
+// numerically mirrors arrangrr::SectionType (components/core/arrangrr/
+// include/arrangrr/arranger/style_model.hpp), same hand-copied-literal
+// discipline grid_model.hpp's own kDefaultSectionType/section_wire_name
+// already use (D38: this file never includes arrangrr/). Index-parallel
+// with kVariations above -- entry i's payload is kVariationSections[i].
+constexpr std::array<std::uint8_t, 8> kVariationSections = {
+    0,   // intro   -> kIntro1
+    2,   // verse A -> kVarA
+    3,   // verse B -> kVarB
+    4,   // chorus  -> kVarC
+    5,   // bridge  -> kVarD
+    10,  // break   -> kBreak
+    6,   // fill    -> kFillA
+    11,  // outro   -> kEnding1
 };
 constexpr std::array<std::string_view, 10> kKits = {
     "acoustic kit", "808",     "909",      "jazz kit", "fingered bass",
@@ -107,6 +127,42 @@ void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& f
   ImGui::TreePop();
 }
 
+// "variations" (kVariations/kVariationSections above): a real drag SOURCE
+// (repeat-zone-real-contract.md SLICE 4a), each row carrying its own
+// SectionType byte under kVariationDragPayloadId -- distinct from
+// kStyleDragPayloadId so grid_panel.cpp's scene-header drop target never
+// confuses the two payload shapes. Clicking a row (leaf_row's own return
+// value) does nothing yet -- there is still no `style section` verb wired
+// from a plain click here, only from the drag; the scene HEADER's own ▶
+// button is what sends `style section <name>` (grid_panel.cpp).
+void render_variations(const std::string& filter, int& shown) {
+  if (!section_header("variations")) {
+    return;
+  }
+  int local_shown = 0;
+  for (std::size_t i = 0; i < kVariations.size(); ++i) {
+    const std::string_view item = kVariations[i];
+    if (!matches(item, filter)) {
+      continue;
+    }
+    ++local_shown;
+    ++shown;
+    ImGui::PushID(static_cast<int>(i));
+    leaf_row(item, /*active=*/false);
+    if (ImGui::BeginDragDropSource()) {
+      const std::uint8_t section = kVariationSections[i];
+      ImGui::SetDragDropPayload(kVariationDragPayloadId, &section, sizeof(section));
+      ImGui::TextUnformatted(std::string(item).c_str());
+      ImGui::EndDragDropSource();
+    }
+    ImGui::PopID();
+  }
+  if (local_shown == 0) {
+    ImGui::TextDisabled("  (no match)");
+  }
+  ImGui::TreePop();
+}
+
 template <std::size_t N>
 void render_list(const char* title, const std::array<std::string_view, N>& items,
                  const std::string& filter, int& shown) {
@@ -140,7 +196,7 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session, V02S
   const std::string filter = model.search_filter();
   int shown = 0;
   render_styles(model, brain_session, fx, filter, shown);
-  render_list("variations", kVariations, filter, shown);
+  render_variations(filter, shown);
   render_list("kits \xC2\xB7 GM", kKits, filter, shown);
   if (section_header("clips")) {
     ImGui::TextDisabled("  (none authored yet)");

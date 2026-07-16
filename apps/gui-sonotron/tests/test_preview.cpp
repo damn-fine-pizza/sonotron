@@ -84,6 +84,21 @@ void test_role_absent_from_section_is_empty() {
   }
 }
 
+// SLICE 4a (docs/proposals/repeat-zone-real-contract.md): grid_panel.cpp now
+// calls preview_for() with a scene COLUMN's own SectionType instead of a
+// hardcoded kVarA, so two columns carrying different sections must actually
+// preview differently. Style 0 ("basic")'s kBass (role_index 2) pattern
+// differs between kVarA and kVarB by construction (components/core/arrangrr/
+// include/arrangrr/arranger/styles/basic.hpp: kVarABass is a plain 4-note
+// root/fifth pattern; kVarBBass is a busier 6-note pattern with different
+// steps/tones) -- a real, content-level difference, not merely a different
+// `approx` flag.
+void test_scene_section_changes_the_preview() {
+  const PreviewPattern var_a = preview_for(0, Section::kVarA, /*role_index=*/2);
+  const PreviewPattern var_b = preview_for(0, Section::kVarB, /*role_index=*/2);
+  CHECK(!same_pattern(var_a, var_b));
+}
+
 // Out-of-range arguments (a negative/too-large style index, or a role index
 // past the core's own TrackRole vocabulary) return an honestly empty
 // preview rather than asserting or reading out of bounds.
@@ -108,6 +123,7 @@ int main() {
   test_known_value_fixed_role_drums();
   test_known_value_resolved_role_bass();
   test_role_absent_from_section_is_empty();
+  test_scene_section_changes_the_preview();
   test_out_of_range_arguments_are_empty();
   return sonotron::test::failures();
 }

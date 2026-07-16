@@ -1,5 +1,6 @@
 #include "scenes_json.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -89,6 +90,10 @@ class Parser {
         if (!parse_scenes_array(model)) {
           return false;
         }
+      } else if (key == "sections") {
+        if (!parse_sections_array(model)) {
+          return false;
+        }
       } else if (!skip_value()) {
         return false;
       }
@@ -158,6 +163,69 @@ class Parser {
       }
       return fail("expected ',' or ']'");
     }
+  }
+
+  // Parses the "sections" array value (SLICE 4a additive format extension):
+  // small non-negative integers, the raw SectionType byte GridModel::
+  // scene_section stores. Entries at/past GridModel::kMaxSceneCount are
+  // parsed (so the array's own JSON syntax is still fully validated) but
+  // discarded -- same forward-compatibility discipline as
+  // parse_scenes_array above. An out-of-range value (>255, or simply not a
+  // real SectionType -- this parser does not know SectionType's own bound,
+  // that validation lives at the wire-translation layer that consumes it)
+  // is still stored as-is; GridModel::scene_section is a raw byte with no
+  // value-level validation of its own, same as GridCellKind is never
+  // range-checked either.
+  bool parse_sections_array(GridModel& model) {
+    if (!expect('[')) {
+      return false;
+    }
+    skip_ws();
+    if (!at_end() && peek() == ']') {
+      advance();
+      return true;
+    }
+    std::size_t index = 0;
+    while (true) {
+      skip_ws();
+      std::uint64_t value = 0;
+      if (!parse_uint(value)) {
+        return false;
+      }
+      if (index < GridModel::kMaxSceneCount && value <= 0xFF) {
+        model.set_scene_section(index, static_cast<std::uint8_t>(value));
+      }
+      ++index;
+      skip_ws();
+      if (at_end()) {
+        return fail("unterminated sections array");
+      }
+      if (peek() == ',') {
+        advance();
+        continue;
+      }
+      if (peek() == ']') {
+        advance();
+        return true;
+      }
+      return fail("expected ',' or ']'");
+    }
+  }
+
+  // Parses one non-negative JSON integer literal (no sign, no fraction, no
+  // exponent -- write_scenes never emits any of those for a section byte)
+  // into `out`. A malformed/negative/fractional token is a parse failure,
+  // same discipline as parse_string's own strictness.
+  bool parse_uint(std::uint64_t& out) {
+    if (at_end() || peek() < '0' || peek() > '9') {
+      return fail("expected a non-negative integer");
+    }
+    out = 0;
+    while (!at_end() && peek() >= '0' && peek() <= '9') {
+      out = out * 10 + static_cast<std::uint64_t>(peek() - '0');
+      advance();
+    }
+    return true;
   }
 
   bool skip_value() {
@@ -398,12 +466,31 @@ std::string write_scenes(const GridModel& model) {
   out += "{\n";
   out += "  \"scenes\": [";
   if (GridModel::kMaxSceneCount == 0) {
-    out += "]\n";
+    out += "],\n";
   } else {
     out += "\n";
     for (std::size_t i = 0; i < GridModel::kMaxSceneCount; ++i) {
       out += "    ";
       append_escaped_string(out, std::string(model.scene_name(i)));
+      if (i + 1 < GridModel::kMaxSceneCount) {
+        out += ",";
+      }
+      out += "\n";
+    }
+    out += "  ],\n";
+  }
+  // SLICE 4a additive format extension: the per-scene SectionType byte,
+  // sibling to "scenes" above. A pre-SLICE-4a reader ignores an unknown key
+  // (parse_scenes_array is keyed on "scenes" only, its own `else if
+  // (!skip_value())` branch), so this stays forward-compatible in both
+  // directions.
+  out += "  \"sections\": [";
+  if (GridModel::kMaxSceneCount == 0) {
+    out += "]\n";
+  } else {
+    out += "\n";
+    for (std::size_t i = 0; i < GridModel::kMaxSceneCount; ++i) {
+      out += "    " + std::to_string(model.scene_section(i));
       if (i + 1 < GridModel::kMaxSceneCount) {
         out += ",";
       }

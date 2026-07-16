@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 // Client-side, engine-free UI state introduced by the v02 workstation
 // redesign (v02-workstation-spec.md). Everything here is HONEST LOCAL STATE:
@@ -56,6 +57,16 @@ struct V02State {
   // The label of the opened clip, mirrored for the Sequence Edit header/canvas.
   // Empty means "nothing open".
   int open_row = -1;
+
+  // The opened cell's OWN scene column's SectionType byte (repeat-zone-
+  // real-contract.md SLICE 4a) -- set alongside open_cell/open_row at every
+  // cell-open site in grid_panel.cpp (GridModel::scene_section(scene)), and
+  // read by seqedit_panel.cpp's own preview_for() call so the Sequence Edit
+  // canvas previews the SAME column/section the launch-cell mini-preview
+  // does. Meaningless while open_cell < 0 (nothing open); defaults to
+  // GridModel::kDefaultSectionType's numeric value so an unopened read is
+  // still a sane section rather than garbage.
+  std::uint8_t open_section = 2;
 
   // True when the currently opened clip lives on the pad row (grid_panel.cpp's
   // kRows[...].audio) -- the only audio row. Set alongside open_row/open_cell
