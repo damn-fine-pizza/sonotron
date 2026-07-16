@@ -116,6 +116,26 @@ void test_out_of_range_arguments_are_empty() {
   CHECK(huge_role.approx == false);
 }
 
+// SLICE 4b (docs/proposals/repeat-zone-real-contract.md): section_bars reads
+// arrangrr::StyleSection::bars for the auto-song advance decision. Style 0
+// ("basic")'s kVarA is bars=1 (components/core/arrangrr/include/arrangrr/
+// arranger/styles/basic.hpp) -- a known value, not merely "some positive
+// number".
+using sonotron::preview::section_bars;
+
+void test_section_bars_known_value_basic_var_a() {
+  CHECK(section_bars(0, Section::kVarA) == 1);
+  CHECK(section_bars(0, Section::kVarB) == 1);
+}
+
+// Out-of-range style_index falls back to the honest "1 bar" default, never a
+// crash and never a 0-or-negative value (which would make an "elapsed >=
+// length" caller check trivially/permanently true).
+void test_section_bars_out_of_range_style_falls_back_to_one() {
+  CHECK(section_bars(-1, Section::kVarA) == 1);
+  CHECK(section_bars(9999, Section::kVarA) == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -125,5 +145,7 @@ int main() {
   test_role_absent_from_section_is_empty();
   test_scene_section_changes_the_preview();
   test_out_of_range_arguments_are_empty();
+  test_section_bars_known_value_basic_var_a();
+  test_section_bars_out_of_range_style_falls_back_to_one();
   return sonotron::test::failures();
 }

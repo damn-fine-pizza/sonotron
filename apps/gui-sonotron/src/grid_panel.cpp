@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 #include "app_state.hpp"
@@ -191,8 +192,35 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   return clicked;
 }
 
-void render_header(V02State& fx) {
+void render_header(V02State& fx, const AppState& app_state) {
   ImGui::TextColored(theme::kCyan, "REPEAT ZONE");
+
+  // Auto-song toggle (repeat-zone-real-contract.md SLICE 4b, GUI-DRIVEN, no
+  // engine mechanism/ABI verb): "un bottone in alto, sempre dentro repeat
+  // zone" -- lives right beside the title, before the hint/zoom group.
+  // Cyan-lit label "auto-song" when armed, muted "song" otherwise; same
+  // transparent-button-with-tinted-text styling as the transport panel's own
+  // glow toggle (transport_panel.cpp) so no new chrome is invented. Arming
+  // resets `active_scene_start_bar`/`auto_song_last_bar` to the CURRENT bar,
+  // so bars-elapsed measures fresh from the moment auto-song was switched on
+  // rather than from whatever bar the active scene happened to launch at.
+  ImGui::SameLine(0.0F, 10.0F);
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                        ImVec4(theme::kCyan.x, theme::kCyan.y, theme::kCyan.z, 0.18F));
+  ImGui::PushStyleColor(ImGuiCol_Text, fx.auto_song ? theme::kCyan : theme::kTextMuted);
+  if (ImGui::SmallButton(fx.auto_song ? "auto-song" : "song")) {
+    fx.auto_song = !fx.auto_song;
+    if (fx.auto_song) {
+      fx.active_scene_start_bar = app_state.bar();
+      fx.auto_song_last_bar = app_state.bar();
+    }
+  }
+  ImGui::PopStyleColor(3);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Auto-song: advance the active scene column at its section boundary (%s)",
+                      fx.auto_song ? "on" : "off");
+  }
 
   // Hint + zoom -/+ as one right-aligned group (design: the hint sits next to
   // the zoom control, not beside the title).
@@ -213,12 +241,49 @@ void render_header(V02State& fx) {
   }
 }
 
+// Repeat-Zone auto-song advance (SLICE 4b, docs/proposals/repeat-zone-real-
+// contract.md's TIMING DECISION: GUI-DRIVEN, no new engine mechanism). Reads
+// the live bar off app_state (already reduced from the "beat" heartbeat,
+// app_state.hpp/app_state.cpp), decides via the PURE next_scene_to_launch()
+// whether the active scene column's own section has finished, and if so
+// fires the EXISTING `style section` verb (bar-quantized by the arranger
+// itself, slice 4a) for the next column and advances fx's own active-scene
+// bookkeeping. bar_just_advanced() guards against re-evaluating (and
+// re-firing) more than once per bar: ImGui runs this every rendered frame,
+// but the live bar only changes once per beat-heartbeat poll.
+void update_auto_song(const GridModel& model, BrainSession& brain_session,
+                      const AppState& app_state, V02State& fx, std::size_t scene_count) {
+  const int current_bar = app_state.bar();
+  if (!bar_just_advanced(current_bar, fx.auto_song_last_bar)) {
+    return;
+  }
+  const int bars_elapsed = current_bar - fx.active_scene_start_bar;
+  const std::size_t active_scene_index =
+      fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
+  const auto active_section =
+      static_cast<preview::Section>(model.scene_section(active_scene_index));
+  const int active_section_bars = preview::section_bars(fx.active_style, active_section);
+  const std::optional<int> next =
+      next_scene_to_launch(fx.auto_song, fx.playing, fx.active_scene, static_cast<int>(scene_count),
+                           bars_elapsed, active_section_bars);
+  if (!next.has_value()) {
+    return;
+  }
+  fx.active_scene = *next;
+  fx.active_scene_start_bar = current_bar;
+  const std::string_view section_name =
+      section_wire_name(model.scene_section(static_cast<std::size_t>(fx.active_scene)));
+  if (!section_name.empty()) {
+    brain_session.send("style section " + std::string(section_name));
+  }
+}
+
 }  // namespace
 
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                        BrainSession& brain_session, const AppState& app_state, V02State& fx) {
   seed_demo(model, seqedit, fx);
-  render_header(fx);
+  render_header(fx, app_state);
   ImGui::Spacing();
 
   // Standard solo semantics: any part soloed makes the non-soloed rows read as
@@ -234,6 +299,11 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 
   const float cz = fx.cell_zoom;
   const std::size_t scenes = std::min<std::size_t>(model.scene_count(), 5);
+
+  // SLICE 4b: evaluate the auto-song advance BEFORE drawing the scene header
+  // row below, so a fired advance is reflected in the SAME frame's active-
+  // scene highlight rather than lagging one frame behind.
+  update_auto_song(model, brain_session, app_state, fx, scenes);
 
   ImGui::BeginChild("grid_body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_None);
 
@@ -296,8 +366,14 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
           ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
       const std::string name(model.scene_name(s));
       const float ty = hp0.y + (cz * 0.5F - ImGui::GetTextLineHeight()) * 0.5F;
-      hdl->AddText(ImVec2(hp0.x + 3.0F, ty),
-                   neon::u32(s == 0 ? theme::kText : theme::kTextSecondary), name.c_str());
+      // SLICE 4b: the header's own text tint doubles as the "active scene"
+      // indicator -- was hardcoded to column 0; now tracks fx.active_scene,
+      // which auto-song's advance AND a manual scene launch both update, so
+      // the highlight reflects whichever column is really current.
+      hdl->AddText(
+          ImVec2(hp0.x + 3.0F, ty),
+          neon::u32(static_cast<int>(s) == fx.active_scene ? theme::kText : theme::kTextSecondary),
+          name.c_str());
       hdl->AddText(ImVec2(hp0.x + 3.0F + ImGui::CalcTextSize(name.c_str()).x + 4.0F, ty),
                    neon::u32(theme::kGreen), "\xE2\x96\xB6");
       const float uy = hp0.y + cz * 0.5F - 2.0F;
@@ -325,6 +401,12 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
         }
         brain_session.send("launch scene " + std::to_string(s) + " quantize " +
                            std::to_string(kDefaultLaunchQuantizeBars));
+        // SLICE 4b: a manual scene-column launch is also a real launch of
+        // this scene, so it becomes auto-song's own "active scene" baseline
+        // -- auto-song, if later armed (or already armed), measures
+        // bars-elapsed from THIS launch, not a stale one.
+        fx.active_scene = static_cast<int>(s);
+        fx.active_scene_start_bar = app_state.bar();
       }
     }
     ImGui::PopID();
@@ -432,18 +514,25 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       // (repeat-zone-real-contract.md §3/§8b decision 1, Shape A) -- so a
       // later `launch clip <id>` actually addresses THIS cell's material
       // instead of an empty pool slot. Owner decision 2: drag-a-style is the
-      // only content source real for this pass; the registered clip always
-      // references SectionType::kVarA (the arranger's own default section --
-      // the GUI has no per-style section identity to pick from, mirroring
-      // `style switch`'s own established fallback, in_process_brain_
-      // session.cpp).
+      // only content source real for this pass. FLAG-1 FIX (slice 4a's own
+      // flag, folded into slice 4b): the registered clip now references THIS
+      // COLUMN's own SectionType (model.scene_section(s)) instead of a
+      // hardcoded kVarA, so launching this cell and launching its column
+      // header both target the SAME section -- no latent misalignment
+      // between the two launch paths. Falls back to "varA" only if the
+      // column's stored section byte is somehow out of range (defensive;
+      // set_scene_section() already keeps it in-range).
       if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kStyleDragPayloadId)) {
           const std::size_t style_index = *static_cast<const std::size_t*>(payload->Data);
           model.set_cell(row.role_index, s, GridCellKind::kStyleSection,
                          std::string(kBuiltinStyleNames[style_index]));
+          const std::string_view cell_section_name = section_wire_name(model.scene_section(s));
+          const std::string cell_section_arg =
+              cell_section_name.empty() ? "varA" : std::string(cell_section_name);
           brain_session.send("clip add " + std::string(parts.part_wire_token(row.role_index)) +
-                             " " + std::to_string(s) + " style varA id " + std::to_string(id));
+                             " " + std::to_string(s) + " style " + cell_section_arg + " id " +
+                             std::to_string(id));
         }
         ImGui::EndDragDropTarget();
       }

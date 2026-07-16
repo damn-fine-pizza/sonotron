@@ -92,6 +92,24 @@ struct V02State {
   int renaming_scene = -1;
   std::array<char, 32> rename_buffer{};
   bool rename_focus_pending = false;
+
+  // Auto-song (repeat-zone-real-contract.md SLICE 4b, GUI-DRIVEN, host-only
+  // -- NO new engine mechanism, NO new ABI verb). `auto_song` is the header
+  // toggle's own state. `active_scene` is the Repeat-Zone COLUMN currently
+  // considered "the song's current scene" -- updated both by auto-song's own
+  // advance and by any manual scene-header launch (grid_panel.cpp), so
+  // auto-song always measures from the most recent real launch, automatic or
+  // not. `active_scene_start_bar` is the live bar (AppState::bar()) at which
+  // `active_scene` became active; `bars_elapsed_in_scene` for the pure
+  // next_scene_to_launch() decision is always `AppState::bar() -
+  // active_scene_start_bar`, computed fresh at the call site rather than
+  // stored here. `auto_song_last_bar` is the once-per-crossing guard's own
+  // bookkeeping (grid_model.hpp's bar_just_advanced) -- defaults to -1 so the
+  // very first live bar (0) still counts as "not yet evaluated".
+  bool auto_song = false;
+  int active_scene = 0;
+  int active_scene_start_bar = 0;
+  int auto_song_last_bar = -1;
 };
 
 }  // namespace sonotron

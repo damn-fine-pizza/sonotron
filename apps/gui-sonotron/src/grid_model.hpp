@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -122,5 +123,38 @@ class GridModel {
 // an out-of-range `section` byte (there is no wire verb to send in that
 // case).
 std::string_view section_wire_name(std::uint8_t section);
+
+// Repeat-Zone auto-song advance decision (SLICE 4b, docs/proposals/
+// repeat-zone-real-contract.md's TIMING DECISION: GUI-DRIVEN, host-only, NO
+// new engine mechanism -- the GUI already tracks the live bar off the
+// existing "beat" heartbeat and the `style section` verb is itself
+// bar-quantized by the arranger, so the GUI only needs to decide WHICH
+// section to request, never WHEN with frame-perfect precision). A pure,
+// side-effect-free function of the current auto-song/transport/scene state,
+// so the "does the active scene column need to advance now" question
+// unit-tests without the GUI event loop.
+//
+// `auto_song` OFF or `playing` false means the active scene column just
+// loops in place (current, pre-auto-song behavior) -- nullopt (stay). ON +
+// playing, once `bars_elapsed_in_scene` reaches or passes
+// `active_scene_section_bars`, the next scene is
+// `(active_scene + 1) % scene_count` -- the song WRAPS around the scene
+// sequence rather than stopping at the last column. `active_scene` is
+// normalized modulo `scene_count` before advancing, so an out-of-range input
+// never indexes past the wrap. `scene_count <= 0` has no scene to wrap into,
+// so it is treated the same as "stay" (nullopt).
+std::optional<int> next_scene_to_launch(bool auto_song, bool playing, int active_scene,
+                                        int scene_count, int bars_elapsed_in_scene,
+                                        int active_scene_section_bars);
+
+// Once-per-crossing guard for the auto-song advance check above: ImGui
+// re-evaluates every rendered frame, but the live bar (app_state.bar(),
+// reduced from the "beat" heartbeat) only changes once per beat-heartbeat
+// poll, so re-running next_scene_to_launch() on every frame while the bar
+// number is unchanged would otherwise fire the SAME crossing repeatedly.
+// Returns true (and updates `last_checked_bar` in place) exactly once per
+// distinct `current_bar` value; false on every other call until the bar
+// actually changes again.
+bool bar_just_advanced(int current_bar, int& last_checked_bar);
 
 }  // namespace sonotron

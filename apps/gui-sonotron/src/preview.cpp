@@ -104,4 +104,14 @@ PreviewPattern preview_for(int style_index, Section section, std::size_t role_in
   return out;
 }
 
+int section_bars(int style_index, Section section) {
+  if (style_index < 0 || style_index >= static_cast<int>(arrangrr::styles::kBuiltinCount)) {
+    return 1;
+  }
+  const arrangrr::Style* style = arrangrr::styles::kBuiltins[static_cast<std::size_t>(style_index)];
+  const auto core_section = static_cast<arrangrr::SectionType>(section);
+  const arrangrr::StyleSection* sec = style->find(core_section);
+  return sec == nullptr ? 1 : static_cast<int>(sec->bars);
+}
+
 }  // namespace sonotron::preview

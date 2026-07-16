@@ -85,4 +85,16 @@ struct PreviewPattern {
 // an error.
 PreviewPattern preview_for(int style_index, Section section, std::size_t role_index);
 
+// The number of BARS `section` holds in `arrangrr::styles::kBuiltins[
+// style_index]` (arrangrr::StyleSection::bars, same hand-copied-mirror
+// discipline as Section/kSteps above). Used by the Repeat-Zone auto-song
+// advance decision (repeat-zone-real-contract.md SLICE 4b) to know when the
+// active scene column's own content has played out. Every built-in style's
+// sections are 1 bar today (see preview.hpp's own kSteps comment), so 1 is
+// also the honest fallback for an out-of-range `style_index` or a `section`
+// absent from that style -- never a crash, never a stall (a 0-or-negative
+// bar count would make the caller's "elapsed >= length" check trivially and
+// permanently true).
+int section_bars(int style_index, Section section);
+
 }  // namespace sonotron::preview

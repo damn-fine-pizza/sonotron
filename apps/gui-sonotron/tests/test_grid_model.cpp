@@ -165,6 +165,85 @@ void test_launch_wired_is_lit() {
   CHECK(sonotron::kGridLaunchWired == true);
 }
 
+// SLICE 4b (docs/proposals/repeat-zone-real-contract.md): next_scene_to_launch
+// is the pure auto-song advance decision, GUI-driven, no core involvement.
+using sonotron::next_scene_to_launch;
+
+void test_next_scene_auto_song_off_stays() {
+  // auto_song OFF: nullopt regardless of how far past the section boundary.
+  CHECK(!next_scene_to_launch(/*auto_song=*/false, /*playing=*/true, /*active_scene=*/0,
+                              /*scene_count=*/5, /*bars_elapsed_in_scene=*/10,
+                              /*active_scene_section_bars=*/1)
+             .has_value());
+}
+
+void test_next_scene_not_playing_stays() {
+  // Transport not playing: nullopt even with auto_song ON and past boundary.
+  CHECK(!next_scene_to_launch(/*auto_song=*/true, /*playing=*/false, /*active_scene=*/0,
+                              /*scene_count=*/5, /*bars_elapsed_in_scene=*/10,
+                              /*active_scene_section_bars=*/1)
+             .has_value());
+}
+
+void test_next_scene_mid_scene_stays() {
+  // On and playing, but the active section hasn't finished yet.
+  CHECK(!next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/2,
+                              /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                              /*active_scene_section_bars=*/4)
+             .has_value());
+}
+
+void test_next_scene_advances_at_boundary() {
+  // bars_elapsed_in_scene == active_scene_section_bars EXACTLY: advances.
+  const auto next = next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/1,
+                                         /*scene_count=*/5, /*bars_elapsed_in_scene=*/4,
+                                         /*active_scene_section_bars=*/4);
+  CHECK(next.has_value());
+  CHECK(*next == 2);
+}
+
+void test_next_scene_advances_past_boundary() {
+  // bars_elapsed_in_scene PAST the boundary (a missed poll/late frame):
+  // still advances -- ">=", not "==".
+  const auto next = next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/1,
+                                         /*scene_count=*/5, /*bars_elapsed_in_scene=*/9,
+                                         /*active_scene_section_bars=*/4);
+  CHECK(next.has_value());
+  CHECK(*next == 2);
+}
+
+void test_next_scene_wraps_at_last_scene() {
+  // The song loops around the scene sequence: the last scene column (index
+  // scene_count - 1) advances back to scene 0, not out of range.
+  const auto next = next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/4,
+                                         /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                                         /*active_scene_section_bars=*/1);
+  CHECK(next.has_value());
+  CHECK(*next == 0);
+}
+
+void test_next_scene_zero_scene_count_stays() {
+  // Defensive: no scene to wrap into.
+  CHECK(!next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/0,
+                              /*scene_count=*/0, /*bars_elapsed_in_scene=*/5,
+                              /*active_scene_section_bars=*/1)
+             .has_value());
+}
+
+// bar_just_advanced: the once-per-crossing guard.
+using sonotron::bar_just_advanced;
+
+void test_bar_just_advanced_fires_once_per_distinct_bar() {
+  int last = -1;
+  CHECK(bar_just_advanced(0, last));  // first ever call at bar 0: fires
+  CHECK(last == 0);
+  CHECK(!bar_just_advanced(0, last));  // same bar again (next frame): does not fire
+  CHECK(!bar_just_advanced(0, last));  // and again: still does not fire
+  CHECK(bar_just_advanced(1, last));   // the bar actually changed: fires
+  CHECK(last == 1);
+  CHECK(!bar_just_advanced(1, last));  // settles again until the next change
+}
+
 }  // namespace
 
 int main() {
@@ -181,5 +260,13 @@ int main() {
   test_add_scene_preserves_scene_sections();
   test_section_wire_name_matches_known_spellings();
   test_launch_wired_is_lit();
+  test_next_scene_auto_song_off_stays();
+  test_next_scene_not_playing_stays();
+  test_next_scene_mid_scene_stays();
+  test_next_scene_advances_at_boundary();
+  test_next_scene_advances_past_boundary();
+  test_next_scene_wraps_at_last_scene();
+  test_next_scene_zero_scene_count_stays();
+  test_bar_just_advanced_fires_once_per_distinct_bar();
   return sonotron::test::failures();
 }
