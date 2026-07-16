@@ -85,6 +85,10 @@ jobs:
             libasound2-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl1-mesa-dev
+          # The tui_console functional test opens the ALSA sequencer
+          # (/dev/snd/seq), absent on headless runners — load the in-kernel
+          # dummy sequencer so the real code path runs instead of erroring out.
+          sudo modprobe snd-seq-dummy || echo "::warning::snd-seq-dummy unavailable; ALSA-seq tests may fail"
 
       - name: Install deps (macOS)
         if: matrix.name == 'macos'
