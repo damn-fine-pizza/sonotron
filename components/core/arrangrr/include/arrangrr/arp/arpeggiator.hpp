@@ -217,10 +217,21 @@ class ArpeggiatorEngine {
   void remove(std::uint8_t note) noexcept {
     for (std::uint8_t i = 0; i < m_count; ++i) {
       if (m_notes[i] == note) {
+#if defined(__GNUC__) && !defined(__clang__)
+        // Known gcc -O3 false positive (-Werror=maybe-uninitialized): m_notes
+        // and m_vels carry default member initializers (= {}), so every
+        // element is zero-initialized on construction; gcc's uninitialized-use
+        // analysis loses that fact once this loop is inlined into a caller.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
         for (std::uint8_t j = i; j + 1 < m_count; ++j) {
           m_notes[j] = m_notes[j + 1];
           m_vels[j] = m_vels[j + 1];
         }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
         --m_count;
         return;
       }

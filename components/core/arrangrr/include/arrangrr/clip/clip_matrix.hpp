@@ -144,7 +144,18 @@ class ClipMatrix {
   // a slot nothing ever explicitly registered is not a real clip, regardless
   // of whether the underlying StaticVector already physically holds it.
   const Clip* get(std::size_t id) const noexcept {
+#if defined(__GNUC__) && !defined(__clang__)
+    // Known gcc -O3 false positive (-Werror=array-bounds=): after inlining
+    // with id folded to kMaxClips, gcc's VRP still flags m_used[id] as if it
+    // could be evaluated at id == m_used.size(), even though the short-circuit
+    // `id < m_clips.size() &&` guard makes that access provably unreachable.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
     return (id < m_clips.size() && m_used[id]) ? &m_clips[id] : nullptr;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
   }
   std::size_t size() const noexcept { return m_clips.size(); }
 

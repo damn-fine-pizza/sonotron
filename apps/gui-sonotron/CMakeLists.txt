@@ -166,7 +166,12 @@ target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # at runtime — same escape hatch used for SONOTRON_LAYOUT_PATH. Packaging a
 # real install layout is a later milestone, not part of this font/DPI pass.
 target_compile_definitions(gui_sonotron PRIVATE
-  SONOTRON_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+  SONOTRON_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+  # Apple's own sanctioned escape hatch for the OpenGL-deprecated-since-10.14
+  # -Wdeprecated-declarations error (Apple clang, -Werror): main.cpp calls
+  # glPixelStorei/glReadPixels/glViewport/glClearColor/glClear/glGetString
+  # directly. APPLE-only; no effect on Linux/Windows.
+  $<$<PLATFORM_ID:Darwin>:GL_SILENCE_DEPRECATION>)
 
 # Layout-model/JSON unit tests (host-only; this whole subtree is added only
 # in the non-firmware branch of the top-level CMakeLists, where
