@@ -11,6 +11,7 @@
 
 #include "alsa_midi.hpp"
 #include "arrangrr/abi.hpp"
+#include "arrangrr/arranger/style_model.hpp"
 #include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
@@ -34,6 +35,7 @@ using arrangrr::Command;
 using arrangrr::Op;
 using arrangrr::OutEvent;
 using arrangrr::Param;
+using arrangrr::SectionType;
 using arrangrr::TickAccumulator;
 using arrangrr::TrackRole;
 using arrangrr::host::AlsaMidi;
@@ -283,6 +285,28 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     }
     out.param = Param::kStyleLoad;
     out.a = index;
+    return TranslateOutcome::kOk;
+  }
+
+  // `style switch <name>` -- the LIVE morph counterpart to `style load` above
+  // (browser_panel.cpp sends this instead of `style load` whenever the
+  // transport is already playing): rides the existing Param::kStyleSwitch
+  // verb (engine.cpp's style_switch()), which quantizes to the next bar
+  // boundary while playing instead of hard-resetting the arranger. The GUI
+  // has no current-section readback (grid_model.hpp's documented gap), so the
+  // target section always defaults to SectionType::kVarA, the arranger's own
+  // default section -- same name resolution as `style load`.
+  if (t.size() == 3 && t[0] == "style" && t[1] == "switch") {
+    const std::string name(t[2]);
+    const int index = Shell::resolve_style_index(name);
+    if (index < 0) {
+      detail = "unknown style: " + name;
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kStyleSwitch;
+    out.a = index;
+    out.b = static_cast<std::int32_t>(SectionType::kVarA);
+    out.boundary = Boundary::kNextBar;
     return TranslateOutcome::kOk;
   }
 

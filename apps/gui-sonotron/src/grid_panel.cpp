@@ -92,6 +92,7 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
   // — so Sequence Edit shows a populated (blue) piano-roll, not the empty hint.
   fx.open_row = 1;
   fx.open_cell = static_cast<int>(cell_id(kRows[1].role_index, 0, model.scene_count()));
+  fx.open_audio = kRows[1].audio;
   seqedit.set_part_index(kRows[1].role_index);
   seqedit.set_clip_label("wlk");
 }
@@ -307,6 +308,7 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
           fx.row_playing[r] = playing ? -1 : static_cast<int>(s);
           fx.open_cell = static_cast<int>(id);
           fx.open_row = static_cast<int>(r);
+          fx.open_audio = row.audio;
           seqedit.set_part_index(row.role_index);
           seqedit.set_clip_label(cell.label);
         }

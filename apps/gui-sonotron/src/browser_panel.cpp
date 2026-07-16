@@ -87,7 +87,11 @@ void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& f
     ++shown;
     ImGui::PushID(static_cast<int>(i));
     if (leaf_row(name, fx.active_style == static_cast<int>(i))) {
-      brain_session.send("style load " + name);
+      // While playing, morph live (quantized to the next bar) instead of
+      // hard-resetting the arranger -- `style load` still stops-and-reloads
+      // for the not-yet-playing case (in_process_brain_session.cpp's
+      // command_line_to_command).
+      brain_session.send(fx.playing ? "style switch " + name : "style load " + name);
       fx.active_style = static_cast<int>(i);
     }
     if (ImGui::BeginDragDropSource()) {

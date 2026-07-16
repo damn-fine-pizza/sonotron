@@ -88,27 +88,36 @@ void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
     return;
   }
 
-  // Full piano-roll of track-colored blocks from the SHARED ClipPattern (the
-  // same generator the launch-cell mini-preview crops from) so the open clip's
-  // editor content corresponds exactly to its cell preview. STEP left->right,
-  // PITCH low->high (pitch 0 at the bottom), matching the cell.
-  const neon::ClipPattern pat = neon::clip_pattern(neon::hash_label(model.clip_label()));
-  const int kSteps = neon::ClipPattern::kSteps;
-  const int kPitches = neon::ClipPattern::kPitches;
-  const float cw = avail.x / static_cast<float>(kSteps);
-  const float rh = avail.y / static_cast<float>(kPitches);
-  for (int step = 0; step < kSteps; ++step) {
-    const int pitch = pat.pitch[step];
-    if (pitch < 0) {
-      continue;
+  // The pad row is the only AUDIO row (grid_panel.cpp's kRows[...].audio) --
+  // its opened clip renders as a waveform, never a MIDI piano-roll. Every
+  // other row renders the existing full piano-roll of track-colored blocks
+  // from the SHARED ClipPattern (the same generator the launch-cell
+  // mini-preview crops from) so the open clip's editor content corresponds
+  // exactly to its cell preview. STEP left->right, PITCH low->high (pitch 0
+  // at the bottom), matching the cell.
+  if (fx.open_audio) {
+    const ImVec2 in0(p0.x + 4.0F, p0.y + 4.0F);
+    const ImVec2 in1(p1.x - 4.0F, p1.y - 4.0F);
+    neon::clip_preview_waveform(dl, in0, in1, neon::hash_label(model.clip_label()), track_color);
+  } else {
+    const neon::ClipPattern pat = neon::clip_pattern(neon::hash_label(model.clip_label()));
+    const int kSteps = neon::ClipPattern::kSteps;
+    const int kPitches = neon::ClipPattern::kPitches;
+    const float cw = avail.x / static_cast<float>(kSteps);
+    const float rh = avail.y / static_cast<float>(kPitches);
+    for (int step = 0; step < kSteps; ++step) {
+      const int pitch = pat.pitch[step];
+      if (pitch < 0) {
+        continue;
+      }
+      const ImVec2 b0(p0.x + static_cast<float>(step) * cw + 2.0F,
+                      p0.y + static_cast<float>(kPitches - 1 - pitch) * rh + 2.0F);
+      const ImVec2 b1(b0.x + cw - 4.0F, b0.y + rh - 4.0F);
+      if (fx.glow) {
+        neon::glow_rect(dl, b0, b1, track_color, 3.0F, 0.7F, fx.glow);
+      }
+      dl->AddRectFilled(b0, b1, neon::u32(track_color, 0.85F), 3.0F);
     }
-    const ImVec2 b0(p0.x + static_cast<float>(step) * cw + 2.0F,
-                    p0.y + static_cast<float>(kPitches - 1 - pitch) * rh + 2.0F);
-    const ImVec2 b1(b0.x + cw - 4.0F, b0.y + rh - 4.0F);
-    if (fx.glow) {
-      neon::glow_rect(dl, b0, b1, track_color, 3.0F, 0.7F, fx.glow);
-    }
-    dl->AddRectFilled(b0, b1, neon::u32(track_color, 0.85F), 3.0F);
   }
 
   // Green playhead sweeping L->R while the opened clip plays.

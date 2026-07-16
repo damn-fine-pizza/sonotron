@@ -58,6 +58,12 @@ struct V02State {
   // Empty means "nothing open".
   int open_row = -1;
 
+  // True when the currently opened clip lives on the pad row (grid_panel.cpp's
+  // kRows[...].audio) -- the only audio row. Lets Sequence Edit render a
+  // waveform for that clip instead of a MIDI piano-roll (all other rows are
+  // MIDI). Set alongside open_row/open_cell at every cell-open site.
+  bool open_audio = false;
+
   // Seeded-once guard: the renderer fills a demo clip pattern into the grid on
   // the first frame so the procedural previews have something to show (the same
   // local content path a browser drag uses; launching still sends real verbs).
