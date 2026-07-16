@@ -145,10 +145,16 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   CHECK(fx.auto_song);
   CHECK(fx.active_scene == 0);
 
-  // Same-bar render: nothing has elapsed yet, no advance, no send.
+  // Same-bar render: nothing has elapsed yet, no advance sent. This first
+  // render is also the ONE frame seed_demo() registers its demo cells with
+  // the core (owner bug #1 fix, grid_panel.cpp): that legitimately sends a
+  // handful of `clip add ...` lines, so the assertion here is narrowed to
+  // "no auto-song advance fired yet" (no `style section `/`launch scene `
+  // send), not "nothing was ever sent".
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 0);
-  CHECK(brain.sent.empty());
+  CHECK(!any_sent_line_starts_with(brain.sent, "style section "));
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
 
   // One further bar crosses the 1-bar section boundary for the active scene:
   // this must trigger exactly one advance.

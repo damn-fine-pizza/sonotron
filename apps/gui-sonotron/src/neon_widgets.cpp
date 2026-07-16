@@ -326,14 +326,16 @@ PitchCellRect pitch_grid_cell(const ImVec2& band_min, const ImVec2& band_max, in
 
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
                             const ClipPattern& pat, const ImVec4& color) {
-  // A little HORIZONTAL piano-roll showing a step-cropped view of `pat`: the
-  // first kCellSteps columns, all kPitches rows, drawn at the SAME
-  // (step, pitch) positions the Sequence Edit canvas uses -- via the shared
-  // pitch_grid_cell() helper above, so a cell dot is a legible subset of the
-  // editor's blocks, never a different melody (the two views can no longer
-  // silently drift apart, since both compute the rect through one function).
-  // STEP runs left->right (X), PITCH low->high (Y, pitch 0 at the bottom).
-  const int steps = ClipPattern::kCellSteps;
+  // A little HORIZONTAL piano-roll showing ALL kSteps columns of `pat`, all
+  // kPitches rows, drawn at the SAME (step, pitch) positions the Sequence
+  // Edit canvas uses -- via the shared pitch_grid_cell() helper above, so a
+  // cell dot is the SAME content the editor draws in full, just denser
+  // (narrower columns in the same band), never a half-cropped subset (owner
+  // bug #2, docs root-cause: this used to hard-crop to the first kCellSteps
+  // (8) columns while Sequence Edit iterated all 16, so any note past step 8
+  // never appeared here at all). STEP runs left->right (X), PITCH low->high
+  // (Y, pitch 0 at the bottom).
+  const int steps = ClipPattern::kSteps;
   const int pitches = ClipPattern::kPitches;
   for (int step = 0; step < steps; ++step) {
     const int pitch = pat.pitch[step];

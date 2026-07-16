@@ -170,3 +170,51 @@ target_link_libraries(test_grid_panel_auto_song_real_backend PRIVATE
 target_compile_options(test_grid_panel_auto_song_real_backend PRIVATE -Wall -Wextra -Werror)
 add_test(NAME test_grid_panel_auto_song_real_backend COMMAND test_grid_panel_auto_song_real_backend)
 set_tests_properties(test_grid_panel_auto_song_real_backend PROPERTIES LABELS functional)
+
+# ---------------------------------------------------------------------------
+# UI-AUTOMATION HARNESS (Torquato QA pass, owner steer): the missing piece
+# every test above this line does NOT have -- REAL ImGui input injection
+# (io.AddMousePosEvent/AddMouseButtonEvent, never a direct V02State/AppState
+# field write) and assertions on the actual RENDERED DRAW DATA (ImGui::
+# Render()'s ImDrawData), not just on model state. See imgui_headless_
+# harness.hpp's own header comment for the full design (widget-rect
+# discovery via rendered-color-vertex scanning + ImGui's own child-window
+# list, no IMGUI_ENABLE_TEST_ENGINE, no product change) and each test file's
+# own header comment for the specific owner-reported bug it pins.
+
+# Bug #1 (no Repeat-Zone playhead): real backend, real Play-button click,
+# real cell-launch click, rendered-draw-data assertion. Needs the same three
+# libraries as test_grid_panel_auto_song_real_backend above (a real
+# InProcessBrainSession) plus gui_sonotron_preview transitively (already
+# pulled in by gui_sonotron_layout) for theme.hpp/neon_widgets.hpp's public
+# color constants this harness locates widgets by.
+add_executable(test_repeat_zone_playhead_ui_automation test_repeat_zone_playhead_ui_automation.cpp)
+target_link_libraries(test_repeat_zone_playhead_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_repeat_zone_playhead_ui_automation PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_repeat_zone_playhead_ui_automation COMMAND test_repeat_zone_playhead_ui_automation)
+set_tests_properties(test_repeat_zone_playhead_ui_automation PROPERTIES LABELS functional)
+
+# Bug #2 (launch-cell preview diverges from Sequence Edit): no real backend
+# needed (a SpyBrainSession is enough -- this pin is purely about RENDERED
+# OUTPUT, never what gets sent), so this uses the lighter grid_panel_test
+# link set (gui_sonotron_layout + gui_sonotron_brain), same group as
+# test_grid_panel_auto_song above.
+gui_sonotron_grid_panel_test(test_grid_cell_preview_vs_seqedit_ui_automation functional)
+
+# Owner-recorded-trace corroboration (owner steer, 2026-07-16 live session):
+# replays fixtures/owner_repro_2026_07_16.jsonl -- captured with the
+# product-side --trace-input feature against the exact live session where
+# the owner saw the playhead/preview bugs -- through imgui_headless_
+# harness.hpp's JSONL loader, tick-by-tick against a REAL InProcessBrainSession.
+# See this test file's own header comment for the honest divergence from a
+# pixel-faithful replay (the trace's own coordinates were captured against
+# main.cpp's full 6-zone layout, not this reduced 2-panel test window).
+add_executable(test_repeat_zone_owner_trace_replay test_repeat_zone_owner_trace_replay.cpp)
+target_link_libraries(test_repeat_zone_owner_trace_replay PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_repeat_zone_owner_trace_replay PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(test_repeat_zone_owner_trace_replay PRIVATE
+  GUI_SONOTRON_OWNER_TRACE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/owner_repro_2026_07_16.jsonl")
+add_test(NAME test_repeat_zone_owner_trace_replay COMMAND test_repeat_zone_owner_trace_replay)
+set_tests_properties(test_repeat_zone_owner_trace_replay PROPERTIES LABELS functional)

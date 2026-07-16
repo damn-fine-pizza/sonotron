@@ -138,7 +138,22 @@ std::size_t cell_id(std::size_t role_index, std::size_t scene, std::size_t scene
 // previews have content (same local-content path a browser drag uses;
 // launching still sends real verbs). Deterministic labels -> deterministic
 // previews.
-void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
+//
+// Owner bug #1 root-cause fix: this used to ONLY call GridModel::set_cell
+// (host-side display state) -- the demo cells were never registered with the
+// core's ClipMatrix, so `launch clip <id>`/`launch scene <n>` always warned
+// (Engine::clip_request's `m_clips.get(id) == nullptr` branch, engine.cpp)
+// and no cell could ever read back as playing (AppState::clip_state stuck at
+// kStopped forever). Fixed by sending the SAME `clip add <role> <scene>
+// style <section> id <n>` verb the browser drag-drop handler already sends
+// (render_track_cell's BeginDragDropTarget block below) for every seeded
+// demo cell, ONCE (guarded by the same `fx.seeded` latch this function
+// already uses), after the scene sections are finalized (so the registered
+// clip's SectionType matches what the column will actually apply/preview) --
+// see the third loop below. `brain_session.send()` is a plain wire command
+// even in --control mode, so this seeding works there too.
+void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+               BrainSession& brain_session, V02State& fx) {
   if (fx.seeded) {
     return;
   }
@@ -201,6 +216,30 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
     }
     model.set_scene_section(scene, static_cast<std::uint8_t>(section));
     model.set_scene_name(scene, name);
+  }
+
+  // Owner bug #1 root-cause fix: register every seeded demo cell with the
+  // core's ClipMatrix for real, at the SAME stable id a later launch
+  // addresses (cell_id(role_index, scene, scene_count), the identical
+  // formula render_track_cell/render_scene_header_cell use), so `launch
+  // clip <id>`/`launch scene <n>` finds a real registered clip instead of
+  // warning. Sent AFTER the scene-section loop above (not interleaved with
+  // it), so each clip's registered SectionType matches the column's own
+  // FINAL section rather than the kDefaultSectionType placeholder every
+  // scene starts at.
+  for (const DemoCell& entry : pattern) {
+    if (entry.row >= kRows.size() || entry.scene >= model.scene_count()) {
+      continue;
+    }
+    const std::size_t role_index = kRows[entry.row].role_index;
+    const std::size_t scene = entry.scene;
+    const std::string_view cell_section_name = section_wire_name(model.scene_section(scene));
+    const std::string cell_section_arg =
+        cell_section_name.empty() ? "varA" : std::string(cell_section_name);
+    const std::size_t id = cell_id(role_index, scene, model.scene_count());
+    brain_session.send("clip add " + std::string(parts.part_wire_token(role_index)) + " " +
+                       std::to_string(scene) + " style " + cell_section_arg + " id " +
+                       std::to_string(id));
   }
 
   // Open the bass 'wlk' clip by default — the design's initial openAt {r:1,c:0}
@@ -754,7 +793,7 @@ void render_track_row(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
 
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                        BrainSession& brain_session, const AppState& app_state, V02State& fx) {
-  seed_demo(model, seqedit, fx);
+  seed_demo(model, seqedit, parts, brain_session, fx);
   render_header(fx, app_state);
   ImGui::Spacing();
 

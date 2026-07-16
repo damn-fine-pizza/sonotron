@@ -28,8 +28,8 @@ ImU32 u32(const ImVec4& color, float alpha_mul = 1.0F);
 // holding a pitch ROW in [0, kPitches) or -1 (a rest). This is the ONE shape
 // shared by the launch-cell mini-preview (clip_preview_pianoroll) and the
 // Sequence Edit canvas, so the SAME clip reads as the SAME melody in both --
-// the cell shows a step-cropped subset (first kCellSteps columns) of exactly
-// the blocks the editor draws in full. STEP runs left->right, PITCH low->high
+// the cell shows the SAME kSteps columns the editor draws in full, just
+// denser (narrower columns in the same band). STEP runs left->right, PITCH low->high
 // (row 0 at the bottom).
 //
 // Real-content cell preview (repeat-zone-real-contract.md): populate this
@@ -41,8 +41,14 @@ ImU32 u32(const ImVec4& color, float alpha_mul = 1.0F);
 struct ClipPattern {
   static constexpr int kSteps = 16;
   static constexpr int kPitches = 5;
-  static constexpr int kCellSteps = 8;  // how many columns the mini-preview crops to
-  std::array<int, kSteps> pitch{};      // pitch[step] in [0,kPitches) or -1 for a rest
+  // Owner bug #2 fix: clip_preview_pianoroll() below no longer crops to this
+  // -- it now visits all kSteps columns, exactly like the Sequence Edit
+  // canvas, so the two views never structurally diverge. Kept as a named
+  // constant only for the UI-automation test harness's own coarse column-
+  // occupancy sampling (apps/gui-sonotron/tests/test_grid_cell_preview_vs_
+  // seqedit_ui_automation.cpp), not as a product crop anymore.
+  static constexpr int kCellSteps = 8;
+  std::array<int, kSteps> pitch{};  // pitch[step] in [0,kPitches) or -1 for a rest
 };
 
 // Normalizes a REAL absolute-MIDI-pitch pattern (-1 = rest, e.g. gui_
@@ -116,10 +122,10 @@ struct PitchCellRect {
 PitchCellRect pitch_grid_cell(const ImVec2& band_min, const ImVec2& band_max, int step, int steps,
                               int pitch, int pitches);
 
-// A little horizontal piano-roll inside a launch cell's inner rect: a
-// step-cropped view (the first kCellSteps columns) of `pattern`, drawn at
-// the SAME (step, row) positions the Sequence Edit canvas uses, so a cell
-// dot is a legible subset of the editor's blocks, never a different melody.
+// A little horizontal piano-roll inside a launch cell's inner rect: ALL
+// kSteps columns of `pattern`, drawn at the SAME (step, row) positions the
+// Sequence Edit canvas uses, so a cell dot is the SAME content the editor
+// draws in full, never a half-cropped subset (owner bug #2).
 // STEP runs left->right (X), ROW low->high (Y, row 0 at the bottom).
 // `pattern` is real content (clip_pattern_from_pitches() above), never a
 // hash-seeded generator -- the caller resolves it once per cell/frame.

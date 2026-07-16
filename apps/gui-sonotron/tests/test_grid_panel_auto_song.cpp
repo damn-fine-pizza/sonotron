@@ -155,10 +155,16 @@ void test_auto_song_advances_scene_after_section_elapses() {
   CHECK(fx.active_scene == 0);
 
   // A render at the SAME bar the arm happened must NOT fire yet -- nothing
-  // has elapsed (bar_just_advanced's own once-per-crossing guard).
+  // has elapsed (bar_just_advanced's own once-per-crossing guard). This first
+  // render is also the ONE frame seed_demo() registers its demo cells with
+  // the core (owner bug #1 fix, grid_panel.cpp): that legitimately sends a
+  // handful of `clip add ...` lines, so the assertion here is narrowed to
+  // "no auto-song advance fired yet" (no `style section `/`launch scene `
+  // send), not "nothing was ever sent".
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 0);
-  CHECK(brain.sent.empty());
+  CHECK(!any_sent_line_starts_with(brain.sent, "style section "));
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
 
   // Scene 0's own length is pinned to 1 bar above, so a single further bar
   // (bar 2, one whole bar past the arm bar) is exactly one full boundary for
@@ -315,7 +321,11 @@ void test_scene_bars_governs_advance_cadence() {
   CHECK(fx.active_scene == 0);
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 0);
-  CHECK(brain.sent.empty());
+  // Same narrowing as test_auto_song_advances_scene_after_section_elapses
+  // above: this first render also seeds the demo grid (owner bug #1 fix),
+  // which legitimately sends `clip add ...` lines -- the assertion only
+  // cares that no auto-song advance has fired yet.
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
 
   // Bars 2, 3, 4 are 1, 2, and 3 bars past the arm bar -- all strictly less
   // than the pinned 4-bar length, so the active scene must stay put and no
