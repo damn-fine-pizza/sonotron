@@ -32,12 +32,13 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 
-#include "alsa_midi.hpp"
 #include "arrangrr/arranger/style.hpp"
 #include "common/time.hpp"
 #include "jsonl.hpp"
+#include "midi_hal.hpp"
 #include "param_state_wire.hpp"
 #include "shell.hpp"
 #include "uds_server.hpp"
@@ -186,14 +187,15 @@ void send_state_dump(UdsServer& control, int client_fd, Shell& shell) {
 }
 
 // The live/headless loop: owns exactly what the Phase 2 brief keeps out of
-// the server library — AlsaMidi, the UdsServer control socket + wiring, the
-// tick-timer clock drive, and the poll() fan-in across ALSA + control fds.
+// the server library — the IMidiHal platform MIDI backend, the UdsServer
+// control socket + wiring, the tick-timer clock drive, and the poll() fan-in
+// across the MIDI backend's + control fds.
 // No stdin/REPL/TUI at all: this binary is driven ONLY by the control socket
 // (and by whatever MIDI arrives on its ALSA ports).
 int run_server(bool human, const char* control_path) {
-  AlsaMidi alsa;
+  const std::unique_ptr<IMidiHal> midi = make_midi_hal();
   std::string error;
-  if (!alsa.open(kAlsaClientName, error)) {
+  if (!midi->open(kAlsaClientName, error)) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 2;
   }
@@ -210,7 +212,7 @@ int run_server(bool human, const char* control_path) {
   Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
     if (ev.kind == OutEvent::Kind::kMidi) {
-      alsa.send(ev.port, ev.msg);
+      midi->send(ev.port, ev.msg);
     }
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
     const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
@@ -244,7 +246,7 @@ int run_server(bool human, const char* control_path) {
   control.set_connect_handler([&](int client_fd) { send_state_dump(control, client_fd, shell); });
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
-    if (!alsa.create_port(def, port_error)) {
+    if (!midi->create_port(def, port_error)) {
       std::fprintf(stderr, "%s\n", port_error.c_str());
     }
   });
@@ -281,7 +283,17 @@ int run_server(bool human, const char* control_path) {
     fds[n].fd = tfd;
     fds[n].events = POLLIN;
     ++n;
-    n += alsa.fill_poll_fds(&fds[n], kMaxPollFds - n);
+    // IMidiHal reports its own descriptors through a portable MidiPollFd
+    // buffer (see midi_hal.hpp), never assuming `struct pollfd` layout --
+    // copy the entries it fills in into this function's own native array.
+    MidiPollFd midi_fds[kMaxPollFds];
+    const int midi_n = midi->fill_poll_fds(midi_fds, kMaxPollFds - n);
+    for (int i = 0; i < midi_n; ++i) {
+      fds[n + i].fd = midi_fds[i].fd;
+      fds[n + i].events = midi_fds[i].events;
+      fds[n + i].revents = 0;
+    }
+    n += midi_n;
 
     int control_start = -1;
     int control_client_count = 0;
@@ -320,8 +332,8 @@ int run_server(bool human, const char* control_path) {
       }
     }
 
-    // MIDI input from ALSA.
-    alsa.drain_input([&](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
+    // MIDI input from the platform backend.
+    midi->drain_input([&](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
       shell.feed_midi(port, Span<const std::uint8_t>(bytes, len));
     });
 

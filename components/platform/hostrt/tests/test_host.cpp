@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "gm_program.hpp"
 #include "jsonl.hpp"
 #include "kitty_keys.hpp"
+#include "midi_hal.hpp"
 #include "runtime/transport.hpp"
 #include "shell.hpp"
 #include "test.hpp"
@@ -2233,11 +2235,29 @@ void test_alsa_null_state_is_safe() {
   // guard branches without needing a sequencer device.
   AlsaMidi alsa;
   CHECK(alsa.poll_fd_count() == 0);
-  struct pollfd fds[4];
+  MidiPollFd fds[4];
   CHECK(alsa.fill_poll_fds(fds, 4) == 0);
   alsa.send(0, MidiMessage::note_on(0, 60, 100));  // no port map -> ignored
   int called = 0;
   alsa.drain_input([&](std::uint8_t, const std::uint8_t*, std::size_t) { ++called; });
+  CHECK(called == 0);
+}
+
+void test_make_midi_hal_returns_a_usable_backend() {
+  // Cross-platform seam smoke test (docs/proposals/looper-in-gui-contract.md
+  // §7 item 12): make_midi_hal() always returns a non-null IMidiHal, and
+  // every method on it is a safe no-op before open() -- exactly the guard
+  // behavior test_alsa_null_state_is_safe already proves for the concrete
+  // Linux backend, but exercised here through the polymorphic interface a
+  // real frontend actually uses.
+  std::unique_ptr<IMidiHal> midi = make_midi_hal();
+  CHECK(midi != nullptr);
+  CHECK(midi->poll_fd_count() == 0);
+  MidiPollFd fds[4];
+  CHECK(midi->fill_poll_fds(fds, 4) == 0);
+  midi->send(0, MidiMessage::note_on(0, 60, 100));  // no port map -> ignored
+  int called = 0;
+  midi->drain_input([&](std::uint8_t, const std::uint8_t*, std::size_t) { ++called; });
   CHECK(called == 0);
 }
 
@@ -2527,6 +2547,7 @@ int main() {
   test_shell_name_tables_never_diverge();
   test_line_editor();
   test_alsa_null_state_is_safe();
+  test_make_midi_hal_returns_a_usable_backend();
   test_shell_pending_order_same_tick();
   test_line_buffer_framing();
   test_line_buffer_overflow();

@@ -6,10 +6,10 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <thread>
 #include <utility>
 
-#include "alsa_midi.hpp"
 #include "arrangrr/abi.hpp"
 #include "arrangrr/arranger/style_model.hpp"
 #include "arrangrr/clip/clip_matrix.hpp"
@@ -17,6 +17,7 @@
 #include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
+#include "midi_hal.hpp"
 #include "shell.hpp"
 
 // The engine-thread half of Phase 2b's "integrated" mode (docs/design/
@@ -49,8 +50,9 @@ using arrangrr::SectionType;
 using arrangrr::Span;
 using arrangrr::TickAccumulator;
 using arrangrr::TrackRole;
-using arrangrr::host::AlsaMidi;
+using arrangrr::host::IMidiHal;
 using arrangrr::host::kAlsaClientName;
+using arrangrr::host::make_midi_hal;
 using arrangrr::host::PortDef;
 using arrangrr::host::Shell;
 
@@ -736,9 +738,9 @@ struct InProcessBrainSession::Impl {
 // (both safe to share, that is the whole point of an SPSC ring) and the
 // plain atomics above.
 void InProcessBrainSession::Impl::run_engine() {
-  AlsaMidi alsa;
+  const std::unique_ptr<IMidiHal> midi = make_midi_hal();
   std::string alsa_error;
-  const bool alsa_ok = alsa.open(kAlsaClientName, alsa_error);
+  const bool alsa_ok = midi->open(kAlsaClientName, alsa_error);
   if (!alsa_ok) {
     std::fprintf(stderr,
                  "sonotron: integrated engine: ALSA unavailable (%s) -- running without sound\n",
@@ -750,9 +752,9 @@ void InProcessBrainSession::Impl::run_engine() {
   // why no atomic is needed here).
   AudioMidiRing* const audio_out_ring = audio_ring;
 
-  Shell shell([this, &alsa, alsa_ok, audio_out_ring](const OutEvent& ev) {
+  Shell shell([this, &midi, alsa_ok, audio_out_ring](const OutEvent& ev) {
     if (alsa_ok && ev.kind == OutEvent::Kind::kMidi) {
-      alsa.send(ev.port, ev.msg);
+      midi->send(ev.port, ev.msg);
     }
     // Phase-6 Theme 2 (Decision 1/3/4): realize ONLY the primary integrated
     // output port through the ISoundEngine wired behind AudioBackend.
@@ -775,9 +777,9 @@ void InProcessBrainSession::Impl::run_engine() {
   // Default topology mirrors sonotron-server's own live launch: one in, one
   // out, wired thru, so a bare integrated launch is immediately playable.
   if (alsa_ok) {
-    shell.set_port_hook([&alsa](const PortDef& def) {
+    shell.set_port_hook([&midi](const PortDef& def) {
       std::string port_error;
-      if (!alsa.create_port(def, port_error)) {
+      if (!midi->create_port(def, port_error)) {
         std::fprintf(stderr, "sonotron: integrated engine: %s\n", port_error.c_str());
       }
     });
@@ -821,12 +823,13 @@ void InProcessBrainSession::Impl::run_engine() {
     // drains ALSA input and feeds it through the SAME feed_midi() entry point
     // the kNoteRaw special case above uses -- mirrors sonotron-server's own
     // run_server loop exactly (apps/sonotron-server/main.cpp:324-326).
-    // drain_input() is itself a safe no-op when ALSA never opened (m_seq ==
-    // nullptr, alsa_midi.hpp), so this needs no extra alsa_ok gate; before
-    // this fix, physical MIDI hardware plugged into gui-sonotron's `in0`
-    // ALSA port produced literally zero effect (the port was opened, a route
-    // was staged, and no byte was ever read off the wire).
-    alsa.drain_input([&shell](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
+    // drain_input() is itself a safe no-op when the backend never opened
+    // (see e.g. AlsaMidi's own m_seq == nullptr guard, alsa_midi.cpp), so
+    // this needs no extra alsa_ok gate; before this fix, physical MIDI
+    // hardware plugged into gui-sonotron's `in0` ALSA port produced
+    // literally zero effect (the port was opened, a route was staged, and no
+    // byte was ever read off the wire).
+    midi->drain_input([&shell](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
       shell.feed_midi(port, Span<const std::uint8_t>(bytes, len));
     });
 

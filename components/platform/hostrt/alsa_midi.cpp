@@ -1,5 +1,7 @@
 #include "alsa_midi.hpp"
 
+#include <poll.h>
+
 namespace arrangrr::host {
 
 AlsaMidi::~AlsaMidi() {
@@ -79,12 +81,49 @@ int AlsaMidi::core_port_for(int alsa_port) const {
   return -1;
 }
 
+void AlsaMidi::drain_input(const InputSink& on_bytes) {
+  if (!m_seq) {
+    return;
+  }
+  snd_seq_event_t* ev = nullptr;
+  while (snd_seq_event_input(m_seq, &ev) >= 0 && ev != nullptr) {
+    const int core_port = core_port_for(ev->dest.port);
+    if (core_port >= 0) {
+      std::uint8_t buf[16];
+      const long n = snd_midi_event_decode(m_decoder, buf, sizeof(buf), ev);
+      if (n > 0) {
+        on_bytes(static_cast<std::uint8_t>(core_port), buf, static_cast<std::size_t>(n));
+      }
+    }
+    snd_seq_free_event(ev);
+    if (snd_seq_event_input_pending(m_seq, 0) <= 0) {
+      break;
+    }
+  }
+}
+
 int AlsaMidi::poll_fd_count() const {
   return m_seq ? snd_seq_poll_descriptors_count(m_seq, POLLIN) : 0;
 }
 
-int AlsaMidi::fill_poll_fds(struct pollfd* fds, int space) const {
-  return m_seq ? snd_seq_poll_descriptors(m_seq, fds, static_cast<unsigned>(space), POLLIN) : 0;
+int AlsaMidi::fill_poll_fds(MidiPollFd* fds, int space) const {
+  if (!m_seq || space <= 0) {
+    return 0;
+  }
+  // Fill through a native ALSA-facing buffer, then copy field-by-field into
+  // the caller's portable MidiPollFd array -- a small, infrequent (once per
+  // ~100 ms poll wakeup) copy that keeps this translation entirely free of
+  // any reinterpret_cast/strict-aliasing concern between `struct pollfd` and
+  // MidiPollFd, even though the two happen to be layout-compatible today.
+  std::vector<struct pollfd> native(static_cast<std::size_t>(space));
+  const int n =
+      snd_seq_poll_descriptors(m_seq, native.data(), static_cast<unsigned>(space), POLLIN);
+  for (int i = 0; i < n; ++i) {
+    fds[i].fd = native[static_cast<std::size_t>(i)].fd;
+    fds[i].events = native[static_cast<std::size_t>(i)].events;
+    fds[i].revents = native[static_cast<std::size_t>(i)].revents;
+  }
+  return n;
 }
 
 }  // namespace arrangrr::host
