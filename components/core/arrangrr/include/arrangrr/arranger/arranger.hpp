@@ -732,6 +732,7 @@ class Arranger {
     }
   }
 
+ public:
   // NTT core (D24): chord-tone index -> concrete note. Bass anchors low
   // (octave 2), everything else around octave 4; indices past the shape wrap
   // an octave up, so tone 3 over a triad is the root one octave higher.
@@ -747,6 +748,16 @@ class Arranger {
   // above returns before `transpose` is ever consulted, so drums/perc stay
   // exempt for free (docs/reflections/phase6-theme3-master-transpose-
   // scope.md Decisions 1/2).
+  //
+  // Hoisted to PUBLIC (repeat-zone-real-contract.md, "cell preview made
+  // real" pass, Corelli Proposal B): the ONLY caller-visible change is
+  // access -- signature and body are untouched, so `on_tick`'s own output
+  // stays byte-identical (golden tests are the proof). This lets a
+  // host-only preview library resolve the SAME NTT kernel the live engine
+  // plays, instead of re-implementing it -- the "second head that
+  // diverges" Corelli warned against. Still freestanding/no-heap/constexpr
+  // -clean: nothing about making this callable from outside the class adds
+  // a dependency or a heap allocation.
   static int resolve(const StylePattern& pattern, const StyleEvent& ev, const Key& key,
                      const ChordState& chord, std::int8_t transpose) noexcept {
     if (pattern.policy == RolePolicy::kFixed) {
@@ -785,6 +796,7 @@ class Arranger {
     }
   }
 
+ private:
   // Default register anchor per role (MIDI note of chord-tone 0 at octave 0),
   // so stacked tonal roles don't all pile into one octave = timbral mush. Bass
   // sits low; pad fills the gap under the mid comp; arp/lead/phrase sit above.

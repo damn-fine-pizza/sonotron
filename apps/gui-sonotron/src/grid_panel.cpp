@@ -10,6 +10,7 @@
 #include "browser_model.hpp"
 #include "imgui.h"
 #include "neon_widgets.hpp"
+#include "preview.hpp"
 #include "theme.hpp"
 
 namespace sonotron {
@@ -37,9 +38,13 @@ bool grid_latch(const char* glyph, bool engaged, const ImVec4& tone) {
 
 // The 6 v02 launch-grid rows (spec §2b), each mapped to a GridModel part-row
 // index (so a launched cell addresses a real, stable ClipMatrix slot) and a
-// track color. Only the pad row is `audio` (waveform preview); the rest are
-// midi (dot piano-roll). The GridModel has 9 role rows; these are the 6 the
-// v02 grid surfaces.
+// track color. `audio` marks the pad row as the design's one "audio" row --
+// it no longer selects a different preview widget (repeat-zone-real-
+// contract.md STEP 3: pad has no real audio content yet, so it shows its
+// real MIDI note pattern too, like every other row); `audio` is kept only
+// for `fx.open_audio` bookkeeping, reserved for genuine future audio
+// content. The GridModel has 9 role rows; these are the 6 the v02 grid
+// surfaces.
 struct V02Row {
   const char* name;
   std::size_t role_index;  // into GridModel / track_roles
@@ -101,8 +106,12 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, V02State& fx) {
 
 // Draws one launch cell (custom draw-list) at the cursor; returns true on
 // click. `filled` cells show a preview + label + (when playing) a sweep bar.
+// `pattern`/`approx` are the cell's REAL resolved content (preview::
+// preview_for, computed by the caller) and its honesty flag (repeat-zone-
+// real-contract.md STEP 4) -- ignored when `!filled`.
 bool draw_cell(const char* id, float size, bool filled, const std::string& label,
-               const ImVec4& color, bool is_audio, bool playing, bool opened, const V02State& fx) {
+               const ImVec4& color, const neon::ClipPattern& pattern, bool approx, bool playing,
+               bool opened, const V02State& fx) {
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   const bool clicked = ImGui::InvisibleButton(id, ImVec2(size, size));
   const bool hovered = ImGui::IsItemHovered();
@@ -134,16 +143,17 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   }
 
   // Preview in a compact horizontal band (design: notes sit in a ~20%..78%
-  // vertical band, above the label — not filling the whole cell).
+  // vertical band, above the label — not filling the whole cell). Real
+  // content (repeat-zone-real-contract.md): `pattern` is the cell's own
+  // resolved note data, the SAME the Sequence Edit canvas draws when this
+  // cell is opened. The pad row (the design's only "audio" row) has no real
+  // audio content yet, so it draws its real MIDI note pattern here too
+  // (STEP 3 decision) rather than a fake waveform -- clip_preview_waveform
+  // stays reserved for genuine future audio content.
   const ImVec2 in0(p0.x + 6.0F, p0.y + size * 0.22F);
   const ImVec2 in1(p1.x - 6.0F, p1.y - 14.0F);
-  const std::uint32_t seed = neon::hash_label(label);
   if (in1.y > in0.y + 4.0F) {
-    if (is_audio) {
-      neon::clip_preview_waveform(dl, in0, in1, seed, color);
-    } else {
-      neon::clip_preview_pianoroll(dl, in0, in1, seed, color);
-    }
+    neon::clip_preview_pianoroll(dl, in0, in1, pattern, color);
   }
 
   // Bottom-centered label "▶/▷ label" at the design's ~11px so short curated
@@ -167,6 +177,14 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   // L->R sweep on a playing cell while running.
   if (playing && fx.playing) {
     neon::sweep_bar(dl, p0, p1, fx.time, theme::kText);
+  }
+
+  // Honesty affordance (repeat-zone-real-contract.md STEP 4): a hover-only
+  // tooltip, no new persistent chrome, for a preview that isn't the exact
+  // runtime output (resolved against a placeholder harmony, and/or a
+  // motif's repeat=0 statement skeleton only).
+  if (approx && hovered) {
+    ImGui::SetTooltip("approx preview (placeholder harmony, no live chord)");
   }
   return clicked;
 }
@@ -339,9 +357,23 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       const AppState::ClipLaunchState launch_state = app_state.clip_state(static_cast<int>(id));
       const bool playing = launch_state != AppState::ClipLaunchState::kStopped;
       const bool opened = fx.open_cell == static_cast<int>(id);
+      // Real content (repeat-zone-real-contract.md "cell preview made
+      // real"): the SAME preview_for(...) the opened cell's Sequence Edit
+      // canvas uses, keyed by this cell's own role and the (today: single,
+      // browser-highlight) active style -- so the two views match by
+      // construction. Empty cells never draw a preview, so this is only
+      // computed for a filled one.
+      neon::ClipPattern pattern{};
+      bool approx = false;
+      if (filled) {
+        const preview::PreviewPattern pp =
+            preview::preview_for(fx.active_style, preview::Section::kVarA, row.role_index);
+        pattern = neon::clip_pattern_from_pitches(pp.pitch);
+        approx = pp.approx;
+      }
       ImGui::PushID(static_cast<int>(s));
       const bool clicked =
-          draw_cell("cell", cz, filled, cell.label, color, row.audio, playing, opened, fx);
+          draw_cell("cell", cz, filled, cell.label, color, pattern, approx, playing, opened, fx);
       if (clicked) {
         if (!filled) {
           // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix

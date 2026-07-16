@@ -104,3 +104,18 @@ gui_sonotron_model_test(test_parts_model unit)
 # decision 3) -- a functional test in the same load/save/temp-dir shape as
 # test_layout_schema_upgrade.cpp, one directory over for its own file.
 gui_sonotron_model_test(test_scenes_json functional)
+
+# Real-content cell preview (repeat-zone-real-contract.md, "cell preview made
+# real" pass): link gui_sonotron_preview directly, which pulls in arrangrr
+# transitively (see apps/gui-sonotron/CMakeLists.txt's gui_sonotron_preview
+# target comment) -- same shape as gui_sonotron_engine_test above, a second
+# library allowed to touch the core.
+function(gui_sonotron_preview_test name category)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE gui_sonotron_preview)
+  target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS ${category})
+endfunction()
+
+gui_sonotron_preview_test(test_preview unit)

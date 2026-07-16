@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 #include "theme.hpp"
@@ -30,27 +31,40 @@ ImU32 u32(const ImVec4& color, float alpha_mul) {
   return ImGui::ColorConvertFloat4ToU32(c);
 }
 
-std::uint32_t hash_label(std::string_view label) {
-  std::uint32_t h = 2166136261u;  // FNV-1a
-  for (const char ch : label) {
-    h ^= static_cast<std::uint8_t>(ch);
-    h *= 16777619u;
-  }
-  return h == 0 ? 0x9e3779b9u : h;  // never seed the xorshift with 0
-}
-
-ClipPattern clip_pattern(std::uint32_t seed) {
+ClipPattern clip_pattern_from_pitches(const std::array<int, ClipPattern::kSteps>& pitches) {
   ClipPattern out{};
-  std::uint32_t s = seed == 0 ? 0x9e3779b9u : seed;
-  for (int step = 0; step < ClipPattern::kSteps; ++step) {
-    // ~60% of steps carry a note; its pitch row is seed-derived. The rest-check
-    // and the pitch draw consume the state in a fixed order, so the whole
-    // pattern is a pure function of the seed -- identical for cell and editor.
-    if (rand01(s) < 0.40F) {
-      out.pitch[step] = -1;
+  int lo = 128;
+  int hi = -1;
+  for (const int p : pitches) {
+    if (p < 0) {
       continue;
     }
-    out.pitch[step] = static_cast<int>(rand01(s) * ClipPattern::kPitches) % ClipPattern::kPitches;
+    lo = std::min(lo, p);
+    hi = std::max(hi, p);
+  }
+  if (hi < lo) {
+    // Every step is a rest: nothing to normalize (ClipPattern's own default
+    // is all-zero, not all-rest, so this must be set explicitly).
+    for (int& row : out.pitch) {
+      row = -1;
+    }
+    return out;
+  }
+  constexpr int kMaxRow = ClipPattern::kPitches - 1;
+  for (int step = 0; step < ClipPattern::kSteps; ++step) {
+    const int p = pitches[static_cast<std::size_t>(step)];
+    if (p < 0) {
+      out.pitch[static_cast<std::size_t>(step)] = -1;
+      continue;
+    }
+    if (hi == lo) {
+      // A single distinct pitch (or a run of the same one): the middle row.
+      out.pitch[static_cast<std::size_t>(step)] = kMaxRow / 2;
+      continue;
+    }
+    const float t = static_cast<float>(p - lo) / static_cast<float>(hi - lo);
+    out.pitch[static_cast<std::size_t>(step)] =
+        std::clamp(static_cast<int>(t * static_cast<float>(kMaxRow) + 0.5F), 0, kMaxRow);
   }
   return out;
 }
@@ -299,13 +313,12 @@ void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
 }
 
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
-                            std::uint32_t seed, const ImVec4& color) {
-  // A little HORIZONTAL piano-roll showing a step-cropped view of the SHARED
-  // ClipPattern: the first kCellSteps columns, all kPitches rows, drawn at the
-  // SAME (step, pitch) positions the Sequence Edit canvas uses -- so a cell dot
+                            const ClipPattern& pat, const ImVec4& color) {
+  // A little HORIZONTAL piano-roll showing a step-cropped view of `pat`: the
+  // first kCellSteps columns, all kPitches rows, drawn at the SAME
+  // (step, pitch) positions the Sequence Edit canvas uses -- so a cell dot
   // is a legible subset of the editor's blocks, never a different melody. STEP
   // runs left->high (X), PITCH low->high (Y, pitch 0 at the bottom).
-  const ClipPattern pat = clip_pattern(seed);
   const int steps = ClipPattern::kCellSteps;
   const int pitches = ClipPattern::kPitches;
   const float w = max.x - min.x;

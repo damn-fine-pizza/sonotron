@@ -88,11 +88,19 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
   bookkeeping (there is no per-cell playing readback on the wire —
   `grid_model.hpp`'s documented gap), `[local-only]` cell content (no clip
   primitive content binding). Done.
-- Mini clip preview: pad row = audio waveform envelope; other rows = a dot
-  piano-roll that is a step-cropped view (first 8 of 16 steps) of the SAME
-  shared `neon::clip_pattern(label)` the Sequence Edit canvas draws in full, so
-  the cell dots correspond exactly to the editor blocks for that clip.
-  `[new-widget]` (`neon::clip_preview_*` + `neon::clip_pattern`). Done.
+- Mini clip preview (repeat-zone-real-contract.md "cell preview made real"
+  pass): every row, including pad (no real audio content yet), is a dot
+  piano-roll that is a step-cropped view (first 8 of 16 steps) of the cell's
+  REAL resolved note content -- `gui_sonotron_preview::preview_for()` resolves
+  the role's StylePattern against a placeholder C-major/tonic-triad harmony
+  through the arranger's own `Arranger::resolve()` NTT kernel, normalized into
+  the SAME `neon::ClipPattern` shape (`neon::clip_pattern_from_pitches`) the
+  Sequence Edit canvas draws in full, so the cell dots correspond exactly to
+  the editor blocks for that clip. `[wired]` (real note data resolved through
+  the core, host-side only) with an "approx" hover marker for non-kFixed
+  roles/motif-repeat=0 skeletons (STEP 4 honesty affordance).
+  `[new-widget]` (`neon::clip_preview_pianoroll` + `clip_pattern_from_pitches`
+  + `gui_sonotron_preview`). Done.
 - L→R sweep bar on a playing cell while running (~1.7s loop). `[new-widget]` +
   `[local-only]` animation (gated on playing). Done.
 - Playing cell = stronger fill + track-color border + glow; opened cell = inset
@@ -129,12 +137,13 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
   Tabs/selection are real `SeqEditModel` state. `[wired]` (model) /
   `[local-only]` (no engine echo). Done.
 - Canvas: vertical bar guides; if a clip is open → 16×5 track-colored piano-roll
-  blocks from the SHARED `neon::clip_pattern(label)` (same generator the launch
-  cell mini-preview crops from, so cell and editor always match) with glow + a
-  green playhead sweeping while the opened clip plays; else centered muted hint.
-  `[new-widget]` + `[local-only]` (the note blocks are procedural from the label
-  hash — there is no live `Track` step data on the wire, the documented
-  `seqedit` gap; playhead gated on playing). Done.
+  blocks from the SAME real `preview_for()` result the launch cell's
+  mini-preview crops from (repeat-zone-real-contract.md "cell preview made
+  real" pass -- so cell and editor always match by construction) with glow + a
+  green playhead sweeping while the opened clip plays; else centered muted
+  hint. `[new-widget]` + `[wired]` (real resolved note data, host-side only --
+  there is still no live `Track` step data on the wire, the documented
+  `seqedit` authoring gap; playhead gated on playing). Done.
 
 ## Animations (ImGui frame clock, gated on playing + glow)
 - `sn-sweepx` cell sweep, `sn-blink` status dot, `sn-eq` master VU, sequence-edit

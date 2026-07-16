@@ -58,9 +58,12 @@ struct V02State {
   int open_row = -1;
 
   // True when the currently opened clip lives on the pad row (grid_panel.cpp's
-  // kRows[...].audio) -- the only audio row. Lets Sequence Edit render a
-  // waveform for that clip instead of a MIDI piano-roll (all other rows are
-  // MIDI). Set alongside open_row/open_cell at every cell-open site.
+  // kRows[...].audio) -- the only audio row. Set alongside open_row/open_cell
+  // at every cell-open site. Repeat-zone-real-contract.md "cell preview made
+  // real" pass: no longer selects a different Sequence Edit render path --
+  // pad has no real audio content yet, so it renders its real MIDI note
+  // pattern like every other row (seqedit_panel.cpp). Kept for genuine future
+  // audio content (a real captured LoopBuffer waveform).
   bool open_audio = false;
 
   // Seeded-once guard: the renderer fills a demo clip pattern into the grid on

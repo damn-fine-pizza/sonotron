@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstdint>
-#include <string_view>
 
 #include "imgui.h"
 
@@ -25,23 +24,37 @@ namespace sonotron::neon {
 // idiom the draw-list halo/wash layers use to fade a token color.
 ImU32 u32(const ImVec4& color, float alpha_mul = 1.0F);
 
-// Deterministic 32-bit hash of a clip label -> the procedural preview seed
-// (FNV-1a). The same label always yields the same waveform / piano-roll.
-std::uint32_t hash_label(std::string_view label);
-
-// The canonical deterministic note pattern for one clip: `kSteps` columns,
-// each holding a pitch row in [0, kPitches) or -1 (a rest). This is the ONE
-// generator shared by the launch-cell mini-preview (clip_preview_pianoroll)
-// and the Sequence Edit canvas, so the SAME clip reads as the SAME melody in
-// both -- the cell shows a step-cropped subset (first kCellSteps columns) of
-// exactly the blocks the editor draws in full. Seed with hash_label(label).
+// The canonical rendered note pattern for one clip: `kSteps` columns, each
+// holding a pitch ROW in [0, kPitches) or -1 (a rest). This is the ONE shape
+// shared by the launch-cell mini-preview (clip_preview_pianoroll) and the
+// Sequence Edit canvas, so the SAME clip reads as the SAME melody in both --
+// the cell shows a step-cropped subset (first kCellSteps columns) of exactly
+// the blocks the editor draws in full. STEP runs left->right, PITCH low->high
+// (row 0 at the bottom).
+//
+// Real-content cell preview (repeat-zone-real-contract.md): populate this
+// from real resolved note data via clip_pattern_from_pitches() below, fed by
+// gui_sonotron_preview's preview_for() -- never from a label hash. This
+// header stays dependency-free (no arrangrr, no gui_sonotron_preview): the
+// conversion below takes plain absolute MIDI pitches (or -1 for a rest), the
+// same shape gui_sonotron_preview::PreviewPattern::pitch already has.
 struct ClipPattern {
   static constexpr int kSteps = 16;
   static constexpr int kPitches = 5;
   static constexpr int kCellSteps = 8;  // how many columns the mini-preview crops to
   std::array<int, kSteps> pitch{};      // pitch[step] in [0,kPitches) or -1 for a rest
 };
-ClipPattern clip_pattern(std::uint32_t seed);
+
+// Normalizes a REAL absolute-MIDI-pitch pattern (-1 = rest, e.g. gui_
+// sonotron_preview::PreviewPattern::pitch) into a ClipPattern (rows in
+// [0,kPitches) or -1), linearly scaling the OBSERVED pitch span onto the
+// fixed row band -- a pattern's lowest sounding note always draws at row 0,
+// its highest at kPitches-1, so melodic contour stays legible regardless of
+// the role's actual register. A pattern with one distinct pitch (or none)
+// maps everything to the middle row. Both callers (grid_panel.cpp's
+// mini-preview, seqedit_panel.cpp's canvas) feed this the SAME preview_for()
+// output for a given cell, so the two views match by construction.
+ClipPattern clip_pattern_from_pitches(const std::array<int, ClipPattern::kSteps>& pitches);
 
 // Soft outer glow behind a rounded-rect element: a few expanding translucent
 // outlines on `dl`, honoring `glow` (no-op when false). Draw BEFORE the
@@ -79,13 +92,23 @@ bool xy_pad(const char* id, float* valence, float* energy, const ImVec2& size, b
 // `size`.
 void master_vu(const char* id, const ImVec2& size, bool playing, float time, bool glow);
 
-// Procedural mini clip previews inside a launch cell's inner rect: a centered
-// waveform envelope (audio/pad row) or a 16x5 dot piano-roll (midi rows), both
-// deterministic from `seed` (hash_label).
+// Procedural mini waveform envelope, seed-driven amplitude bars -- reserved
+// for GENUINE future audio content (a real captured LoopBuffer envelope);
+// no current caller feeds it real audio data (repeat-zone-real-contract.md:
+// the pad row shows its real MIDI note pattern instead, via
+// clip_preview_pianoroll below, since there is no real audio content yet).
 void clip_preview_waveform(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
                            std::uint32_t seed, const ImVec4& color);
+
+// A little horizontal piano-roll inside a launch cell's inner rect: a
+// step-cropped view (the first kCellSteps columns) of `pattern`, drawn at
+// the SAME (step, row) positions the Sequence Edit canvas uses, so a cell
+// dot is a legible subset of the editor's blocks, never a different melody.
+// STEP runs left->right (X), ROW low->high (Y, row 0 at the bottom).
+// `pattern` is real content (clip_pattern_from_pitches() above), never a
+// hash-seeded generator -- the caller resolves it once per cell/frame.
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
-                            std::uint32_t seed, const ImVec4& color);
+                            const ClipPattern& pattern, const ImVec4& color);
 
 // The L->R sweep bar animating across a playing+running cell (~1.7s loop).
 void sweep_bar(ImDrawList* dl, const ImVec2& min, const ImVec2& max, float time,

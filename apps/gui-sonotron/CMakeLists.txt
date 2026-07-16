@@ -4,13 +4,17 @@
 # milestone (owner-decided): the GUI binary now hosts the engine in-process
 # on a dedicated thread (the "integrated" mode, no external `sonotron-server`
 # needed), so it DOES link hostrt/runtime/arrangrr — through the
-# gui_sonotron_engine library below, and ONLY through that library. Every
-# other library in this directory (gui_sonotron_models/brain/layout/
-# screenshot) stays exactly as core-free as it always was — see each
-# target's own comment below and docs/design/gui-contract-map.md for the
-# discipline that continues to apply at THIS granularity (compilation units
-# and target_link_libraries edges) now that the OS-level process boundary
-# that used to enforce it is gone. `--control <path>` (a pure client of an
+# gui_sonotron_engine library below. A second, narrowly-scoped library,
+# gui_sonotron_preview (repeat-zone-real-contract.md "cell preview made
+# real" pass), ALSO includes arrangrr/ headers, to resolve real note content
+# for the launch-grid/Sequence Edit preview through the SAME NTT kernel the
+# engine plays. These two are the ONLY libraries that do. Every other
+# library in this directory (gui_sonotron_models/brain/layout/screenshot)
+# stays exactly as core-free as it always was — see each target's own
+# comment below and docs/design/gui-contract-map.md for the discipline that
+# continues to apply at THIS granularity (compilation units and
+# target_link_libraries edges) now that the OS-level process boundary that
+# used to enforce it is gone. `--control <path>` (a pure client of an
 # external `sonotron-server`, unchanged) is still supported side by side with
 # the integrated default -- see main.cpp.
 #
@@ -55,6 +59,24 @@ add_library(gui_sonotron_brain STATIC
 target_include_directories(gui_sonotron_brain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(gui_sonotron_brain PRIVATE -Wall -Wextra -Werror)
 
+# Real-content cell preview (repeat-zone-real-contract.md, "cell preview made
+# real" pass): a SECOND library allowed to include arrangrr/ headers (Corelli
+# §15 review resolution item 1's original grant was ONE library,
+# gui_sonotron_engine below; this pass extends the same discipline to a
+# second, narrowly-scoped one). preview.cpp resolves a role's StylePattern
+# against a canonical placeholder harmony through arrangrr::Arranger::resolve
+# (hoisted PUBLIC for exactly this reuse) so the launch-cell thumbnail and
+# the Sequence Edit canvas draw the SAME real note data the engine would
+# play, never a re-implementation. preview.hpp (the header gui_sonotron_
+# layout's panels actually include) names ZERO arrangrr/core types -- the
+# same pimpl-by-convention discipline in_process_brain_session.hpp already
+# uses -- so linking this library does not reopen the core-free invariant
+# gui_sonotron_layout/grid_panel.cpp/seqedit_panel.cpp otherwise hold to.
+add_library(gui_sonotron_preview STATIC src/preview.cpp)
+target_include_directories(gui_sonotron_preview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(gui_sonotron_preview PRIVATE arrangrr)
+target_compile_options(gui_sonotron_preview PRIVATE -Wall -Wextra -Werror)
+
 # Layout engine + zone panels + the sonotron theme. The zone panels (G3) are
 # ImGui-rendering code (transport/browser/grid/seqedit/parts/intention), so
 # they live in this ImGui-linked library alongside layout_renderer.cpp -- the
@@ -67,6 +89,13 @@ target_compile_options(gui_sonotron_brain PRIVATE -Wall -Wextra -Werror)
 # and for track_roles.hpp (theme.hpp's per-role tint ramp); AppState/
 # BrainSession usage stays header-only (inline getters, a pure-virtual
 # interface) so no link dependency on gui_sonotron_brain is required.
+# gui_sonotron_preview is linked PRIVATE (repeat-zone-real-contract.md,
+# "cell preview made real" pass): grid_panel.cpp/seqedit_panel.cpp call its
+# preview_for() to draw REAL resolved note content instead of a label-hash,
+# but its own public header (preview.hpp) names zero arrangrr/core types, so
+# this stays a pure library-boundary dependency, not a core-free violation --
+# see preview.hpp's own header comment and gui_sonotron_preview's target
+# comment above.
 add_library(gui_sonotron_layout STATIC
   src/theme.cpp
   src/neon_widgets.cpp
@@ -82,13 +111,15 @@ add_library(gui_sonotron_layout STATIC
 )
 target_include_directories(gui_sonotron_layout PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gui_sonotron_layout PUBLIC imgui gui_sonotron_models)
+target_link_libraries(gui_sonotron_layout PRIVATE gui_sonotron_preview)
 target_compile_options(gui_sonotron_layout PRIVATE -Wall -Wextra -Werror)
 
 # Engine-linking half of the GUI binary (Phase 2b, docs/design/
 # sonotron-server-phase2-brief.md): D38 is retired for THIS milestone
 # (owner-decided, Corelli §15 review resolution item 1) -- this library, and
-# only this library, includes arrangrr/runtime/hostrt headers and links
-# hostrt/ALSA directly. It owns the dedicated engine thread
+# gui_sonotron_preview above, are the ONLY two libraries that include
+# arrangrr/runtime/hostrt headers directly. This one links hostrt/ALSA
+# directly and owns the dedicated engine thread
 # (in_process_brain_session.cpp: Runtime + arrangrr Stage + AlsaMidi, driven
 # by the Command ring, producing the OutEvent ring) and the in-process
 # OutEvent -> BrainEvent decode (brain_event_from_outevent.cpp), which shares
