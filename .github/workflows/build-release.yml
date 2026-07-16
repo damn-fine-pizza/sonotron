@@ -56,13 +56,14 @@ jobs:
           - os: macos-latest
             name: macos
             required: false
-          # windows-2022 pins the stable MSVC 19.4x (VS2022): windows-latest now
-          # ships VS18-preview MSVC 19.51, which is newer than any released CMake
-          # knows how to map to the CXX26 dialect. The stable toolchain is in
-          # CMake's feature table, so the C++26 requirement resolves.
-          - os: windows-2022
-            name: windows
-            required: false
+          # Windows is DISABLED for now: CMake maps no MSVC (neither VS2022's
+          # stable 19.4x nor windows-latest's VS18-preview 19.51) to the CXX26
+          # dialect the project requires, and the TUI layer (console.cpp /
+          # kitty_keys.cpp) is POSIX-only. Re-enable behind a mingw-w64 CI leg
+          # (matching the local Windows cross-build) once those two land.
+          # - os: windows-2022
+          #   name: windows
+          #   required: false
 
     steps:
       - uses: actions/checkout@v4
