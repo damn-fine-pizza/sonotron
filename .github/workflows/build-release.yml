@@ -68,9 +68,14 @@ jobs:
       # --- system dependencies -------------------------------------------------
       - name: Install deps (Linux)
         if: matrix.name == 'linux'
+        # The project pins CMAKE_CXX_STANDARD 26; ubuntu-latest's default gcc-13
+        # cannot enable CXX26, so pull gcc-15 from the toolchain PPA (closest to
+        # the g++-16 host baseline) and drive the build with it below.
         run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            g++-15 \
             ninja-build \
             libasound2-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
@@ -84,12 +89,28 @@ jobs:
         if: matrix.name == 'windows'
         run: choco install ninja -y
 
+      # windows-latest ships MSVC 19.51 (VS18), which DOES support C++26 via
+      # /std:c++latest, but the runner's stock CMake is too old to know the
+      # CXX26->MSVC flag mapping. Pull the latest CMake so the dialect resolves.
+      - name: Setup latest CMake (Windows)
+        if: matrix.name == 'windows'
+        uses: lukka/get-cmake@latest
+
       # --- configure -----------------------------------------------------------
       # Configure WITHOUT the CMake presets: the `host` preset pins
       # CMAKE_CXX_COMPILER_LAUNCHER=ccache, which CI runners don't have. GLFW
       # Wayland is disabled to keep the Linux dep set to X11 only.
-      - name: Configure (Ninja, Unix)
-        if: matrix.name != 'windows'
+      - name: Configure (Ninja, Linux)
+        if: matrix.name == 'linux'
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DGLFW_BUILD_WAYLAND=OFF
+          -DCMAKE_C_COMPILER=gcc-15
+          -DCMAKE_CXX_COMPILER=g++-15
+
+      - name: Configure (Ninja, macOS)
+        if: matrix.name == 'macos'
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
