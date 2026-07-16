@@ -68,7 +68,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         # third_party/ (GLFW, imgui, miniaudio, tinysoundfont) is vendored
-        # in-tree — no submodules to init.
+        # in-tree — no submodules to init. fetch-depth: 0 gives the full history
+        # so the version component's `git rev-list --count HEAD` (the build
+        # number) is correct — a shallow clone would under-count it.
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        # MAJOR.MINOR from the VERSION file + build number = commit count,
+        # matching components/platform/version exactly (0.3.<N>).
+        run: echo "version=$(cat VERSION).$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       # --- system dependencies -------------------------------------------------
       - name: Install deps (Linux)
@@ -153,7 +164,7 @@ jobs:
           mkdir -p dist
           bin="build/apps/gui-sonotron/gui-sonotron"
           if [ -x "$bin" ]; then
-            cp "$bin" "dist/gui-sonotron-${{ matrix.name }}"
+            cp "$bin" "dist/gui-sonotron-${{ matrix.name }}-${{ steps.ver.outputs.version }}"
           else
             echo "::warning::gui-sonotron binary not produced on ${{ matrix.name }} (expected until the IMidiHal seam lands)"
           fi
@@ -209,7 +220,9 @@ jobs:
           body: |
             Automated gui-sonotron build.
 
-            **Scaffold note:** only the Linux binary is currently produced.
-            macOS and Windows binaries are attached automatically once the
-            cross-platform `IMidiHal` seam (ALSA / CoreMIDI / WinMM) lands and
-            those build legs go green. See memory `platform-backend-three-way`.
+            Binaries are versioned `MAJOR.MINOR.<build>` where the build number
+            is the git commit count (see the VERSION file + scripts/bump-version.sh).
+
+            Linux and macOS binaries are attached. Windows is deferred until a
+            mingw-w64 CI leg and the POSIX TUI port land (the MSVC toolchain has
+            no CMake CXX26 mapping yet). See memory `platform-backend-three-way`.
