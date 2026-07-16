@@ -489,6 +489,25 @@ work):**
 
 ---
 
+## 9b. OWNER SIGN-OFF (2026-07-16) — LOCKED
+
+- **§9 decision 1 (on-screen surface shape) → BOTH** a piano strip AND a pad
+  bank, and the PADS must be MAPPABLE TO THE HOST PC (QWERTY) KEYBOARD (a
+  physical key triggers a pad). Both surfaces drive the same `kNoteRaw` wire
+  path (§2). This is the build-item-10 panel; it lands LAST (build step 7).
+- **§9 decision 2 (v1 loop-verb scope) → MVP SET ONLY**: record (hold gesture),
+  stop (release), erase (per-cell), undo (one global — honor the single
+  tree-wide shadow, §6), length. Overdub/replace-mode selection and
+  retro-capture arm/grab are explicitly V2, NOT this pass.
+- §9 decision 3 (platform-MIDI `IMidiHal` abstraction) stays OUT OF SCOPE —
+  deferred to the later macOS/cross-platform workstream ([[platform-backend-
+  three-way]] in memory; three-way Linux/macOS/Windows seam).
+
+Build steps 1-5 (§10) are decision-independent and start immediately; steps
+6-7 (the panel + gesture) build the locked BOTH-surfaces + QWERTY-pad design.
+
+---
+
 ## 10. Ordered build plan (for Nazzareno, once owner decisions land)
 
 1. **Fix the ALSA dead-end + wire `kNoteRaw`** (§7 items 1/2/3) — zero ABI
