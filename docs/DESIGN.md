@@ -863,15 +863,39 @@ INSTANCES of the chain, not disconnected modules.*
   - `5330` velocity-proc / probability / randomize — ○
   - `5340` harmonize / chord-memory-expand — ○
 
-#### 6000 — Looper (the missing "capture" gesture) — ○ planned (behind the GUI freeze line, `11700`)
+#### 6000 — Looper (the missing "capture" gesture) — ◑ partial (Phase 7 SLICE 1 shipped
+ahead of the informal `11700` ordering; ABI-additive, all pre-existing goldens
+byte-identical)
 
 *Completes the write/generate/capture triad of the unified timeline (`0130`). Budget
 pre-sized by `0400` (8×3072 ev = 192 KB).*
-- `6100` Record / overdub / replace / erase / undo — ○ SHIPPABLE
-- `6200` Quantize-after (non-destructive) — ○ SHIPPABLE
-- `6300` Retroactive capture (always-on ring, "grab last N bars") — ○ SHIPPABLE
-- `6400` Loop length (fixed/auto/quantized), per-track/global — ○ SHIPPABLE
-- `6500` Sync + follow-chord capture (re-harmonize on chord change) — ○ SHIPPABLE
+- `6100` Record / overdub / replace / erase / undo — ✅ done: `LoopBuffer`
+  (`components/core/arrangrr/include/arrangrr/loop/loop_buffer.hpp`), commit `eaf9d50`
+  "add node 6000 Looper primitive (Phase 7 SLICE 1)" — `kLoopNew`/`kLoopRecordStart`
+  (record/overdub/replace)/`kLoopRecordStop`/`kLoopErase`/`kLoopUndo` = ABI Param
+  59–63 (`abi.hpp:330-350`). Tests: `test_loop.cpp`, `test_loop_ops.cpp`,
+  `test_loop_wrap_and_idempotency_regression.cpp`. Playback-capacity hardening in
+  `bc693d1`.
+- `6200` Quantize-after (non-destructive) — ✅ done: `kLoopRecordStop`'s quantize-grid
+  argument, same commit `eaf9d50` (`abi.hpp:342-345`, "non-destructive to event
+  count/positions").
+- `6300` Retroactive capture (always-on ring, "grab last N bars") — ✅ done:
+  `RetroCaptureRing` (`components/core/arrangrr/include/arrangrr/loop/retro_capture.hpp`),
+  commit `95a3a7d` "add node 6300 retroactive capture ('grab last N bars')" —
+  `kRetroCaptureArm`/`Disarm`/`Grab` = ABI Param 69–71 (`abi.hpp:391-399`); hardened by
+  QA commit `6e89bda` "keep the most-recent tail on a dense retro-capture grab (6300
+  QA)" + `test_retro_capture.cpp`/`test_retro_capture_ring.cpp`.
+- `6400` Loop length (fixed/auto/quantized), per-track/global — ✅ done: `kLoopLength`
+  = ABI Param 64 (`abi.hpp:351-354`), `LoopLengthMode` 0=auto (content-derived) /
+  1=fixed (explicit tick length) / 2=quantized (snap to grid), same commit `eaf9d50`.
+- `6500` Sync + follow-chord capture (re-harmonize on chord change) — ◑ partial: the
+  RE-HARMONIZE half is proven end-to-end (`test_loop_reharmonize.cpp` — record → stop
+  → [context changes] → launch through the real ABI, all three `LoopNoteSource`
+  branches) — chord-tone-relative storage + resolve-at-playback makes re-harmonize a
+  byproduct of `6100`'s own shape (`loop_event.hpp:9-19`), not new machinery. The SYNC
+  half stays explicitly unbuilt: `loop_buffer.hpp:146-152`'s own comment calls today's
+  overdub alignment "a SLICE-1 simplification: true bar-aligned overdub-while-playing
+  synchronization is 6300/6500 territory (deferred)." Not ✅.
 
 #### 7000 — Expression — ◑ partial
 
@@ -894,14 +918,26 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
 - **7300 Groove/Humanize** — ✅ *(shared with 3250)*
 - **7400 Metronome/click, tap-tempo, tempo-nudge** — ○ SHIPPABLE
 
-#### 8000 — Structure & recall + persistence — ◑ partial (`8200`/`8500` done, rest behind the GUI freeze line, `11700`)
+#### 8000 — Structure & recall + persistence — ◑ partial (`8100`/`8200`/`8500` done,
+`8300`/`8400`/`8600` remain, behind the GUI freeze line, `11700`)
 
-- `8100` Scenes / song mode (snapshot + chain + tempo/time-sig) — ○ SHIPPABLE
-  *(explicitly NOT built by Phase-5 Item #9: the shipped `Performance` scopes
-  itself away from this node — "Deliberately NOT ... DESIGN.md section 7's
-  Song-anchored timed Scene (node 8100, a separate, later concern)",
-  `components/arrangrr/include/arrangrr/perf/performance.hpp:12-18`. Still
-  planned, unchanged.)*
+- `8100` Scenes / song mode (snapshot + chain + tempo/time-sig) — ✅ done (Phase 7,
+  commit `67fdd13` "add SceneChain (node 8100, Scenes/song mode) + re-anchor the
+  bar-boundary gate"): `SceneChain`
+  (`components/core/arrangrr/include/arrangrr/scene/scene_chain.hpp`) is a bounded,
+  ordered chain of steps, each holding a `PerformanceStore` slot index (the
+  "snapshot") + its own `TimeSig` ("tempo/time-sig" — tempo rides the referenced
+  Performance), advancing at bar boundaries via `Engine::fire_scene`/`Engine::scenes()`
+  (`engine.hpp:151-152,608-611`). ABI `Param::kSceneAdd`/`kScenePlay`/`kSceneStop`/
+  `kSceneClear` = 65–68 (`abi.hpp:364-383`). Tests: `test_scene.cpp` (220 lines),
+  `test_scene_hardening.cpp` (341), `test_scene_meter_gate_regression.cpp` (283) — 844
+  lines combined. **Supersedes the former "explicitly NOT built by Phase-5 Item #9"
+  note**: that note correctly described `Performance`'s own deliberately narrower scope
+  AT THAT TIME (commit `e980665`, 2026-07-14); a later, separate Phase-7 pass (commit
+  `67fdd13`, 2026-07-15) built node `8100` itself, exactly as its own header comment
+  says. `SceneTransitionKind` ships one value (`kCut`, a hard switch) today — a future
+  crossfade kind is reserved as metadata, not required by this node's own description
+  (snapshot + chain + tempo/time-sig).
 - `8200` Performance/Registration (recall live state) — ✅ done (Phase-5 Item
   #9, commit `e980665`, 2026-07-14): `Performance` POD (96 B,
   `components/arrangrr/include/arrangrr/perf/performance.hpp`) snapshots
@@ -955,8 +991,25 @@ pre-sized by `0400` (8×3072 ev = 192 KB).*
   *ranked the single biggest lever against style sameness (corpus measurement,
   `docs/style-corpus-and-generation.md`); feel values in
   `docs/style-corpus-and-generation.md`*
-- **9200 Generative style — ○ planned**
-  - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ○ SHIPPABLE
+- **9200 Generative style — ◑ partial (`9210` shipped, `9220` remains)**
+  - `9210` Motif + transforms (diatonic transpose/retrograde/displacement, seeded) — ✅
+    done. Engine: `components/core/arrangrr/include/arrangrr/arranger/motif.hpp`, commit
+    `6fe5869` "add generative motif engine first slice (9210)"; `test_motif.cpp` (487
+    lines). Owner directive recorded in
+    `docs/reflections/phase7-9210-motif-authoring-all16.md`: "9210 is 'done' only when
+    the motif engine is wired into all 16 built-in styles, not just a blues
+    demonstrator." Now true: commit `f850ea2` "wire MotifSpec into 12 built-in styles
+    (Phase 7, node 9210, Option-1 batch)" attached existing per-style content as motif
+    seeds across 12 styles; commit `417a674` "wire 4 Option-2 motif::generate leads
+    (bossa/samba/funk/ballad)" added the last 4 (generated, not authored, seeds),
+    "closes the last 4 of the 16-style kLead model gap"; commit `f46d758` un-held
+    samba's Finding-B-flagged bass motif; golden regression `690b35c` locks the 4 new
+    lead fixtures (26/26 goldens green, per its own commit message). Verified against
+    the tree: every one of the 16 `arranger/styles/*.hpp` headers carries at least one
+    `.motif=&...Spec` attachment; 15/16 also carry a `TrackRole::kLead` motif —
+    `basic` is the deliberate exception (no genre convention to generate toward, per
+    the authoring plan's own §3.16), matching `3260`'s already-established "basic kept
+    as baseline" precedent, not a residual gap.
   - `9220` Offline-trained Markov/grammar on scale degrees, baked constexpr — ○ runtime SHIPPABLE / training HOST-ONLY
 - **9300 MIDI stylizer — ◑ partial (host-only)**
   - `9310` Accompany (keep the melody, play the genre band under detected chords) — ✅ done
@@ -1056,11 +1109,27 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   wired end-to-end (`apps/gui-sonotron/src/brain_event.cpp`, `app_state.cpp`,
   `transport_panel.cpp`; `test_chord_followed_event`, `test_brain_event`,
   `test_app_state`, `golden_chord_followed` all green) — the harmony visualizer and the
-  live playhead are real, not placeholders. Still open: the clip/scene launch
-  primitive (`apps/gui-sonotron/src/grid_panel.cpp`'s "awaits the core clip primitive"
-  tooltip — unimplemented; also the still-open Phase-5 candidate in
-  `docs/phase5-plan.md` #2) — this is the one remaining §11 gap, so the
-  node stays ◑, not ✅. Toolkit dependency flag: RESOLVED / vendored. **Architecture
+  live playhead are real, not placeholders. **Update (Repeat Zone, 2026-07-16):** the
+  clip/scene launch primitive gap this bullet used to name is now CLOSED for slices
+  1–3 of the `docs/proposals/repeat-zone-real-contract.md` workstream — the stale
+  "`apps/gui-sonotron/src/grid_panel.cpp`'s 'awaits the core clip primitive' tooltip"
+  citation this note used to carry no longer matches the tree (that tooltip string is
+  gone). Commit `3398f04` "Repeat Zone real — readback + Shape-A clip binding" wires
+  `AppState` to a real per-clip `{id -> LaunchState}` map reduced from the existing
+  `clip` `OutEvent` (replacing a local click-time echo with honest core readback) and
+  gives `kClipAdd` an explicit-`id` form (`ClipMatrix::add_at`) so the GUI's grid cells
+  register real content instead of addressing an empty pool slot; commit `f531d8f`
+  "renamable scene columns with scenes.json persistence" adds slice 3 (host-only scene
+  naming + persistence, zero ABI). Tests: `test_app_state.cpp`,
+  `test_in_process_brain_session.cpp`, `test_grid_model.cpp`, `test_scenes_json.cpp`.
+  **Still open (why the node stays ◑, not ✅):** slice 4, "auto-song" — a new
+  grid-column active-scene cursor auto-advancing at bar/section boundaries
+  (`repeat-zone-real-contract.md` §5/§8b decision 4) — is not yet built. (Separately,
+  by explicit owner decision and NOT a gap, §8b decision 2: in-app step/chord/loop
+  authoring of a cell's own content from inside the GUI stays out of scope for this
+  workstream — a cell's content is real only for a style dropped from the Browser;
+  every other content kind is still CLI/script-only.) Toolkit dependency flag:
+  RESOLVED / vendored. **Architecture
   fact (Phase 2a/2b, owner-decided):** the GUI now hosts the engine IN-PROCESS by
   default — a dedicated thread driven by lock-free SPSC Command/OutEvent rings;
   `apps/gui-sonotron/CMakeLists.txt`'s `gui_sonotron_engine` library links
@@ -1151,8 +1220,11 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
       this program:** #3 STM32 bring-up (`12100`), #5 external clock-in (`4500`).
       **Shipped:** the Fuzzing harness — `components/midisrc/fuzz/`,
       `option(SONOTRON_FUZZ)`, commit `c2251f2`. Pad/Scene (`7200` partial,
-      `8200`/`8500` done, `8100` explicitly not built) — commit `e980665`.
-      MIDI-FX chain core (`5100`) — commit `95f542b`. **In-flight, not yet on
+      `8200`/`8500` done at the time of commit `e980665`; `8100` itself shipped
+      separately in a later Phase-7 pass — commit `67fdd13`, see the `8100` entry
+      above). Motif (`9210`) — commits `f850ea2`/`417a674`/`f46d758`/`690b35c`, see
+      the `9210` entry above. MIDI-FX chain core (`5100`) — commit `95f542b`.
+      **In-flight, not yet on
       this branch:** the corpus-import lowering first slice — see `9420` above
       (commit `f6611e5`, on sibling worktree branch
       `worktree-agent-a3f3c787996a2023e`, pending cherry-pick). **Also
