@@ -70,11 +70,31 @@ namespace {
 // discrepancy here cannot be blamed on a frame-order artifact this harness
 // introduces. Returns the frame's ImDrawData (valid only until the next
 // ImGui::Render() call).
+//
+// Root-caused while verifying render_header's fixed-height fix
+// (grid_panel.cpp): a bare ImGui::Begin("test") with no explicit size
+// auto-fits ONLY on its very first appearance, from whatever content it
+// manages to measure during that (always-hidden, ImGui-internal-quirk)
+// first frame -- and that measurement under-counts real content height, so
+// the window's Size silently freezes far too small FOREVER after (never
+// re-measured on later frames, since ImGuiWindowFlags_AlwaysAutoResize is
+// not set). The Repeat Zone's own "grid_body" BeginChild(0,0) ("fill
+// remaining parent space") then gets positioned below that frozen window's
+// own bottom edge, so ImGui marks it fully clipped (ImGuiWindow::Hidden)
+// and drops its entire ImDrawList from ImGui::Render()'s output -- a latent
+// fragility of this bare test window that only tipped over into an actual
+// failure once render_header's own (correct, real-layout-shift-bug-fixing)
+// two-row fixed footprint made the header a little taller. The honest fix
+// is to give this test window a REAL size once, matching the full display
+// (the real app's own window is always sized by the real OS/GLFW display,
+// never auto-fit), so its own clip rect can actually contain the grid
+// regardless of how tall the panels above it are.
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                              BrainSession& brain_session, AppState& app_state, V02State& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
+  ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Once);
   ImGui::Begin("test");
   sonotron::render_transport_panel(app_state, brain_session, fx);
   ImGui::Spacing();
@@ -152,21 +172,13 @@ void test_no_playhead_after_real_play_and_real_launch() {
   // entirely (no draw commands at all) while it measures its own content
   // size before ever showing anything -- a well-known ImGui quirk, not a
   // product bug -- so this warm-up frame (thrown away) is required before
-  // the real "locate" frame below can find any geometry at all.
+  // the real "locate" frame below can find any geometry at all. (See
+  // render_one_frame's own header comment for a related, now-fixed
+  // fragility this same quirk exposed: this bare window's SIZE, not just
+  // its first-frame visibility, needed pinning too.)
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   render_one_frame(model, seqedit, parts, session, app_state, fx);
   ImDrawData* locate = render_one_frame(model, seqedit, parts, session, app_state, fx);
-
-  // Play button rect: pad_button("play", ..., theme::kCyan, filled=true,
-  // fx.glow) paints its fill AND border with the EXACT SAME ImU32 at rest
-  // (not hovered -> no color boost) -- neon::u32(theme::kCyan, 0.9F),
-  // transport_panel.cpp / neon_widgets.cpp:148-149. Nothing else in these
-  // two panels paints that exact alpha over kCyan (the header text uses
-  // alpha 1.0, the scene-header underline uses 0.25), so a single-region
-  // scan is enough -- no clustering needed.
-  const ImU32 play_color = sonotron::neon::u32(sonotron::theme::kCyan, 0.9F);
-  const th::Rect play_rect = th::find_single_color_rect(locate, play_color);
-  CHECK(play_rect.found);
 
   // Drums (row 0) launch cells: draw_cell's fill for a filled, not-hovered,
   // not-playing cell is neon::u32(track_color, 0.10F) (grid_panel.cpp's
@@ -187,6 +199,17 @@ void test_no_playhead_after_real_play_and_real_launch() {
     return;
   }
   const th::Rect scene0_cell = drums_cells.front();
+
+  // Play button rect: pad_button("play", ..., theme::kCyan, filled=true,
+  // fx.glow) paints its fill AND border with the EXACT SAME ImU32 at rest
+  // (not hovered -> no color boost) -- neon::u32(theme::kCyan, 0.9F),
+  // transport_panel.cpp / neon_widgets.cpp:148-149. Nothing else in these
+  // two panels paints that exact alpha over kCyan (the header text uses
+  // alpha 1.0, the scene-header underline uses 0.25), so a single-region
+  // scan is enough -- no clustering needed.
+  const ImU32 play_color = sonotron::neon::u32(sonotron::theme::kCyan, 0.9F);
+  const th::Rect play_rect = th::find_single_color_rect(locate, play_color);
+  CHECK(play_rect.found);
 
   // Real click #1: press Play (transport_panel.cpp's REAL button verb --
   // `brain_session.send("transport start")` + `app_state.note_transport_

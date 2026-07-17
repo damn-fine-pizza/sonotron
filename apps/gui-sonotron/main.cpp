@@ -87,12 +87,14 @@
 #include "src/brain_event.hpp"
 #include "src/brain_session.hpp"
 #include "src/browser_model.hpp"
+#include "src/debug_log.hpp"
 #include "src/grid_model.hpp"
 #include "src/in_process_brain_session.hpp"
 #include "src/input_trace.hpp"
 #include "src/layout_json.hpp"
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
+#include "src/logging_brain_session.hpp"
 #include "src/parts_model.hpp"
 #include "src/scenes_json.hpp"
 #include "src/screenshot.hpp"
@@ -193,6 +195,60 @@ std::string replay_input_path_from_args(int argc, char** argv) {
     return env;
   }
   return "";
+}
+
+// `--debug` (bare flag) / SONOTRON_DEBUG (any value) turns on the owner's
+// root-cause trace for the still-broken live auto-song (src/debug_log.hpp):
+// same flag-over-env precedence as --control/--trace-input above, but a
+// plain on/off switch rather than a path. Resolved and applied FIRST, before
+// any BrainSession/GridModel/scene load, so every send/receive and the
+// launch-time scene table below are covered from the very first line.
+bool debug_requested_from_args(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--debug") {
+      return true;
+    }
+  }
+  return std::getenv("SONOTRON_DEBUG") != nullptr;
+}
+
+// --debug/SONOTRON_DEBUG launch-time snapshot (owner ask): the resolved
+// scenes.json path plus the scene table exactly as loaded (index, name, the
+// wire section name a `style section`/`clip add` for this column would
+// actually send, and the per-scene bar length auto-song gates on) -- one
+// stamped line per scene, printed once, before the frame loop (and before
+// grid_panel.cpp's own seed_demo() may still overwrite the demo columns'
+// section/name on frame 1 if scenes.json was missing/empty). Split out of
+// main() (rather than inlined at the call site) to keep that already large
+// function's cognitive complexity from growing further -- caller already
+// gates the call itself on debug_enabled(), so this is a no-op cost when off.
+void print_debug_launch_scene_table(const std::string& scenes_file_path,
+                                    const sonotron::GridModel& grid_model) {
+  sonotron::debug_log("[dbg launch] scenes.json path=" + scenes_file_path);
+  for (std::size_t s = 0; s < grid_model.scene_count(); ++s) {
+    const std::string_view section_wire = sonotron::section_wire_name(grid_model.scene_section(s));
+    sonotron::debug_log(
+        "[dbg launch] scene " + std::to_string(s) + ": " + std::string(grid_model.scene_name(s)) +
+        " section=" + (section_wire.empty() ? std::string("?") : std::string(section_wire)) +
+        " bars=" + std::to_string(grid_model.scene_bars(s)));
+  }
+  sonotron::debug_log("[dbg launch] scene_count=" + std::to_string(grid_model.scene_count()));
+}
+
+// --debug/SONOTRON_DEBUG (src/debug_log.hpp): resolves to the
+// LoggingBrainSession decorator wrapping `real_session` (constructed into
+// `storage`, which the caller must keep alive for as long as the returned
+// reference is used) when debug tracing is on, or straight to `real_session`
+// otherwise. Split out of main() (rather than inlined at the call site) to
+// keep that already large function's cognitive complexity from growing
+// further.
+sonotron::BrainSession& resolve_debug_brain_session(
+    sonotron::BrainSession& real_session, std::optional<sonotron::LoggingBrainSession>& storage) {
+  if (sonotron::debug_enabled()) {
+    storage.emplace(real_session);
+    return *storage;
+  }
+  return real_session;
 }
 
 // `--version`: print the release version and exit, before touching GLFW/GL
@@ -575,6 +631,8 @@ void present_frame(GLFWwindow* window, const char* screenshot_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  sonotron::set_debug_enabled(debug_requested_from_args(argc, argv));
+
   if (version_requested_from_args(argc, argv)) {
     std::printf("gui-sonotron %s (%s)\n", sonotron::version::kVersionString,
                 sonotron::version::kVersionFull);
@@ -735,7 +793,17 @@ int main(int argc, char** argv) {
                  "SONOTRON_CONTROL_PATH) - running the integrated engine thread\n");
     brain_session_holder = std::move(in_process_session);
   }
-  sonotron::BrainSession& brain_session = *brain_session_holder;
+  // --debug/SONOTRON_DEBUG (src/debug_log.hpp): transparently wrap whichever
+  // concrete backend was just constructed above in the LoggingBrainSession
+  // decorator (src/logging_brain_session.hpp), the single choke point every
+  // panel's send()/every decoded event funnels through. `brain_session`
+  // (the reference every panel/WorkstationState actually holds) resolves to
+  // the decorator when debug tracing is on, or straight to the real backend
+  // otherwise -- zero indirection cost when off.
+  sonotron::BrainSession& real_brain_session = *brain_session_holder;
+  std::optional<sonotron::LoggingBrainSession> debug_brain_session;
+  sonotron::BrainSession& brain_session =
+      resolve_debug_brain_session(real_brain_session, debug_brain_session);
   sonotron::AppState app_state;
 
   // The G3 zone panels' models (docs/design/gui-fase2-mechanical-plan.md):
@@ -759,9 +827,19 @@ int main(int argc, char** argv) {
                  scenes_file_path.c_str(), scenes_error.c_str());
   }
 
+  if (sonotron::debug_enabled()) {
+    print_debug_launch_scene_table(scenes_file_path, grid_model);
+  }
+
   sonotron::SeqEditModel seqedit_model;
   sonotron::PartsModel parts_model;
   sonotron::V02State v02_state;  // v02 redesign: glow flag, frame clock, local intent
+
+  if (sonotron::debug_enabled()) {
+    sonotron::debug_log(
+        "[dbg launch] auto_song=" + std::string(v02_state.auto_song ? "on" : "off") +
+        " active_scene=" + std::to_string(v02_state.active_scene));
+  }
 
   // SLICE 4a item 1 (docs/proposals/repeat-zone-real-contract.md): boot
   // ALIVE. Only the integrated (non `--control`) path -- an external

@@ -12,6 +12,7 @@
 
 #include "app_state.hpp"
 #include "browser_model.hpp"
+#include "debug_log.hpp"
 #include "imgui.h"
 #include "neon_widgets.hpp"
 #include "preview.hpp"
@@ -351,7 +352,8 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   return clicked;
 }
 
-void render_header(V02State& fx, const AppState& app_state) {
+void render_header(const GridModel& model, V02State& fx, const AppState& app_state,
+                   std::size_t scene_count) {
   ImGui::TextColored(theme::kCyan, "REPEAT ZONE");
 
   // Auto-song toggle (repeat-zone-real-contract.md SLICE 4b, GUI-DRIVEN, no
@@ -398,6 +400,120 @@ void render_header(V02State& fx, const AppState& app_state) {
   if (ImGui::SmallButton("+")) {
     fx.cell_zoom = std::clamp(fx.cell_zoom + 9.0F, 34.0F, 88.0F);
   }
+
+  // Owner ask: "visualizza in ui che scena sta suonando (metti numero: nome)"
+  // -- a subtle status block, its OWN two rows (never disturbing the row
+  // above), showing BOTH truths side by side because their disagreement IS
+  // the root-cause diagnostic for the "never leaves intro1 audibly" bug: the
+  // GUI's own launch intent (fx.active_scene + GridModel::scene_name -- what
+  // auto-song/a manual scene launch believes is current) next to the
+  // ENGINE's authoritative section readback (AppState::section(), fed by the
+  // kSection wire event, app_state.cpp's kSection case). If they ever
+  // diverge live, the bug is localized in one glance.
+  //
+  // FIXED HEIGHT (bug found verifying this task): both rows below are drawn
+  // UNCONDITIONALLY -- an invisible placeholder Dummy stands in whenever the
+  // real content does not apply (transport stopped / auto-song off) --
+  // rather than the row being skipped outright. Skipping it used to make
+  // this header's own height (and therefore the Y every scene-header/track
+  // row below starts at) DEPEND on fx.playing/fx.auto_song: the instant the
+  // transport started, the ENTIRE Repeat-Zone grid visibly jumped down by
+  // one text line (and jumped back up on Stop) -- a real, user-visible
+  // layout glitch, caught by test_repeat_zone_playhead_ui_automation.cpp
+  // (it locates a cell's rect once, before Play, then asserts against it
+  // after Play: the shift moved the real cell out from under the stale
+  // rect, so the playhead assertion failed even though the playhead WAS
+  // being drawn -- just one line lower than the rect it was checked
+  // against). Reserving the same two-row footprint in every state removes
+  // the shift entirely.
+  const std::size_t active_scene_index =
+      fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
+  const float placeholder_row_h = ImGui::GetTextLineHeight();
+  if (fx.playing) {
+    const std::string engine_section = app_state.section().empty() || app_state.section() == "-"
+                                           ? "\xE2\x80\x94"
+                                           : app_state.section();
+    ImGui::TextColored(
+        theme::kTextSecondary, "\xE2\x96\xB6 %d: %s \xC2\xB7 engine: %s", fx.active_scene + 1,
+        std::string(model.scene_name(active_scene_index)).c_str(), engine_section.c_str());
+  } else {
+    ImGui::Dummy(ImVec2(1.0F, placeholder_row_h));
+  }
+
+  // Owner issue (b): "next section" indicator. There is NO authoritative
+  // upcoming/queued section on the wire today -- the core only reports the
+  // section it has already COMMITTED to (the "kSection" OutEvent the row
+  // above's "engine: %s" reads); the arranger's own pending/armed section is
+  // not surfaced over the wire at all (confirmed against brain_event.cpp's
+  // kSection decode and docs/proposals/ui-motion-extreme-2026-07.md §5.3:
+  // "requested-vs-current section needs an 'armed section' field on
+  // AppState... not implemented yet"). Rather than fake a readback or
+  // silently show a stale echo, this shows the GUI's OWN next-scene INTENT
+  // instead -- the same round-robin target auto-song's own next_scene_to_
+  // launch() would advance to -- explicitly labelled "next (intent)" so it
+  // can never be mistaken for an engine-confirmed fact. Only shown while
+  // playing AND auto-song is armed: with auto-song off the active scene
+  // never advances on its own, so there genuinely is no "next" to report.
+  if (fx.playing && fx.auto_song && scene_count > 0) {
+    const std::size_t next_scene_index = (active_scene_index + 1) % scene_count;
+    ImGui::TextColored(theme::kTextDim, "  next (intent): %d: %s",
+                       static_cast<int>(next_scene_index) + 1,
+                       std::string(model.scene_name(next_scene_index)).c_str());
+  } else {
+    ImGui::Dummy(ImVec2(1.0F, placeholder_row_h));
+  }
+}
+
+// MASTER PLAY (owner issue a): the master ▶ (transport_panel.cpp's own Play
+// pad, next to the "sonotron_" wordmark) only ever sent `transport start` --
+// audio starts, but no scene column is ever launched, so no cell reads back
+// as playing (AppState::clip_state stays kStopped for every cell) and the
+// beat-synced playhead sweep (draw_cell's own `playing && fx.playing` gate)
+// never appears until the user separately clicks a cell or a scene header.
+// This mirrors render_scene_header_cell's own launch exactly (`style
+// section` + `launch scene <n> quantize <bars>`) for the CURRENTLY ACTIVE
+// scene column (fx.active_scene) the instant the transport is OBSERVED to
+// have started -- via AppState::transport(), the authoritative state (fed
+// either by this panel's own optimistic note_transport_sent() hint or by a
+// real confirmed transport event from any OTHER trigger, e.g. the menu bar's
+// Transport > Start), never a guess. `fx.master_play_launched` is the
+// once-per-press guard: cleared the instant the transport is observed NOT
+// playing, and set the instant this function actually fires -- so a Play
+// press launches the active column exactly once, never re-firing on every
+// subsequent frame while the transport keeps running, and re-arms cleanly on
+// the next Stop/Play cycle.
+void handle_master_play_launch(const GridModel& model, BrainSession& brain_session,
+                               const AppState& app_state, V02State& fx) {
+  const bool transport_playing_now = app_state.transport() == AppState::Transport::kPlaying;
+  if (!transport_playing_now) {
+    fx.master_play_launched = false;
+    return;
+  }
+  if (fx.master_play_launched) {
+    return;
+  }
+  fx.master_play_launched = true;
+
+  const std::size_t active_scene_index =
+      fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
+  const std::string_view section_name = section_wire_name(model.scene_section(active_scene_index));
+  const std::string style_section_verb = "style section " + std::string(section_name);
+  const std::string launch_scene_verb = "launch scene " + std::to_string(active_scene_index) +
+                                        " quantize " + std::to_string(kDefaultLaunchQuantizeBars);
+  if (debug_enabled()) {
+    debug_log("[dbg master-play] transport just started -> launching active scene " +
+              std::to_string(active_scene_index) + " sending '" + style_section_verb + "' and '" +
+              launch_scene_verb + "'");
+  }
+  if (!section_name.empty()) {
+    brain_session.send(style_section_verb);
+  }
+  brain_session.send(launch_scene_verb);
+  // Same bookkeeping the manual scene-header launch performs (render_scene_
+  // header_cell's own "go" branch): the active scene's own beat-synced
+  // playhead sweep (render_grid_panel's active_section_phase) and auto-song's
+  // bars-elapsed measurement both anchor from THIS bar, not a stale one.
+  fx.active_scene_start_bar = app_state.bar();
 }
 
 // Repeat-Zone auto-song advance (SLICE 4b, docs/proposals/repeat-zone-real-
@@ -446,6 +562,19 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   // playhead uses below, so the sweep fills exactly over the length that
   // gates this advance.
   const int active_section_bars = model.scene_bars(active_scene_index);
+
+  // --debug/SONOTRON_DEBUG (owner ask): this is essentially the old
+  // SONOTRON_AUTOSONG_TRACE stderr trace (since removed, see git history),
+  // made permanent behind the same debug gate every other trace point in
+  // this pass uses -- printed on every bar this function actually
+  // evaluates (bar_just_advanced() above already guards the once-per-bar
+  // cadence), whether or not it decides to advance.
+  if (debug_enabled()) {
+    debug_log("[dbg auto-song] bar=" + std::to_string(current_bar) + " active_scene=" +
+              std::to_string(fx.active_scene) + " bars_elapsed=" + std::to_string(bars_elapsed) +
+              " scene_bars=" + std::to_string(active_section_bars));
+  }
+
   const std::optional<int> next =
       next_scene_to_launch(fx.auto_song, fx.playing, fx.active_scene, static_cast<int>(scene_count),
                            bars_elapsed, active_section_bars);
@@ -456,9 +585,7 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   fx.active_scene_start_bar = current_bar;
   const std::string_view section_name =
       section_wire_name(model.scene_section(static_cast<std::size_t>(fx.active_scene)));
-  if (!section_name.empty()) {
-    brain_session.send("style section " + std::string(section_name));
-  }
+  const std::string style_section_verb = "style section " + std::string(section_name);
   // Root-cause fix: `style section` alone only selects WHICH section a
   // future launch will use -- it never fires the newly-active column's own
   // clips. The manual scene-header launch (render_scene_header_cell below)
@@ -466,8 +593,16 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   // exactly, or the newly-active column's audio never actually starts (the
   // proven "scene 1 forever" bug -- fx.active_scene DID advance internally,
   // but nothing ever launched the column it pointed at).
-  brain_session.send("launch scene " + std::to_string(fx.active_scene) + " quantize " +
-                     std::to_string(kDefaultLaunchQuantizeBars));
+  const std::string launch_scene_verb = "launch scene " + std::to_string(fx.active_scene) +
+                                        " quantize " + std::to_string(kDefaultLaunchQuantizeBars);
+  if (debug_enabled()) {
+    debug_log("[dbg auto-song] advance -> scene " + std::to_string(fx.active_scene) + " sending '" +
+              style_section_verb + "' and '" + launch_scene_verb + "'");
+  }
+  if (!section_name.empty()) {
+    brain_session.send(style_section_verb);
+  }
+  brain_session.send(launch_scene_verb);
 }
 
 // Standard solo semantics: any part soloed makes the non-soloed rows read as
@@ -794,7 +929,13 @@ void render_track_row(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                        BrainSession& brain_session, const AppState& app_state, V02State& fx) {
   seed_demo(model, seqedit, parts, brain_session, fx);
-  render_header(fx, app_state);
+  // Capped scene count (the v02 launch grid only ever renders the first 5
+  // scene columns, render_scene_header_row/render_track_row below) computed
+  // ONCE, up front, so render_header's own "next (intent)" preview and the
+  // update_auto_song/render_* calls further down all share the exact same
+  // wrap-around modulus -- never a second, silently-divergent literal.
+  const std::size_t scenes = std::min<std::size_t>(model.scene_count(), 5);
+  render_header(model, fx, app_state, scenes);
   ImGui::Spacing();
 
   // Standard solo semantics: any part soloed makes the non-soloed rows read as
@@ -803,7 +944,13 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   const bool any_solo = any_part_soloed(parts);
 
   const float cz = fx.cell_zoom;
-  const std::size_t scenes = std::min<std::size_t>(model.scene_count(), 5);
+
+  // MASTER PLAY (issue a): if the transport just started, launch the active
+  // scene column so its clips read back as playing and the beat-synced
+  // sweep starts -- BEFORE update_auto_song, mirroring SLICE 4b's own
+  // "evaluate before drawing the header" ordering so a fired launch is
+  // reflected in the SAME frame's active-scene highlight.
+  handle_master_play_launch(model, brain_session, app_state, fx);
 
   // SLICE 4b: evaluate the auto-song advance BEFORE drawing the scene header
   // row below, so a fired advance is reflected in the SAME frame's active-

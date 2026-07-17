@@ -145,16 +145,18 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   CHECK(fx.auto_song);
   CHECK(fx.active_scene == 0);
 
-  // Same-bar render: nothing has elapsed yet, no advance sent. This first
-  // render is also the ONE frame seed_demo() registers its demo cells with
-  // the core (owner bug #1 fix, grid_panel.cpp): that legitimately sends a
-  // handful of `clip add ...` lines, so the assertion here is narrowed to
-  // "no auto-song advance fired yet" (no `style section `/`launch scene `
-  // send), not "nothing was ever sent".
+  // Same-bar render: auto-song itself must NOT advance yet. This first
+  // render is also the ONE frame TWO OTHER, legitimate one-shot sends fire
+  // on: seed_demo()'s `clip add ...` registrations (owner bug #1 fix) AND
+  // handle_master_play_launch's own immediate launch of the CURRENTLY active
+  // scene (0) -- issue (a), grid_panel.cpp -- the instant the transport is
+  // observed to have started (already true, from the "playing" apply_line
+  // above). Neither is the property under test here; what must NOT have
+  // happened yet is auto-song's OWN advance to a DIFFERENT scene (1), so the
+  // assertion is narrowed to that, not to "nothing was ever sent".
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 0);
-  CHECK(!any_sent_line_starts_with(brain.sent, "style section "));
-  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
   // One further bar crosses the 1-bar section boundary for the active scene:
   // this must trigger exactly one advance.
@@ -174,9 +176,12 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   // scene-header ▶ launch does (render_scene_header_cell, grid_panel.cpp).
   // Without this send, the section changes silently but no clip in the new
   // column ever actually fires -- "scene 1 forever" from the listener's
-  // point of view, even though fx.active_scene has moved. THIS IS THE
-  // ASSERTION THAT FAILS ON THE CURRENT TREE.
-  CHECK(any_sent_line_starts_with(brain.sent, "launch scene "));
+  // point of view, even though fx.active_scene has moved. Checked against
+  // "launch scene 1" specifically (not a blanket "launch scene " prefix):
+  // the master-play launch (issue a) already put a "launch scene 0" in
+  // `brain.sent` back on the very first render, so only the scene-1-specific
+  // send is unambiguous proof of the advance's OWN launch.
+  CHECK(any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
   ImGui::DestroyContext();
 }

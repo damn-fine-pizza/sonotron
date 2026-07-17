@@ -154,17 +154,20 @@ void test_auto_song_advances_scene_after_section_elapses() {
   CHECK(fx.auto_song);
   CHECK(fx.active_scene == 0);
 
-  // A render at the SAME bar the arm happened must NOT fire yet -- nothing
-  // has elapsed (bar_just_advanced's own once-per-crossing guard). This first
-  // render is also the ONE frame seed_demo() registers its demo cells with
-  // the core (owner bug #1 fix, grid_panel.cpp): that legitimately sends a
-  // handful of `clip add ...` lines, so the assertion here is narrowed to
-  // "no auto-song advance fired yet" (no `style section `/`launch scene `
-  // send), not "nothing was ever sent".
+  // A render at the SAME bar the arm happened must NOT advance auto-song's
+  // OWN scene yet (bar_just_advanced's own once-per-crossing guard). This
+  // first render is also the ONE frame TWO OTHER, legitimate one-shot sends
+  // fire on: seed_demo()'s `clip add ...` registrations (owner bug #1 fix)
+  // AND handle_master_play_launch's own immediate launch of the CURRENTLY
+  // active scene (0) -- issue (a), grid_panel.cpp -- the instant the
+  // transport is observed to have started (already true, from the "playing"
+  // apply_line above). Neither is the property under test here; what must
+  // NOT have happened yet is auto-song's OWN advance to a DIFFERENT scene
+  // (1), so the assertion is narrowed to that, not to "nothing was ever
+  // sent".
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 0);
-  CHECK(!any_sent_line_starts_with(brain.sent, "style section "));
-  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
   // Scene 0's own length is pinned to 1 bar above, so a single further bar
   // (bar 2, one whole bar past the arm bar) is exactly one full boundary for
@@ -322,30 +325,39 @@ void test_scene_bars_governs_advance_cadence() {
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 0);
   // Same narrowing as test_auto_song_advances_scene_after_section_elapses
-  // above: this first render also seeds the demo grid (owner bug #1 fix),
-  // which legitimately sends `clip add ...` lines -- the assertion only
-  // cares that no auto-song advance has fired yet.
-  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
+  // above: this first render also seeds the demo grid (owner bug #1 fix) AND
+  // fires handle_master_play_launch's own immediate launch of the CURRENTLY
+  // active scene (0, issue (a)) -- both legitimate, neither the property
+  // under test here. The assertion is narrowed to "auto-song has not ALSO
+  // advanced to a DIFFERENT scene (1) yet", the only unambiguous signature
+  // of a premature auto-song crossing.
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
   // Bars 2, 3, 4 are 1, 2, and 3 bars past the arm bar -- all strictly less
   // than the pinned 4-bar length, so the active scene must stay put and no
-  // `launch scene ` line may be sent yet, on any of these three bars.
+  // `launch scene 1` (the wrap-forward advance target) may be sent yet, on
+  // any of these three bars.
   for (int bar = 2; bar <= 4; ++bar) {
     app_state.apply_line(R"({"ev":"beat","bar":)" + std::to_string(bar) +
                          R"(,"beat":0,"pulse":0,"@":)" + std::to_string(bar * 500) + "}");
     render_one_frame(model, seqedit, parts, brain, app_state, fx);
     CHECK(fx.active_scene == 0);
-    CHECK(!any_sent_line_starts_with(brain.sent, "launch scene "));
+    CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
   }
 
   // Bar 5 is exactly 4 bars past the arm bar -- the pinned length is now
   // fully elapsed: the active scene column MUST advance and a
-  // `launch scene <n> ...` command MUST be sent for the newly-active column.
+  // `launch scene <n> ...` command MUST be sent for the newly-active column
+  // (1). Checked against "launch scene 1" specifically (not a blanket
+  // "launch scene " prefix): the master-play launch (issue a) already put a
+  // "launch scene 0" in `brain.sent` back on the very first render, so only
+  // the scene-1-specific send is unambiguous proof THIS advance actually
+  // fired.
   app_state.apply_line(R"({"ev":"beat","bar":5,"beat":0,"pulse":0,"@":2500})");
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 1);
   CHECK(any_sent_line_starts_with(brain.sent, "style section "));
-  CHECK(any_sent_line_starts_with(brain.sent, "launch scene "));
+  CHECK(any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
   ImGui::DestroyContext();
 }

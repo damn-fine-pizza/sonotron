@@ -110,6 +110,14 @@ struct V02State {
   int active_scene = 0;
   int active_scene_start_bar = 0;
   int auto_song_last_bar = -1;
+
+  // MASTER PLAY launch guard (owner issue a, grid_panel.cpp's
+  // handle_master_play_launch): true once the active scene column has been
+  // launched for the transport run currently in progress, so a Play press
+  // launches it exactly once rather than re-firing on every subsequent
+  // frame. Cleared the instant the transport is observed NOT playing
+  // (AppState::transport() != kPlaying), re-arming for the next Play.
+  bool master_play_launched = false;
 };
 
 }  // namespace sonotron
