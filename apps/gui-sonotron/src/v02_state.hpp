@@ -106,7 +106,16 @@ struct V02State {
   // stored here. `auto_song_last_bar` is the once-per-crossing guard's own
   // bookkeeping (grid_model.hpp's bar_just_advanced) -- defaults to -1 so the
   // very first live bar (0) still counts as "not yet evaluated".
-  bool auto_song = false;
+  //
+  // DEFAULT ON (owner decision 2026-07-17): auto_song starts armed. The
+  // still-live "I always have to click to advance" bug was that NOTHING in
+  // production armed auto_song -- only the near-invisible header toggle did,
+  // and pressing master Play never touched it, so the active scene looped
+  // forever. Every auto-song test set this true by hand, so they stayed green
+  // while the real Play path advanced nothing. Starting armed means Play makes
+  // the song advance through its scenes on its own; the header toggle now only
+  // turns it OFF for a deliberate fixed single-scene loop.
+  bool auto_song = true;
   int active_scene = 0;
   int active_scene_start_bar = 0;
   int auto_song_last_bar = -1;

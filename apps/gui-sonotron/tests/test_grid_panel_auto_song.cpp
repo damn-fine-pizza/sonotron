@@ -362,11 +362,67 @@ void test_scene_bars_governs_advance_cadence() {
   ImGui::DestroyContext();
 }
 
+// REAL-PATH COVERAGE (owner "devo sempre cliccare a mano per far avanzare"
+// bug): every test above arms auto-song by hand (click_arm_auto_song), so
+// they prove the ADVANCE logic but NEVER the real user path -- where nothing
+// armed auto-song and pressing Play advanced nothing (the near-invisible
+// header toggle was the only thing that ever set it, and master Play never
+// touched it). auto_song now DEFAULTS ON (v02_state.hpp, owner decision
+// 2026-07-17). This test constructs a fresh V02State (the real startup
+// state), NEVER toggles it, and drives everything through render_grid_panel
+// (which runs both handle_master_play_launch and update_auto_song) -- so the
+// scene must advance on its own with zero direct fx poking, exactly the path
+// that used to be broken while every armed test stayed green.
+void test_auto_song_armed_by_default_advances_without_manual_toggle() {
+  ImGui::CreateContext();
+  ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
+  unsigned char* tex_pixels = nullptr;
+  int tex_w = 0;
+  int tex_h = 0;
+  ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
+
+  GridModel model(5);
+  SeqEditModel seqedit;
+  PartsModel parts;
+  SpyBrainSession brain;
+  AppState app_state;
+  V02State fx;
+
+  // The whole point: NEVER call click_arm_auto_song. A default-constructed
+  // V02State is exactly what the app boots with.
+  CHECK(fx.auto_song);  // pins the owner default-ON decision itself
+  CHECK(fx.active_scene == 0);
+
+  model.set_scene_bars(0, 1);
+
+  app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
+  app_state.apply_line(R"({"ev":"beat","bar":1,"beat":0,"pulse":0,"@":0})");
+  CHECK(app_state.bar() == 1);
+
+  // First frame at bar 1: handle_master_play_launch fires (transport observed
+  // playing), launches the active scene 0 and anchors active_scene_start_bar
+  // to the live bar. auto-song must NOT yet have advanced to a DIFFERENT scene.
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 0);
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
+
+  // One full bar past the master-play anchor: scene 0's pinned 1-bar length
+  // elapses, and the song must advance to scene 1 ON ITS OWN -- no toggle, no
+  // manual state mutation, only real rendered frames.
+  app_state.apply_line(R"({"ev":"beat","bar":2,"beat":0,"pulse":0,"@":500})");
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 1);
+  CHECK(any_sent_line_starts_with(brain.sent, "launch scene 1"));
+
+  ImGui::DestroyContext();
+}
+
 }  // namespace
 
 int main() {
   test_auto_song_advances_scene_after_section_elapses();
   test_auto_song_stuck_after_transport_stop_then_restart();
   test_scene_bars_governs_advance_cadence();
+  test_auto_song_armed_by_default_advances_without_manual_toggle();
   return sonotron::test::failures();
 }
