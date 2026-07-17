@@ -30,3 +30,6 @@ compile_commands.json
 .claude/settings.local.json
 .claude/codebase-memory-usage.log
 .claude/codebase-memory-gain.sh
+
+# Dear ImGui runtime layout cache (per-machine, not source)
+imgui.ini
