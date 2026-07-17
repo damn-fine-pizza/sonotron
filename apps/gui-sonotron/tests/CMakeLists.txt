@@ -86,6 +86,12 @@ target_compile_definitions(test_audio_port_gate PRIVATE
 # now -- a normal, registered, always-green test like every other one here.
 gui_sonotron_engine_test(test_audio_primary_port_reachable functional)
 
+# A/B FIX PIN (docs/reflections/cli-vs-gui-ab-2026-07.md): proves the GUI's
+# own reachable path (`style load`/`transport start`, nothing hand-written)
+# now produces real harmonic movement instead of a static tonic triad -- see
+# this test file's own header comment.
+gui_sonotron_engine_test(test_default_style_progression_functional functional)
+
 # Device-independent AudioBackend/SoundfontEngine smoke test (Torquato QA
 # pass): moved to components/platform/audio/tests (docs/proposals/
 # components-restructure-move-plan.md §2/§3 Step 5, docs/proposals/

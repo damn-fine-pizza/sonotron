@@ -17,6 +17,7 @@
 #include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
+#include "default_style_progressions.hpp"
 #include "midi_hal.hpp"
 #include "shell.hpp"
 
@@ -723,6 +724,178 @@ Command make_default_style_route_command(const DefaultStyleRoute& route) {
   return cmd;
 }
 
+// docs/proposals/per-style-default-progressions.md: default per-style
+// harmonic progression, HOST data (default_style_progressions.hpp) feeding
+// the core's EXISTING ChordSequence object through the EXISTING
+// kKeySet/kSeqNew/kSeqClear/kSeqAdd/kSeqLoop/kSeqPlay Command verbs -- zero
+// new StyleDef field, zero ABI change, zero core touch. Mirrors
+// make_default_style_route_command()'s own idiom exactly: a small constexpr
+// table turned into raw Command PODs, injected at the SAME site
+// (run_engine()'s command-drain loop, right after a successful
+// kStyleLoad/kStyleSwitch) -- never routed through command_line_to_command(),
+// since nothing in gui-sonotron today ever types a `key`/`seq` line (no
+// free-text console exists, per the proposal's own §3.2 finding).
+//
+// Trap #2 (sequence-pool exhaustion, proposal §3.3.2): `kSeqNew` appends a
+// NEW slot to the core's bounded 16-sequence pool every time it is called;
+// re-issuing it on every style load/switch would exhaust the pool after 16
+// switches in one session. Fix: `seq_already_created` lets the caller ask
+// for `kSeqNew` only the FIRST time (run_engine() tracks this with a local
+// bool, reset naturally on every fresh engine-thread start) and `kSeqClear`
+// every time after -- always targeting pool slot 0 by construction (this
+// builder emits raw Command PODs directly, so it never needs Shell's
+// name-based `seq use <name>` resolution).
+void append_default_progression_commands(const sonotron::DefaultProgression& prog,
+                                         bool seq_already_created, std::uint32_t ticks_per_bar,
+                                         std::vector<Command>& out) {
+  Command key_cmd{};
+  key_cmd.op = Op::kSet;
+  key_cmd.param = Param::kKeySet;
+  key_cmd.a = prog.key_root_pc;
+  key_cmd.b = static_cast<std::int32_t>(prog.key_mode);
+  out.push_back(key_cmd);
+
+  Command seq_setup{};
+  seq_setup.param = seq_already_created ? Param::kSeqClear : Param::kSeqNew;
+  out.push_back(seq_setup);
+
+  // Same velocity kSeqAdd's own CLI verb hardcodes (shell_music_commands.cpp's
+  // seq_add(), `c.b = (quality + 1) | (100 << 8);`) -- kept identical so a
+  // host-injected progression sounds exactly as loud as a hand-typed one.
+  constexpr std::uint8_t kDefaultVelocity = 100;
+  constexpr std::uint8_t kOctave4Base = 60;  // matches parse_note()'s no-octave default (C4=60)
+  for (std::uint8_t i = 0; i < prog.step_count; ++i) {
+    const sonotron::ProgressionStep& step = prog.steps[i];
+    Command add_cmd{};
+    add_cmd.param = Param::kSeqAdd;
+    add_cmd.a = static_cast<std::int32_t>(kOctave4Base) + step.root_pc;
+    add_cmd.b = (static_cast<std::int32_t>(step.quality_ovr) + 1) |
+                (static_cast<std::int32_t>(kDefaultVelocity) << 8);
+    add_cmd.c = static_cast<std::int32_t>(step.bars) * static_cast<std::int32_t>(ticks_per_bar);
+    out.push_back(add_cmd);
+  }
+
+  Command loop_cmd{};
+  loop_cmd.op = Op::kSet;
+  loop_cmd.param = Param::kSeqLoop;
+  loop_cmd.a = 1;
+  out.push_back(loop_cmd);
+
+  Command play_cmd{};
+  play_cmd.param = Param::kSeqPlay;
+  out.push_back(play_cmd);
+}
+
+// Default-harmony-progression state, owned by run_engine()'s own stack frame
+// (engine-thread-local, resets naturally on every fresh run_engine() call --
+// a brand-new Shell/Engine also has a brand-new, empty ChordSequencer pool,
+// see append_default_progression_commands()'s trap #2 comment).
+struct DefaultProgressionState {
+  // Set true the first time a kSeqNew actually goes out; never reset after
+  // (trap #2: exactly one kSeqNew, ever, per session).
+  bool seq_created = false;
+  // Trap #3 (phase alignment, docs/proposals/per-style-default-progressions.
+  // md §3.3.3): a single pending slot, last-write-wins by design (mirrors
+  // Arranger's own m_pending_style/m_pending_valid pair) -- a second style
+  // pick before the first one lands simply replaces what is pending, never
+  // queues both.
+  bool pending_valid = false;
+  std::uint32_t pending_arm_bar_index = 0;
+  std::vector<Command> pending_commands;
+};
+
+// Builds and dispatches the default progression for `cmd` right after a
+// successful kStyleLoad/kStyleSwitch (the caller must have already called
+// `shell.push_command(cmd)`). Handles trap #3: `style load` is
+// unconditionally immediate in the core (Engine::cmd_style's kStyleLoad
+// branch never defers), but `style switch` quantizes to the next bar WHILE
+// PLAYING (Engine::style_switch, engine.cpp) -- and Engine::cmd_seq never
+// reads Command::boundary for ANY seq verb, so firing the progression at
+// ring-pop time on a LIVE switch would start the new harmony loop "now", up
+// to a bar ahead of the style morph it is meant to accompany
+// (browser_panel.cpp only ever sends `style switch` while fx.playing(), so
+// this is the COMMON case for a switch, not an edge one). Fix, host-only, no
+// core touch: hold the built commands and let
+// release_pending_progression_if_due() below release them the moment
+// Transport::bar_index() -- the SAME monotonic bar counter the core itself
+// advances at every bar boundary (runtime/transport.hpp's own "shared
+// primitive every bar-gated consumer should count against" recommendation)
+// -- moves past the value observed here. This lands the progression on the
+// first real bar boundary crossed after the request, the same downbeat the
+// deferred style morph itself targets (Arranger::on_tick's own
+// section-relative bar gate, which stays in phase with Transport's grid as
+// long as the meter does not change mid-switch).
+void handle_style_change_progression(Shell& shell, const Command& cmd,
+                                     DefaultProgressionState& state) {
+  std::vector<Command> progression_cmds;
+  progression_cmds.reserve(sonotron::kMaxProgressionSteps + 4);
+  append_default_progression_commands(
+      sonotron::default_progression_for(cmd.a), state.seq_created,
+      static_cast<std::uint32_t>(shell.engine().transport().ticks_per_bar()), progression_cmds);
+  state.seq_created = true;
+
+  const bool immediate = cmd.param == Param::kStyleLoad || cmd.boundary == Boundary::kImmediate ||
+                         !shell.engine().transport().playing();
+  if (immediate) {
+    for (const Command& progression_cmd : progression_cmds) {
+      shell.push_command(progression_cmd);
+    }
+    state.pending_valid = false;
+    return;
+  }
+  state.pending_commands = std::move(progression_cmds);
+  state.pending_arm_bar_index = shell.engine().transport().bar_index();
+  state.pending_valid = true;
+}
+
+// Releases a pending (deferred) progression the first time the transport's
+// own bar counter moves past the value observed at arm time -- i.e. the
+// first real bar boundary crossed since the live `style switch` that armed
+// it, matching the deferred style morph's own landing point. `!=` rather
+// than `>` so a transport stop/restart in between (which resets bar_index()
+// to 0) still eventually releases the pending progression instead of
+// leaving it stuck forever.
+// Drains the Command ring: never silently dropped by the PRODUCER side (see
+// InProcessBrainSession::send()) -- the engine just applies whatever is
+// queued, in FIFO order, through the exact same Engine::push_command every
+// exec_line handler already calls. ONE special case: Param::kNoteRaw (docs/
+// proposals/looper-in-gui-contract.md §2/§7 items 1/2) has no case in Engine::
+// push_command's own dispatch switch (it would land on the unhandled-param
+// default and emit kUnknownCommand, see abi.hpp's own kNoteRaw comment) -- it
+// is decoded to raw MIDI bytes and fed through the SAME feed_midi() entry
+// point run_engine()'s own ALSA drain uses, exactly like Shell::cmd_note's
+// own L1 handling (shell_music_commands.cpp). Extracted out of run_engine()
+// (rather than left inline) purely to keep that function's own cognitive
+// complexity under the project's clang-tidy threshold -- no behavior change.
+void drain_command_ring(Shell& shell, SpscRing<Command, kCommandRingCapacity>& command_ring,
+                        DefaultProgressionState& progression_state) {
+  Command cmd;
+  while (command_ring.try_pop(cmd)) {
+    if (cmd.param == Param::kNoteRaw) {
+      std::uint8_t bytes[3];
+      Shell::note_raw_to_bytes(cmd, bytes);
+      shell.feed_midi(static_cast<std::uint8_t>(cmd.idx & 0xFF),
+                      Span<const std::uint8_t>(bytes, sizeof(bytes)));
+      continue;
+    }
+    shell.push_command(cmd);
+    if (cmd.param == Param::kStyleLoad || cmd.param == Param::kStyleSwitch) {
+      handle_style_change_progression(shell, cmd, progression_state);
+    }
+  }
+}
+
+void release_pending_progression_if_due(Shell& shell, DefaultProgressionState& state) {
+  if (!state.pending_valid ||
+      shell.engine().transport().bar_index() == state.pending_arm_bar_index) {
+    return;
+  }
+  for (const Command& progression_cmd : state.pending_commands) {
+    shell.push_command(progression_cmd);
+  }
+  state.pending_valid = false;
+}
+
 std::uint64_t monotonic_us() {
   const auto epoch = std::chrono::steady_clock::now().time_since_epoch();
   return static_cast<std::uint64_t>(
@@ -824,29 +997,29 @@ void InProcessBrainSession::Impl::run_engine() {
   TickAccumulator acc;
   std::uint64_t last_us = monotonic_us();
 
+  // Default harmonic progression (docs/proposals/per-style-default-
+  // progressions.md): re-applied on EVERY successful style load/switch,
+  // mirroring kDefaultStyleRoutes's own "always re-apply" idiom -- see
+  // handle_style_change_progression()'s own comment for trap #3 (phase
+  // alignment). This DOES reverse Engine::cmd_style's own "load keeps the
+  // HARMONY" discipline (engine.cpp's kStyleLoad comment: establish_default
+  // only seeds a key when nothing explicit is in force) -- but that guard is
+  // about not clobbering a LIVE chord a future detect/pad panel might steer;
+  // today nothing in gui-sonotron ever plays a live chord (the proposal's
+  // own §3.3.1 finding), so there is nothing genuine yet to "keep", and this
+  // progression's own kKeySet/kSeqAdd calls ARE this style's explicit chord
+  // going forward. The owner-approved trade-off (proposal §4 item 1, option
+  // (a)) has an explicit expiry: once a live chord/detect/pad path ships,
+  // re-applying unconditionally here would silently clobber a user-steered
+  // chord and this gate must learn to check ChordEngine::explicit_set()
+  // (unreachable from the GUI thread today without a new engine-thread-side
+  // readback -- a real, if small, core/ABI change requiring its own
+  // sign-off, not done here).
+  DefaultProgressionState progression_state;
+
   while (running.load(std::memory_order_acquire)) {
-    // Drain the Command ring: never silently dropped by the PRODUCER side
-    // (see InProcessBrainSession::send()) -- the engine just applies
-    // whatever is queued, in FIFO order, through the exact same
-    // Engine::push_command every exec_line handler already calls. ONE
-    // special case: Param::kNoteRaw (docs/proposals/looper-in-gui-contract.md
-    // §2/§7 items 1/2) has no case in Engine::push_command's own dispatch
-    // switch (it would land on the unhandled-param default and emit
-    // kUnknownCommand, see abi.hpp's own kNoteRaw comment) -- it is decoded
-    // to raw MIDI bytes and fed through the SAME feed_midi() entry point
-    // item 3's ALSA drain below uses, exactly like Shell::cmd_note's own L1
-    // handling (shell_music_commands.cpp).
-    Command cmd;
-    while (command_ring.try_pop(cmd)) {
-      if (cmd.param == Param::kNoteRaw) {
-        std::uint8_t bytes[3];
-        Shell::note_raw_to_bytes(cmd, bytes);
-        shell.feed_midi(static_cast<std::uint8_t>(cmd.idx & 0xFF),
-                        Span<const std::uint8_t>(bytes, sizeof(bytes)));
-        continue;
-      }
-      shell.push_command(cmd);
-    }
+    drain_command_ring(shell, command_ring, progression_state);
+    release_pending_progression_if_due(shell, progression_state);
 
     // Hardware MIDI-in (docs/proposals/looper-in-gui-contract.md §7 item 3):
     // drains ALSA input and feeds it through the SAME feed_midi() entry point
