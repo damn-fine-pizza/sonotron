@@ -218,3 +218,80 @@ target_compile_definitions(test_repeat_zone_owner_trace_replay PRIVATE
   GUI_SONOTRON_OWNER_TRACE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/owner_repro_2026_07_16.jsonl")
 add_test(NAME test_repeat_zone_owner_trace_replay COMMAND test_repeat_zone_owner_trace_replay)
 set_tests_properties(test_repeat_zone_owner_trace_replay PROPERTIES LABELS functional)
+
+# ---------------------------------------------------------------------------
+# Torquato QA pass (docs/proposals/flow-verification-matrix-2026-07.md-driven
+# expansion, 2026-07): 6 more flows off the matrix's own "hand to Torquato"
+# list, all real click injection + real InProcessBrainSession + real
+# rendered-output/engine readback -- see each file's own header comment for
+# the matrix row it closes and (for the next-bar test) the task #19 root-
+# cause trace. All link the same three-library set as the UI-automation
+# tests above (a real backend + the real render loop).
+
+# §2a "Press Play"/"Press Stop": both transport pad clicks, real backend.
+add_executable(test_transport_play_stop_ui_automation test_transport_play_stop_ui_automation.cpp)
+target_link_libraries(test_transport_play_stop_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_transport_play_stop_ui_automation PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_transport_play_stop_ui_automation COMMAND test_transport_play_stop_ui_automation)
+set_tests_properties(test_transport_play_stop_ui_automation PROPERTIES LABELS functional)
+
+# §2c "Click scene-header ▶" -- TASK #19 PIN: a manual scene-header click
+# while playing must flip the real section/clip readback within one bar, not
+# after GridModel::kDefaultSceneBars (8) bars ("waiting until the cell
+# ends"). See this file's own header comment for the full root-cause trace.
+add_executable(test_repeat_zone_scene_header_next_bar_ui_automation
+  test_repeat_zone_scene_header_next_bar_ui_automation.cpp)
+target_link_libraries(test_repeat_zone_scene_header_next_bar_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_repeat_zone_scene_header_next_bar_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_repeat_zone_scene_header_next_bar_ui_automation
+  COMMAND test_repeat_zone_scene_header_next_bar_ui_automation)
+set_tests_properties(test_repeat_zone_scene_header_next_bar_ui_automation PROPERTIES
+  LABELS functional)
+
+# §2c "Click a FILLED cell -> real launch + opens Sequence Edit".
+add_executable(test_grid_cell_launch_open_seqedit_ui_automation
+  test_grid_cell_launch_open_seqedit_ui_automation.cpp)
+target_link_libraries(test_grid_cell_launch_open_seqedit_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_cell_launch_open_seqedit_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_grid_cell_launch_open_seqedit_ui_automation
+  COMMAND test_grid_cell_launch_open_seqedit_ui_automation)
+set_tests_properties(test_grid_cell_launch_open_seqedit_ui_automation PROPERTIES LABELS functional)
+
+# §2c "M/S latch click -> real part mute|solo + PartsModel toggle".
+add_executable(test_grid_ms_latch_ui_automation test_grid_ms_latch_ui_automation.cpp)
+target_link_libraries(test_grid_ms_latch_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_ms_latch_ui_automation PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_grid_ms_latch_ui_automation COMMAND test_grid_ms_latch_ui_automation)
+set_tests_properties(test_grid_ms_latch_ui_automation PROPERTIES LABELS functional)
+
+# §2b "Click a style leaf while playing -> style switch (live morph)".
+add_executable(test_browser_style_switch_while_playing_ui_automation
+  test_browser_style_switch_while_playing_ui_automation.cpp)
+target_link_libraries(test_browser_style_switch_while_playing_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_browser_style_switch_while_playing_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_browser_style_switch_while_playing_ui_automation
+  COMMAND test_browser_style_switch_while_playing_ui_automation)
+set_tests_properties(test_browser_style_switch_while_playing_ui_automation PROPERTIES
+  LABELS functional)
+
+# §2c "Auto-song bookkeeping surviving a transport stop/restart" -- extends
+# test_grid_panel_auto_song_real_backend.cpp's happy-path shape with a real
+# Stop/Play click cycle (real backend, real render loop).
+add_executable(test_grid_panel_auto_song_stop_restart_ui_automation
+  test_grid_panel_auto_song_stop_restart_ui_automation.cpp)
+target_link_libraries(test_grid_panel_auto_song_stop_restart_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_panel_auto_song_stop_restart_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_grid_panel_auto_song_stop_restart_ui_automation
+  COMMAND test_grid_panel_auto_song_stop_restart_ui_automation)
+set_tests_properties(test_grid_panel_auto_song_stop_restart_ui_automation PROPERTIES
+  LABELS functional)
