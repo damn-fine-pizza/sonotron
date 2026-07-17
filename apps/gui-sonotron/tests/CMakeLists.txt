@@ -88,8 +88,10 @@ gui_sonotron_engine_test(test_audio_primary_port_reachable functional)
 
 # A/B FIX PIN (docs/reflections/cli-vs-gui-ab-2026-07.md): proves the GUI's
 # own reachable path (`style load`/`transport start`, nothing hand-written)
-# now produces real harmonic movement instead of a static tonic triad -- see
-# this test file's own header comment.
+# now produces real harmonic movement instead of a static tonic triad --
+# extended (Torquato QA pass, 2026-07-17, issue #29 / commit 7f07a6f) to
+# cover all 16 built-in styles (one deliberate exception: funk's single-step
+# vamp) -- see this test file's own header comment.
 gui_sonotron_engine_test(test_default_style_progression_functional functional)
 
 # Device-independent AudioBackend/SoundfontEngine smoke test (Torquato QA
