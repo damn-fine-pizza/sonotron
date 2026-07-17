@@ -10,7 +10,14 @@ namespace styles {
 // "swing": jazz ride pattern with a swung feel, pedal-hat on 2 & 4, feathered
 // kick, walking quarter-note bass and sparse rootless off-beat comping.
 namespace swing {
-inline constexpr StyleEvent kHeldBass[] = {{.step=0, .tone=kRoot, .octave=0, .vel=84, .gate=kGateHeld}};
+// Held root pickup for Intro1. Re-articulated at step 16 too (style-depth
+// Wave-2 C): Intro1 is now 2 bars, and the sustain re-triggers every bar
+// exactly as it always has when the section looped -- a background hold, not
+// the section's own bar-to-bar variation (same idiom as basic's kPadTriad).
+inline constexpr StyleEvent kHeldBass[] = {
+    {.step=0, .tone=kRoot, .octave=0, .vel=84, .gate=kGateHeld},
+    {.step=16, .tone=kRoot, .octave=0, .vel=82, .gate=kGateHeld},
+};
 inline constexpr StyleEvent kWalkBass[] = {{.step=0, .tone=kRoot, .octave=0, .vel=86, .gate=kGateBeat}, {.step=4, .tone=kThird, .octave=0, .vel=80, .gate=kGateBeat}, {.step=8, .tone=kFifth, .octave=0, .vel=84, .gate=kGateBeat}, {.step=12, .tone=kSeventh, .octave=0, .vel=80, .gate=kGateBeat}};
 // Motif engine (9210, Ottorino RANK 3): the walking quarter-note bass,
 // reused 9x. kRetrograde maps the four on-the-beat quarters to the four
@@ -41,8 +48,14 @@ inline constexpr std::int16_t kPadVoice = 48;
 inline constexpr std::int16_t kChord2Voice = 4;
 inline constexpr std::int16_t kArpVoice = 11;
 inline constexpr std::int16_t kLeadVoice = 66;  // Tenor Sax — the bebop horn answer
+// Rootless pad: hold the upper structure under the whole bar. Re-articulated
+// at step 16 too (style-depth Wave-2 C): VarA is now 2 bars, and the sustain
+// re-triggers every bar exactly as it always has when the section looped --
+// a background hold, not the section's own bar-to-bar variation (kPadT is
+// unmotifed in every use here, so this is safe -- basic.hpp's own kPadTriad).
 inline constexpr StyleEvent kPadT[] = {
     {.step=0, .tone=kThird, .octave=0, .vel=46, .gate=kGateHeld}, {.step=0, .tone=kFifth, .octave=0, .vel=44, .gate=kGateHeld}, {.step=0, .tone=kSeventh, .octave=0, .vel=46, .gate=kGateHeld},
+    {.step=16, .tone=kThird, .octave=0, .vel=46, .gate=kGateHeld}, {.step=16, .tone=kFifth, .octave=0, .vel=44, .gate=kGateHeld}, {.step=16, .tone=kSeventh, .octave=0, .vel=46, .gate=kGateHeld},
 };
 inline constexpr StyleEvent kPad7[] = {
     {.step=0, .tone=kRoot, .octave=0, .vel=48, .gate=kGateHeld}, {.step=0, .tone=kThird, .octave=0, .vel=46, .gate=kGateHeld}, {.step=0, .tone=kFifth, .octave=0, .vel=48, .gate=kGateHeld}, {.step=0, .tone=kSeventh, .octave=0, .vel=44, .gate=kGateHeld},
@@ -82,18 +95,47 @@ inline constexpr StyleEvent kLeadLick[] = {
     {.step=12, .tone=4, .octave=0, .vel=76, .gate=kGate8th,      .src=NoteSource::kInterval},      // resolves up to the chord's major 3rd
     {.step=14, .tone=0, .octave=0, .vel=72, .gate=kGateBeat,     .src=NoteSource::kScaleDegree},   // land on the tonic
 };
-inline constexpr StyleEvent kIn1D[] = {{.step=8, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=10, .tone=kRide, .octave=0, .vel=50, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=60, .gate=120}, {.step=14, .tone=kRide, .octave=0, .vel=54, .gate=120}};
+// Intro1 (style-depth Wave-2 C): a genuine 2-bar build. Bar 1 (unchanged) is
+// the sparse ride pickup on the last beat; bar 2 is the arrival -- the ride
+// fills out and the pedal-hat (2 & 4) enters, landing the band right where
+// Intro2/VarA starts.
+inline constexpr StyleEvent kIn1D[] = {
+    {.step=8, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=10, .tone=kRide, .octave=0, .vel=50, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=60, .gate=120}, {.step=14, .tone=kRide, .octave=0, .vel=54, .gate=120},
+    // bar 2: arrival -- fuller ride, pedal-hat enters on 2 & 4.
+    {.step=16, .tone=kRide, .octave=0, .vel=62, .gate=120}, {.step=20, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=22, .tone=kRide, .octave=0, .vel=50, .gate=120},
+    {.step=24, .tone=kRide, .octave=0, .vel=64, .gate=120}, {.step=28, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=30, .tone=kRide, .octave=0, .vel=50, .gate=120},
+    {.step=20, .tone=kClosedHat, .octave=0, .vel=56, .gate=50}, {.step=28, .tone=kClosedHat, .octave=0, .vel=56, .gate=50},
+};
 inline constexpr StylePattern kIn1P[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIn1D)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kHeldBass)}};
 inline constexpr StyleEvent kIn2D[] = {{.step=0, .tone=kRide, .octave=0, .vel=64, .gate=120}, {.step=4, .tone=kRide, .octave=0, .vel=58, .gate=120}, {.step=6, .tone=kRide, .octave=0, .vel=52, .gate=120}, {.step=8, .tone=kRide, .octave=0, .vel=62, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=58, .gate=120}, {.step=14, .tone=kRide, .octave=0, .vel=52, .gate=120}, {.step=4, .tone=kClosedHat, .octave=0, .vel=54, .gate=50}, {.step=12, .tone=kClosedHat, .octave=0, .vel=54, .gate=50}};
 inline constexpr StyleEvent kIn2C[] = {{.step=6, .tone=kThird, .octave=0, .vel=68, .gate=kGateStab}, {.step=6, .tone=kSeventh, .octave=0, .vel=68, .gate=kGateStab}, {.step=14, .tone=kThird, .octave=0, .vel=66, .gate=kGateStab}, {.step=14, .tone=kSeventh, .octave=0, .vel=66, .gate=kGateStab}};
 inline constexpr StylePattern kIn2P[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIn2D)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kWalkBass), .motif=&kWalkBassMotif}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIn2C), .voicing=VoicingPolicy::kLead}, {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadT), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead}};
+// VarA (style-depth Wave-2 C): genuinely 2 bars now. Bar 1 is unchanged. Bar 2
+// keeps the ride/hat time-keeping steady (a real jazz ride rarely changes bar
+// to bar -- same idiom as basic's re-triggered pad, not this bar's own
+// variation); the REAL bar-2 idea is a soft kick "bomb" and a snare ghost
+// note marking the turnaround, plus the rootless comp answering on a
+// different offbeat pair. The walking bass (kWalkBass) is motif-locked
+// (kWalkBassMotif) and is this style's only bass idiom, so it is
+// deliberately left untouched here (guardrail: vary drums/comp, not the bass).
 inline constexpr StyleEvent kAD[] = {
     {.step=0, .tone=kRide, .octave=0, .vel=72, .gate=120}, {.step=4, .tone=kRide, .octave=0, .vel=64, .gate=120}, {.step=6, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=8, .tone=kRide, .octave=0, .vel=70, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=64, .gate=120}, {.step=14, .tone=kRide, .octave=0, .vel=56, .gate=120},
     {.step=4, .tone=kClosedHat, .octave=0, .vel=58, .gate=50}, {.step=12, .tone=kClosedHat, .octave=0, .vel=58, .gate=50}, {.step=0, .tone=kKick, .octave=0, .vel=40, .gate=50}, {.step=8, .tone=kKick, .octave=0, .vel=38, .gate=50},
+    // bar 2: the ride/hat pattern repeats verbatim (shifted +16, steady time-
+    // keeping); a soft kick "bomb" and a snare ghost note mark the turnaround.
+    {.step=16, .tone=kRide, .octave=0, .vel=72, .gate=120}, {.step=20, .tone=kRide, .octave=0, .vel=64, .gate=120}, {.step=22, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=24, .tone=kRide, .octave=0, .vel=70, .gate=120}, {.step=28, .tone=kRide, .octave=0, .vel=64, .gate=120}, {.step=30, .tone=kRide, .octave=0, .vel=56, .gate=120},
+    {.step=20, .tone=kClosedHat, .octave=0, .vel=58, .gate=50}, {.step=28, .tone=kClosedHat, .octave=0, .vel=58, .gate=50}, {.step=16, .tone=kKick, .octave=0, .vel=40, .gate=50}, {.step=30, .tone=kKick, .octave=0, .vel=44, .gate=50}, {.step=31, .tone=kSnare, .octave=0, .vel=46, .gate=50},
 };
-inline constexpr StyleEvent kAC[] = {{.step=6, .tone=kThird, .octave=0, .vel=70, .gate=kGateStab}, {.step=6, .tone=kSeventh, .octave=0, .vel=70, .gate=kGateStab}, {.step=14, .tone=kThird, .octave=0, .vel=68, .gate=kGateStab}, {.step=14, .tone=kSeventh, .octave=0, .vel=68, .gate=kGateStab}};
+inline constexpr StyleEvent kAC[] = {
+    {.step=6, .tone=kThird, .octave=0, .vel=70, .gate=kGateStab}, {.step=6, .tone=kSeventh, .octave=0, .vel=70, .gate=kGateStab}, {.step=14, .tone=kThird, .octave=0, .vel=68, .gate=kGateStab}, {.step=14, .tone=kSeventh, .octave=0, .vel=68, .gate=kGateStab},
+    // bar 2: the rootless comp answers on a different offbeat pair -- a
+    // turnaround comping idea, not a repeat of bar 1's stabs.
+    {.step=18, .tone=kThird, .octave=0, .vel=68, .gate=kGateStab}, {.step=18, .tone=kSeventh, .octave=0, .vel=68, .gate=kGateStab}, {.step=27, .tone=kThird, .octave=0, .vel=66, .gate=kGateStab}, {.step=27, .tone=kSeventh, .octave=0, .vel=66, .gate=kGateStab},
+};
 inline constexpr StylePattern kAP[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kAD)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kWalkBass), .motif=&kWalkBassMotif}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kAC), .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadT), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead}, {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kCh2A), .gm_program=kChord2Voice, .voicing=VoicingPolicy::kLead}};
+// VarB left at 1 bar (style-depth Wave-2 C): no genuine bar-2 idea beyond
+// VarA's own turnaround without touching the motif-locked walking bass.
 inline constexpr StyleEvent kBD[] = {
     {.step=0, .tone=kRide, .octave=0, .vel=76, .gate=120}, {.step=2, .tone=kRide, .octave=0, .vel=54, .gate=120}, {.step=4, .tone=kRide, .octave=0, .vel=68, .gate=120}, {.step=6, .tone=kRide, .octave=0, .vel=58, .gate=120}, {.step=8, .tone=kRide, .octave=0, .vel=74, .gate=120}, {.step=10, .tone=kRide, .octave=0, .vel=54, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=68, .gate=120}, {.step=14, .tone=kRide, .octave=0, .vel=58, .gate=120},
     {.step=4, .tone=kClosedHat, .octave=0, .vel=60, .gate=50}, {.step=12, .tone=kClosedHat, .octave=0, .vel=60, .gate=50}, {.step=0, .tone=kKick, .octave=0, .vel=44, .gate=50}, {.step=8, .tone=kKick, .octave=0, .vel=42, .gate=50}, {.step=6, .tone=kSnare, .octave=0, .vel=52, .gate=50}, {.step=14, .tone=kSnare, .octave=0, .vel=56, .gate=50},
@@ -118,18 +160,23 @@ inline constexpr StyleEvent kE2B[] = {{.step=0, .tone=kRoot, .octave=-1, .vel=86
 inline constexpr StyleEvent kE2C[] = {{.step=0, .tone=kThird, .octave=0, .vel=76, .gate=kGateHeld}, {.step=0, .tone=kFifth, .octave=0, .vel=76, .gate=kGateHeld}, {.step=0, .tone=kSeventh, .octave=0, .vel=76, .gate=kGateHeld}, {.step=0, .tone=kThird, .octave=1, .vel=72, .gate=kGateHeld}};
 inline constexpr StylePattern kE2P[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kE2D)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kE2B)}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kE2C), .voicing=VoicingPolicy::kLead}, {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead}};
 // varC: two-feel — laid-back quarter ride, feathered kick, pedal hat, sparse comp.
+// VarC left at 1 bar (style-depth Wave-2 C): the two-feel/laid-back groove
+// is a single sustained idea -- a second bar would just repeat it.
 inline constexpr StyleEvent kCD[] = {{.step=0, .tone=kRide, .octave=0, .vel=68, .gate=120}, {.step=4, .tone=kRide, .octave=0, .vel=60, .gate=120}, {.step=8, .tone=kRide, .octave=0, .vel=66, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=60, .gate=120}, {.step=0, .tone=kKick, .octave=0, .vel=42, .gate=50}, {.step=8, .tone=kKick, .octave=0, .vel=40, .gate=50}, {.step=4, .tone=kClosedHat, .octave=0, .vel=54, .gate=50}, {.step=12, .tone=kClosedHat, .octave=0, .vel=54, .gate=50}};
 inline constexpr StyleEvent kCC[] = {{.step=2, .tone=kThird, .octave=0, .vel=68, .gate=kGateStab}, {.step=2, .tone=kSeventh, .octave=0, .vel=68, .gate=kGateStab}, {.step=10, .tone=kThird, .octave=0, .vel=66, .gate=kGateStab}, {.step=10, .tone=kSeventh, .octave=0, .vel=66, .gate=kGateStab}};
 inline constexpr StylePattern kCP[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kCD)}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kWalkBass), .motif=&kWalkBassMotif}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kCC), .voicing=VoicingPolicy::kLead},
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRe), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead, .motif=&kSharedPadMotif}, {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kCh2A), .gm_program=kChord2Voice, .voicing=VoicingPolicy::kLead}, {.role=TrackRole::kArp, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kArp8), .gm_program=kArpVoice}};
 // varD: shout chorus — busy swung ride, hats on 2 & 4, kick bombs, snare comps, full rootless 7ths.
+// VarD left at 1 bar (style-depth Wave-2 C): already the shout-chorus peak
+// (motif-driven drums/chord1/lead-lick); no clean additional idea for a
+// second bar.
 inline constexpr StyleEvent kDD[] = {{.step=0, .tone=kRide, .octave=0, .vel=78, .gate=120}, {.step=2, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=4, .tone=kRide, .octave=0, .vel=72, .gate=120}, {.step=6, .tone=kRide, .octave=0, .vel=58, .gate=120}, {.step=8, .tone=kRide, .octave=0, .vel=76, .gate=120}, {.step=10, .tone=kRide, .octave=0, .vel=56, .gate=120}, {.step=12, .tone=kRide, .octave=0, .vel=72, .gate=120}, {.step=14, .tone=kRide, .octave=0, .vel=58, .gate=120}, {.step=4, .tone=kClosedHat, .octave=0, .vel=62, .gate=50}, {.step=12, .tone=kClosedHat, .octave=0, .vel=62, .gate=50}, {.step=0, .tone=kKick, .octave=0, .vel=50, .gate=50}, {.step=4, .tone=kKick, .octave=0, .vel=44, .gate=50}, {.step=8, .tone=kKick, .octave=0, .vel=48, .gate=50}, {.step=12, .tone=kKick, .octave=0, .vel=44, .gate=50}, {.step=2, .tone=kSnare, .octave=0, .vel=54, .gate=50}, {.step=6, .tone=kSnare, .octave=0, .vel=58, .gate=50}, {.step=10, .tone=kSnare, .octave=0, .vel=54, .gate=50}, {.step=14, .tone=kSnare, .octave=0, .vel=60, .gate=50}};
 inline constexpr StyleEvent kDC[] = {{.step=2, .tone=kThird, .octave=0, .vel=74, .gate=kGateStab}, {.step=2, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=2, .tone=kSeventh, .octave=0, .vel=74, .gate=kGateStab}, {.step=6, .tone=kThird, .octave=0, .vel=72, .gate=kGateStab}, {.step=6, .tone=kFifth, .octave=0, .vel=72, .gate=kGateStab}, {.step=6, .tone=kSeventh, .octave=0, .vel=72, .gate=kGateStab}, {.step=10, .tone=kThird, .octave=0, .vel=74, .gate=kGateStab}, {.step=10, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=10, .tone=kSeventh, .octave=0, .vel=74, .gate=kGateStab}, {.step=14, .tone=kThird, .octave=0, .vel=72, .gate=kGateStab}, {.step=14, .tone=kFifth, .octave=0, .vel=72, .gate=kGateStab}, {.step=14, .tone=kSeventh, .octave=0, .vel=72, .gate=kGateStab}};
 inline constexpr StylePattern kDP[] = {{.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kDD), .motif=&kPeakDrumsMotif}, {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kWalkBass), .motif=&kWalkBassMotif}, {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kDC), .voicing=VoicingPolicy::kLead, .motif=&kPeakChordMotif},
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadRe), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead, .motif=&kSharedPadMotif}, {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kCh2B), .gm_program=kChord2Voice, .voicing=VoicingPolicy::kLead, .motif=&kSharedChord2Motif}, {.role=TrackRole::kArp, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kArp8), .gm_program=kArpVoice}, {.role=TrackRole::kLead, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kLeadLick), .gm_program=kLeadVoice, .motif=&kLeadLickMotif}, {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercD)}};
 inline constexpr StyleSection kSections[] = {
-    {.type=SectionType::kIntro1, .bars=1, .patterns=Span<const StylePattern>(kIn1P)}, {.type=SectionType::kIntro2, .bars=1, .patterns=Span<const StylePattern>(kIn2P)},
-    {.type=SectionType::kVarA, .bars=1, .patterns=Span<const StylePattern>(kAP)}, {.type=SectionType::kVarB, .bars=1, .patterns=Span<const StylePattern>(kBP)},
+    {.type=SectionType::kIntro1, .bars=2, .patterns=Span<const StylePattern>(kIn1P)}, {.type=SectionType::kIntro2, .bars=1, .patterns=Span<const StylePattern>(kIn2P)},
+    {.type=SectionType::kVarA, .bars=2, .patterns=Span<const StylePattern>(kAP)}, {.type=SectionType::kVarB, .bars=1, .patterns=Span<const StylePattern>(kBP)},
     {.type=SectionType::kVarC, .bars=1, .patterns=Span<const StylePattern>(kCP)}, {.type=SectionType::kVarD, .bars=1, .patterns=Span<const StylePattern>(kDP)},
     {.type=SectionType::kFillA, .bars=1, .patterns=Span<const StylePattern>(kFAP)}, {.type=SectionType::kFillB, .bars=1, .patterns=Span<const StylePattern>(kFBP)}, {.type=SectionType::kFillC, .bars=1, .patterns=Span<const StylePattern>(kFCP)}, {.type=SectionType::kFillD, .bars=1, .patterns=Span<const StylePattern>(kFDP)},
     {.type=SectionType::kEnding1, .bars=1, .patterns=Span<const StylePattern>(kE1P)}, {.type=SectionType::kEnding2, .bars=1, .patterns=Span<const StylePattern>(kE2P)},

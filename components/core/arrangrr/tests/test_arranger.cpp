@@ -606,7 +606,10 @@ void test_intro_leads_to_variation() {
   b.cmd(Param::kChordPlay, 60, -1, 100);
   b.cmd(Param::kTransportStart);
   b.ev.clear();
-  b.advance(kTicksPerBar + 10);
+  // "basic"'s Intro1 is genuinely 2 bars now (style-depth Wave-2 C): the
+  // one-shot only resolves to VarA once the WHOLE section (both bars) has
+  // played, not after bar 1.
+  b.advance(2 * kTicksPerBar + 10);
   const auto sec = b.sections();
   CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarA));
 }

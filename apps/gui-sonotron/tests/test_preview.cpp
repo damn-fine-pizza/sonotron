@@ -150,13 +150,14 @@ void test_out_of_range_arguments_are_empty() {
 
 // SLICE 4b (docs/proposals/repeat-zone-real-contract.md): section_bars reads
 // arrangrr::StyleSection::bars for the auto-song advance decision. Style 0
-// ("basic")'s kVarA is bars=1 (components/core/arrangrr/include/arrangrr/
-// arranger/styles/basic.hpp) -- a known value, not merely "some positive
-// number".
+// ("basic")'s kVarA is bars=2 since Wave-2 C gave Intro1/VarA a genuine
+// two-bar build (components/core/arrangrr/include/arrangrr/arranger/styles/
+// basic.hpp); kVarB stays bars=1 -- both known values, not merely "some
+// positive number".
 using sonotron::preview::section_bars;
 
 void test_section_bars_known_value_basic_var_a() {
-  CHECK(section_bars(0, Section::kVarA) == 1);
+  CHECK(section_bars(0, Section::kVarA) == 2);
   CHECK(section_bars(0, Section::kVarB) == 1);
 }
 

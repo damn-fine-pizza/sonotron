@@ -19,9 +19,13 @@ namespace basic {
 inline constexpr std::int16_t kPadVoice = 89;
 inline constexpr std::int16_t kChord2Voice = 4;
 inline constexpr std::int16_t kArpVoice = 10;
-// Pad: hold the triad (register 48) under the whole bar.
+// Pad: hold the triad (register 48) under the whole bar. Re-articulated at
+// step 16 too (style-depth Wave-2 C): VarA is now 2 bars, and the sustain
+// re-triggers every bar exactly as it always has when the section looped --
+// a background hold, not the section's own bar-to-bar variation.
 inline constexpr StyleEvent kPadTriad[] = {
     {.step=0, .tone=kRoot, .octave=0, .vel=58, .gate=kGateHeld}, {.step=0, .tone=kThird, .octave=0, .vel=56, .gate=kGateHeld}, {.step=0, .tone=kFifth, .octave=0, .vel=58, .gate=kGateHeld},
+    {.step=16, .tone=kRoot, .octave=0, .vel=58, .gate=kGateHeld}, {.step=16, .tone=kThird, .octave=0, .vel=56, .gate=kGateHeld}, {.step=16, .tone=kFifth, .octave=0, .vel=58, .gate=kGateHeld},
 };
 // Pad with a 7th for the bigger sections; re-hit at the half bar for movement.
 inline constexpr StyleEvent kPad7[] = {
@@ -33,9 +37,14 @@ inline constexpr StyleEvent kPadRehit[] = {
 };
 // Chord2: complementary comp. Beats 2 & 4 when kChord1 hits 1 & 3 (varA);
 // on the beat when kChord1 is off-beat (varB); light upper triad on the &'s.
+// Bar 2 (style-depth Wave-2 C, VarA only -- VarB/VarC still read bar 1):
+// the same comp answers syncopated onto the & of 2/4 instead of square on the
+// beat, a genuine call-and-response rather than a repeat of bar 1.
 inline constexpr StyleEvent kChord2Beat24[] = {
     {.step=4, .tone=kRoot, .octave=0, .vel=62, .gate=kGateStab}, {.step=4, .tone=kThird, .octave=0, .vel=62, .gate=kGateStab}, {.step=4, .tone=kFifth, .octave=0, .vel=62, .gate=kGateStab},
     {.step=12, .tone=kRoot, .octave=0, .vel=60, .gate=kGateStab}, {.step=12, .tone=kThird, .octave=0, .vel=60, .gate=kGateStab}, {.step=12, .tone=kFifth, .octave=0, .vel=60, .gate=kGateStab},
+    {.step=22, .tone=kRoot, .octave=0, .vel=62, .gate=kGateStab}, {.step=22, .tone=kThird, .octave=0, .vel=62, .gate=kGateStab}, {.step=22, .tone=kFifth, .octave=0, .vel=62, .gate=kGateStab},
+    {.step=30, .tone=kRoot, .octave=0, .vel=60, .gate=kGateStab}, {.step=30, .tone=kThird, .octave=0, .vel=60, .gate=kGateStab}, {.step=30, .tone=kFifth, .octave=0, .vel=60, .gate=kGateStab},
 };
 inline constexpr StyleEvent kChord2Beat13[] = {
     {.step=0, .tone=kThird, .octave=0, .vel=60, .gate=kGateBeat}, {.step=0, .tone=kFifth, .octave=0, .vel=60, .gate=kGateBeat},
@@ -78,21 +87,42 @@ inline constexpr MotifSpec kPeakChordMotif{.transform = MotifTransform::kRetrogr
 inline constexpr MotifSpec kSharedPadMotif{.transform = MotifTransform::kDisplacement, .seed = 1612};
 inline constexpr MotifSpec kSharedChord2Motif{.transform = MotifTransform::kDisplacement, .seed = 1613};
 
+// VarA (style-depth Wave-2 C): genuinely 2 bars now. Bar 1 is untouched (the
+// pinned zero-jitter probes in test_fx.cpp/test_dual_arp_collision.cpp/
+// test_engine_fire_order.cpp only ever read bar 1); bar 2 is a real
+// turnaround, not a copy -- an open-hat lift on the last 8th (drums), an
+// octave-up push then a leading 7th (bass; the bar-2 DOWNBEAT stays the root
+// so test_engine_fire_order's chord-seq-before-arranger G-downbeat pin still
+// resolves the same way), and a syncopated comp answer (chord1, off the beat
+// instead of square on it).
 inline constexpr StyleEvent kVarADrums[] = {
     {.step=0, .tone=36, .octave=0, .vel=110, .gate=120}, {.step=4, .tone=38, .octave=0, .vel=100, .gate=120}, {.step=8, .tone=36, .octave=0, .vel=105, .gate=120}, {.step=12, .tone=38, .octave=0, .vel=100, .gate=120},
     {.step=0, .tone=42, .octave=0, .vel=70, .gate=60},   {.step=2, .tone=42, .octave=0, .vel=60, .gate=60},   {.step=4, .tone=42, .octave=0, .vel=70, .gate=60},   {.step=6, .tone=42, .octave=0, .vel=60, .gate=60},
     {.step=8, .tone=42, .octave=0, .vel=70, .gate=60},   {.step=10, .tone=42, .octave=0, .vel=60, .gate=60},  {.step=12, .tone=42, .octave=0, .vel=70, .gate=60},  {.step=14, .tone=42, .octave=0, .vel=60, .gate=60},
+    // bar 2: same backbeat, but the hat opens on the last 8th (turnaround).
+    {.step=16, .tone=36, .octave=0, .vel=110, .gate=120}, {.step=20, .tone=38, .octave=0, .vel=100, .gate=120}, {.step=24, .tone=36, .octave=0, .vel=105, .gate=120}, {.step=28, .tone=38, .octave=0, .vel=100, .gate=120},
+    {.step=16, .tone=42, .octave=0, .vel=70, .gate=60},  {.step=18, .tone=42, .octave=0, .vel=60, .gate=60},  {.step=20, .tone=42, .octave=0, .vel=70, .gate=60},  {.step=22, .tone=42, .octave=0, .vel=60, .gate=60},
+    {.step=24, .tone=42, .octave=0, .vel=70, .gate=60},  {.step=26, .tone=42, .octave=0, .vel=60, .gate=60},  {.step=28, .tone=42, .octave=0, .vel=70, .gate=60},  {.step=30, .tone=46, .octave=0, .vel=88, .gate=90},
 };
 inline constexpr StyleEvent kVarABass[] = {
     {.step=0, .tone=0, .octave=0, .vel=100, .gate=220},  // root
     {.step=4, .tone=2, .octave=0, .vel=85, .gate=220},   // fifth
     {.step=8, .tone=0, .octave=0, .vel=95, .gate=220},
     {.step=12, .tone=2, .octave=0, .vel=85, .gate=220},
+    // bar 2: root (downbeat -- kept for the fire-order chord-seq pin), fifth,
+    // an octave-up push, then the 7th leading back into the repeat.
+    {.step=16, .tone=0, .octave=0, .vel=100, .gate=220},
+    {.step=20, .tone=2, .octave=0, .vel=85, .gate=220},
+    {.step=24, .tone=0, .octave=1, .vel=95, .gate=220},
+    {.step=28, .tone=3, .octave=0, .vel=88, .gate=220},
 };
 inline constexpr StyleEvent kVarAChord[] = {
     // Comp stabs on beats 1 and 3: full stack (tones 0..3).
     {.step=0, .tone=0, .octave=0, .vel=80, .gate=360}, {.step=0, .tone=1, .octave=0, .vel=80, .gate=360}, {.step=0, .tone=2, .octave=0, .vel=80, .gate=360}, {.step=0, .tone=3, .octave=0, .vel=80, .gate=360},
     {.step=8, .tone=0, .octave=0, .vel=75, .gate=360}, {.step=8, .tone=1, .octave=0, .vel=75, .gate=360}, {.step=8, .tone=2, .octave=0, .vel=75, .gate=360}, {.step=8, .tone=3, .octave=0, .vel=75, .gate=360},
+    // bar 2: the comp answers syncopated -- off the beat instead of on it.
+    {.step=18, .tone=0, .octave=0, .vel=78, .gate=360}, {.step=18, .tone=1, .octave=0, .vel=78, .gate=360}, {.step=18, .tone=2, .octave=0, .vel=78, .gate=360}, {.step=18, .tone=3, .octave=0, .vel=78, .gate=360},
+    {.step=26, .tone=0, .octave=0, .vel=74, .gate=360}, {.step=26, .tone=1, .octave=0, .vel=74, .gate=360}, {.step=26, .tone=2, .octave=0, .vel=74, .gate=360}, {.step=26, .tone=3, .octave=0, .vel=74, .gate=360},
 };
 inline constexpr StylePattern kVarAPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kVarADrums)},
@@ -128,14 +158,30 @@ inline constexpr StylePattern kVarBPatterns[] = {
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercTamb)},
 };
 
+// Intro1 (style-depth Wave-2 C): a genuine 2-bar build. Bar 1 (unchanged) is
+// the sparse hat pickup; bar 2 is the arrival -- crash + backbeat kick/snare
+// enter under a full 8th-note hat, landing the band right where VarA starts.
 inline constexpr StyleEvent kIntroDrums[] = {
     {.step=8, .tone=42, .octave=0, .vel=60, .gate=60},
     {.step=10, .tone=42, .octave=0, .vel=65, .gate=60},
     {.step=12, .tone=42, .octave=0, .vel=70, .gate=60},
     {.step=14, .tone=42, .octave=0, .vel=80, .gate=60},
+    // bar 2: arrival.
+    {.step=16, .tone=49, .octave=0, .vel=90, .gate=1800},  // crash announces the downbeat
+    {.step=16, .tone=36, .octave=0, .vel=100, .gate=120},
+    {.step=20, .tone=38, .octave=0, .vel=92, .gate=120},
+    {.step=24, .tone=36, .octave=0, .vel=104, .gate=120},
+    {.step=28, .tone=38, .octave=0, .vel=98, .gate=120},
+    {.step=16, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=18, .tone=42, .octave=0, .vel=54, .gate=60},
+    {.step=20, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=22, .tone=42, .octave=0, .vel=54, .gate=60},
+    {.step=24, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=26, .tone=42, .octave=0, .vel=54, .gate=60},
+    {.step=28, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=30, .tone=42, .octave=0, .vel=60, .gate=60},
 };
 inline constexpr StyleEvent kIntroBass[] = {
     {.step=0, .tone=0, .octave=0, .vel=90, .gate=3600},  // held root pickup
+    // bar 2: hold the root again, then a short 5th anticipation into VarA.
+    {.step=16, .tone=0, .octave=0, .vel=94, .gate=3200},
+    {.step=30, .tone=2, .octave=0, .vel=80, .gate=kGate8th},
 };
 inline constexpr StylePattern kIntroPatterns[] = {
     {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIntroDrums)},
@@ -259,9 +305,9 @@ inline constexpr StylePattern kVarDPatterns[] = {{.role=TrackRole::kDrums, .poli
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercShake)}};
 
 inline constexpr StyleSection kSections[] = {
-    {.type=SectionType::kIntro1, .bars=1, .patterns=Span<const StylePattern>(kIntroPatterns)},
+    {.type=SectionType::kIntro1, .bars=2, .patterns=Span<const StylePattern>(kIntroPatterns)},
     {.type=SectionType::kIntro2, .bars=1, .patterns=Span<const StylePattern>(kIntro2Patterns)},
-    {.type=SectionType::kVarA, .bars=1, .patterns=Span<const StylePattern>(kVarAPatterns)},
+    {.type=SectionType::kVarA, .bars=2, .patterns=Span<const StylePattern>(kVarAPatterns)},
     {.type=SectionType::kVarB, .bars=1, .patterns=Span<const StylePattern>(kVarBPatterns)},
     {.type=SectionType::kVarC, .bars=1, .patterns=Span<const StylePattern>(kVarCPatterns)},
     {.type=SectionType::kVarD, .bars=1, .patterns=Span<const StylePattern>(kVarDPatterns)},
