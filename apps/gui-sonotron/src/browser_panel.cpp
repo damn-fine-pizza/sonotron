@@ -30,11 +30,11 @@ constexpr std::array<StyleFamily, 8> kFamilyRenderOrder = {
     StyleFamily::kWorldRegional, StyleFamily::kOther,
 };
 
-// The v02 non-style sections (spec §2a). "variations" is now a REAL drag
+// The non-style sections (spec §2a). "variations" is now a REAL drag
 // source (repeat-zone-real-contract.md SLICE 4a): each row carries a
 // SectionType byte a scene header (grid_panel.cpp) accepts as a drop target
 // to set that column's section. "kits" stays a design-intent, local-only list
-// (see docs/v02-feature-list) -- no kit-load verb is wired from here.
+// (see docs/feature-list) -- no kit-load verb is wired from here.
 constexpr std::array<std::string_view, 8> kVariations = {
     "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro",
 };
@@ -108,7 +108,7 @@ bool leaf_row(std::string_view item, bool active) {
 // behavior render_styles always had, factored out so both the family-
 // grouped loop below and its ImGuiListClipper wrapper can call it per row.
 void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
-                       V02State& fx, std::size_t i) {
+                       UiState& fx, std::size_t i) {
   const std::string name(model.style_name(i));
   ImGui::PushID(static_cast<int>(i));
   if (leaf_row(name, fx.active_style == static_cast<int>(i))) {
@@ -149,7 +149,7 @@ void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const A
 // with nothing matching still shows its header plus "(no match)" so a
 // player can tell the bucket exists rather than silently vanishing.
 void render_style_family_section(BrowserModel& model, BrainSession& brain_session,
-                                 const AppState& app_state, V02State& fx, StyleFamily family,
+                                 const AppState& app_state, UiState& fx, StyleFamily family,
                                  int& shown) {
   std::vector<std::size_t> indices;
   for (std::size_t i = 0; i < model.style_count(); ++i) {
@@ -179,7 +179,7 @@ void render_style_family_section(BrowserModel& model, BrainSession& brain_sessio
 }
 
 void render_styles(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
-                   V02State& fx, int& shown) {
+                   UiState& fx, int& shown) {
   for (const StyleFamily family : kFamilyRenderOrder) {
     render_style_family_section(model, brain_session, app_state, fx, family, shown);
   }
@@ -273,7 +273,7 @@ void render_family_filter_combo(BrowserModel& model) {
 }  // namespace
 
 void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
-                          const AppState& app_state, V02State& fx) {
+                          const AppState& app_state, UiState& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
   ImGui::Spacing();
   render_family_filter_combo(model);

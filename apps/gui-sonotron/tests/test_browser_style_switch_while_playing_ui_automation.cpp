@@ -43,7 +43,7 @@
 #include "src/neon_widgets.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -59,7 +59,7 @@ using sonotron::BrainEvent;
 using sonotron::BrainSession;
 using sonotron::BrowserModel;
 using sonotron::InProcessBrainSession;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -71,7 +71,7 @@ namespace {
 // "4/4" label) when scanning for color clusters below -- a TEST-only
 // wrapper, not a product change (render_browser_panel itself is unchanged).
 ImDrawData* render_one_frame(BrowserModel& model, BrainSession& brain_session, AppState& app_state,
-                             V02State& fx) {
+                             UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -95,7 +95,7 @@ ImDrawData* render_one_frame(BrowserModel& model, BrainSession& brain_session, A
 }
 
 ImDrawData* click_at(ImVec2 pos, BrowserModel& model, BrainSession& brain_session,
-                     AppState& app_state, V02State& fx) {
+                     AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -133,7 +133,7 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
 
   BrowserModel model;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   InProcessBrainSession session;

@@ -14,11 +14,11 @@
 #include "theme.hpp"
 #include "transport_panel.hpp"
 
-// v02 workstation renderer (v02-workstation-spec.md). This replaces the old
-// JSON-fraction zone grid with the fixed 3-band v02 layout (transport rack
+// Neon workstation renderer (v02-workstation-spec.md). This replaces the old
+// JSON-fraction zone grid with the fixed 3-band layout (transport rack
 // 58px / working row flex / sequence edit 172px). The `Layout` argument is
 // still accepted so main.cpp's call site, the JSON persistence, the window
-// title and the configurable font size are untouched -- but the v02 layout is
+// title and the configurable font size are untouched -- but the layout is
 // fixed by design, so the per-zone fractions are no longer consulted here.
 // layout_model.cpp / layout_json.cpp (and their tests) are unchanged.
 
@@ -41,7 +41,7 @@ void begin_zone(const char* id, const ImVec2& size, bool scrolls) {
   ImGui::BeginChild(id, size, ImGuiChildFlags_Borders, flags);
 }
 
-void render_master_vu(const AppState& app_state, V02State& fx) {
+void render_master_vu(const AppState& app_state, UiState& fx) {
   ImGui::Spacing();
   ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kInsetBg);
   ImGui::PushStyleColor(ImGuiCol_Border, theme::kBorderCyan);
@@ -75,8 +75,8 @@ void render_rail(WorkstationState& state) {
 }  // namespace
 
 void render_layout(const Layout& layout, WorkstationState& state) {
-  (void)layout;  // v02 layout is fixed by design; see the file header comment.
-  V02State& fx = state.fx;
+  (void)layout;  // layout is fixed by design; see the file header comment.
+  UiState& fx = state.fx;
   fx.time = static_cast<float>(ImGui::GetTime());
   fx.playing = state.app_state.transport() == AppState::Transport::kPlaying;
 

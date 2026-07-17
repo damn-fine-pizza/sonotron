@@ -34,7 +34,7 @@
 #include "src/in_process_brain_session.hpp"
 #include "src/parts_model.hpp"
 #include "src/seqedit_model.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "test.hpp"
 
@@ -52,7 +52,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 
 namespace {
 
@@ -62,7 +62,7 @@ namespace {
 // layout_renderer.cpp:81-82/107-108) -- reused verbatim so a discrepancy
 // between the two tests can never be blamed on a difference in this harness.
 void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                      BrainSession& brain_session, const AppState& app_state, V02State& fx) {
+                      BrainSession& brain_session, const AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -78,7 +78,7 @@ void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
 // click_arm_auto_song: there is still no click-injection seam for an
 // ImGui::SmallButton in this codebase (headless mouse-event simulation would
 // test ImGui itself, not this feature).
-void click_arm_auto_song(V02State& fx, const AppState& app_state) {
+void click_arm_auto_song(UiState& fx, const AppState& app_state) {
   fx.auto_song = true;
   fx.active_scene_start_bar = app_state.bar();
   fx.auto_song_last_bar = app_state.bar();
@@ -108,7 +108,7 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   // SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_

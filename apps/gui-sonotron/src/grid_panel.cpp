@@ -141,21 +141,21 @@ bool stepper_button(const char* glyph, ImVec2 p0) {
   return clicked;
 }
 
-// The 6 v02 launch-grid rows (spec §2b), each mapped to a GridModel part-row
+// The 6 launch-grid rows (spec §2b), each mapped to a GridModel part-row
 // index (so a launched cell addresses a real, stable ClipMatrix slot) and a
 // track color. `audio` marks the pad row as the design's one "audio" row --
 // it no longer selects a different preview widget (repeat-zone-real-
 // contract.md STEP 3: pad has no real audio content yet, so it shows its
 // real MIDI note pattern too, like every other row); `audio` is kept only
 // for `fx.open_audio` bookkeeping, reserved for genuine future audio
-// content. The GridModel has 9 role rows; these are the 6 the v02 grid
+// content. The GridModel has 9 role rows; these are the 6 the launch grid
 // surfaces.
-struct V02Row {
+struct GridRow {
   const char* name;
   std::size_t role_index;  // into GridModel / track_roles
   bool audio;
 };
-constexpr std::array<V02Row, 6> kRows = {{
+constexpr std::array<GridRow, 6> kRows = {{
     {"drums", 0, false},
     {"bass", 2, false},
     {"chord", 3, false},
@@ -187,12 +187,12 @@ std::size_t cell_id(std::size_t role_index, std::size_t scene, std::size_t scene
 // see the third loop below. `brain_session.send()` is a plain wire command
 // even in --control mode, so this seeding works there too.
 void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-               BrainSession& brain_session, V02State& fx) {
+               BrainSession& brain_session, UiState& fx) {
   if (fx.seeded) {
     return;
   }
   fx.seeded = true;
-  // Match the v02 design's default clip set + short curated labels exactly
+  // Match the design's default clip set + short curated labels exactly
   // (Sonotron v02 Workstation.dc.html) so the launch grid reads like the ref
   // (A/B/fil, wlk/sub, cmp/stab/out, swl, up/up2, vox/ld/end) — no truncation.
   struct DemoCell {
@@ -300,7 +300,7 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
 // its own.
 bool draw_cell(const char* id, float size, bool filled, const std::string& label,
                const ImVec4& color, const neon::ClipPattern& pattern, bool approx, bool playing,
-               bool opened, const V02State& fx, float section_phase) {
+               bool opened, const UiState& fx, float section_phase) {
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   const bool clicked = ImGui::InvisibleButton(id, ImVec2(size, size));
   const bool hovered = ImGui::IsItemHovered();
@@ -385,7 +385,7 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   return clicked;
 }
 
-void render_header(const GridModel& model, V02State& fx, const AppState& app_state,
+void render_header(const GridModel& model, UiState& fx, const AppState& app_state,
                    std::size_t scene_count) {
   ImGui::TextColored(theme::kCyan, "REPEAT ZONE");
 
@@ -574,7 +574,7 @@ int active_style_section_bars(const GridModel& model, std::size_t scene_index) {
 // better or worse by it either way (both sends still fire every time, exactly
 // as before) -- but touching it means editing arrangrr's own Arranger/Engine,
 // which moves goldens. Out of scope for this host-side pass.
-void activate_scene_column(const GridModel& model, BrainSession& brain_session, V02State& fx,
+void activate_scene_column(const GridModel& model, BrainSession& brain_session, UiState& fx,
                            std::size_t scene_index, int current_bar, int quantize_bars) {
   const std::string_view section_name = section_wire_name(model.scene_section(scene_index));
   if (!section_name.empty()) {
@@ -639,7 +639,7 @@ void activate_scene_column(const GridModel& model, BrainSession& brain_session, 
 // section_bars/GridModel::set_scene_bars). No double-launch, no
 // double-advance, on the bar Play first lands.
 void handle_master_play_launch(const GridModel& model, BrainSession& brain_session,
-                               const AppState& app_state, V02State& fx) {
+                               const AppState& app_state, UiState& fx) {
   const bool transport_playing_now = app_state.transport() == AppState::Transport::kPlaying;
   if (!transport_playing_now) {
     fx.master_play_launched = false;
@@ -703,12 +703,12 @@ void handle_master_play_launch(const GridModel& model, BrainSession& brain_sessi
 // clip id that was never registered just warns (Engine::clip_request's own
 // `m_clips.get(id) == nullptr` guard), never crashes.
 void cancel_active_scene_clip_arms(const GridModel& model, BrainSession& brain_session,
-                                   const V02State& fx) {
+                                   const UiState& fx) {
   if (fx.active_scene < 0) {
     return;
   }
   const std::size_t scene = static_cast<std::size_t>(fx.active_scene);
-  for (const V02Row& row : kRows) {
+  for (const GridRow& row : kRows) {
     const std::size_t id = cell_id(row.role_index, scene, model.scene_count());
     brain_session.send("stop clip " + std::to_string(id));
   }
@@ -725,7 +725,7 @@ void cancel_active_scene_clip_arms(const GridModel& model, BrainSession& brain_s
 // re-firing) more than once per bar: ImGui runs this every rendered frame,
 // but the live bar only changes once per beat-heartbeat poll.
 void update_auto_song(const GridModel& model, BrainSession& brain_session,
-                      const AppState& app_state, V02State& fx, std::size_t scene_count) {
+                      const AppState& app_state, UiState& fx, std::size_t scene_count) {
   // Roadmap task #37: the ENDING pad (transport_panel.cpp) sets fx.ending_
   // cued the instant it cues `style section ending1`. That cue is bar-
   // quantized and, once it lands, plays out for the Ending section's own
@@ -876,7 +876,7 @@ bool any_part_soloed(const PartsModel& parts) {
 // launch happens). Deliberately minimal per owner judgment: the scene's
 // stored NAME is left untouched by a drop -- only the section changes.
 void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
-                              const AppState& app_state, V02State& fx, std::size_t s, float cz,
+                              const AppState& app_state, UiState& fx, std::size_t s, float cz,
                               float header_h) {
   ImGui::SameLine(0.0F, kCellGap);
   ImGui::PushID(static_cast<int>(s));
@@ -1022,7 +1022,7 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
 // underline (render_scene_header_cell) -- reserved uniformly here, same as
 // the wrapped-name height above, so it never shifts per-column either.
 void render_scene_header_row(GridModel& model, BrainSession& brain_session,
-                             const AppState& app_state, V02State& fx, std::size_t scenes,
+                             const AppState& app_state, UiState& fx, std::size_t scenes,
                              float cz) {
   ImFont* font = ImGui::GetFont();
   std::size_t max_lines = 1;
@@ -1050,8 +1050,8 @@ void render_scene_header_row(GridModel& model, BrainSession& brain_session,
 // small/cramped to read or tell apart -- stacking the name above the
 // latches gives both rows their own full-width space for a bigger, clearly
 // legible S/M pair.
-void render_track_label(PartsModel& parts, BrainSession& brain_session, const V02Row& row,
-                        bool any_solo, const ImVec4& color, V02State& fx, float cz) {
+void render_track_label(PartsModel& parts, BrainSession& brain_session, const GridRow& row,
+                        bool any_solo, const ImVec4& color, UiState& fx, float cz) {
   const std::size_t role = row.role_index;
   const PartInfo& info = parts.part(role);
   const bool dim = (any_solo && !info.soloed) || info.muted;
@@ -1100,11 +1100,11 @@ void render_track_label(PartsModel& parts, BrainSession& brain_session, const V0
 // resolution (grid_model.hpp's section_playhead_phase); only THIS column,
 // when `s == active_scene`, actually draws it -- every other column passes
 // draw_cell the "no playhead" sentinel, since only the active scene's own
-// bookkeeping (V02State::active_scene_start_bar) is beat-synced to a real
+// bookkeeping (UiState::active_scene_start_bar) is beat-synced to a real
 // section boundary.
 void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                       BrainSession& brain_session, const AppState& app_state, V02State& fx,
-                       const V02Row& row, std::size_t r, std::size_t s, const ImVec4& color,
+                       BrainSession& brain_session, const AppState& app_state, UiState& fx,
+                       const GridRow& row, std::size_t r, std::size_t s, const ImVec4& color,
                        float cz, int active_scene, float active_section_phase) {
   ImGui::SameLine(0.0F, kCellGap);
   const std::size_t id = cell_id(row.role_index, s, model.scene_count());
@@ -1195,11 +1195,11 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
 // section_phase` thread render_grid_panel's once-per-frame playhead
 // resolution down to each cell (see render_track_cell's own comment).
 void render_track_row(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                      BrainSession& brain_session, const AppState& app_state, V02State& fx,
+                      BrainSession& brain_session, const AppState& app_state, UiState& fx,
                       std::size_t r, std::size_t scenes, bool any_solo, float cz, int active_scene,
                       float active_section_phase) {
-  const V02Row& row = kRows[r];
-  const ImVec4& color = theme::kV02TrackColor[r];
+  const GridRow& row = kRows[r];
+  const ImVec4& color = theme::kTrackColor[r];
 
   ImGui::PushID(static_cast<int>(100 + r));
   render_track_label(parts, brain_session, row, any_solo, color, fx, cz);
@@ -1213,9 +1213,9 @@ void render_track_row(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
 }  // namespace
 
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                       BrainSession& brain_session, const AppState& app_state, V02State& fx) {
+                       BrainSession& brain_session, const AppState& app_state, UiState& fx) {
   seed_demo(model, seqedit, parts, brain_session, fx);
-  // Capped scene count (the v02 launch grid only ever renders the first 5
+  // Capped scene count (the launch grid only ever renders the first 5
   // scene columns, render_scene_header_row/render_track_row below) computed
   // ONCE, up front, so render_header's own "next (intent)" preview and the
   // update_auto_song/render_* calls further down all share the exact same

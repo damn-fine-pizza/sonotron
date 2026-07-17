@@ -6,7 +6,7 @@
 #include "grid_model.hpp"
 #include "parts_model.hpp"
 #include "seqedit_model.hpp"
-#include "v02_state.hpp"
+#include "ui_state.hpp"
 
 // Bundles the mutable/const state each zone panel needs, threaded through
 // render_layout -> layout_renderer.cpp's zone dispatch -> the individual
@@ -23,7 +23,7 @@ struct WorkstationState {
   GridModel& grid;
   SeqEditModel& seqedit;
   PartsModel& parts;
-  V02State& fx;  // v02 redesign: glow flag, frame clock, local intent surface
+  UiState& fx;  // neon workstation redesign: glow flag, frame clock, local intent surface
 };
 
 }  // namespace sonotron

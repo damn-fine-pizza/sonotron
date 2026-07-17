@@ -5,10 +5,10 @@
 #include "grid_model.hpp"
 #include "parts_model.hpp"
 #include "seqedit_model.hpp"
-#include "v02_state.hpp"
+#include "ui_state.hpp"
 
-// Renders the v02 REPEAT ZONE launch grid (v02-workstation-spec.md §2b).
-// Declared here as pure data/interface (models + BrainSession + V02State, no
+// Renders the REPEAT ZONE launch grid (v02-workstation-spec.md §2b).
+// Declared here as pure data/interface (models + BrainSession + UiState, no
 // ImGui) -- see the *_panel/*_model split invariant.
 
 namespace sonotron {
@@ -28,6 +28,6 @@ namespace sonotron {
 // L1 verb (§7 B8) through `parts` -- they share PartsModel state with the rail
 // mute/solo, and drive the standard solo-implies-others-muted dim in the grid.
 void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                       BrainSession& brain_session, const AppState& app_state, V02State& fx);
+                       BrainSession& brain_session, const AppState& app_state, UiState& fx);
 
 }  // namespace sonotron

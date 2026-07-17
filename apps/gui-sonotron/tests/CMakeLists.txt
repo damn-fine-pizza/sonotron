@@ -225,7 +225,7 @@ set_tests_properties(test_grid_panel_auto_song_real_backend PROPERTIES LABELS fu
 # ---------------------------------------------------------------------------
 # UI-AUTOMATION HARNESS (Torquato QA pass, owner steer): the missing piece
 # every test above this line does NOT have -- REAL ImGui input injection
-# (io.AddMousePosEvent/AddMouseButtonEvent, never a direct V02State/AppState
+# (io.AddMousePosEvent/AddMouseButtonEvent, never a direct UiState/AppState
 # field write) and assertions on the actual RENDERED DRAW DATA (ImGui::
 # Render()'s ImDrawData), not just on model state. See imgui_headless_
 # harness.hpp's own header comment for the full design (widget-rect

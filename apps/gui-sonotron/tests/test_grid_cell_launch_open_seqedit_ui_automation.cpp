@@ -9,7 +9,7 @@
 // clip_state, the same core ClipMatrix round trip test_repeat_zone_playhead_
 // ui_automation.cpp already proved reachable after dff4e9e's demo-clip-
 // registration fix) AND the "open in Sequence Edit" bookkeeping
-// (V02State::open_cell/open_row/open_section, SeqEditModel::part_index/
+// (UiState::open_cell/open_row/open_section, SeqEditModel::part_index/
 // clip_label) -- fields the existing playhead test never asserts on, since
 // its own focus is the playhead primitive, not this click's OTHER effect.
 
@@ -26,7 +26,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -44,13 +44,13 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
 
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -71,7 +71,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -89,7 +89,7 @@ void test_real_click_on_filled_cell_launches_and_opens_sequence_edit() {
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   InProcessBrainSession session;
@@ -119,7 +119,7 @@ void test_real_click_on_filled_cell_launches_and_opens_sequence_edit() {
   // `fill_a` decision) -- clusters[0] is always drums/scene 0 (draw order,
   // same reasoning test_repeat_zone_playhead_ui_automation.cpp's own header
   // comment already documents for this exact color/row).
-  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kV02TrackColor[0], 0.10F);
+  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.10F);
   const std::vector<th::Rect> drums_cells = th::find_color_clusters(locate, drums_not_playing);
   CHECK(!drums_cells.empty());
   if (drums_cells.empty()) {

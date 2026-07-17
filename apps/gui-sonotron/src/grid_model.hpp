@@ -237,7 +237,7 @@ bool bar_just_advanced(int current_bar, int& last_checked_bar);
 //
 // `current_bar`/`beat_num`/`pulse` mirror AppState::bar()/beat_num()/pulse()
 // exactly (`beat_num` 1-based, `pulse` 0..23 at 24 PPQN); `active_scene_
-// start_bar` mirrors V02State::active_scene_start_bar (the live bar the
+// start_bar` mirrors UiState::active_scene_start_bar (the live bar the
 // active scene became active, grid_panel.cpp's update_auto_song); `beats_
 // per_bar` mirrors AppState::beats_per_bar(); `section_bars` mirrors
 // preview::section_bars(active_style, active_section).

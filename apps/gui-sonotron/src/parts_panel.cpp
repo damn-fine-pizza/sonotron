@@ -12,22 +12,22 @@ namespace sonotron {
 
 namespace {
 
-// The 3 v02 PARTS "amount" knobs (spec §2c): DRUMS/BASS/CHORD. Amount is a
+// The 3 PARTS "amount" knobs (spec §2c): DRUMS/BASS/CHORD. Amount is a
 // local-only intent; mute/solo is per-track and lives on the grid rows (§2b).
-struct V02Part {
+struct PartRow {
   const char* label;
   ImVec4 color;
 };
 
 }  // namespace
 
-void render_parts_panel(V02State& fx) {
+void render_parts_panel(UiState& fx) {
   ImGui::TextColored(theme::kCyan, "PARTS");
   ImGui::SameLine();
   ImGui::TextColored(theme::kTextMuted, "  amount");
   ImGui::Spacing();
 
-  const std::array<V02Part, 3> parts = {{
+  const std::array<PartRow, 3> parts = {{
       {.label = "DRUMS", .color = theme::kCyan},
       {.label = "BASS", .color = theme::kBlue},
       {.label = "CHORD", .color = theme::kGreen},
@@ -40,7 +40,7 @@ void render_parts_panel(V02State& fx) {
 
   ImGui::BeginGroup();
   for (std::size_t i = 0; i < parts.size(); ++i) {
-    const V02Part& p = parts[i];
+    const PartRow& p = parts[i];
     ImGui::PushID(static_cast<int>(i));
     neon::knob("amount", &fx.part_amount[i], p.color, p.label, knob_sz, fx.glow);
     ImGui::PopID();

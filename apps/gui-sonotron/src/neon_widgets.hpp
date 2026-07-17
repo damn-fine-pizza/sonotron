@@ -5,7 +5,7 @@
 
 #include "imgui.h"
 
-// Reusable Dear ImGui draw-list widgets for the v02 "neon / hardware-synth"
+// Reusable Dear ImGui draw-list widgets for the "neon / hardware-synth"
 // workstation redesign (v02-workstation-spec.md §"Widgets NEW"). Everything
 // here is pure ImDrawList / immediate-mode input -- no BrainSession, no model
 // dependency -- so it lives in gui_sonotron_layout next to theme.cpp and the
@@ -14,7 +14,7 @@
 //
 // The GLOW SYSTEM: every helper that can glow takes a `glow` bool. When false
 // the halo draws are skipped (shadow -> none), honoring the one global
-// V02State::glow flag the whole UI passes down. Animations take an explicit
+// UiState::glow flag the whole UI passes down. Animations take an explicit
 // `time` (ImGui frame clock) and a `playing`/gate flag so the caller decides
 // when motion is allowed -- the widgets never read the clock themselves.
 

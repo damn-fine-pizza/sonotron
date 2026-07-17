@@ -6,7 +6,7 @@
 // This test clicks the REAL scene-header ▶ (grid_panel.cpp's render_scene_
 // header_cell) while the transport is REALLY playing, through a REAL
 // InProcessBrainSession, and measures -- in real bar units read back from the
-// REAL engine's own "section"/"clip" OutEvents (never a V02State/AppState
+// REAL engine's own "section"/"clip" OutEvents (never a UiState/AppState
 // field write standing in for the click) -- how many bars elapse between the
 // click and the FIRST observable readback flip. The pin: that gap must be
 // <= 1 bar (the SAME bar boundary the click's own `style section` (Param::
@@ -65,7 +65,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -83,7 +83,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -91,7 +91,7 @@ namespace {
 // Same combined transport+grid frame shape as test_repeat_zone_playhead_ui_
 // automation.cpp's own render_one_frame (both panels this flow spans).
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -112,7 +112,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -141,7 +141,7 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   // Pinned OFF (Torquato QA re-pass, world change: auto_song now DEFAULTS TO
   // true, commit 7113a90 "auto-song DEFAULT ON", landed AFTER this test's own
   // base commit 59660fd). Left armed, update_auto_song's own periodic
@@ -189,7 +189,7 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
   // Warm-up + locate frame (transport still stopped, nothing playing yet --
   // the scene-header caret's own paint color, neon::u32(theme::kGreen), is
   // unique in this frame only while no chord-row (role_index 3, also
-  // theme::kV02TrackColor[kGreen]) cell is rendering a `playing==true`
+  // theme::kTrackColor[kGreen]) cell is rendering a `playing==true`
   // border at the SAME full alpha; capturing the header rects BEFORE Play is
   // ever clicked keeps that collision structurally impossible).
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
@@ -202,7 +202,7 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
   // exclusive to the caret in this frame: transport_panel.cpp:90's
   // unconditional `ImGui::TextColored(theme::kGreen, "Cm")` key readout, and
   // grid_panel.cpp's render_track_label row-name text for the "chord" track
-  // row (role_index 3, theme::kV02TrackColor[2] == kGreen, drawn at full
+  // row (role_index 3, theme::kTrackColor[2] == kGreen, drawn at full
   // alpha whenever that row isn't muted/dimmed), both land in the SAME color
   // bucket -- confirmed empirically while re-deriving this geometry (a naive
   // find_color_clusters over the whole frame returns 7 clusters, not 5: one

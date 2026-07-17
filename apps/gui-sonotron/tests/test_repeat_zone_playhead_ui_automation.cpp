@@ -10,7 +10,7 @@
 // (transport_panel.cpp) and click a REAL, already-filled Repeat-Zone launch
 // cell (grid_panel.cpp's draw_cell), and it asserts on the ACTUAL RENDERED
 // DRAW DATA (ImGui::Render()'s ImDrawData) for the playhead primitive
-// (neon::playhead_at's own two AddLine calls), not on any AppState/V02State
+// (neon::playhead_at's own two AddLine calls), not on any AppState/UiState
 // field. It does not need to click the "auto-song" header toggle at all
 // (see the note before test_no_playhead_after_real_play_and_real_launch()
 // below for why) -- side-stepping the ONE widget in these panels
@@ -38,7 +38,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -56,7 +56,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -90,7 +90,7 @@ namespace {
 // never auto-fit), so its own clip rect can actually contain the grid
 // regardless of how tall the panels above it are.
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -110,7 +110,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 // widget) -- returns the ImDrawData of the RELEASE frame (the one where the
 // click handler actually ran).
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -120,10 +120,10 @@ ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsM
 // THE PINNED BUG. Real backend, real clicks, real render loop, asserted
 // against real draw data.
 //
-// This deliberately never touches the "auto-song" header toggle: V02State's
+// This deliberately never touches the "auto-song" header toggle: UiState's
 // own defaults already make this reachable without it --
 // `active_scene == 0` and `active_scene_start_bar == 0` out of the box
-// (v02_state.hpp), and section_playhead_phase()'s only gate on TIME is
+// (ui_state.hpp), and section_playhead_phase()'s only gate on TIME is
 // `current_bar > 0` (grid_model.cpp) -- so the moment the transport is
 // really playing and the first real "beat" heartbeat has arrived
 // (app_state.bar() > 0), scene 0's own playhead phase is already >= 0 with
@@ -151,7 +151,7 @@ void test_no_playhead_after_real_play_and_real_launch() {
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   InProcessBrainSession session;
@@ -183,15 +183,15 @@ void test_no_playhead_after_real_play_and_real_launch() {
   // Drums (row 0) launch cells: draw_cell's fill for a filled, not-hovered,
   // not-playing cell is neon::u32(track_color, 0.10F) (grid_panel.cpp's
   // `fill_a = playing ? 0.26F : (hovered ? 0.16F : 0.10F)`). theme::
-  // kV02TrackColor reuses kCyan for BOTH row 0 (drums) and row 4 (arp)
+  // kTrackColor reuses kCyan for BOTH row 0 (drums) and row 4 (arp)
   // (theme.hpp), so this exact color also matches arp's own filled cells --
   // harmless here, because find_color_clusters returns clusters in DRAW
   // ORDER (imgui_headless_harness.hpp's own header comment) and render_
   // grid_panel draws every drums-row cell before it ever reaches row 4, so
   // clusters[0] is always drums/scene 0 ("A" in seed_demo()'s pattern) --
-  // the ACTIVE scene at boot (V02State::active_scene defaults to 0) --
+  // the ACTIVE scene at boot (UiState::active_scene defaults to 0) --
   // regardless of how many later (row-4) clusters share the same color.
-  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kV02TrackColor[0], 0.10F);
+  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.10F);
   const std::vector<th::Rect> drums_cells = th::find_color_clusters(locate, drums_not_playing);
   CHECK(!drums_cells.empty());
   if (drums_cells.empty()) {

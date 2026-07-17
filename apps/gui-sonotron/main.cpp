@@ -812,7 +812,7 @@ int main(int argc, char** argv) {
   // the sequence-edit note canvas) stay honest placeholders — see each
   // model/panel pair's own header comment for the exact gap.
   sonotron::BrowserModel browser_model;
-  sonotron::GridModel grid_model(5);  // v02 launch grid: 5 scene columns
+  sonotron::GridModel grid_model(5);  // launch grid: 5 scene columns
 
   // Scene names (repeat-zone-real-contract.md §4/§8b decision 3): host-only,
   // loaded right after the GridModel they belong to is constructed, same
@@ -833,12 +833,12 @@ int main(int argc, char** argv) {
 
   sonotron::SeqEditModel seqedit_model;
   sonotron::PartsModel parts_model;
-  sonotron::V02State v02_state;  // v02 redesign: glow flag, frame clock, local intent
+  sonotron::UiState ui_state;  // neon workstation: glow flag, frame clock, local intent surface
 
   if (sonotron::debug_enabled()) {
     sonotron::debug_log(
-        "[dbg launch] auto_song=" + std::string(v02_state.auto_song ? "on" : "off") +
-        " active_scene=" + std::to_string(v02_state.active_scene));
+        "[dbg launch] auto_song=" + std::string(ui_state.auto_song ? "on" : "off") +
+        " active_scene=" + std::to_string(ui_state.active_scene));
   }
 
   // SLICE 4a item 1 (docs/proposals/repeat-zone-real-contract.md): boot
@@ -860,7 +860,7 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
       if (sonotron::kBuiltinStyleNames[i] == kDefaultStyleName) {
         brain_session.send("style load " + std::string(kDefaultStyleName));
-        v02_state.active_style = static_cast<int>(i);
+        ui_state.active_style = static_cast<int>(i);
         break;
       }
     }
@@ -872,7 +872,7 @@ int main(int argc, char** argv) {
                                                .grid = grid_model,
                                                .seqedit = seqedit_model,
                                                .parts = parts_model,
-                                               .fx = v02_state};
+                                               .fx = ui_state};
 
   const int max_frames = max_frames_from_env();
   const char* screenshot_path = screenshot_path_from_env();

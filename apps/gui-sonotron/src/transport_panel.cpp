@@ -13,7 +13,7 @@ namespace sonotron {
 
 namespace {
 
-// A dark rounded inset "cluster" box (the v02 tempo / bar:beat readout
+// A dark rounded inset "cluster" box (the tempo / bar:beat readout
 // housings, spec §1) as an inline child so several sit side by side on the
 // rack's single row. Caller fills it with content, then calls end_inset().
 // `content_width`, when >= 0, horizontally centers the upcoming content
@@ -51,7 +51,7 @@ void divider() {
 // transport once Ending1's own authored bars run out -- no new verb, no ABI
 // change. `fx.ending_cued` is set here so grid_panel.cpp's update_auto_song
 // can suppress its own advance until the transport is actually observed
-// stopped (see V02State::ending_cued's own comment). While stopped, the cue
+// stopped (see UiState::ending_cued's own comment). While stopped, the cue
 // is meaningless (nothing playing to end) -- the button is a no-op and
 // visually dimmed (muted accent instead of amber) rather than sending
 // anything. "END" is a plain ASCII label, not a glyph, since the vendored
@@ -59,7 +59,7 @@ void divider() {
 // function (mirroring begin_inset/end_inset/divider above) so the button's
 // own gating logic does not add to render_transport_panel's own cognitive
 // complexity.
-void render_ending_pad(BrainSession& brain_session, V02State& fx, bool playing) {
+void render_ending_pad(BrainSession& brain_session, UiState& fx, bool playing) {
   ImGui::SameLine(0.0F, 6.0F);
   const ImVec2 ending_pad(46.0F, 34.0F);
   const ImVec4& ending_accent = playing ? theme::kAmber : theme::kTextMuted;
@@ -76,7 +76,7 @@ void render_ending_pad(BrainSession& brain_session, V02State& fx, bool playing) 
 
 }  // namespace
 
-void render_transport_panel(AppState& app_state, BrainSession& brain_session, V02State& fx) {
+void render_transport_panel(AppState& app_state, BrainSession& brain_session, UiState& fx) {
   const bool playing = app_state.transport() == AppState::Transport::kPlaying;
   const float row_h = 40.0F;
   ImGui::SetCursorPosY(std::max(6.0F, (ImGui::GetContentRegionAvail().y - row_h) * 0.5F));

@@ -5,7 +5,7 @@
 // song*.cpp, test_grid_panel_auto_song_real_backend.cpp) fakes BOTH ends of
 // the UI seam -- the "click" is a direct field/state mutation (their own
 // click_arm_auto_song helper says so explicitly) and the assertions only
-// ever read back AppState/V02State fields, never what ImGui actually PAINTED
+// ever read back AppState/UiState fields, never what ImGui actually PAINTED
 // this frame. Two owner-reported bugs (no Repeat-Zone playhead; the
 // launch-cell preview not matching Sequence Edit) kept surviving because of
 // exactly that gap. This header is the reusable seam that closes it:
@@ -14,7 +14,7 @@
 //      through ImGui's own IO event queue (io.AddMousePosEvent/
 //      AddMouseButtonEvent) across two NewFrame/EndFrame cycles -- the same
 //      queue a real platform backend (imgui_impl_glfw.cpp) feeds. Nothing in
-//      this file ever writes to a V02State/AppState/GridModel field
+//      this file ever writes to a UiState/AppState/GridModel field
 //      directly; a "click" is a mouse move + button down + a rendered frame
 //      + a button up + another rendered frame, exactly like a live user.
 //
@@ -53,7 +53,7 @@
 //
 //   3. RENDERED-OUTPUT assertions: count_occupied_columns_in_band() and
 //      any_vertex_with_color_in() below inspect the actual ImDrawData after
-//      ImGui::Render() -- never AppState/V02State fields -- so a test can
+//      ImGui::Render() -- never AppState/UiState fields -- so a test can
 //      assert "was a playhead primitive actually painted on this cell" or
 //      "how many note-bar quads did this panel actually paint", the
 //      rendered-pixel-equivalent the task calls for, without a pixel-diffing

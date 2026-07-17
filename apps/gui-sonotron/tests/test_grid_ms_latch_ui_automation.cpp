@@ -30,7 +30,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -48,7 +48,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -61,7 +61,7 @@ constexpr float kLatchSize = 17.0F;
 constexpr float kLatchGap = 3.0F;
 
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -80,7 +80,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -136,7 +136,7 @@ void test_real_ms_latch_clicks_toggle_partsmodel_and_reach_engine_without_warnin
   GridModel model(5);
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   InProcessBrainSession session;

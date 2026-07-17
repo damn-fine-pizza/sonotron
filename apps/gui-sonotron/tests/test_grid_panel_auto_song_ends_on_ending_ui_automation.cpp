@@ -45,7 +45,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -63,7 +63,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -71,7 +71,7 @@ namespace {
 // Same combined transport+grid frame shape every UI-automation test in this
 // directory shares (mirrors test_transport_ending_button_ui_automation.cpp).
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -86,7 +86,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -119,7 +119,7 @@ void test_auto_song_holds_at_last_column_and_ends_on_ending_without_any_click() 
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
 
@@ -160,7 +160,7 @@ void test_auto_song_holds_at_last_column_and_ends_on_ending_without_any_click() 
   CHECK(app_state.bar() > 0);
 
   // GIVEN: auto_song is armed by default -- confirmed without clicking
-  // anything (V02State::auto_song defaults to true, owner decision
+  // anything (UiState::auto_song defaults to true, owner decision
   // 2026-07-17).
   CHECK(fx.auto_song);
 

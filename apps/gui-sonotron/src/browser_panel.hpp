@@ -3,10 +3,10 @@
 #include "app_state.hpp"
 #include "brain_session.hpp"
 #include "browser_model.hpp"
-#include "v02_state.hpp"
+#include "ui_state.hpp"
 
-// Renders the v02 BROWSER zone (v02-workstation-spec.md §2a). Declared here as
-// pure data/interface (BrowserModel + BrainSession + V02State + AppState, no
+// Renders the BROWSER zone (v02-workstation-spec.md §2a). Declared here as
+// pure data/interface (BrowserModel + BrainSession + UiState + AppState, no
 // ImGui) -- see the *_panel/*_model split invariant.
 
 namespace sonotron {
@@ -15,7 +15,7 @@ namespace sonotron {
 // the CURRENT ImGui child, with the search field pinned at the bottom. Every
 // style row is a real drag source (kStyleDragPayloadId) AND a real load
 // (`style load <name>`, a shipped L1 verb) -- clicking one also marks it the
-// active row (V02State::active_style, a local highlight; there is no
+// active row (UiState::active_style, a local highlight; there is no
 // selection readback on the wire). Variations / kits are local-only lists (no
 // section/kit-load verb is wired from here); clips is an honest empty branch.
 //
@@ -26,6 +26,6 @@ namespace sonotron {
 // the active section instead of always reverting to varA (see in_process_
 // brain_session.cpp's command_line_to_command for the wire-level rationale).
 void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
-                          const AppState& app_state, V02State& fx);
+                          const AppState& app_state, UiState& fx);
 
 }  // namespace sonotron

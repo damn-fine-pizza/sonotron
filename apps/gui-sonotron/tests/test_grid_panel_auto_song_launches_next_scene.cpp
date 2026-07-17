@@ -36,7 +36,7 @@
 #include "src/grid_panel.hpp"
 #include "src/parts_model.hpp"
 #include "src/seqedit_model.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "test.hpp"
 
@@ -51,7 +51,7 @@ using sonotron::BrainSnapshot;
 using sonotron::GridModel;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 
 namespace {
 
@@ -75,7 +75,7 @@ class SpyBrainSession : public BrainSession {
 // per-frame shape (layout_renderer.cpp refreshes fx.playing from
 // app_state.transport() right before the grid panel call).
 void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                      BrainSession& brain_session, const AppState& app_state, V02State& fx) {
+                      BrainSession& brain_session, const AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -88,7 +88,7 @@ void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
 // Mimics the exact state mutation the "auto-song" header button click
 // performs (grid_panel.cpp render_header): arms auto-song and resets both
 // bookkeeping bars to the current live bar.
-void click_arm_auto_song(V02State& fx, const AppState& app_state) {
+void click_arm_auto_song(UiState& fx, const AppState& app_state) {
   fx.auto_song = true;
   fx.active_scene_start_bar = app_state.bar();
   fx.auto_song_last_bar = app_state.bar();
@@ -133,7 +133,7 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   PartsModel parts;
   SpyBrainSession brain;
   AppState app_state;
-  V02State fx;
+  UiState fx;
   model.set_scene_bars(0, 2);  // task #6: pins the 2-bar advance threshold
 
   // Transport starts playing; first beat lands at bar 1.

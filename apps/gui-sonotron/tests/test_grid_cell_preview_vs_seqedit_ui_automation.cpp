@@ -11,7 +11,7 @@
 // harness.hpp's click injection -- io.AddMousePosEvent/AddMouseButtonEvent,
 // never a direct fx.open_cell/fx.open_row field write), and asserts on the
 // ACTUAL RENDERED DRAW DATA of BOTH panels for the SAME clip: how many
-// note-bar quads did each panel actually paint. No AppState/V02State field
+// note-bar quads did each panel actually paint. No AppState/UiState field
 // is compared -- only what ImGui really drew.
 //
 // Fixture, already independently proven by test_preview.cpp's own
@@ -47,7 +47,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/seqedit_panel.hpp"
 #include "src/theme.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -64,7 +64,7 @@ using sonotron::BrainSnapshot;
 using sonotron::GridModel;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -95,7 +95,7 @@ class SpyBrainSession : public BrainSession {
 // Zone above Sequence Edit) closely enough that the two panels' own draw
 // regions never overlap.
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
   ImGui::SetNextWindowSize(ImVec2(1200.0F, 700.0F), ImGuiCond_Always);
@@ -125,7 +125,7 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   PartsModel parts;
   SpyBrainSession brain;
   AppState app_state;
-  V02State fx;
+  UiState fx;
   // Maximum zoom (grid_panel.cpp's own -/+ clamp tops out at 88px, render_
   // header) -- gives the 8-column-cropped mini-preview as much room as this
   // UI can ever give it, so this pin cannot be dismissed as "too small a
@@ -193,7 +193,7 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   ImGui::GetIO().MousePos = ImVec2(-100.0F, -100.0F);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   ImDrawData* locate = render_one_frame(model, seqedit, parts, brain, app_state, fx);
-  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kV02TrackColor[0], 0.10F);
+  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.10F);
   const std::vector<th::Rect> drums_cells = th::find_color_clusters(locate, drums_not_playing);
   CHECK(drums_cells.size() >= 2);
   if (drums_cells.size() < 2) {
@@ -252,7 +252,7 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   // truncation the product code itself used to have) -- the grid mini-cell
   // keeps its own coarser sampling relative to the canvas (kCellSteps :
   // kSteps == 1:2, unchanged), just scaled by the section's real bar count.
-  const ImU32 note_color = sonotron::neon::u32(sonotron::theme::kV02TrackColor[0], 0.85F);
+  const ImU32 note_color = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.85F);
   const int grid_notes_shown = th::count_occupied_columns_in_band(
       final_draw_data, note_color, grid_band, pp.bars * sonotron::neon::ClipPattern::kCellSteps);
   const int seqedit_notes_shown =

@@ -26,7 +26,7 @@
 // column's own caret rect, this test back-derives that column's own LEFT
 // edge (hp0.x): the caret is drawn at hp0.x + cz - caret_ts.x - 3 (render_
 // scene_header_cell), so its right edge sits ~3px shy of the column's own
-// right edge, hp0.x + cz -- and `cz` itself is not guessed: V02State::
+// right edge, hp0.x + cz -- and `cz` itself is not guessed: UiState::
 // cell_zoom is a public field this test constructs directly (default 52.0F,
 // left untouched here).
 //
@@ -60,7 +60,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -79,7 +79,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -87,7 +87,7 @@ namespace {
 // Same combined transport+grid frame shape every UI-automation test in this
 // directory shares.
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -102,7 +102,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -188,7 +188,7 @@ void test_stepper_clicks_change_scene_bars_and_never_launch_the_scene() {
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
   CHECK(session.start());
@@ -200,7 +200,7 @@ void test_stepper_clicks_change_scene_bars_and_never_launch_the_scene() {
   const th::Rect grid_body_rect = th::find_child_window_rect("grid_body");
   CHECK(grid_body_rect.found);
   const float cz = fx.cell_zoom;
-  // Column 1, deliberately NOT column 0 (V02State::active_scene's own
+  // Column 1, deliberately NOT column 0 (UiState::active_scene's own
   // untouched default) -- so an accidental scene launch from a mis-hit
   // "head" region would be unambiguously visible as fx.active_scene flipping
   // to 1.
@@ -265,7 +265,7 @@ void test_stepper_min_length_makes_auto_song_advance_genuinely_faster() {
   GridModel model(5);
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
   CHECK(session.start());

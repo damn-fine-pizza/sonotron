@@ -4,19 +4,19 @@
 #include <cstddef>
 #include <cstdint>
 
-// Client-side, engine-free UI state introduced by the v02 workstation
+// Client-side, engine-free UI state introduced by the neon workstation
 // redesign (v02-workstation-spec.md). Everything here is HONEST LOCAL STATE:
 // a display preference (glow), a per-frame clock/gate the renderer sets, and
 // the design's "intent surface" values (energy/tension/valence, per-part
 // amount) that have NO BrainSession verb on the wire yet -- so they are
-// deliberately local-only, never a faked round-trip (see docs/v02-feature-
-// list.md for the per-element [wired]/[local-only]/[gap] tags). Pure data, no
+// deliberately local-only, never a faked round-trip (see docs/feature-list.md
+// for the per-element [wired]/[local-only]/[gap] tags). Pure data, no
 // ImGui / model dependency, so it threads through WorkstationState next to the
 // other pure-data models without widening who includes ImGui.
 
 namespace sonotron {
 
-struct V02State {
+struct UiState {
   // Global glow flag toggled by the transport ⚙ button (default ON). Every
   // neon glow honors it. Local display preference only.
   bool glow = true;
@@ -27,7 +27,7 @@ struct V02State {
   float time = 0.0F;
   bool playing = false;
 
-  // Launch-cell edge length in px (v02 zoom -/+, 34..88).
+  // Launch-cell edge length in px (zoom -/+, 34..88).
   float cell_zoom = 52.0F;
 
   // Browser active-style echo: index into kBuiltinStyleNames of the last style

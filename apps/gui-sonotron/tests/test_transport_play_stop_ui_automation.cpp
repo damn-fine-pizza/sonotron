@@ -8,7 +8,7 @@
 // through the REAL render_transport_panel entry point, wired to a REAL
 // InProcessBrainSession (real engine thread, real ring, real decode) -- never
 // a hand-written `brain_session.send("transport start")` call, never a
-// V02State/AppState field write standing in for a click.
+// UiState/AppState field write standing in for a click.
 //
 // Real-vs-stubbed tag (docs/proposals/flow-verification-matrix-2026-07.md §1
 // naming convention): `_ui_automation` == real click injection + real
@@ -23,7 +23,7 @@
 #include "src/neon_widgets.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -36,7 +36,7 @@ using sonotron::AppState;
 using sonotron::BrainEvent;
 using sonotron::BrainSession;
 using sonotron::InProcessBrainSession;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -44,7 +44,7 @@ namespace {
 // One headless frame around the real transport panel, mirroring main.cpp's
 // own per-frame shape (fx.playing refreshed from app_state.transport() right
 // before drawing).
-void render_one_frame(BrainSession& brain_session, AppState& app_state, V02State& fx) {
+void render_one_frame(BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -57,7 +57,7 @@ void render_one_frame(BrainSession& brain_session, AppState& app_state, V02State
 // A real two-frame press+release click at `pos` (ImGuiButtonFlags_
 // PressedOnClickRelease, ImGui's InvisibleButton default), mirroring every
 // other UI-automation test's own click_at().
-void click_at(ImVec2 pos, BrainSession& brain_session, AppState& app_state, V02State& fx) {
+void click_at(ImVec2 pos, BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -72,7 +72,7 @@ void test_real_play_click_starts_transport_and_climbs_bar_then_real_stop_click_p
   int tex_h = 0;
   ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
 
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
   CHECK(session.start());

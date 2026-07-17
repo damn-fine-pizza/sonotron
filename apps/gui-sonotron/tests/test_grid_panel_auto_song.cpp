@@ -25,7 +25,7 @@
 #include "src/grid_panel.hpp"
 #include "src/parts_model.hpp"
 #include "src/seqedit_model.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "test.hpp"
 
@@ -40,7 +40,7 @@ using sonotron::BrainSnapshot;
 using sonotron::GridModel;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 
 namespace {
 
@@ -68,7 +68,7 @@ class SpyBrainSession : public BrainSession {
 // than left stale, so a failure in this test cannot be blamed on a
 // frame-order artifact this harness introduced.
 void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                      BrainSession& brain_session, const AppState& app_state, V02State& fx) {
+                      BrainSession& brain_session, const AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -85,7 +85,7 @@ void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
 // this codebase (headless mouse-event simulation would test ImGui itself,
 // not this feature), so this reproduces the click's own state transition
 // verbatim, exactly as the task's repro instructions call for.
-void click_arm_auto_song(V02State& fx, const AppState& app_state) {
+void click_arm_auto_song(UiState& fx, const AppState& app_state) {
   fx.auto_song = true;
   fx.active_scene_start_bar = app_state.bar();
   fx.auto_song_last_bar = app_state.bar();
@@ -128,7 +128,7 @@ void test_auto_song_advances_scene_after_section_elapses() {
   PartsModel parts;
   SpyBrainSession brain;
   AppState app_state;
-  V02State fx;
+  UiState fx;
 
   // SECOND source-of-truth transition (task #6, see grid_panel.cpp's update_
   // auto_song header comment for the full rationale): GridModel::scene_bars
@@ -235,7 +235,7 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   PartsModel parts;
   SpyBrainSession brain;
   AppState app_state;
-  V02State fx;
+  UiState fx;
 
   // NOTE (task #6 SECOND source-of-truth transition): these set_scene_bars
   // calls are load-bearing AGAIN -- task #6's always-visible length stepper
@@ -328,7 +328,7 @@ void test_scene_bars_governs_advance_cadence() {
   PartsModel parts;
   SpyBrainSession brain;
   AppState app_state;
-  V02State fx;
+  UiState fx;
 
   // 0 == "basic" (kBuiltinStyleNames[0]) -- kept for this test's own
   // traceability, no longer load-bearing for the threshold (see this
@@ -391,8 +391,8 @@ void test_scene_bars_governs_advance_cadence() {
 // they prove the ADVANCE logic but NEVER the real user path -- where nothing
 // armed auto-song and pressing Play advanced nothing (the near-invisible
 // header toggle was the only thing that ever set it, and master Play never
-// touched it). auto_song now DEFAULTS ON (v02_state.hpp, owner decision
-// 2026-07-17). This test constructs a fresh V02State (the real startup
+// touched it). auto_song now DEFAULTS ON (ui_state.hpp, owner decision
+// 2026-07-17). This test constructs a fresh UiState (the real startup
 // state), NEVER toggles it, and drives everything through render_grid_panel
 // (which runs both handle_master_play_launch and update_auto_song) -- so the
 // scene must advance on its own with zero direct fx poking, exactly the path
@@ -410,10 +410,10 @@ void test_auto_song_armed_by_default_advances_without_manual_toggle() {
   PartsModel parts;
   SpyBrainSession brain;
   AppState app_state;
-  V02State fx;
+  UiState fx;
 
   // The whole point: NEVER call click_arm_auto_song. A default-constructed
-  // V02State is exactly what the app boots with.
+  // UiState is exactly what the app boots with.
   CHECK(fx.auto_song);  // pins the owner default-ON decision itself
   CHECK(fx.active_scene == 0);
 

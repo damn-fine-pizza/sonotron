@@ -26,10 +26,10 @@
 // Scenario driven through REAL mouse clicks on the REAL transport pad
 // buttons (imgui_headless_harness.hpp), a REAL InProcessBrainSession, and a
 // REAL render_grid_panel/render_transport_panel loop -- never a hand-written
-// V02State field standing in for a click, EXCEPT the two documented gaps this
+// UiState field standing in for a click, EXCEPT the two documented gaps this
 // whole test suite already lives with (no click-injection seam yet for the
 // auto-song header's own ImGui::SmallButton, alpha-0-at-rest background):
-//   1. auto_song ON (now the shipped DEFAULT, v02_state.hpp), Play, and let
+//   1. auto_song ON (now the shipped DEFAULT, ui_state.hpp), Play, and let
 //      the REAL auto-song advance move the song mid-way to a non-zero scene
 //      column (exactly test_grid_panel_auto_song_stop_restart_ui_
 //      automation.cpp's own round 1, reused verbatim here).
@@ -52,7 +52,7 @@
 // a corroborating (not primary) signal.
 //
 // SCOPE DECISION, ENCODED AS A SECOND TEST BELOW: the rewind-to-first-scene
-// behavior must be auto_song-ON only. With auto_song OFF, `v02_state.hpp`'s
+// behavior must be auto_song-ON only. With auto_song OFF, `ui_state.hpp`'s
 // own comment calls this "a deliberate fixed single-scene loop" -- the active
 // scene there is the user's own explicit manual selection (a scene-header
 // click), not stale auto-song bookkeeping, and Play re-launching that exact
@@ -77,7 +77,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -95,7 +95,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -104,7 +104,7 @@ namespace {
 // directory shares (see test_grid_panel_auto_song_stop_restart_ui_
 // automation.cpp's own copy for the "why explicit size" note).
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -119,7 +119,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -129,7 +129,7 @@ ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsM
 // Mimics the auto-song header button click's own field mutation -- verbatim
 // copy of the sibling stop/restart test's own helper (documented gap: no
 // click-injection seam for an alpha-0-at-rest ImGui::SmallButton).
-void click_arm_auto_song(V02State& fx, const AppState& app_state) {
+void click_arm_auto_song(UiState& fx, const AppState& app_state) {
   fx.auto_song = true;
   fx.active_scene_start_bar = app_state.bar();
   fx.auto_song_last_bar = app_state.bar();
@@ -155,7 +155,7 @@ struct MidSongFixture {
 
 MidSongFixture drive_to_mid_song(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
                                  InProcessBrainSession& session, AppState& app_state,
-                                 V02State& fx) {
+                                 UiState& fx) {
   CHECK(session.start());
   session.send("style load basic");
   for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
@@ -220,7 +220,7 @@ void test_master_play_restart_rewinds_to_first_scene_when_auto_song_on() {
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
 
@@ -327,7 +327,7 @@ void test_master_play_restart_rewinds_to_first_scene_when_auto_song_on() {
 // -----------------------------------------------------------------------
 // TEST 2 (scope lock, GREEN both before and after the fix): auto_song OFF.
 // The active scene is the user's own explicit manual choice (a deliberate
-// single-scene loop, v02_state.hpp's own comment) -- master Play must keep
+// single-scene loop, ui_state.hpp's own comment) -- master Play must keep
 // re-launching THAT scene, never rewind to scene 0. This nails down the
 // boundary so a fix for TEST 1's bug does not silently regress into rewinding
 // UNCONDITIONALLY (ignoring auto_song) -- Nazzareno's actual fix (see the
@@ -345,7 +345,7 @@ void test_master_play_restart_preserves_selected_scene_when_auto_song_off() {
   GridModel model(5);
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
 

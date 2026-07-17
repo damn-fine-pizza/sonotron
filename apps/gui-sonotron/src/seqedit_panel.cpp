@@ -82,11 +82,11 @@ void render_role_toggle_sidebar(SeqEditModel& model) {
 
 }  // namespace
 
-void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
+void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   const bool open = fx.open_cell >= 0;
   const ImVec4 track_color =
-      (fx.open_row >= 0 && fx.open_row < static_cast<int>(theme::kV02TrackColor.size()))
-          ? theme::kV02TrackColor[fx.open_row]
+      (fx.open_row >= 0 && fx.open_row < static_cast<int>(theme::kTrackColor.size()))
+          ? theme::kTrackColor[fx.open_row]
           : theme::kCyan;
 
   // Real content (repeat-zone-real-contract.md "cell preview made real"):

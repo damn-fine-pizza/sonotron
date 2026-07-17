@@ -121,7 +121,7 @@ void AppState::apply(const BrainEvent& ev) {
       // Real per-cell readback (repeat-zone-real-contract.md §3): the ONLY
       // consumer of this event was a log line before this fix -- grid_panel.cpp
       // now reads playing/armed/queued-stop state off this map instead of a
-      // local click-time echo (V02State's former row_playing).
+      // local click-time echo (UiState's former row_playing).
       m_clip_states[ev.clip_id] = parse_clip_launch_state(ev.clip_state);
       break;
     case BrainEvent::Kind::kTimeSig:

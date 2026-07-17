@@ -29,7 +29,7 @@
 // the pre-existing Play/Stop/Panic three (see this file's own header comment
 // in transport_panel.hpp). What HAS already landed in the tree (uncommitted,
 // alongside this test) is the OTHER half of the contract this test also
-// pins: `V02State::ending_cued` (v02_state.hpp) and grid_panel.cpp's
+// pins: `UiState::ending_cued` (ui_state.hpp) and grid_panel.cpp's
 // update_auto_song suppression guard (`if (fx.ending_cued) { return; }`),
 // both carrying a header comment that already documents EXACTLY what the
 // button is expected to do: "set the instant the button sends `style section
@@ -56,9 +56,9 @@
 // Real-vs-stubbed tag (flow-verification-matrix-2026-07.md §1 convention):
 // `_ui_automation` == real click injection + real InProcessBrainSession +
 // real rendered-output/engine readback, never a hand-written send() or a
-// V02State field standing in for a click -- EXCEPT auto_song's own arming,
-// which needs no click at all here: V02State::auto_song now defaults to true
-// (owner decision 2026-07-17, v02_state.hpp), so "auto_song ON" is simply
+// UiState field standing in for a click -- EXCEPT auto_song's own arming,
+// which needs no click at all here: UiState::auto_song now defaults to true
+// (owner decision 2026-07-17, ui_state.hpp), so "auto_song ON" is simply
 // the fixture's starting state, not a gap.
 
 #include "imgui.h"
@@ -74,7 +74,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -92,7 +92,7 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
@@ -100,7 +100,7 @@ namespace {
 // Same combined transport+grid frame shape every UI-automation test in this
 // directory shares.
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -115,7 +115,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -143,7 +143,7 @@ struct Fixture {
 };
 
 Fixture setup_and_play(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                       InProcessBrainSession& session, AppState& app_state, V02State& fx) {
+                       InProcessBrainSession& session, AppState& app_state, UiState& fx) {
   CHECK(session.start());
   session.send("style load basic");
   for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
@@ -209,7 +209,7 @@ void test_ending_button_cues_ending_then_engine_stops_transport_without_autosong
   GridModel model(5);  // same scene count main.cpp actually boots with
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
 
@@ -380,7 +380,7 @@ void test_stop_button_still_does_immediate_cold_stop() {
   GridModel model(5);
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
   InProcessBrainSession session;
 

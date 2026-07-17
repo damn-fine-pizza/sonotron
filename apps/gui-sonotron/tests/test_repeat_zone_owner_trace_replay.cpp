@@ -54,7 +54,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -74,13 +74,13 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
 
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -94,7 +94,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -143,7 +143,7 @@ void test_no_playhead_under_owner_recorded_session_traffic() {
   GridModel model(5);
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   InProcessBrainSession session;
@@ -172,12 +172,12 @@ void test_no_playhead_under_owner_recorded_session_traffic() {
   const ImU32 play_color = sonotron::neon::u32(sonotron::theme::kCyan, 0.9F);
   const th::Rect play_rect = th::find_single_color_rect(locate, play_color);
   CHECK(play_rect.found);
-  // theme::kV02TrackColor reuses kCyan for both row 0 (drums) and row 4
+  // theme::kTrackColor reuses kCyan for both row 0 (drums) and row 4
   // (arp) -- harmless, since find_color_clusters preserves DRAW ORDER and
   // drums cells are always drawn before arp's, so clusters[0] is always
   // drums/scene 0 (see test_repeat_zone_playhead_ui_automation.cpp's own
   // comment on this).
-  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kV02TrackColor[0], 0.10F);
+  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.10F);
   const std::vector<th::Rect> drums_cells = th::find_color_clusters(locate, drums_not_playing);
   CHECK(!drums_cells.empty());
   if (drums_cells.empty()) {

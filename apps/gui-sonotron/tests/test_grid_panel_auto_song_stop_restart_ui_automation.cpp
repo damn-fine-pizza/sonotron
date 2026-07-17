@@ -13,7 +13,7 @@
 // rather than hand-written `session.send("transport start")` calls, closing
 // the residual click-injection gap the EXISTING real-backend test's own
 // header comment leaves open ("press Play" there is still a literal send()
-// call, not a click). The auto-song ARM itself stays a direct V02State field
+// call, not a click). The auto-song ARM itself stays a direct UiState field
 // write (`click_arm_auto_song`, copied verbatim from the sibling test) --
 // there is still no click-injection seam for the auto-song header's
 // ImGui::SmallButton (alpha-0-at-rest background, imgui_headless_harness.
@@ -39,7 +39,7 @@
 #include "src/seqedit_model.hpp"
 #include "src/theme.hpp"
 #include "src/transport_panel.hpp"
-#include "src/v02_state.hpp"
+#include "src/ui_state.hpp"
 
 #include "imgui_headless_harness.hpp"
 #include "test.hpp"
@@ -58,13 +58,13 @@ using sonotron::GridModel;
 using sonotron::InProcessBrainSession;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
-using sonotron::V02State;
+using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
 namespace {
 
 ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                             BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                             BrainSession& brain_session, AppState& app_state, UiState& fx) {
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
@@ -85,7 +85,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 }
 
 ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
-                     BrainSession& brain_session, AppState& app_state, V02State& fx) {
+                     BrainSession& brain_session, AppState& app_state, UiState& fx) {
   th::queue_mouse_down(pos);
   render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
   th::queue_mouse_up(pos);
@@ -97,7 +97,7 @@ ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsM
 // block) -- verbatim copy of test_grid_panel_auto_song_real_backend.cpp's
 // own click_arm_auto_song: there is still no click-injection seam for an
 // ImGui::SmallButton with an alpha-0-at-rest background in this codebase.
-void click_arm_auto_song(V02State& fx, const AppState& app_state) {
+void click_arm_auto_song(UiState& fx, const AppState& app_state) {
   fx.auto_song = true;
   fx.active_scene_start_bar = app_state.bar();
   fx.auto_song_last_bar = app_state.bar();
@@ -124,7 +124,7 @@ void test_auto_song_advances_again_after_a_real_stop_restart_cycle() {
   model.set_scene_bars(1, 1);  // scene 1's own length: 1 bar, so the SECOND advance is fast too
   SeqEditModel seqedit;
   PartsModel parts;
-  V02State fx;
+  UiState fx;
   AppState app_state;
 
   InProcessBrainSession session;
