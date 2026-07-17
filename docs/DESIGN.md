@@ -1139,7 +1139,21 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   for that one library only — every other GUI library (`gui_sonotron_models`/`brain`/
   `layout`/`screenshot`) stays core-free — see the D38 record below. The core ABI
   itself is UNCHANGED by this: `abi.hpp` stays FROZEN v1, `sizeof(OutEvent)==16`,
-  `test_abi_frozen` intact.**)
+  `test_abi_frozen` intact.**) **Pointer (not a new node — no canonical number
+  assigned, same discipline as the "Clip/launch primitive"/"Fuzzing harness"
+  placeholders above): a UI-animation/motion program for `apps/gui-sonotron/`
+  is PLANNED (owner-authored, 2026-07-17) in
+  `docs/proposals/ui-animation-roadmap.md`, phased Step 1 Foundation
+  (`motion.hpp/.cpp`, beat/bar-driven `MotionFrame`) → Step 2 Hero (Repeat Zone
+  lifecycle, Sequence Edit playhead) → Step 3 Polish (Transport/Intention/
+  Browser/Parts) → Step 4 Real data (gated on new core/audio/GPU data not yet
+  built). It acts on the same P1 finding as the earlier
+  `docs/proposals/ui-motion-extreme-2026-07.md` audit (no motion is
+  beat-synchronised) — see that proposal's own reconciliation note for how the
+  two relate. STATUS: not yet started. Whether this becomes a new `116xx`
+  sub-node or stays folded into `11600` itself is a node-numbering/
+  prioritization call left to the owner or `verdi-roadmap-strategist`, not
+  decided here.**
 
 - **11700 GUI freeze line — pivot from core-feature work to the host GUI**
   (owner-decided). STATUS: ✅ CROSSED (2026-07-06). The pre-GUI batch `11710` is all ✅
