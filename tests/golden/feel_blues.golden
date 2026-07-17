@@ -29,9 +29,11 @@
 {"ev":"beat","bar":1,"beat":1,"pulse":16,"@":640}
 {"ev":"beat","bar":1,"beat":1,"pulse":17,"@":680}
 {"ev":"beat","bar":1,"beat":1,"pulse":18,"@":720}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":36,"vel":70,"@":728}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":51,"vel":64,"@":740}
 {"ev":"beat","bar":1,"beat":1,"pulse":19,"@":760}
 {"ev":"beat","bar":1,"beat":1,"pulse":20,"@":800}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":36,"vel":64,"@":828}
 {"ev":"beat","bar":1,"beat":1,"pulse":21,"@":840}
 {"ev":"beat","bar":1,"beat":1,"pulse":22,"@":880}
 {"ev":"beat","bar":1,"beat":1,"pulse":23,"@":920}
@@ -88,8 +90,10 @@
 {"ev":"beat","bar":1,"beat":3,"pulse":14,"@":2480}
 {"ev":"beat","bar":1,"beat":3,"pulse":15,"@":2520}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":51,"vel":56,"@":2537}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":36,"vel":70,"@":2537}
 {"ev":"beat","bar":1,"beat":3,"pulse":16,"@":2560}
 {"ev":"beat","bar":1,"beat":3,"pulse":17,"@":2600}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":36,"vel":64,"@":2637}
 {"ev":"beat","bar":1,"beat":3,"pulse":18,"@":2640}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":51,"vel":64,"@":2657}
 {"ev":"beat","bar":1,"beat":3,"pulse":19,"@":2680}

@@ -41,6 +41,23 @@ inline constexpr StyleEvent kChord2Off[] = {
     {.step=2, .tone=kRoot, .octave=0, .vel=74, .gate=kGateStab}, {.step=2, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=6, .tone=kRoot, .octave=0, .vel=70, .gate=kGateStab}, {.step=6, .tone=kFifth, .octave=0, .vel=70, .gate=kGateStab},
     {.step=10, .tone=kRoot, .octave=0, .vel=74, .gate=kGateStab}, {.step=10, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=14, .tone=kRoot, .octave=0, .vel=70, .gate=kGateStab}, {.step=14, .tone=kFifth, .octave=0, .vel=70, .gate=kGateStab},
 };
+// Wave-2.5 (rock.hpp motif-engine bug fix, owner-approved): VarA-ONLY dedicated
+// 2-bar Chord2 array. kChord2Off above stays motif-locked (kSharedChord2Motif,
+// shared with VarB/VarD) and its motif-generated events never carry step>=16
+// (motif.hpp caps a generated span at kMaxMotifLen=16), which is exactly why
+// VarA's Chord2 used to go silent in bar 2 -- flagged, not fixed, in the
+// style-depth Wave-2 C pass (see the comment on kVarAPatterns' Chord2 entry
+// below). The fix follows the SAME convention VarA's own drums/bass/chord1
+// already use: a fully-authored, non-motif 2-bar array (bar 1 identical to
+// kChord2Off, bar 2 a mirrored answer with a fuller turnaround on the last
+// hit), wired ONLY into kVarAPatterns -- VarB/VarD keep using kChord2Off with
+// kSharedChord2Motif, untouched.
+inline constexpr StyleEvent kChord2OffVarA[] = {
+    {.step=2, .tone=kRoot, .octave=0, .vel=74, .gate=kGateStab}, {.step=2, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=6, .tone=kRoot, .octave=0, .vel=70, .gate=kGateStab}, {.step=6, .tone=kFifth, .octave=0, .vel=70, .gate=kGateStab},
+    {.step=10, .tone=kRoot, .octave=0, .vel=74, .gate=kGateStab}, {.step=10, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=14, .tone=kRoot, .octave=0, .vel=70, .gate=kGateStab}, {.step=14, .tone=kFifth, .octave=0, .vel=70, .gate=kGateStab},
+    {.step=18, .tone=kRoot, .octave=0, .vel=74, .gate=kGateStab}, {.step=18, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=22, .tone=kRoot, .octave=0, .vel=70, .gate=kGateStab}, {.step=22, .tone=kFifth, .octave=0, .vel=70, .gate=kGateStab},
+    {.step=26, .tone=kRoot, .octave=0, .vel=74, .gate=kGateStab}, {.step=26, .tone=kFifth, .octave=0, .vel=74, .gate=kGateStab}, {.step=30, .tone=kRoot, .octave=0, .vel=76, .gate=kGateStab}, {.step=30, .tone=kSeventh, .octave=0, .vel=76, .gate=kGateStab},
+};
 // Organ sustained under the half-time stomp (varC).
 inline constexpr StyleEvent kChord2HalfBar[] = {
     {.step=0, .tone=kThird, .octave=0, .vel=68, .gate=kGateHalfBar}, {.step=0, .tone=kSeventh, .octave=0, .vel=64, .gate=kGateHalfBar},
@@ -137,14 +154,15 @@ inline constexpr StylePattern kVarAPatterns[] = {
     {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarABass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kVarAChord)},
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice, .voicing=VoicingPolicy::kLead},
-    // Chord2 stays motif-driven and UNCHANGED here (style-depth Wave-2 C,
-    // deliberate): kChord2Off is also motif-referenced from VarB/VarD, so it
-    // is off-limits to step>=16 additions (motif engine hazard guardrail —
-    // from_span/retrograde/displacement assume a 16-slot bar). A side effect:
-    // motif-generated events never carry step>=16 (motif.hpp), so Chord2 will
-    // sound in bar 1 of this now-2-bar VarA and go quiet in bar 2 — flagged,
-    // not fixed; an engine change, not a data change, would be needed to close it.
-    {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2Off), .gm_program=kChord2Voice, .motif=&kSharedChord2Motif},
+    // Wave-2.5 bug fix: Chord2 used to stay motif-driven off kChord2Off here,
+    // which -- being shared with VarB/VarD via kSharedChord2Motif -- can never
+    // carry a motif-generated event past step 15 (motif.hpp caps a generated
+    // span at kMaxMotifLen=16), so Chord2 went silent in bar 2 of this now-2-bar
+    // VarA. Fixed with a dedicated, fully-authored, non-motif 2-bar array
+    // (kChord2OffVarA, defined above) -- the same convention VarA's own
+    // drums/bass/chord1 already use. VarB/VarD are untouched and keep reading
+    // kChord2Off through kSharedChord2Motif.
+    {.role=TrackRole::kChord2, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kChord2OffVarA), .gm_program=kChord2Voice},
 };
 
 // VarB stays 1 bar (style-depth Wave-2 C): the crash-on-downbeat entrance and
