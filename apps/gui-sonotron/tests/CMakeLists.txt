@@ -135,6 +135,49 @@ endfunction()
 
 gui_sonotron_preview_test(test_preview unit)
 
+# ---------------------------------------------------------------------------
+# PREVIEW ORACLE (Torquato QA pass, owner task #4: debug/oracle tooling for
+# the class of bug where the Sequence-Edit/cell preview disagrees with what
+# the engine actually plays). preview_oracle.cpp calls the REAL arrangrr
+# kernel functions (Style::find/Arranger::resolve/motif::apply_repeat) plus a
+# REAL InProcessBrainSession capture -- see preview_oracle.hpp's own header
+# comment for the full two-halves design. Links arrangrr directly (ground
+# truth) and gui_sonotron_engine (the real-capture half, InProcessBrainSession
+# + BrainEvent).
+add_library(gui_sonotron_preview_oracle STATIC preview_oracle.cpp)
+target_link_libraries(gui_sonotron_preview_oracle PUBLIC arrangrr gui_sonotron_engine)
+target_compile_options(gui_sonotron_preview_oracle PRIVATE -Wall -Wextra -Werror)
+
+# RED tests pinning preview::preview_for()'s three confirmed fidelity gaps
+# against the oracle above -- link gui_sonotron_preview (the code under test)
+# + gui_sonotron_preview_oracle (the ground truth) + gui_sonotron_brain (the
+# BrainEvent/BrainSession types the oracle's real-capture half returns).
+function(gui_sonotron_preview_oracle_test name category)
+  add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE gui_sonotron_preview gui_sonotron_preview_oracle
+    gui_sonotron_brain)
+  target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS ${category})
+endfunction()
+
+# Oracle-backed acceptance test for all three of preview_for()'s originally-
+# confirmed fidelity gaps (owner task #4): multi-bar truncation (bug #1,
+# basic/kVarA/kBass), the placeholder-harmony divergence (bug #3, rock/kVarA/
+# kBass vs the style's own real default progression), and the motif-repeat
+# approximation (bug #2, both the underlying motif-kernel ground truth on
+# basic/kVarD/kChord1 and its actual reachability on pop/kVarA/kChord2, a
+# genuinely two-bar motif-driven pattern). Originally authored RED-before-
+# green against the pre-fix preview_for(); Nazzareno's SLICE 1 (multi-bar
+# window + per-bar real progression harmony + repeat=bar motif approximation)
+# has since landed, so this is now the GREEN acceptance gate for that fix --
+# see the test file's own header comment for the full design and the one
+# honestly-documented caveat (pop's chord2 role goes silent in bar 2 at REAL
+# playback, an engine-level motif-kernel constraint unrelated to preview; the
+# preview's own approximation there is deliberate and owner-approved, not a
+# residual bug). Kept as a standing regression test, not deleted.
+gui_sonotron_preview_oracle_test(test_preview_multibar_truncation_red functional)
+
 # Repeat-Zone auto-song functional/integration test (Torquato QA pass, red-
 # before-green bug repro): drives the REAL render_grid_panel entry point
 # (grid_panel.hpp) inside a headless ImGui context (no GPU, no window, no
@@ -302,4 +345,40 @@ target_compile_options(test_grid_panel_auto_song_stop_restart_ui_automation PRIV
 add_test(NAME test_grid_panel_auto_song_stop_restart_ui_automation
   COMMAND test_grid_panel_auto_song_stop_restart_ui_automation)
 set_tests_properties(test_grid_panel_auto_song_stop_restart_ui_automation PROPERTIES
+  LABELS functional)
+
+# Roadmap task #36 FIX PIN (Torquato QA pass, owner-observed LIVE bug):
+# master Play pressed a second time (real Stop then real Play again) while
+# the song sits mid-way must restart from scene 0, not re-launch the stale
+# active_scene. Authored RED-first against the pre-fix tree; Nazzareno's fix
+# (grid_panel.cpp, gated on fx.auto_song) landed concurrently while this test
+# was being written -- both tests in this file are now the GREEN standing
+# regression proof (root cause, RED trail, and the auto_song-OFF scope-lock
+# companion test are all in this file's own header comment).
+add_executable(test_grid_panel_master_play_restart_rewind_ui_automation
+  test_grid_panel_master_play_restart_rewind_ui_automation.cpp)
+target_link_libraries(test_grid_panel_master_play_restart_rewind_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_panel_master_play_restart_rewind_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_grid_panel_master_play_restart_rewind_ui_automation
+  COMMAND test_grid_panel_master_play_restart_rewind_ui_automation)
+set_tests_properties(test_grid_panel_master_play_restart_rewind_ui_automation PROPERTIES
+  LABELS functional)
+
+# Roadmap task #37 ACCEPTANCE TEST (Torquato QA pass, docs/proposals/song-
+# form-option-a-wiring-plan.md §3/§4): a dedicated ENDING transport button.
+# RED-first, per this file's own header comment -- the button does not exist
+# in transport_panel.cpp yet at authoring time (Nazzareno implementing it in
+# parallel, in the same shared tree); this suite's own locate step is the RED
+# pin until his code lands.
+add_executable(test_transport_ending_button_ui_automation
+  test_transport_ending_button_ui_automation.cpp)
+target_link_libraries(test_transport_ending_button_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_transport_ending_button_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_transport_ending_button_ui_automation
+  COMMAND test_transport_ending_button_ui_automation)
+set_tests_properties(test_transport_ending_button_ui_automation PROPERTIES
   LABELS functional)

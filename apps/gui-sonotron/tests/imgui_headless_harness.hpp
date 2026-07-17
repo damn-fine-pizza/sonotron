@@ -215,6 +215,84 @@ inline Rect find_child_window_rect(const char* child_str_id) {
   return r;
 }
 
+// Per-channel Manhattan distance between two packed RGBA colors -- used by
+// find_rect_in_region_excluding_colors below to treat anti-aliased fringe
+// vertices (a blend of mostly-background with a sliver of some neighboring
+// widget's own edge, e.g. a rounded rect's stroke feather) as "close enough
+// to background to ignore", rather than an EXACT-match filter (which a
+// single AA-blended pixel a few percent off the reference color trivially
+// defeats -- confirmed empirically while writing this helper: an exact-match
+// version of this scan falsely "found" a plausible-looking rect in an
+// otherwise-EMPTY probe region, made entirely of fringe pixels bleeding in
+// from the two real widgets bordering that empty gap).
+inline int color_channel_distance(ImU32 a, ImU32 b) {
+  const auto da = reinterpret_cast<const unsigned char*>(&a);
+  const auto db = reinterpret_cast<const unsigned char*>(&b);
+  int total = 0;
+  for (int i = 0; i < 4; ++i) {
+    total += std::abs(static_cast<int>(da[i]) - static_cast<int>(db[i]));
+  }
+  return total;
+}
+
+// Finds the bounding box of every vertex whose position falls inside
+// `region` (1px slack) AND whose packed color is NOT within `tolerance`
+// (summed per-channel distance, see color_channel_distance above) of any
+// color in `exclude_colors` -- the mirror image of find_single_color_rect
+// (known color, unknown region): this is for locating a widget of an
+// UNKNOWN color within a KNOWN screen region, e.g. a not-yet-implemented pad
+// button whose accent has not been fixed at test-authoring time (a RED-first
+// acceptance test written before the product code lands). The caller
+// narrows `region` to wherever the new widget is EXPECTED to land (e.g. the
+// gap between two already-locatable sibling widgets) and supplies that
+// region's own known background/neighbor color(s) (e.g.
+// ImGui::GetColorU32(ImGuiCol_WindowBg)) to exclude -- anything else painted
+// there is the new widget. Returns found=false if nothing but
+// background/AA-fringe was painted in `region` (the widget does not exist in
+// the tree yet). `min_matching_vertices` additionally requires at least that
+// many non-excluded vertices before reporting found=true, so a couple of
+// stray fringe pixels that dodge the tolerance band still cannot masquerade
+// as a real, solidly-filled widget.
+inline Rect find_rect_in_region_excluding_colors(const ImDrawData* draw_data, const Rect& region,
+                                                 const std::vector<ImU32>& exclude_colors,
+                                                 int tolerance = 40, int min_matching_vertices = 8) {
+  Rect r;
+  int matching = 0;
+  for (int i = 0; i < draw_data->CmdListsCount; ++i) {
+    const ImDrawList* dl = draw_data->CmdLists[i];
+    for (const ImDrawVert& v : dl->VtxBuffer) {
+      if (v.pos.x < region.min.x - 1.0F || v.pos.x > region.max.x + 1.0F ||
+          v.pos.y < region.min.y - 1.0F || v.pos.y > region.max.y + 1.0F) {
+        continue;
+      }
+      bool excluded = false;
+      for (const ImU32 c : exclude_colors) {
+        if (color_channel_distance(v.col, c) <= tolerance) {
+          excluded = true;
+          break;
+        }
+      }
+      if (excluded) {
+        continue;
+      }
+      ++matching;
+      if (!r.found) {
+        r.min = r.max = v.pos;
+        r.found = true;
+      } else {
+        r.min.x = std::min(r.min.x, v.pos.x);
+        r.min.y = std::min(r.min.y, v.pos.y);
+        r.max.x = std::max(r.max.x, v.pos.x);
+        r.max.y = std::max(r.max.y, v.pos.y);
+      }
+    }
+  }
+  if (matching < min_matching_vertices) {
+    return Rect{};
+  }
+  return r;
+}
+
 // ---------------------------------------------------------------------------
 // Rendered-output assertions.
 

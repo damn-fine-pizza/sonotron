@@ -1,7 +1,9 @@
-// UI-AUTOMATION RED PIN (Torquato QA pass, owner bug #2): "Scene cell
+// UI-AUTOMATION PIN (originally Torquato QA pass, owner bug #2: "Scene cell
 // preview is wrong: the launch-cell mini-preview does not match the
 // Sequence Edit canvas (which the owner confirms is correct) for the same
-// clip."
+// clip." -- the original column-crop root cause below was fixed in dff4e9e;
+// this pin now also covers owner bug #3, the one-bar TRUNCATION both panels
+// used to share: neither view drew a multi-bar section's bar 2 at all).
 //
 // Drives the REAL render_grid_panel AND the REAL render_seqedit_panel
 // entry points (grid_panel.cpp / seqedit_panel.cpp) inside one headless
@@ -12,17 +14,17 @@
 // note-bar quads did each panel actually paint. No AppState/V02State field
 // is compared -- only what ImGui really drew.
 //
-// Root-cause fixture, already independently proven by test_preview.cpp's
-// own test_known_value_fixed_role_drums(): style "basic", section kVarA,
-// role_index 0 (drums) resolves to a REAL note (GM closed hi-hat, pitch 42)
-// at steps {0,2,4,6,8,10,12,14} -- HALF of those steps (8,10,12,14) are
-// past ClipPattern::kCellSteps (8), the column count grid_panel.cpp's own
-// neon::clip_preview_pianoroll hard-crops the mini-preview to (neon_widgets.
-// hpp:44, neon_widgets.cpp:336). seqedit_panel.cpp's own canvas loop has no
-// such crop -- it iterates the full ClipPattern::kSteps (16, seqedit_panel.
-// cpp:130) -- so for this (and any other) clip with real content past step
-// 8, the two views are structurally guaranteed to diverge: the mini-preview
-// can only ever show at most 4 of this clip's 8 real notes.
+// Fixture, already independently proven by test_preview.cpp's own
+// test_known_value_fixed_role_drums(): style "basic", section kVarA (a
+// 2-bar section, Wave-1 style-depth), role_index 0 (drums) resolves to a
+// REAL note (GM closed hi-hat, pitch 42, opening to pitch 46 on the bar-2
+// turnaround) at steps {0,2,4,6,8,10,12,14} in bar 1 AND {16,18,20,22,24,
+// 26,28,30} in bar 2 -- 16 real notes total across the full 2-bar window.
+// Both the grid mini-preview crop (fixed, dff4e9e) and the one-bar
+// truncation (fixed alongside this task) used to make grid_panel.cpp and
+// seqedit_panel.cpp structurally diverge from each other and from the real
+// content; this pin now asserts BOTH views paint every real note, in every
+// bar, and agree with each other.
 //
 // grid_panel.cpp's own seed_demo() already seeds exactly this fixture on
 // boot with zero custom setup: row 0 (drums, kRows[0].role_index == 0),
@@ -110,7 +112,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
   return ImGui::GetDrawData();
 }
 
-void test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit() {
+void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
   unsigned char* tex_pixels = nullptr;
@@ -148,14 +150,19 @@ void test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit() {
       sonotron::preview::preview_for(fx.active_style, sonotron::preview::Section::kVarA,
                                      /*role_index=*/0);
   CHECK(pp.approx ==
-        false);  // kFixed drums role: literal, not resolved against a placeholder chord
+        false);         // kFixed drums role: literal, not resolved against a placeholder chord
+  CHECK(pp.bars == 2);  // basic::kVarA is a 2-bar section (Wave-1 style-depth)
   // Column occupancy (a STEP counts once if ANY voice slot is real content),
   // matching count_occupied_columns_in_band()'s own per-column counting
-  // below -- steps 0,4,8,12 actually carry TWO simultaneous voices each
-  // (kick/snare + hat, owner bug #13), but they still paint as ONE occupied
-  // column each, same as the hat-only steps 2,6,10,14.
+  // below -- steps 0,4,8,12,16,20,24,28 actually carry TWO simultaneous
+  // voices each (kick/snare + hat, owner bug #13), but they still paint as
+  // ONE occupied column each, same as the hat-only steps. Scanned across
+  // BOTH bars (owner bug #2/#3: previewing only bar 1 used to silently drop
+  // bar 2's real content) -- `total_steps` bounds the scan to exactly the
+  // bars this section actually has, never a hardcoded one-bar window.
+  const int total_steps = pp.bars * sonotron::preview::kSteps;
   int real_note_count = 0;
-  for (int step = 0; step < sonotron::preview::kSteps; ++step) {
+  for (int step = 0; step < total_steps; ++step) {
     bool step_has_content = false;
     for (int v = 0; v < sonotron::preview::kMaxVoicesPerStep; ++v) {
       if (pp.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] >= 0) {
@@ -167,11 +174,14 @@ void test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit() {
       ++real_note_count;
     }
   }
-  // 8 real notes (steps 0,2,4,6,8,10,12,14), independently pinned by
-  // test_preview.cpp's own test_known_value_fixed_role_drums(). If this
-  // ever fails, the fixture itself changed (e.g. a Wave-1 style edit) and
-  // this test's own root-cause reasoning needs re-deriving, not silencing.
-  CHECK(real_note_count == 8);
+  // 16 real notes: bar 1's steps 0,2,4,6,8,10,12,14 (8) PLUS bar 2's steps
+  // 16,18,20,22,24,26,28,30 (8, the same backbeat groove repeated verbatim,
+  // the hat only turning to an open hit on the last one) -- independently
+  // pinned by test_preview.cpp's own test_known_value_fixed_role_drums(). If
+  // this ever fails, the fixture itself changed (e.g. a Wave-1 style edit)
+  // and this test's own root-cause reasoning needs re-deriving, not
+  // silencing.
+  CHECK(real_note_count == 16);
 
   // Locate the drums/scene-1 cell ("B") for real: row 0's fill color at
   // rest (grid_panel.cpp's draw_cell, non-hovered/non-playing fill_a ==
@@ -236,33 +246,38 @@ void test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit() {
   // per-step loop both call `neon::u32(track_color, 0.85F)`) -- only the
   // two panels' own disjoint screen regions (grid_band vs canvas_rect,
   // discovered above, never overlapping) distinguish which one painted
-  // which bar.
+  // which bar. Both bands are sampled at a divisor SCALED by `pp.bars`
+  // (owner bug #2/#3: the fixed-resolution one-bar divisors used to
+  // silently discard bar 2's real content from this comparison, the same
+  // truncation the product code itself used to have) -- the grid mini-cell
+  // keeps its own coarser sampling relative to the canvas (kCellSteps :
+  // kSteps == 1:2, unchanged), just scaled by the section's real bar count.
   const ImU32 note_color = sonotron::neon::u32(sonotron::theme::kV02TrackColor[0], 0.85F);
   const int grid_notes_shown = th::count_occupied_columns_in_band(
-      final_draw_data, note_color, grid_band, sonotron::neon::ClipPattern::kCellSteps);
-  const int seqedit_notes_shown = canvas_rect.found ? th::count_occupied_columns_in_band(
-                                                          final_draw_data, note_color, canvas_rect,
-                                                          sonotron::neon::ClipPattern::kSteps)
-                                                    : -1;
+      final_draw_data, note_color, grid_band, pp.bars * sonotron::neon::ClipPattern::kCellSteps);
+  const int seqedit_notes_shown =
+      canvas_rect.found
+          ? th::count_occupied_columns_in_band(final_draw_data, note_color, canvas_rect,
+                                               pp.bars * sonotron::neon::ClipPattern::kSteps)
+          : -1;
 
   // Diagnostic (not an assertion): the actual rendered note-bar counts, so a
-  // test-log reader sees the concrete divergence (4 vs 8) without having to
+  // test-log reader sees the concrete divergence (if any) without having to
   // re-derive it from the CHECK line below.
   std::printf("grid_notes_shown=%d seqedit_notes_shown=%d\n", grid_notes_shown,
               seqedit_notes_shown);
 
-  // Sanity (should PASS): Sequence Edit, the view the owner confirms is
-  // correct, really does paint all 8 real notes for this clip.
-  CHECK(seqedit_notes_shown == 8);
+  // Sanity (should PASS): Sequence Edit really does paint every real note of
+  // this clip, across BOTH bars (owner bug #2/#3 fix), not just bar 1.
+  CHECK(seqedit_notes_shown == real_note_count);
 
-  // THE RENDERED-OUTPUT PIN (RED, owner symptom): the SAME clip's launch-
-  // cell mini-preview must show the SAME note content Sequence Edit shows
-  // -- that is the whole premise of grid_panel.cpp's own render_track_cell
-  // comment ("the SAME preview_for(...) the opened cell's Sequence Edit
-  // canvas uses"). It does not: neon::clip_preview_pianoroll structurally
-  // never visits steps 8..15 (ClipPattern::kCellSteps == 8), so it can only
-  // ever paint 4 of this clip's 8 real notes, HALF of what Sequence Edit
-  // shows for the identical clip.
+  // THE RENDERED-OUTPUT PIN: the SAME clip's launch-cell mini-preview must
+  // show the SAME note content Sequence Edit shows -- that is the whole
+  // premise of grid_panel.cpp's own render_track_cell comment ("the SAME
+  // preview_for(...) the opened cell's Sequence Edit canvas uses"). Before
+  // the owner bug #2 crop fix (dff4e9e) this used to structurally diverge;
+  // now both panels draw the identical (pitch, bars) content, so this holds
+  // for every bar, not just bar 1.
   CHECK(grid_notes_shown == seqedit_notes_shown);
 
   ImGui::DestroyContext();
@@ -271,6 +286,6 @@ void test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit() {
 }  // namespace
 
 int main() {
-  test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit();
+  test_grid_cell_preview_matches_sequence_edit_across_all_bars();
   return sonotron::test::failures();
 }

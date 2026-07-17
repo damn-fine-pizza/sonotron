@@ -6,9 +6,10 @@
 
 // Real-content cell preview (repeat-zone-real-contract.md, "cell preview
 // made real" pass, owner-approved full-fidelity). Resolves a role's
-// StylePattern in a given style/section against a canonical PLACEHOLDER
-// harmony (a C-major key + tonic triad -- there is no live chord while the
-// transport is stopped and the user is just browsing the grid) through the
+// StylePattern in a given style/section against this style's own REAL
+// per-style default harmonic progression (sonotron::default_progression_for,
+// see default_style_progressions.hpp -- the same progression the engine
+// itself walks via ChordSequence/kSeqAdd), one chord per bar, through the
 // arranger's OWN NTT kernel (arrangrr::Arranger::resolve, hoisted PUBLIC for
 // exactly this reuse), so the launch-cell mini-preview and the Sequence Edit
 // canvas both draw the SAME real note data the engine would actually play,
@@ -30,9 +31,23 @@ namespace sonotron::preview {
 // arrangrr::kMaxMotifLen -- a hand-copied literal, the same "read-only
 // literal copy, not an invented number" discipline track_roles.hpp already
 // uses for TrackRole; this header must not include arrangrr/ to name the
-// real constant). Every built-in style's own sections are one bar (bars=1),
-// so this window never truncates real content.
+// real constant). This is the PER-BAR grid width, not the full preview
+// window -- see kMaxBars/kMaxSteps below for that (a built-in section can
+// span more than one bar, e.g. basic.hpp's kVarA/kIntro1 -- Wave-1
+// style-depth made this false as a blanket claim).
 inline constexpr int kSteps = 16;
+
+// Longest built-in style section length observed today (Wave-1 style-depth's
+// basic::kVarA/kIntro1 == 2 bars). A style importing more bars in the future
+// silently clamps here (see preview_for()'s own bar loop) rather than
+// crashing -- MUST be revisited (and this comment updated) if a built-in or
+// imported style ever authors more than this many bars in one section.
+inline constexpr int kMaxBars = 2;
+
+// Total window width in steps across every bar this preview can show (owner
+// tasks #2/#3: previously ONE bar only, silently truncating bar 2+ of any
+// multi-bar section -- e.g. VarA, the DEFAULT opened section).
+inline constexpr int kMaxSteps = kSteps * kMaxBars;
 
 // The most StyleEvents this preview ever keeps DISTINCTLY at the same step:
 // a drum kit's kick/snare/hihat voices routinely land on the exact same 16th
@@ -70,51 +85,64 @@ enum class Section : std::uint8_t {
 
 // One resolved preview pattern: `pitch[step]` is the REAL absolute MIDI
 // note number arrangrr::Arranger::resolve() (or, for a motif-driven
-// pattern, arrangrr::motif::generate()'s repeat=0 seed resolved the same
-// way) produces for that step, or -1 for a rest/silence. Deterministic:
-// the same (style_index, section, role_index) always yields the same
-// pattern (no seed, no randomness -- it is exactly what the style table
-// says, resolved against a fixed placeholder harmony).
+// pattern, arrangrr::motif::apply_repeat()'s per-bar-approximated repeat
+// resolved the same way) produces for that step, or -1 for a rest/silence.
+// Deterministic: the same (style_index, section, role_index) always yields
+// the same pattern (no seed, no randomness -- it is exactly what the style
+// table says, resolved against this style's own real default progression).
 struct PreviewPattern {
-  // pitch[step][voice]: the absolute MIDI note for that voice slot, or -1
-  // for "no voice here" (a rest, or a step with fewer than
-  // kMaxVoicesPerStep simultaneous StyleEvents). Voices are packed low
-  // within a step in the ORDER their StyleEvents were resolved -- multiple
-  // StyleEvents landing on the SAME step (e.g. a drum kit's kick+hihat both
-  // on beat 1) each get their OWN slot instead of the last one silently
-  // overwriting the others.
-  std::array<std::array<int, kMaxVoicesPerStep>, kSteps> pitch{};
+  // pitch[bar*kSteps + step][voice]: same per-slot meaning as before (-1 =
+  // rest/no voice), now spanning every bar in the window instead of just bar
+  // 1. Columns at `bars*kSteps` and beyond are defensively all-rest (this
+  // section's own content never reaches them, not real silence) -- see
+  // `bars` below. Voices are packed low within a step in the ORDER their
+  // StyleEvents were resolved -- multiple StyleEvents landing on the SAME
+  // step (e.g. a drum kit's kick+hihat both on beat 1) each get their OWN
+  // slot instead of the last one silently overwriting the others.
+  std::array<std::array<int, kMaxVoicesPerStep>, kMaxSteps> pitch{};
   // True when this preview is APPROXIMATE, not the exact runtime output:
-  // every non-kFixed role resolves against the placeholder harmony above
-  // (there is no live chord while stopped) and/or, for a motif-driven
-  // pattern, only ever shows the repeat=0 STATEMENT skeleton (a later
-  // repeat's call-and-response transform is live `Arranger` state this
-  // preview has no access to). kFixed roles (drums/perc) are literal
-  // regardless of harmony or repeat -- never approximate.
+  // every non-kFixed role resolves against this style's own default
+  // progression rather than any LIVE chord state (there is none while
+  // stopped) and/or, for a motif-driven pattern, approximates each bar's
+  // repeat via `arrangrr::motif::apply_repeat(seed, spec, bar)` -- a real
+  // Arranger only increments its own repeat counter once per FULL section
+  // repeat, not once per bar within a single multi-bar pass, so this is a
+  // deliberate, owner-approved approximation to make the answer-bar's
+  // transform visible within one static preview window, not a literal
+  // reproduction of one single real playback pass. kFixed roles
+  // (drums/perc) are literal regardless of harmony or repeat -- never
+  // approximate.
   bool approx = false;
+  // How many of the kMaxBars columns are REAL section content: preview::
+  // section_bars(style_index, section) clamped into [1, kMaxBars]. A caller
+  // iterating the full kMaxSteps width must gate on this to avoid drawing a
+  // real-looking rest for a bar that simply isn't part of this section.
+  int bars = 1;
 };
 
 // Resolves `role_index`'s StylePattern in `section` of arrangrr::styles::
-// kBuiltins[style_index] against the canonical placeholder harmony,
-// through the arranger's own NTT kernel. `role_index` mirrors track_roles.
-// hpp's own TrackRole index convention (0=kDrums..8=kLead; the core's
-// TrackRole also has an index-9 kCc, which has no grid row and is simply
-// out of range for this preview). Returns an all-rest pattern (approx =
-// false) for any out-of-range argument, or for an in-range role that
-// simply has no content in that section -- an honestly empty preview, not
-// an error.
+// kBuiltins[style_index] against this style's own real default harmonic
+// progression (one chord per bar, walking sonotron::default_progression_for
+// (style_index)), through the arranger's own NTT kernel. `role_index`
+// mirrors track_roles.hpp's own TrackRole index convention (0=kDrums..
+// 8=kLead; the core's TrackRole also has an index-9 kCc, which has no grid
+// row and is simply out of range for this preview). Returns an all-rest
+// pattern (approx = false) for any out-of-range argument, or for an
+// in-range role that simply has no content in that section -- an honestly
+// empty preview, not an error.
 PreviewPattern preview_for(int style_index, Section section, std::size_t role_index);
 
 // The number of BARS `section` holds in `arrangrr::styles::kBuiltins[
 // style_index]` (arrangrr::StyleSection::bars, same hand-copied-mirror
 // discipline as Section/kSteps above). Used by the Repeat-Zone auto-song
 // advance decision (repeat-zone-real-contract.md SLICE 4b) to know when the
-// active scene column's own content has played out. Every built-in style's
-// sections are 1 bar today (see preview.hpp's own kSteps comment), so 1 is
-// also the honest fallback for an out-of-range `style_index` or a `section`
-// absent from that style -- never a crash, never a stall (a 0-or-negative
-// bar count would make the caller's "elapsed >= length" check trivially and
-// permanently true).
+// active scene column's own content has played out. Some built-in sections
+// span more than one bar (e.g. basic.hpp's VarA/Intro1, Wave-1 style-depth
+// -- see kMaxBars above), so 1 is the honest FALLBACK for an out-of-range
+// `style_index` or a `section` absent from that style, not a universal
+// value -- never a crash, never a stall (a 0-or-negative bar count would
+// make the caller's "elapsed >= length" check trivially and permanently
+// true).
 int section_bars(int style_index, Section section);
 
 // ---------------------------------------------------------------------------
@@ -154,19 +182,20 @@ struct LoopPreviewEvent {
   LoopNoteSource source = LoopNoteSource::kInterval;
 };
 
-// Resolves a captured loop's events against the SAME canonical placeholder
-// harmony preview_for() uses above (a C-major key + tonic triad -- there is
-// no live chord while the transport is stopped and the user is just
-// browsing the grid), through the identical chord/key-relative resolution
-// arrangrr::resolve_note performs at real playback time (Engine::fire_loop's
-// own LoopBuffer::on_tick call, loop_buffer.hpp:322-391) -- never a
-// re-implementation. Always APPROXIMATE (PreviewPattern::approx == true):
-// even a kInterval event (which does not strictly need a chord) is still
-// resolved against the placeholder harmony, not the loop's live one, exactly
-// like every non-kFixed style-section preview above. Only events landing
-// inside the first bar (the same one-bar, kSteps-wide window preview_for()
-// uses) are shown; an event starting at or past one bar is silently dropped,
-// mirroring preview_for()'s own "outside the one-bar preview window" note.
+// Resolves a captured loop's events against a canonical placeholder harmony
+// (a C-major key + tonic triad -- there is no live chord while the
+// transport is stopped and the user is just browsing the grid, and a loop
+// has no style/progression of its own to walk the way preview_for() now
+// does for a style section), through the identical chord/key-relative
+// resolution arrangrr::resolve_note performs at real playback time
+// (Engine::fire_loop's own LoopBuffer::on_tick call, loop_buffer.hpp:
+// 322-391) -- never a re-implementation. Always APPROXIMATE
+// (PreviewPattern::approx == true): even a kInterval event (which does not
+// strictly need a chord) is still resolved against the placeholder harmony,
+// not the loop's live one. Only events landing inside the first bar (this
+// function's own one-bar, kSteps-wide preview window -- unlike preview_for(),
+// out of scope for the multi-bar widening above) are shown; an event
+// starting at or past one bar is silently dropped.
 // `events`/`count` follow the same plain-pointer-plus-length shape as
 // arrangrr::Span (this header cannot name that core type either) --
 // `events == nullptr` or `count == 0` yields an honestly empty, all-rest

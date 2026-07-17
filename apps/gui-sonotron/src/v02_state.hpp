@@ -127,6 +127,29 @@ struct V02State {
   // frame. Cleared the instant the transport is observed NOT playing
   // (AppState::transport() != kPlaying), re-arming for the next Play.
   bool master_play_launched = false;
+
+  // ENDING button suppression latch (roadmap task #37, transport_panel.cpp's
+  // dedicated ENDING pad): set the instant the button sends `style section
+  // ending1` while playing. grid_panel.cpp's update_auto_song reads this to
+  // suppress its own `style section <next>` advance for as long as the cued
+  // Ending is still playing out -- otherwise auto-song would override the
+  // manual cue at the next section boundary and the song would never
+  // actually stop (Arranger::on_tick's section_is_ending one-shot stop only
+  // fires if nothing else re-arms the section first). Cleared the instant the
+  // transport is observed NOT playing (mirrors master_play_launched's own
+  // reset shape), re-arming cleanly for the next Play/song run.
+  bool ending_cued = false;
+
+  // ENDING-vs-in-flight-clip-arm race guard (roadmap task #37, Torquato QA
+  // finding): true once grid_panel.cpp's update_auto_song has already
+  // cancelled the active scene column's own clip arms for the CURRENT ending
+  // cue (see cancel_active_scene_clip_arms's own header comment for the full
+  // race this closes). A once-per-cue latch, not a per-frame resend: sending
+  // `stop clip <id>` again on every subsequent frame while ending_cued stays
+  // true would be harmless but wasteful. Cleared alongside ending_cued the
+  // instant the transport is observed NOT playing, so the next Ending cue
+  // re-arms this guard cleanly.
+  bool ending_clip_arms_cancelled = false;
 };
 
 }  // namespace sonotron

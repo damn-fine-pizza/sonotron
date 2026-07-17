@@ -219,7 +219,22 @@ void test_auto_song_advances_again_after_a_real_stop_restart_cycle() {
       poll_once(session, app_state);
       max_bar_seen_round2 = std::max(max_bar_seen_round2, app_state.bar());
       render_one_frame(model, seqedit, parts, session, app_state, fx);
-      if (fx.active_scene != scene_after_round1) {
+      // Wait for a REAL flip, not just any single frame's read: task #36's
+      // fix (grid_panel.cpp's handle_master_play_launch, gated on
+      // fx.auto_song) now resets fx.active_scene to 0 on the SAME frame Play
+      // is processed, on EVERY fresh Play -- including this round 2 one. That
+      // reset alone satisfies `fx.active_scene != scene_after_round1`
+      // immediately, before poll_once has ever observed a single real bar
+      // advance in round 2 -- breaking on that condition ALONE used to exit
+      // this loop on its very first iteration with max_bar_seen_round2 still
+      // 0, failing the bar-climbed assertion below for a reason that has
+      // nothing to do with this test's own root cause (auto-song surviving a
+      // stop/restart). Requiring max_bar_seen_round2 > 0 too -- the same
+      // "wait for a real flip, not the earliest possible read" idiom
+      // test_repeat_zone_scene_header_next_bar_ui_automation.cpp already
+      // uses -- keeps this loop honestly waiting for the SECOND, auto-song-
+      // driven advance this test actually pins, not the task #36 reset.
+      if (fx.active_scene != scene_after_round1 && max_bar_seen_round2 > 0) {
         advanced_again = true;
         break;
       }

@@ -32,9 +32,12 @@ ImU32 u32(const ImVec4& color, float alpha_mul) {
 }
 
 ClipPattern clip_pattern_from_pitches(
-    const std::array<std::array<int, ClipPattern::kMaxVoicesPerStep>, ClipPattern::kSteps>&
-        pitches) {
+    const std::array<std::array<int, ClipPattern::kMaxVoicesPerStep>, ClipPattern::kMaxSteps>&
+        pitches,
+    int bars) {
   ClipPattern out{};
+  out.bars = std::clamp(bars, 1, ClipPattern::kMaxBars);
+  const int steps = out.bars * ClipPattern::kSteps;
   // Every step's every slot starts as an empty voice (ClipPattern's own
   // default is all-zero, not all-rest, so this must be set explicitly).
   for (auto& slots : out.pitch) {
@@ -43,8 +46,8 @@ ClipPattern clip_pattern_from_pitches(
 
   int lo = 128;
   int hi = -1;
-  for (const auto& slots : pitches) {
-    for (const int p : slots) {
+  for (int step = 0; step < steps; ++step) {
+    for (const int p : pitches[static_cast<std::size_t>(step)]) {
       if (p < 0) {
         continue;
       }
@@ -56,7 +59,7 @@ ClipPattern clip_pattern_from_pitches(
     return out;  // every step is a rest: nothing to normalize
   }
   constexpr int kMaxRow = ClipPattern::kPitches - 1;
-  for (int step = 0; step < ClipPattern::kSteps; ++step) {
+  for (int step = 0; step < steps; ++step) {
     for (int voice = 0; voice < ClipPattern::kMaxVoicesPerStep; ++voice) {
       const int p = pitches[static_cast<std::size_t>(step)][static_cast<std::size_t>(voice)];
       if (p < 0) {
@@ -332,22 +335,33 @@ PitchCellRect pitch_grid_cell(const ImVec2& band_min, const ImVec2& band_max, in
 
 void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max,
                             const ClipPattern& pat, const ImVec4& color) {
-  // A little HORIZONTAL piano-roll showing ALL kSteps columns of `pat`, all
-  // kPitches rows, drawn at the SAME (step, pitch) positions the Sequence
-  // Edit canvas uses -- via the shared pitch_grid_cell() helper above, so a
-  // cell dot is the SAME content the editor draws in full, just denser
-  // (narrower columns in the same band), never a half-cropped subset (owner
-  // bug #2, docs root-cause: this used to hard-crop to the first kCellSteps
-  // (8) columns while Sequence Edit iterated all 16, so any note past step 8
-  // never appeared here at all). Every simultaneous voice at a step (owner
-  // bug #13, e.g. a drum kit's kick+hihat both on beat 1) draws its OWN
-  // row-bar -- iterating (step, voice) instead of just `step` is what makes
-  // that possible; a flattened single-level preview used to be the visible
+  // A little HORIZONTAL piano-roll showing ALL `pat.bars * kSteps` columns of
+  // `pat` (every bar the section actually has, owner bug #2/#3 -- compressed
+  // into the SAME band width, so a 2-bar section reads denser but complete
+  // rather than being truncated to bar 1), all kPitches rows, drawn at the
+  // SAME (step, pitch) positions the Sequence Edit canvas uses -- via the
+  // shared pitch_grid_cell() helper above, so a cell dot is the SAME content
+  // the editor draws in full, just denser (narrower columns in the same
+  // band), never a half-cropped subset (owner bug #2, docs root-cause: this
+  // used to hard-crop to the first kCellSteps (8) columns of a single bar
+  // while Sequence Edit iterated all 16, so any note past step 8 never
+  // appeared here at all). Every simultaneous voice at a step (owner bug
+  // #13, e.g. a drum kit's kick+hihat both on beat 1) draws its OWN row-bar
+  // -- iterating (step, voice) instead of just `step` is what makes that
+  // possible; a flattened single-level preview used to be the visible
   // symptom of `pat.pitch[step]` only ever holding one voice at all. STEP
   // runs left->right (X), PITCH low->high (Y, pitch 0 at the bottom).
-  const int steps = ClipPattern::kSteps;
+  const int steps = std::clamp(pat.bars, 1, ClipPattern::kMaxBars) * ClipPattern::kSteps;
   const int pitches = ClipPattern::kPitches;
   const int voices = ClipPattern::kMaxVoicesPerStep;
+  // A faint bar-boundary line at every ClipPattern::kSteps column past the
+  // first, so a multi-bar preview reads as N compressed bars, not one
+  // ambiguous run -- purely a legibility aid, drawn before the note bars.
+  for (int bar = 1; bar < pat.bars; ++bar) {
+    const float x = min.x + (max.x - min.x) * static_cast<float>(bar * ClipPattern::kSteps) /
+                                static_cast<float>(steps);
+    dl->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), u32(color, 0.20F), 1.0F);
+  }
   for (int step = 0; step < steps; ++step) {
     for (int voice = 0; voice < voices; ++voice) {
       const int pitch = pat.pitch[step][voice];

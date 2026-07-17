@@ -18,6 +18,7 @@ void test_defaults() {
   CHECK(!model.record_armed());
   CHECK(model.grid_division() == 16);
   CHECK(model.view() == SeqEditView::kPianoRoll);
+  CHECK(model.role_visible(0));
 }
 
 void test_set_part_index_clamps() {
@@ -53,6 +54,34 @@ void test_grid_division_and_view() {
   CHECK(model.view() == SeqEditView::kPianoRoll);
 }
 
+void test_role_visibility() {
+  SeqEditModel model;
+
+  // Default: all 9 roles visible
+  for (std::size_t i = 0; i < sonotron::kTrackRoleCount; ++i) {
+    CHECK(model.role_visible(i));
+  }
+
+  // Toggle a single role off
+  model.set_role_visible(3, false);
+  CHECK(!model.role_visible(3));
+  // Confirm a different role is untouched
+  CHECK(model.role_visible(4));
+
+  // Toggle back on
+  model.set_role_visible(3, true);
+  CHECK(model.role_visible(3));
+
+  // Out-of-range read returns true (safe default)
+  CHECK(model.role_visible(999));
+
+  // Out-of-range write is a silent no-op: confirm all in-range roles still visible
+  model.set_role_visible(999, false);
+  for (std::size_t i = 0; i < sonotron::kTrackRoleCount; ++i) {
+    CHECK(model.role_visible(i));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -60,5 +89,6 @@ int main() {
   test_set_part_index_clamps();
   test_clip_label_and_record_arm();
   test_grid_division_and_view();
+  test_role_visibility();
   return sonotron::test::failures();
 }

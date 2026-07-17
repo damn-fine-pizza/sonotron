@@ -40,6 +40,40 @@ void divider() {
   ImGui::SameLine(0.0F, 8.0F);
 }
 
+// ENDING pad (roadmap task #37, docs/proposals/song-form-option-a-wiring-
+// plan.md §3/§4): a dedicated cue-then-stop control, matching the Yamaha/Korg
+// convention of a SEPARATE Ending button next to Stop (not a second Stop
+// press). While playing, clicking it sends the bare, bar-quantized `style
+// section ending1` verb ALONE -- never paired with `launch scene`, which
+// would force an immediate (non-quantized) switch and defeat the "next
+// measure" convention this button exists to match. The core's own one-shot
+// rule (Arranger::on_tick's section_is_ending branch) then stops the
+// transport once Ending1's own authored bars run out -- no new verb, no ABI
+// change. `fx.ending_cued` is set here so grid_panel.cpp's update_auto_song
+// can suppress its own advance until the transport is actually observed
+// stopped (see V02State::ending_cued's own comment). While stopped, the cue
+// is meaningless (nothing playing to end) -- the button is a no-op and
+// visually dimmed (muted accent instead of amber) rather than sending
+// anything. "END" is a plain ASCII label, not a glyph, since the vendored
+// mono font has no dedicated ending/flag glyph. Kept as its own small
+// function (mirroring begin_inset/end_inset/divider above) so the button's
+// own gating logic does not add to render_transport_panel's own cognitive
+// complexity.
+void render_ending_pad(BrainSession& brain_session, V02State& fx, bool playing) {
+  ImGui::SameLine(0.0F, 6.0F);
+  const ImVec2 ending_pad(46.0F, 34.0F);
+  const ImVec4& ending_accent = playing ? theme::kAmber : theme::kTextMuted;
+  if (neon::pad_button("ending", "END", ending_pad, ending_accent, /*filled=*/false, fx.glow) &&
+      playing) {
+    brain_session.send("style section ending1");
+    fx.ending_cued = true;
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip(playing ? "Ending -- cue Ending 1 at the next bar, then stop"
+                              : "Ending -- only meaningful while playing");
+  }
+}
+
 }  // namespace
 
 void render_transport_panel(AppState& app_state, BrainSession& brain_session, V02State& fx) {
@@ -70,6 +104,7 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session, V0
   if (neon::pad_button("panic", "\xE2\x97\x89", pad, theme::kPink, /*filled=*/false, fx.glow)) {
     brain_session.send("panic");
   }
+  render_ending_pad(brain_session, fx, playing);
 
   // Tempo / meter / key / transpose inset. BPM + transpose are real sends on
   // nudge; the DISPLAYED bpm/transpose are local intent (no readback), and

@@ -1,6 +1,8 @@
 #include "preview.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <utility>
 
 #include "arrangrr/arranger/arranger.hpp"
 #include "arrangrr/arranger/motif.hpp"
@@ -10,6 +12,7 @@
 #include "arrangrr/loop/loop_event.hpp"
 #include "chorddet/theory.hpp"
 #include "common/time.hpp"
+#include "default_style_progressions.hpp"
 
 // D38/Corelli §15 (see preview.hpp's own header comment): this is the ONLY
 // translation unit in gui_sonotron_preview, and the only place in the whole
@@ -26,6 +29,141 @@ namespace {
 // to reject a nonsensical `role_index`, so a plain literal keeps this file
 // from having one more transitive include to track.
 constexpr std::size_t kCoreRoleCount = 10;
+
+// The SAME canonical placeholder harmony preview_for() used before this
+// pass (a C-major key + tonic triad) -- kept only as a defensive fallback
+// for chord_for_bar() below, for the two cases that should never happen for
+// well-formed authored data: an empty progression table entry, or a
+// progression root pc that is somehow chromatic to its own declared key.
+constexpr arrangrr::Key kFallbackKey{.root_pc = 0, .mode = arrangrr::Mode::kMajor};
+constexpr arrangrr::ChordState kFallbackChord{
+    .root_pc = 0, .quality = arrangrr::ChordQuality::kMaj, .valid = true};
+
+// Resolves the (key, chord) this style's own real default progression
+// (sonotron::default_progression_for, default_style_progressions.hpp) holds
+// on absolute bar `bar` (bar 0 = the section's first bar, bar 1 = its
+// second, and so on -- the progression LOOPS once it runs out, mirroring
+// the engine's own Param::kSeqLoop behavior). Falls back to the canonical
+// C-major placeholder only in the two defensive cases noted above; never
+// propagates a bad per-bar result into any other bar's own lookup.
+std::pair<arrangrr::Key, arrangrr::ChordState> chord_for_bar(int style_index, int bar) {
+  const sonotron::DefaultProgression& prog = sonotron::default_progression_for(style_index);
+
+  int total_prog_bars = 0;
+  for (std::size_t i = 0; i < prog.step_count; ++i) {
+    total_prog_bars += prog.steps[i].bars;
+  }
+  if (total_prog_bars == 0) {
+    return {kFallbackKey, kFallbackChord};  // defensive; entry 0 always has 4 steps
+  }
+
+  const int bar_in_cycle = bar % total_prog_bars;
+  int cumulative = 0;
+  for (std::size_t i = 0; i < prog.step_count; ++i) {
+    const int step_bars = prog.steps[i].bars;
+    if (bar_in_cycle >= cumulative && bar_in_cycle < cumulative + step_bars) {
+      const arrangrr::Key key{.root_pc = prog.key_root_pc, .mode = prog.key_mode};
+      const int degree = arrangrr::theory::degree_of(key, prog.steps[i].root_pc);
+      if (degree < 0) {
+        return {kFallbackKey, kFallbackChord};  // defensive; well-formed data never hits this
+      }
+      const arrangrr::ChordQuality quality =
+          prog.steps[i].quality_ovr >= 0
+              ? static_cast<arrangrr::ChordQuality>(prog.steps[i].quality_ovr)
+              : arrangrr::theory::smart_quality(prog.key_mode, degree);
+      const arrangrr::ChordState chord{
+          .root_pc = prog.steps[i].root_pc, .quality = quality, .valid = true};
+      return {key, chord};
+    }
+    cumulative += step_bars;
+  }
+  return {kFallbackKey, kFallbackChord};  // defensive; the loop above always covers bar_in_cycle
+}
+
+// Non-motif StylePattern: a StyleEvent's own `step` already spans absolute
+// positions across every authored bar (style_model.hpp), so a single pass
+// suffices -- no per-bar sub-loop needed. Only the window bound (widened
+// from kSteps to out.bars*kSteps) and the per-event bar lookup for
+// chord_for_bar() are new. Extracted out of preview_for() (readability-
+// function-cognitive-complexity) -- pure refactor, no behavior change.
+void resolve_literal_pattern(int style_index, const arrangrr::StylePattern& pattern,
+                             PreviewPattern& out) {
+  for (const arrangrr::StyleEvent& ev : pattern.events) {
+    if (ev.step >= static_cast<std::uint16_t>(out.bars * kSteps)) {
+      continue;  // outside this section's own multi-bar window (defensive)
+    }
+    const int bar = ev.step / kSteps;
+    int note;
+    if (pattern.policy == arrangrr::RolePolicy::kFixed) {
+      note = ev.tone;
+    } else {
+      const auto [key, chord] = chord_for_bar(style_index, bar);
+      note = arrangrr::Arranger::resolve(pattern, ev, key, chord, /*transpose=*/0);
+    }
+    if (note < 0 || note > 127) {
+      continue;
+    }
+    // Owner bug #13 fix: pack this StyleEvent into the first FREE voice slot
+    // at its own step, rather than overwriting `out.pitch[ev.step]` outright
+    // -- a drum kit's kick/snare colliding with the hat bed on the same 16th
+    // (e.g. basic.hpp's kVarADrums) used to lose every voice but the last
+    // one resolved. A step with more simultaneous voices than
+    // kMaxVoicesPerStep (no built-in style reaches this) defensively drops
+    // the extra event rather than overflowing.
+    for (int& slot : out.pitch[ev.step]) {
+      if (slot < 0) {
+        slot = note;
+        break;
+      }
+    }
+  }
+}
+
+// Motif-driven StylePattern: the seed is built ONCE (it does not change per
+// bar -- only apply_repeat()'s transform does). See PreviewPattern::approx's
+// own doc comment for why `repeat = bar` here is a deliberate, owner-approved
+// APPROXIMATION (a real Arranger increments its repeat counter once per full
+// section repeat, not once per bar within one pass) rather than a literal
+// reproduction of one single real playback pass. Extracted out of
+// preview_for() (readability-function-cognitive-complexity) -- pure
+// refactor, no behavior change.
+void resolve_motif_pattern(int style_index, const arrangrr::StyleSection& sec,
+                           const arrangrr::StylePattern& pattern, PreviewPattern& out) {
+  const arrangrr::Motif seed =
+      pattern.events.empty()
+          ? arrangrr::motif::generate(
+                pattern.motif->seed, pattern.motif->length,
+                arrangrr::motif::idiom_onset_mask(sec.patterns, pattern.motif->idiom_role),
+                pattern.motif->center_degree, pattern.motif->vel, pattern.motif->gate)
+          : arrangrr::motif::from_span(pattern.events);
+
+  for (int bar = 0; bar < out.bars; ++bar) {
+    const arrangrr::Motif generated =
+        arrangrr::motif::apply_repeat(seed, *pattern.motif, static_cast<std::uint32_t>(bar));
+    const auto [key, chord] = chord_for_bar(style_index, bar);
+    for (std::uint8_t i = 0; i < generated.count; ++i) {
+      const arrangrr::StyleEvent& ev = generated.events[i];
+      if (ev.step >= static_cast<std::uint16_t>(kSteps)) {
+        continue;  // defensive; motif events are always local by construction
+      }
+      const std::size_t absolute_step =
+          static_cast<std::size_t>(bar) * static_cast<std::size_t>(kSteps) + ev.step;
+      const int note = pattern.policy == arrangrr::RolePolicy::kFixed
+                           ? ev.tone
+                           : arrangrr::Arranger::resolve(pattern, ev, key, chord, /*transpose=*/0);
+      if (note < 0 || note > 127) {
+        continue;
+      }
+      // Same voice-slot packing as resolve_literal_pattern above (owner bug #13).
+      for (int& slot : out.pitch[absolute_step]) {
+        if (slot < 0) {
+          slot = note;
+          break;
+        }
+      }
+    }
+  }
+}
 
 }  // namespace
 
@@ -47,6 +185,12 @@ PreviewPattern preview_for(int style_index, Section section, std::size_t role_in
     return out;
   }
 
+  // Set the multi-bar window width EVEN if this role turns out to have no
+  // content below -- an honestly-empty preview still needs the correct
+  // `bars` metadata (a caller iterating the full kMaxSteps width has to gate
+  // on it either way).
+  out.bars = std::clamp(static_cast<int>(sec->bars), 1, kMaxBars);
+
   const auto role = static_cast<arrangrr::TrackRole>(static_cast<std::uint8_t>(role_index));
   const arrangrr::StylePattern* pattern = nullptr;
   for (const arrangrr::StylePattern& p : sec->patterns) {
@@ -59,63 +203,16 @@ PreviewPattern preview_for(int style_index, Section section, std::size_t role_in
     return out;  // this role has no content in this section -- an honestly empty preview
   }
 
-  // Canonical placeholder harmony (STEP 2 of the workstream contract): a
-  // fixed C-major key + tonic triad, constructed HERE -- the transport is
-  // stopped while browsing the grid, so there is no live Key/ChordState to
-  // borrow; the GUI never has to fabricate one of its own.
-  const arrangrr::Key key{.root_pc = 0, .mode = arrangrr::Mode::kMajor};
-  const arrangrr::ChordState chord{
-      .root_pc = 0, .quality = arrangrr::ChordQuality::kMaj, .valid = true};
-
-  // Every non-kFixed role resolves against the placeholder harmony above,
-  // never the exact live chord -- APPROXIMATE by construction, whether or
-  // not a motif is also involved. kFixed roles (drums/perc) are literal
-  // regardless of harmony -- never approximate.
+  // Every non-kFixed role resolves against this style's own real default
+  // progression (chord_for_bar() above), never a live chord -- APPROXIMATE
+  // by construction, whether or not a motif is also involved. kFixed roles
+  // (drums/perc) are literal regardless of harmony -- never approximate.
   out.approx = pattern->policy != arrangrr::RolePolicy::kFixed;
 
-  arrangrr::Motif generated;
-  arrangrr::Span<const arrangrr::StyleEvent> source = pattern->events;
-  if (pattern->motif != nullptr) {
-    const arrangrr::Motif seed =
-        pattern->events.empty()
-            ? arrangrr::motif::generate(
-                  pattern->motif->seed, pattern->motif->length,
-                  arrangrr::motif::idiom_onset_mask(sec->patterns, pattern->motif->idiom_role),
-                  pattern->motif->center_degree, pattern->motif->vel, pattern->motif->gate)
-            : arrangrr::motif::from_span(pattern->events);
-    // repeat=0: the STATEMENT bar only. apply_repeat(seed, spec, 0) is the
-    // seed verbatim (even repeats never transform) -- exactly what the
-    // FIRST playback of this section sounds like. A later runtime repeat's
-    // call-and-response transform is live `Arranger::m_motif_repeat` state
-    // this preview has no access to (STEP 4: flagged via `out.approx`,
-    // already true above since every motif-bearing role here is non-kFixed).
-    generated = arrangrr::motif::apply_repeat(seed, *pattern->motif, /*repeat=*/0);
-    source = arrangrr::Span<const arrangrr::StyleEvent>(generated.events, generated.count);
-  }
-
-  for (const arrangrr::StyleEvent& ev : source) {
-    if (ev.step >= static_cast<std::uint16_t>(kSteps)) {
-      continue;  // outside the one-bar preview window (defensive; no built-in style reaches it)
-    }
-    const int note = pattern->policy == arrangrr::RolePolicy::kFixed
-                         ? ev.tone
-                         : arrangrr::Arranger::resolve(*pattern, ev, key, chord, /*transpose=*/0);
-    if (note < 0 || note > 127) {
-      continue;
-    }
-    // Owner bug #13 fix: pack this StyleEvent into the first FREE voice slot
-    // at its own step, rather than overwriting `out.pitch[ev.step]` outright
-    // -- a drum kit's kick/snare colliding with the hat bed on the same 16th
-    // (e.g. basic.hpp's kVarADrums) used to lose every voice but the last
-    // one resolved. A step with more simultaneous voices than
-    // kMaxVoicesPerStep (no built-in style reaches this) defensively drops
-    // the extra event rather than overflowing.
-    for (int& slot : out.pitch[ev.step]) {
-      if (slot < 0) {
-        slot = note;
-        break;
-      }
-    }
+  if (pattern->motif == nullptr) {
+    resolve_literal_pattern(style_index, *pattern, out);
+  } else {
+    resolve_motif_pattern(style_index, *sec, *pattern, out);
   }
   return out;
 }
@@ -144,8 +241,10 @@ PreviewPattern preview_for_loop(const LoopPreviewEvent* events, std::size_t coun
     return out;
   }
 
-  // Canonical placeholder harmony -- the SAME one preview_for() constructs
-  // above, for the SAME reason (no live chord while browsing the grid).
+  // Canonical placeholder harmony -- a loop has no style/progression of its
+  // own to walk the way preview_for() now does for a style section, so this
+  // function keeps the fixed C-major/tonic-triad placeholder for the same
+  // reason it always did (no live chord while browsing the grid).
   const arrangrr::Key key{.root_pc = 0, .mode = arrangrr::Mode::kMajor};
   const arrangrr::ChordState chord{
       .root_pc = 0, .quality = arrangrr::ChordQuality::kMaj, .valid = true};
