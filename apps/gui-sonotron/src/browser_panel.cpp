@@ -43,8 +43,8 @@ constexpr std::array<std::uint8_t, 8> kVariationSections = {
     11,  // outro   -> kEnding1
 };
 constexpr std::array<std::string_view, 10> kKits = {
-    "acoustic kit", "808",     "909",      "jazz kit", "fingered bass",
-    "picked bass",  "rhodes",  "dx piano", "warm pad", "saw lead",
+    "acoustic kit", "808",    "909",      "jazz kit", "fingered bass",
+    "picked bass",  "rhodes", "dx piano", "warm pad", "saw lead",
 };
 
 bool matches(std::string_view item, const std::string& filter) {
@@ -66,8 +66,8 @@ bool matches(std::string_view item, const std::string& filter) {
 // in the design (no per-section tint; only the active style leaf goes cyan).
 bool section_header(const char* title) {
   ImGui::PushStyleColor(ImGuiCol_Text, theme::kText);
-  const bool open = ImGui::TreeNodeEx(title, ImGuiTreeNodeFlags_DefaultOpen |
-                                                 ImGuiTreeNodeFlags_SpanAvailWidth);
+  const bool open =
+      ImGui::TreeNodeEx(title, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
   ImGui::PopStyleColor();
   return open;
 }
@@ -92,8 +92,8 @@ bool leaf_row(std::string_view item, bool active) {
   return clicked;
 }
 
-void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& fx,
-                   const std::string& filter, int& shown) {
+void render_styles(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                   V02State& fx, const std::string& filter, int& shown) {
   if (!section_header("styles")) {
     return;
   }
@@ -111,7 +111,20 @@ void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& f
       // hard-resetting the arranger -- `style load` still stops-and-reloads
       // for the not-yet-playing case (in_process_brain_session.cpp's
       // command_line_to_command).
-      brain_session.send(fx.playing ? "style switch " + name : "style load " + name);
+      //
+      // Owner task #2: the switch used to silently default to varA (the
+      // translator's own fallback, in_process_brain_session.cpp). Pass the
+      // engine's OWN current section (app_state.section(), the authoritative
+      // kSection echo -- never a guess) as an explicit suffix so the switch
+      // preserves it. An empty or "-" reading (no section committed yet)
+      // falls back to the translator's own 3-token/varA default rather than
+      // sending a malformed suffix.
+      const std::string_view current_section = app_state.section();
+      std::string verb = fx.playing ? "style switch " + name : "style load " + name;
+      if (fx.playing && !current_section.empty() && current_section != "-") {
+        verb += " section " + std::string(current_section);
+      }
+      brain_session.send(verb);
       fx.active_style = static_cast<int>(i);
     }
     if (ImGui::BeginDragDropSource()) {
@@ -186,7 +199,8 @@ void render_list(const char* title, const std::array<std::string_view, N>& items
 
 }  // namespace
 
-void render_browser_panel(BrowserModel& model, BrainSession& brain_session, V02State& fx) {
+void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
+                          const AppState& app_state, V02State& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
   ImGui::Spacing();
 
@@ -195,7 +209,7 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session, V02S
                     ImGuiChildFlags_None, ImGuiWindowFlags_None);
   const std::string filter = model.search_filter();
   int shown = 0;
-  render_styles(model, brain_session, fx, filter, shown);
+  render_styles(model, brain_session, app_state, fx, filter, shown);
   render_variations(filter, shown);
   render_list("kits \xC2\xB7 GM", kKits, filter, shown);
   if (section_header("clips")) {

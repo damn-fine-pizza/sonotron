@@ -154,4 +154,13 @@ float section_playhead_phase(int current_bar, int active_scene_start_bar, int be
   return std::clamp(phase, 0.0F, 1.0F);
 }
 
+int repeat_cycle_start_bar(int current_bar, int scene_start_bar, int repeat_length_bars) {
+  if (repeat_length_bars <= 0 || current_bar < scene_start_bar) {
+    return scene_start_bar;
+  }
+  const int bars_elapsed = current_bar - scene_start_bar;
+  const int repeats_completed = bars_elapsed / repeat_length_bars;
+  return scene_start_bar + repeats_completed * repeat_length_bars;
+}
+
 }  // namespace sonotron

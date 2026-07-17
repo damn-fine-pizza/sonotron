@@ -227,4 +227,27 @@ bool bar_just_advanced(int current_bar, int& last_checked_bar);
 float section_playhead_phase(int current_bar, int active_scene_start_bar, int beat_num, int pulse,
                              int beats_per_bar, int section_bars);
 
+// Repeat-local playhead anchor (owner task #3, docs/proposals/repeat-zone-
+// real-contract.md follow-up: auto-song now advances after a section has
+// played `kDefaultSectionRepeats` (grid_panel.cpp) whole times, not after one
+// pass -- but the owner locked "the playhead sweeps the SECTION" (see
+// section_playhead_phase's own header comment), and with multiple repeats
+// held per advance the honest reading of that lock is N separate 0->100%
+// sweeps, one per repeat, not a single slow sweep smeared across all of
+// them. This is the anchor half of that: given the bar the WHOLE hold began
+// (`scene_start_bar`) and the section's own real length in bars
+// (`repeat_length_bars`, preview::section_bars(style, section) -- the SAME
+// value the advance threshold is built from), returns the bar at which the
+// CURRENT repeat cycle began, so a caller can feed THAT (instead of
+// `scene_start_bar` itself) as section_playhead_phase's own `active_scene_
+// start_bar` argument and get a fresh sweep every repeat instead of one that
+// clamps to 1.0 partway through the hold and sits there.
+//
+// Degenerate inputs (a non-positive `repeat_length_bars`, or `current_bar`
+// already behind `scene_start_bar` -- a bar rewind mid-hold) fall back to
+// `scene_start_bar` verbatim: section_playhead_phase's own guards already
+// turn either case into the honest "no playhead" sentinel, so there is
+// nothing for this helper to usefully compute.
+int repeat_cycle_start_bar(int current_bar, int scene_start_bar, int repeat_length_bars);
+
 }  // namespace sonotron

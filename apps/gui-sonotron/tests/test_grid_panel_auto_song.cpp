@@ -130,15 +130,18 @@ void test_auto_song_advances_scene_after_section_elapses() {
   AppState app_state;
   V02State fx;
 
-  // Scene 0 (the active scene at arm time) gets an explicit, short 1-bar
-  // length via the new per-scene length GridModel::set_scene_bars -- the
-  // advance decision now reads THIS, not preview::section_bars (the style's
-  // own section length, which used to be the ONLY thing available and was
-  // always 1 bar for every built-in style, the very reason auto-song used to
-  // sprint one bar per scene regardless of what a column held). Pinning it
-  // explicitly keeps this test's single-bar crossing deterministic and
-  // independent of any built-in style.
-  model.set_scene_bars(0, 1);
+  // SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_
+  // auto_song header comment for the full rationale): the advance no longer
+  // reads GridModel::scene_bars (a host-only per-column bookkeeping field) --
+  // it reads the STYLE's own real section length (preview::section_bars)
+  // times kDefaultSectionRepeats (2). fx.active_style is left at its default
+  // (-1, "no style"), for which preview::section_bars() honestly falls back
+  // to 1 bar -- so the effective threshold here is 1 * 2 == 2 bars, not the
+  // 1-bar-pinned cadence this test used to set up via set_scene_bars(0, 1)
+  // (that call is gone: the field still exists, reserved for a future editor
+  // task #6, but this advance no longer consults it).
+  constexpr int kExpectedThresholdBars =
+      2;  // preview::section_bars(-1, *) fallback (1) * repeats (2)
 
   // Transport starts playing; the first beat lands at bar 1 (kBeat's
   // beat_bar is a 1-based absolute bar counter, abi.hpp/app_state.cpp).
@@ -147,9 +150,7 @@ void test_auto_song_advances_scene_after_section_elapses() {
   CHECK(app_state.bar() == 1);
   CHECK(app_state.transport() == AppState::Transport::kPlaying);
 
-  // Click "auto-song" while playing, at bar 1. fx.active_scene defaults to
-  // 0, whose length is now pinned to 1 bar above -- the active scene's own
-  // length should therefore already be "done" after just one more bar.
+  // Click "auto-song" while playing, at bar 1.
   click_arm_auto_song(fx, app_state);
   CHECK(fx.auto_song);
   CHECK(fx.active_scene == 0);
@@ -169,15 +170,22 @@ void test_auto_song_advances_scene_after_section_elapses() {
   CHECK(fx.active_scene == 0);
   CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
-  // Scene 0's own length is pinned to 1 bar above, so a single further bar
-  // (bar 2, one whole bar past the arm bar) is exactly one full boundary for
-  // the CURRENT active scene: this is the realistic, single-crossing repro
-  // (not a multi-bar loop, which would cross the same 1-bar boundary again
-  // on every subsequent bar and cycle through several scenes -- a different,
-  // already-covered case of the pure next_scene_to_launch()/bar_just_
-  // advanced units).
+  // One bar past the arm bar (bars_elapsed == 1) is still strictly less than
+  // the 2-bar threshold -- the active scene must not have advanced yet.
   app_state.apply_line(R"({"ev":"beat","bar":2,"beat":0,"pulse":0,"@":500})");
   CHECK(app_state.bar() == 2);
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 0);
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
+
+  // Two bars past the arm bar (bars_elapsed == kExpectedThresholdBars): the
+  // section has now played its one real repeat, the full threshold. This is
+  // the realistic, single-crossing repro (not a multi-bar loop, which would
+  // cross the same boundary again on every subsequent bar and cycle through
+  // several scenes -- a different, already-covered case of the pure
+  // next_scene_to_launch()/bar_just_advanced units).
+  app_state.apply_line(R"({"ev":"beat","bar":3,"beat":0,"pulse":0,"@":1000})");
+  CHECK(app_state.bar() == 1 + kExpectedThresholdBars);
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
 
   // THE ASSERTION UNDER TEST: the section elapsed -- the active scene column
@@ -231,12 +239,15 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   AppState app_state;
   V02State fx;
 
-  // Every scene column gets an explicit, short 1-bar length (the new
-  // per-scene length the advance decision reads, GridModel::set_scene_bars)
-  // so the ten-bar loop below is guaranteed to cross a boundary on every
-  // single bar as fx.active_scene cycles through all five columns -- proving
-  // the stuck-after-restart bug stays fixed regardless of which column is
-  // active at any given bar.
+  // NOTE (owner task #3 source-of-truth transition): these set_scene_bars
+  // calls are now VESTIGIAL -- the advance no longer consults GridModel::
+  // scene_bars (see grid_panel.cpp's update_auto_song header comment) --
+  // left in place only because this test does not depend on removing them
+  // (fx.active_style stays at its default -1, so the real threshold is
+  // preview::section_bars(-1, *)'s fallback (1) * kDefaultSectionRepeats (2)
+  // == 2 bars, regardless of what is set here). The ten-bar loop below still
+  // gives several crossings at that 2-bar cadence, enough to prove the
+  // stuck-after-restart bug stays fixed.
   for (std::size_t scene = 0; scene < model.scene_count(); ++scene) {
     model.set_scene_bars(scene, 1);
   }
@@ -275,25 +286,34 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   CHECK(app_state.bar() == 10);
 
   // THE BUG, PINNED: ten full bars into the NEW session -- with auto_song
-  // still ON, the transport PLAYING, and every scene column pinned to a
-  // 1-bar length above -- that should have advanced the active scene column
-  // NINE separate times over by now -- the active scene has not moved AT
-  // ALL. A correct implementation must not get stuck this way after an
-  // ordinary stop/restart.
+  // still ON and the transport PLAYING -- that should have advanced the
+  // active scene column several times over by now (every kDefaultSectionRepeats
+  // * preview::section_bars(-1, *) fallback == 2 bars, grid_panel.cpp's
+  // update_auto_song -- the per-scene set_scene_bars(scene, 1) calls above are
+  // vestigial now: the advance no longer consults them, see owner task #3) --
+  // the active scene has not moved AT ALL. A correct implementation must not
+  // get stuck this way after an ordinary stop/restart.
   CHECK(fx.active_scene != 0);
   CHECK(!brain.sent.empty());
 
   ImGui::DestroyContext();
 }
 
-// POSITIVE COVERAGE (Torquato QA, auto-song fix follow-up): pins that
-// GridModel::scene_bars actually GOVERNS the advance cadence, not just that
-// an advance eventually fires. Scene 0 is given an explicit 4-bar length: the
-// active scene column must NOT advance (and no `launch scene ` line may be
-// sent) after 1, 2, or 3 bars have elapsed, and MUST advance (with a
-// `launch scene <n> ...` send) exactly once 4 full bars have elapsed --
-// proving the per-scene length, not some fixed 1-bar sprint, is what gates
-// every crossing.
+// POSITIVE COVERAGE (Torquato QA, auto-song fix follow-up) -- REPURPOSED for
+// owner task #3's source-of-truth transition: this test used to pin that
+// GridModel::scene_bars (a host-only per-column bookkeeping field) governed
+// the advance cadence. That premise is now false BY DESIGN -- the advance no
+// longer consults scene_bars at all (grid_panel.cpp's update_auto_song header
+// comment) -- so this test now pins the REPLACEMENT invariant: the style's
+// own REAL section length (preview::section_bars) times kDefaultSectionRepeats
+// governs the cadence instead. fx.active_style = 0 ("basic", kBuiltinStyleNames
+// [0]) whose kVarA section is 2 bars (preview::section_bars(0, kVarA) == 2,
+// pinned independently by test_preview.cpp) -- times the default 2 repeats,
+// the SAME 4-bar threshold the old set_scene_bars(0, 4) call used to pin
+// directly, so the bar-by-bar timeline below is unchanged. The active scene
+// column must NOT advance (and no `launch scene ` line may be sent) after 1,
+// 2, or 3 bars have elapsed, and MUST advance (with a `launch scene <n> ...`
+// send) exactly once 4 full bars have elapsed.
 void test_scene_bars_governs_advance_cadence() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
@@ -309,9 +329,10 @@ void test_scene_bars_governs_advance_cadence() {
   AppState app_state;
   V02State fx;
 
-  // Scene 0 (the active scene at arm time) gets an explicit 4-bar length.
-  model.set_scene_bars(0, 4);
-  CHECK(model.scene_bars(0) == 4);
+  // 0 == "basic" (kBuiltinStyleNames[0]); scene 0 keeps GridModel's own
+  // default section (kDefaultSectionType == SectionType::kVarA), whose real
+  // length in "basic" is 2 bars -- see this function's own header comment.
+  fx.active_style = 0;
 
   // Transport starts playing; the first beat lands at bar 1.
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
@@ -334,9 +355,9 @@ void test_scene_bars_governs_advance_cadence() {
   CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
   // Bars 2, 3, 4 are 1, 2, and 3 bars past the arm bar -- all strictly less
-  // than the pinned 4-bar length, so the active scene must stay put and no
-  // `launch scene 1` (the wrap-forward advance target) may be sent yet, on
-  // any of these three bars.
+  // than the 4-bar threshold (basic's own kVarA length 2 * kDefaultSectionRepeats
+  // 2), so the active scene must stay put and no `launch scene 1` (the
+  // wrap-forward advance target) may be sent yet, on any of these three bars.
   for (int bar = 2; bar <= 4; ++bar) {
     app_state.apply_line(R"({"ev":"beat","bar":)" + std::to_string(bar) +
                          R"(,"beat":0,"pulse":0,"@":)" + std::to_string(bar * 500) + "}");
@@ -345,7 +366,7 @@ void test_scene_bars_governs_advance_cadence() {
     CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
   }
 
-  // Bar 5 is exactly 4 bars past the arm bar -- the pinned length is now
+  // Bar 5 is exactly 4 bars past the arm bar -- the threshold is now
   // fully elapsed: the active scene column MUST advance and a
   // `launch scene <n> ...` command MUST be sent for the newly-active column
   // (1). Checked against "launch scene 1" specifically (not a blanket
@@ -393,7 +414,11 @@ void test_auto_song_armed_by_default_advances_without_manual_toggle() {
   CHECK(fx.auto_song);  // pins the owner default-ON decision itself
   CHECK(fx.active_scene == 0);
 
-  model.set_scene_bars(0, 1);
+  // fx.active_style stays at its default (-1, "no style"): preview::
+  // section_bars(-1, *) honestly falls back to 1 bar, so the effective
+  // advance threshold is 1 * kDefaultSectionRepeats (2) == 2 bars (owner
+  // task #3's source-of-truth transition, see grid_panel.cpp's update_auto_
+  // song). set_scene_bars is no longer consulted by this advance.
 
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
   app_state.apply_line(R"({"ev":"beat","bar":1,"beat":0,"pulse":0,"@":0})");
@@ -406,10 +431,18 @@ void test_auto_song_armed_by_default_advances_without_manual_toggle() {
   CHECK(fx.active_scene == 0);
   CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
-  // One full bar past the master-play anchor: scene 0's pinned 1-bar length
-  // elapses, and the song must advance to scene 1 ON ITS OWN -- no toggle, no
-  // manual state mutation, only real rendered frames.
+  // One bar past the master-play anchor (bars_elapsed == 1) is still
+  // strictly less than the 2-bar threshold -- the active scene must not have
+  // advanced yet.
   app_state.apply_line(R"({"ev":"beat","bar":2,"beat":0,"pulse":0,"@":500})");
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 0);
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
+
+  // Two bars past the master-play anchor: the 2-bar threshold has now fully
+  // elapsed, and the song must advance to scene 1 ON ITS OWN -- no toggle, no
+  // manual state mutation, only real rendered frames.
+  app_state.apply_line(R"({"ev":"beat","bar":3,"beat":0,"pulse":0,"@":1000})");
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
   CHECK(fx.active_scene == 1);
   CHECK(any_sent_line_starts_with(brain.sent, "launch scene 1"));

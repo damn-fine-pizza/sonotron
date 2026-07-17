@@ -111,12 +111,17 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
   V02State fx;
   AppState app_state;
 
-  // Scene 0 (the active scene at arm time) gets an explicit, short 1-bar
-  // length via the new per-scene length GridModel::set_scene_bars -- the
-  // advance decision now reads THIS, not preview::section_bars, so this
-  // pins the advance to fire well within the wall-clock deadline below
-  // regardless of which style is loaded or its own section length.
-  model.set_scene_bars(0, 1);
+  // SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_
+  // auto_song header comment): the advance no longer reads GridModel::
+  // scene_bars at all -- it reads the STYLE's own real section length
+  // (preview::section_bars) times kDefaultSectionRepeats (2). With "basic"
+  // loaded below and scene 0 defaulting to kVarA (GridModel::
+  // kDefaultSectionType), that is section_bars(basic, kVarA) == 2 bars * 2
+  // repeats == 4 bars -- at the DEFAULT 120 BPM that is ~8 real seconds,
+  // which would blow the 6000ms deadline below, so this test now also bumps
+  // the tempo (same technique the sibling stop/restart and browser-switch
+  // real-backend tests already use) to keep the real-wall-clock advance
+  // comfortably inside budget.
 
   InProcessBrainSession session;
   CHECK(session.start());
@@ -134,6 +139,7 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
       break;
     }
   }
+  session.send("bpm 400");  // shrink the wall-clock bar cadence (see comment above)
 
   // "Press Play": the REAL button verb, transport_panel.cpp:55, byte for
   // byte (`brain_session.send("transport start")` followed by the same
@@ -144,11 +150,11 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
 
   // Pump the REAL per-frame pipeline (poll -> apply -> render, main.cpp's
   // own shape) across up to 6 REAL wall-clock seconds -- ample headroom at
-  // the default 120 BPM (a 4/4 bar is 2 real seconds, and scene 0's own
-  // pinned length above is only 1 bar), bounded on WALL TIME (not
-  // iteration/frame count) so this stays robust to scheduler jitter rather
-  // than flaky, per the same discipline test_in_process_brain_session.cpp's
-  // own poll_until already uses.
+  // 400 BPM (a 4/4 bar is well under a real second, and the advance
+  // threshold above is 4 bars), bounded on WALL TIME (not iteration/frame
+  // count) so this stays robust to scheduler jitter rather than flaky, per
+  // the same discipline test_in_process_brain_session.cpp's own poll_until
+  // already uses.
   const int first_bar = app_state.bar();
   int max_bar_seen = first_bar;
   bool armed = false;

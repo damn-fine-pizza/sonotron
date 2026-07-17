@@ -337,14 +337,25 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     return TranslateOutcome::kOk;
   }
 
-  // `style switch <name>` -- the LIVE morph counterpart to `style load` above
-  // (browser_panel.cpp sends this instead of `style load` whenever the
-  // transport is already playing): rides the existing Param::kStyleSwitch
-  // verb (engine.cpp's style_switch()), which quantizes to the next bar
-  // boundary while playing instead of hard-resetting the arranger. The GUI
-  // has no current-section readback (grid_model.hpp's documented gap), so the
-  // target section always defaults to SectionType::kVarA, the arranger's own
-  // default section -- same name resolution as `style load`.
+  // `style switch <name> [section <section-name>]` -- the LIVE morph
+  // counterpart to `style load` above (browser_panel.cpp sends this instead
+  // of `style load` whenever the transport is already playing): rides the
+  // existing Param::kStyleSwitch verb (engine.cpp's style_switch()), which
+  // quantizes to the next bar boundary while playing instead of hard-
+  // resetting the arranger.
+  //
+  // Owner task #2: switching style used to always force SectionType::kVarA,
+  // so changing style while playing silently reverted whatever section was
+  // actually active. This translator is a pure text->Command mapper with no
+  // access to AppState/GridModel (grid_model.hpp's documented gap) -- it
+  // cannot look up the current section itself -- so the caller now passes it
+  // explicitly through the optional `section <name>` suffix (browser_panel.
+  // cpp resolves it from AppState::section(), the engine's own last-
+  // committed section echo, before calling send()). The 3-token form (no
+  // suffix) is kept and still defaults to SectionType::kVarA -- the
+  // arranger's own default section -- for any caller that does not (or
+  // cannot) supply one, e.g. test_audio_primary_port_reachable.cpp's plain
+  // `style switch basic`.
   if (t.size() == 3 && t[0] == "style" && t[1] == "switch") {
     const std::string name(t[2]);
     const int index = Shell::resolve_style_index(name);
@@ -355,6 +366,24 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.param = Param::kStyleSwitch;
     out.a = index;
     out.b = static_cast<std::int32_t>(SectionType::kVarA);
+    out.boundary = Boundary::kNextBar;
+    return TranslateOutcome::kOk;
+  }
+  if (t.size() == 5 && t[0] == "style" && t[1] == "switch" && t[3] == "section") {
+    const std::string name(t[2]);
+    const int index = Shell::resolve_style_index(name);
+    if (index < 0) {
+      detail = "unknown style: " + name;
+      return TranslateOutcome::kInvalidArgument;
+    }
+    SectionType section{};
+    if (!parse_section_name(t[4], section)) {
+      detail = "unknown section: " + std::string(t[4]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kStyleSwitch;
+    out.a = index;
+    out.b = static_cast<std::int32_t>(section);
     out.boundary = Boundary::kNextBar;
     return TranslateOutcome::kOk;
   }

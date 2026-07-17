@@ -345,6 +345,66 @@ void test_section_playhead_phase_different_time_signature_3_4() {
   CHECK(std::fabs(phase - (1.0F / 6.0F)) < 1e-4F);  // 1/6 ≈ 0.1667
 }
 
+// repeat_cycle_start_bar: repeat-local playhead anchor (owner task #3) -- the
+// bar at which the CURRENT repeat cycle began, given the bar the WHOLE hold
+// started and the section's own real length in bars.
+using sonotron::repeat_cycle_start_bar;
+
+void test_repeat_cycle_start_bar_first_repeat_is_the_scene_start() {
+  // Still inside the FIRST repeat (bars_elapsed < repeat_length_bars): the
+  // anchor is just the scene's own start bar, unchanged.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/6, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/4) == 5);
+}
+
+void test_repeat_cycle_start_bar_advances_exactly_at_a_repeat_boundary() {
+  // Exactly one repeat_length_bars past the scene start: the SECOND repeat's
+  // own cycle has just begun, so the anchor jumps forward by one full
+  // repeat_length_bars.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/9, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/4) == 9);
+}
+
+void test_repeat_cycle_start_bar_mid_second_repeat() {
+  // Two bars into the SECOND repeat (bars_elapsed == 6, repeat_length == 4):
+  // one whole repeat (4 bars) has completed, so the anchor is scene_start +
+  // 4, not scene_start itself.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/11, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/4) == 9);
+}
+
+void test_repeat_cycle_start_bar_third_repeat() {
+  // Two whole repeats completed (bars_elapsed == 8, repeat_length == 4): the
+  // THIRD repeat's own cycle has just begun.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/13, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/4) == 13);
+}
+
+void test_repeat_cycle_start_bar_degenerate_non_positive_length_falls_back() {
+  // repeat_length_bars <= 0 (invalid): falls back to scene_start_bar
+  // verbatim -- section_playhead_phase's own guards already turn this into
+  // the honest "no playhead" sentinel, so there is nothing to compute.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/20, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/0) == 5);
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/20, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/-1) == 5);
+}
+
+void test_repeat_cycle_start_bar_rewind_falls_back_to_scene_start() {
+  // current_bar < scene_start_bar (a bar rewind mid-hold, e.g. a
+  // stop/restart cycle that has not yet re-anchored): falls back to
+  // scene_start_bar verbatim, same degenerate-input discipline as above.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/3, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/4) == 5);
+}
+
+void test_repeat_cycle_start_bar_exactly_at_scene_start() {
+  // current_bar == scene_start_bar: zero bars elapsed, still the first
+  // repeat -- the anchor is the scene start itself.
+  CHECK(repeat_cycle_start_bar(/*current_bar=*/5, /*scene_start_bar=*/5,
+                               /*repeat_length_bars=*/4) == 5);
+}
+
 }  // namespace
 
 int main() {
@@ -380,5 +440,12 @@ int main() {
   test_section_playhead_phase_sentinel_beats_per_bar_zero();
   test_section_playhead_phase_rewind_bar_less_than_anchor();
   test_section_playhead_phase_different_time_signature_3_4();
+  test_repeat_cycle_start_bar_first_repeat_is_the_scene_start();
+  test_repeat_cycle_start_bar_advances_exactly_at_a_repeat_boundary();
+  test_repeat_cycle_start_bar_mid_second_repeat();
+  test_repeat_cycle_start_bar_third_repeat();
+  test_repeat_cycle_start_bar_degenerate_non_positive_length_falls_back();
+  test_repeat_cycle_start_bar_rewind_falls_back_to_scene_start();
+  test_repeat_cycle_start_bar_exactly_at_scene_start();
   return sonotron::test::failures();
 }

@@ -35,9 +35,9 @@ constexpr float kRailW = 288.0F;
 // Opens one rounded neon zone panel child; `scrolls` false pins it (fixed
 // content must not wheel-scroll the few pixels its padding overflows).
 void begin_zone(const char* id, const ImVec2& size, bool scrolls) {
-  ImGuiWindowFlags flags = scrolls ? ImGuiWindowFlags_None
-                                   : (ImGuiWindowFlags_NoScrollbar |
-                                      ImGuiWindowFlags_NoScrollWithMouse);
+  ImGuiWindowFlags flags =
+      scrolls ? ImGuiWindowFlags_None
+              : (ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::BeginChild(id, size, ImGuiChildFlags_Borders, flags);
 }
 
@@ -58,8 +58,7 @@ void render_master_vu(const AppState& app_state, V02State& fx) {
     ImGui::TextColored(theme::kTextMuted, "  \xE2\x80\x94");
   }
   ImGui::Spacing();
-  neon::master_vu("vu", ImVec2(ImGui::GetContentRegionAvail().x, 22.0F), playing, fx.time,
-                  fx.glow);
+  neon::master_vu("vu", ImVec2(ImGui::GetContentRegionAvail().x, 22.0F), playing, fx.time, fx.glow);
   ImGui::EndChild();
   ImGui::PopStyleColor(2);
 }
@@ -99,7 +98,7 @@ void render_layout(const Layout& layout, WorkstationState& state) {
   // Band 2: working row -- browser | hero | rail.
   const float hero_w = std::max(200.0F, avail.x - kBrowserW - kRailW - 2.0F * kBandGap);
   begin_zone("band_browser", ImVec2(kBrowserW, work_h), /*scrolls=*/false);
-  render_browser_panel(state.browser, state.brain_session, fx);
+  render_browser_panel(state.browser, state.brain_session, state.app_state, fx);
   ImGui::EndChild();
 
   ImGui::SameLine(0.0F, kBandGap);

@@ -20,12 +20,14 @@
 // missing-launch defect). It asserts that among the sent command lines there
 // is one starting with "launch scene " after an auto-song advance fires.
 //
-// The active scene's own length is pinned short via GridModel::
-// set_scene_bars (the new per-scene length the advance decision now reads,
-// grid_model.hpp/.cpp -- NOT the old preview::section_bars style-section
-// fallback this file used to rely on), so a single further bar deterministic-
-// ally crosses the boundary without depending on any built-in style's own
-// section length.
+// SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_
+// auto_song header comment): the advance no longer reads GridModel::
+// scene_bars at all -- it reads the STYLE's own real section length
+// (preview::section_bars) times kDefaultSectionRepeats (2). fx.active_style
+// is left at its default (-1, "no style"), for which preview::section_bars()
+// honestly falls back to 1 bar, so the effective threshold here is a fixed 2
+// bars, independent of any built-in style's own section length and of the
+// (now-vestigial) set_scene_bars field.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
@@ -112,6 +114,11 @@ bool any_sent_line_starts_with(const std::vector<std::string>& sent, std::string
 // deterministically), then adds the assertion that specifies the full
 // contract: not just that `style section` was sent, but that a
 // `launch scene <n> ...` command was ALSO sent for the new active scene.
+//
+// NOTE: this reproduces the single-crossing advance at the current 2-bar
+// threshold (fx.active_style stays default, see this file's own header
+// comment) -- one bar longer than the ORIGINAL 1-bar set_scene_bars pin, so
+// the boundary-crossing beat below is bar 3, not bar 2.
 void test_auto_song_advance_must_launch_next_scene_clips() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
@@ -128,11 +135,6 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   SpyBrainSession brain;
   AppState app_state;
   V02State fx;
-
-  // Scene 0 (the active scene at arm time) gets a short, explicit 1-bar
-  // length so the advance boundary is crossed by exactly one further bar,
-  // independent of any built-in style's own section length.
-  model.set_scene_bars(0, 1);
 
   // Transport starts playing; first beat lands at bar 1.
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
@@ -158,10 +160,18 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   CHECK(fx.active_scene == 0);
   CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
 
-  // One further bar crosses the 1-bar section boundary for the active scene:
-  // this must trigger exactly one advance.
+  // One bar past the arm bar (bars_elapsed == 1) is still strictly less than
+  // the 2-bar threshold -- the active scene must not have advanced yet.
   app_state.apply_line(R"({"ev":"beat","bar":2,"beat":0,"pulse":0,"@":500})");
   CHECK(app_state.bar() == 2);
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(fx.active_scene == 0);
+  CHECK(!any_sent_line_starts_with(brain.sent, "launch scene 1"));
+
+  // Two bars past the arm bar crosses the 2-bar threshold: this must trigger
+  // exactly one advance.
+  app_state.apply_line(R"({"ev":"beat","bar":3,"beat":0,"pulse":0,"@":1000})");
+  CHECK(app_state.bar() == 3);
   render_one_frame(model, seqedit, parts, brain, app_state, fx);
 
   // Half of the contract (already pinned green by

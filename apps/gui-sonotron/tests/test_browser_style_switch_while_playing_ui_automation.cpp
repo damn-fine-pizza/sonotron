@@ -8,17 +8,30 @@
 // inside render_styles) while the transport is REALLY playing, through a
 // REAL InProcessBrainSession, and distinguishes "style switch" from "style
 // load" via a REAL, ENGINE-OBSERVABLE difference (never a spy on the sent
-// wire text): `style switch <name>` (in_process_brain_session.cpp) always
-// targets `SectionType::kVarA` and rides Boundary::kNextBar -- while playing
-// and already loaded, Engine::style_switch (engine.cpp) queues it
-// (immediate == false) and it lands, one bar later, through the SAME
-// fire_arranger `section_changed` -> `OutEvent::section(...)` path
-// AppState::section() decodes. `style load <name>`, in contrast,
-// (Engine::cmd_style's kStyleLoad case) NEVER emits an OutEvent::section at
-// all, at any bar, playing or not -- so if this flow regressed to
-// unconditionally sending `style load` (ignoring `fx.playing`), AppState::
-// section() would simply never move off the pre-established baseline within
-// this test's wall-clock budget, a real, observable divergence.
+// wire text).
+//
+// REWRITTEN for owner task #2 (preserve the active section across a live
+// switch instead of always reverting to varA): the OLD version of this test
+// asserted the section readback FLIPPED to "varA" after the switch -- that
+// signal is gone by design now, because browser_panel.cpp's render_styles
+// passes the engine's own CURRENT section (AppState::section()) as an
+// explicit `style switch <name> section <current>` suffix
+// (in_process_brain_session.cpp), so the switch lands on the SAME section it
+// started from, not varA.
+//
+// The new, still-real signal: `style_switched=true` forces the arranger's own
+// TickResult.section_changed=true regardless of whether the section VALUE
+// actually changed (arranger.hpp's `if (next != m_current || style_switched)`
+// -- confirmed by reading the arranger source, not assumed), so a genuine
+// `OutEvent::section(...)` -> AppState::apply -> a NEW "section varB" line in
+// AppState::log() (app_state.cpp's format_log_line) still fires one bar
+// later, even though the section VALUE never moves off varB. `style load
+// <name>` (Engine::cmd_style's kStyleLoad case), in contrast, NEVER emits an
+// OutEvent::section at all, at any bar -- so counting "section varB" log-line
+// OCCURRENCES before/after the click (rather than checking the live value,
+// which never changes) still distinguishes a genuine switch from a load: a
+// load would leave the count frozen forever; a switch adds a later
+// occurrence.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
@@ -74,7 +87,7 @@ ImDrawData* render_one_frame(BrowserModel& model, BrainSession& brain_session, A
   sonotron::render_transport_panel(app_state, brain_session, fx);
   ImGui::Spacing();
   ImGui::BeginChild("browser_area", ImVec2(360.0F, 600.0F));
-  sonotron::render_browser_panel(model, brain_session, fx);
+  sonotron::render_browser_panel(model, brain_session, app_state, fx);
   ImGui::EndChild();
   ImGui::End();
   ImGui::Render();
@@ -89,10 +102,24 @@ ImDrawData* click_at(ImVec2 pos, BrowserModel& model, BrainSession& brain_sessio
   return render_one_frame(model, brain_session, app_state, fx);
 }
 
-void poll_once(BrainSession& session, AppState& app_state) {
+// `section_varb_events` counts every REAL kSection("varB") event this test
+// observes, at the BrainEvent granularity, as it is decoded -- NOT via
+// AppState::log() (app_state.hpp's own m_log is a display-only, CAPPED ring
+// buffer, kMaxLog == 200 lines, and this test's own bpm-400 run floods it
+// with far more than 200 "beat"/"midi-out" lines in the time it takes a
+// queued style switch to land one bar later; the ORIGINAL baseline "section
+// varB" line is long evicted by the time the switch's own line would land,
+// which silently broke a first draft of this test's own log-line-count
+// technique -- found and fixed while writing this test). Counting at the
+// event source, before AppState ever caps or evicts anything, is immune to
+// that.
+void poll_once(BrainSession& session, AppState& app_state, int& section_varb_events) {
   std::vector<BrainEvent> events;
   session.poll(events);
   for (const BrainEvent& ev : events) {
+    if (ev.kind == BrainEvent::Kind::kSection && ev.section_name == "varB") {
+      ++section_varb_events;
+    }
     app_state.apply(ev);
   }
 }
@@ -112,7 +139,7 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   InProcessBrainSession session;
   CHECK(session.start());
   session.send("style load basic");
-  fx.active_style = 0;  // "basic" is index 0 (kBuiltinStyleNames), same as main.cpp's own boot
+  fx.active_style = 0;      // "basic" is index 0 (kBuiltinStyleNames), same as main.cpp's own boot
   session.send("bpm 400");  // shrink the wall-clock bar cadence (~0.6s/bar vs ~2s at 120 BPM)
   // Baseline section, established WHILE STOPPED (immediate echo): distinct
   // from "varA", the fixed target `style switch` always requests
@@ -159,8 +186,8 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   const float row_height = ImGui::GetTextLineHeightWithSpacing();
   constexpr int kTargetStyleIndex = 2;  // "rock" (kBuiltinStyleNames[2])
   th::Rect target_row;
-  target_row.min = ImVec2(basic_row.min.x,
-                          basic_row.min.y + static_cast<float>(kTargetStyleIndex) * row_height);
+  target_row.min =
+      ImVec2(basic_row.min.x, basic_row.min.y + static_cast<float>(kTargetStyleIndex) * row_height);
   target_row.max = ImVec2(basic_row.max.x, target_row.min.y + row_height);
   target_row.found = true;
 
@@ -171,10 +198,11 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   click_at(play_rect.center(), model, session, app_state, fx);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
 
+  int section_varb_events = 0;
   {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(6000);
     while (std::chrono::steady_clock::now() < deadline) {
-      poll_once(session, app_state);
+      poll_once(session, app_state, section_varb_events);
       render_one_frame(model, session, app_state, fx);
       if (app_state.transport() == AppState::Transport::kPlaying && app_state.section() == "varB") {
         break;
@@ -184,10 +212,14 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   }
   CHECK(app_state.transport() == AppState::Transport::kPlaying);
   CHECK(app_state.section() == "varB");
+  // Baseline event count: exactly the one kSection("varB") event decoded
+  // above while establishing the baseline (immediate echo, transport was
+  // stopped at the time).
+  CHECK(section_varb_events == 1);
 
   // Real click: the target style leaf, WHILE PLAYING (browser_panel.cpp's
-  // REAL click handler -- `fx.playing ? "style switch " + name : "style
-  // load " + name`, never hand-written here).
+  // REAL click handler -- `fx.playing ? "style switch " + name + " section "
+  // + app_state.section() : "style load " + name`, never hand-written here).
   click_at(target_row.center(), model, session, app_state, fx);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
 
@@ -195,16 +227,18 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   // the intended row (real production field, not an assumption).
   CHECK(fx.active_style == kTargetStyleIndex);
 
-  // Pump the REAL per-frame pipeline (bounded wall time) until the section
-  // readback flips to "varA" -- the fixed target ONLY a real `style switch`
-  // ever lands (see this file's own header comment for why `style load`
-  // could never produce this signal).
+  // Pump the REAL per-frame pipeline (bounded wall time) until a SECOND
+  // kSection("varB") event is decoded -- only a real `style switch` (queued
+  // to the next bar boundary, Engine::style_switch) forces the arranger's own
+  // section_changed=true and re-emits the OutEvent::section(...) this test
+  // observes; `style load` never emits one at all, at any bar (see this
+  // file's own header comment).
   {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(6000);
     while (std::chrono::steady_clock::now() < deadline) {
-      poll_once(session, app_state);
+      poll_once(session, app_state, section_varb_events);
       render_one_frame(model, session, app_state, fx);
-      if (app_state.section() == "varA") {
+      if (section_varb_events > 1) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -214,9 +248,13 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   session.stop();
 
   // THE ASSERTION: only a real `style switch` (not `style load`) could have
-  // produced this section-readback flip while the transport stayed playing
-  // throughout.
-  CHECK(app_state.section() == "varA");
+  // produced a second kSection("varB") event while the section's own VALUE
+  // never moved -- the section-value-preserving fix (owner task #2) means the
+  // live value alone is no longer an observable signal, so this counts the
+  // genuine re-emission instead.
+  CHECK(section_varb_events > 1);
+  // Sanity: the section truly never moved off the baseline throughout.
+  CHECK(app_state.section() == "varB");
 
   ImGui::DestroyContext();
 }
