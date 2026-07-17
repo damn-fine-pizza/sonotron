@@ -34,6 +34,19 @@ namespace sonotron::preview {
 // so this window never truncates real content.
 inline constexpr int kSteps = 16;
 
+// The most StyleEvents this preview ever keeps DISTINCTLY at the same step:
+// a drum kit's kick/snare/hihat voices routinely land on the exact same 16th
+// (a "backbeat + hat bed" pattern, e.g. arrangrr/arranger/styles/basic.hpp's
+// kVarADrums has a kick or snare colliding with the hat bed on every
+// downbeat). A single int per step could only ever remember the LAST
+// StyleEvent resolved for that step, silently discarding every earlier
+// simultaneous voice -- the launch-cell/Sequence Edit "drums flatten to one
+// level" bug. kMaxVoicesPerStep is a generous cap above every built-in
+// style's observed worst-case same-step collision (kick+snare+hat == 3) with
+// one spare slot; a StyleEvent beyond this cap is defensively dropped, never
+// a crash (see preview_for()'s own insertion loop).
+inline constexpr int kMaxVoicesPerStep = 4;
+
 // Section vocabulary, numerically IDENTICAL to arrangrr::SectionType (same
 // mirror discipline as kSteps above) so preview.cpp can `static_cast`
 // between them with no translation table. Values not yet reachable from the
@@ -63,7 +76,14 @@ enum class Section : std::uint8_t {
 // pattern (no seed, no randomness -- it is exactly what the style table
 // says, resolved against a fixed placeholder harmony).
 struct PreviewPattern {
-  std::array<int, kSteps> pitch{};
+  // pitch[step][voice]: the absolute MIDI note for that voice slot, or -1
+  // for "no voice here" (a rest, or a step with fewer than
+  // kMaxVoicesPerStep simultaneous StyleEvents). Voices are packed low
+  // within a step in the ORDER their StyleEvents were resolved -- multiple
+  // StyleEvents landing on the SAME step (e.g. a drum kit's kick+hihat both
+  // on beat 1) each get their OWN slot instead of the last one silently
+  // overwriting the others.
+  std::array<std::array<int, kMaxVoicesPerStep>, kSteps> pitch{};
   // True when this preview is APPROXIMATE, not the exact runtime output:
   // every non-kFixed role resolves against the placeholder harmony above
   // (there is no live chord while stopped) and/or, for a motif-driven

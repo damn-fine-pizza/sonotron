@@ -31,40 +31,46 @@ ImU32 u32(const ImVec4& color, float alpha_mul) {
   return ImGui::ColorConvertFloat4ToU32(c);
 }
 
-ClipPattern clip_pattern_from_pitches(const std::array<int, ClipPattern::kSteps>& pitches) {
+ClipPattern clip_pattern_from_pitches(
+    const std::array<std::array<int, ClipPattern::kMaxVoicesPerStep>, ClipPattern::kSteps>&
+        pitches) {
   ClipPattern out{};
+  // Every step's every slot starts as an empty voice (ClipPattern's own
+  // default is all-zero, not all-rest, so this must be set explicitly).
+  for (auto& slots : out.pitch) {
+    slots.fill(-1);
+  }
+
   int lo = 128;
   int hi = -1;
-  for (const int p : pitches) {
-    if (p < 0) {
-      continue;
+  for (const auto& slots : pitches) {
+    for (const int p : slots) {
+      if (p < 0) {
+        continue;
+      }
+      lo = std::min(lo, p);
+      hi = std::max(hi, p);
     }
-    lo = std::min(lo, p);
-    hi = std::max(hi, p);
   }
   if (hi < lo) {
-    // Every step is a rest: nothing to normalize (ClipPattern's own default
-    // is all-zero, not all-rest, so this must be set explicitly).
-    for (int& row : out.pitch) {
-      row = -1;
-    }
-    return out;
+    return out;  // every step is a rest: nothing to normalize
   }
   constexpr int kMaxRow = ClipPattern::kPitches - 1;
   for (int step = 0; step < ClipPattern::kSteps; ++step) {
-    const int p = pitches[static_cast<std::size_t>(step)];
-    if (p < 0) {
-      out.pitch[static_cast<std::size_t>(step)] = -1;
-      continue;
+    for (int voice = 0; voice < ClipPattern::kMaxVoicesPerStep; ++voice) {
+      const int p = pitches[static_cast<std::size_t>(step)][static_cast<std::size_t>(voice)];
+      if (p < 0) {
+        continue;  // already -1 from the fill above
+      }
+      if (hi == lo) {
+        // A single distinct pitch (or a run of the same one): the middle row.
+        out.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(voice)] = kMaxRow / 2;
+        continue;
+      }
+      const float t = static_cast<float>(p - lo) / static_cast<float>(hi - lo);
+      out.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(voice)] =
+          std::clamp(static_cast<int>(t * static_cast<float>(kMaxRow) + 0.5F), 0, kMaxRow);
     }
-    if (hi == lo) {
-      // A single distinct pitch (or a run of the same one): the middle row.
-      out.pitch[static_cast<std::size_t>(step)] = kMaxRow / 2;
-      continue;
-    }
-    const float t = static_cast<float>(p - lo) / static_cast<float>(hi - lo);
-    out.pitch[static_cast<std::size_t>(step)] =
-        std::clamp(static_cast<int>(t * static_cast<float>(kMaxRow) + 0.5F), 0, kMaxRow);
   }
   return out;
 }
@@ -333,32 +339,45 @@ void clip_preview_pianoroll(ImDrawList* dl, const ImVec2& min, const ImVec2& max
   // (narrower columns in the same band), never a half-cropped subset (owner
   // bug #2, docs root-cause: this used to hard-crop to the first kCellSteps
   // (8) columns while Sequence Edit iterated all 16, so any note past step 8
-  // never appeared here at all). STEP runs left->right (X), PITCH low->high
-  // (Y, pitch 0 at the bottom).
+  // never appeared here at all). Every simultaneous voice at a step (owner
+  // bug #13, e.g. a drum kit's kick+hihat both on beat 1) draws its OWN
+  // row-bar -- iterating (step, voice) instead of just `step` is what makes
+  // that possible; a flattened single-level preview used to be the visible
+  // symptom of `pat.pitch[step]` only ever holding one voice at all. STEP
+  // runs left->right (X), PITCH low->high (Y, pitch 0 at the bottom).
   const int steps = ClipPattern::kSteps;
   const int pitches = ClipPattern::kPitches;
+  const int voices = ClipPattern::kMaxVoicesPerStep;
   for (int step = 0; step < steps; ++step) {
-    const int pitch = pat.pitch[step];
-    if (pitch < 0) {
-      continue;
+    for (int voice = 0; voice < voices; ++voice) {
+      const int pitch = pat.pitch[step][voice];
+      if (pitch < 0) {
+        continue;
+      }
+      // Skip a continuation step: this exact (voice slot, pitch) already
+      // got drawn as the second half of a merged 2-wide bar starting at
+      // step-1, below.
+      if (step > 0 && pat.pitch[step - 1][voice] == pitch) {
+        continue;
+      }
+      // Notes as short horizontal BARS filling most of their step column
+      // (design), not centered square dots; a run of the SAME voice slot
+      // holding the same pitch on the immediately following step merges
+      // into a 2-wide bar -- `r0`/`r1` are this bar's first/last step cell.
+      int span = 1;
+      if (step + 1 < steps && pat.pitch[step + 1][voice] == pitch) {
+        span = 2;
+      }
+      const PitchCellRect r0 = pitch_grid_cell(min, max, step, steps, pitch, pitches);
+      const PitchCellRect r1 = pitch_grid_cell(min, max, step + span - 1, steps, pitch, pitches);
+      const float rh = r0.max.y - r0.min.y;
+      const float bar_h = std::max(2.0F, rh * 0.5F);
+      const float cy = (r0.min.y + r0.max.y) * 0.5F;
+      const float x0 = r0.min.x + 0.5F;
+      const float x1 = r1.max.x - 1.0F;
+      dl->AddRectFilled(ImVec2(x0, cy - bar_h * 0.5F), ImVec2(x1, cy + bar_h * 0.5F),
+                        u32(color, 0.85F), 1.5F);
     }
-    int span = 1;
-    while (step + span < steps && pat.pitch[step + span] == pitch && span < 2) {
-      ++span;
-    }
-    // Notes as short horizontal BARS filling most of their step column
-    // (design), not centered square dots; a run of the same pitch merges
-    // into a 2-wide bar -- `r0`/`r1` are this bar's first/last step cell.
-    const PitchCellRect r0 = pitch_grid_cell(min, max, step, steps, pitch, pitches);
-    const PitchCellRect r1 = pitch_grid_cell(min, max, step + span - 1, steps, pitch, pitches);
-    const float rh = r0.max.y - r0.min.y;
-    const float bar_h = std::max(2.0F, rh * 0.5F);
-    const float cy = (r0.min.y + r0.max.y) * 0.5F;
-    const float x0 = r0.min.x + 0.5F;
-    const float x1 = r1.max.x - 1.0F;
-    dl->AddRectFilled(ImVec2(x0, cy - bar_h * 0.5F), ImVec2(x1, cy + bar_h * 0.5F),
-                      u32(color, 0.85F), 1.5F);
-    step += span - 1;
   }
 }
 

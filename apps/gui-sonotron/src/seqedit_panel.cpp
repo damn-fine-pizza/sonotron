@@ -124,21 +124,27 @@ void render_seqedit_panel(SeqEditModel& model, const V02State& fx) {
   // (pitch 0 at the bottom), via the SAME neon::pitch_grid_cell() helper the
   // launch-cell mini-preview uses (neon_widgets.cpp's clip_preview_pianoroll)
   // -- one shared formula, so the two views can never silently drift apart.
+  // Every simultaneous voice at a step (owner bug #13, e.g. a drum kit's
+  // kick+hihat both on beat 1) draws its OWN row block here too -- this is
+  // the reference view the launch-cell mini-preview must match.
   const neon::ClipPattern pat = neon::clip_pattern_from_pitches(pp.pitch);
   const int kSteps = neon::ClipPattern::kSteps;
   const int kPitches = neon::ClipPattern::kPitches;
+  const int kVoices = neon::ClipPattern::kMaxVoicesPerStep;
   for (int step = 0; step < kSteps; ++step) {
-    const int pitch = pat.pitch[static_cast<std::size_t>(step)];
-    if (pitch < 0) {
-      continue;
+    for (int voice = 0; voice < kVoices; ++voice) {
+      const int pitch = pat.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(voice)];
+      if (pitch < 0) {
+        continue;
+      }
+      const neon::PitchCellRect r = neon::pitch_grid_cell(p0, p1, step, kSteps, pitch, kPitches);
+      const ImVec2 b0(r.min.x + 2.0F, r.min.y + 2.0F);
+      const ImVec2 b1(r.max.x - 2.0F, r.max.y - 2.0F);
+      if (fx.glow) {
+        neon::glow_rect(dl, b0, b1, track_color, 3.0F, 0.7F, fx.glow);
+      }
+      dl->AddRectFilled(b0, b1, neon::u32(track_color, 0.85F), 3.0F);
     }
-    const neon::PitchCellRect r = neon::pitch_grid_cell(p0, p1, step, kSteps, pitch, kPitches);
-    const ImVec2 b0(r.min.x + 2.0F, r.min.y + 2.0F);
-    const ImVec2 b1(r.max.x - 2.0F, r.max.y - 2.0F);
-    if (fx.glow) {
-      neon::glow_rect(dl, b0, b1, track_color, 3.0F, 0.7F, fx.glow);
-    }
-    dl->AddRectFilled(b0, b1, neon::u32(track_color, 0.85F), 3.0F);
   }
 
   // Green playhead sweeping L->R while the opened clip plays.

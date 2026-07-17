@@ -31,7 +31,9 @@ constexpr std::size_t kCoreRoleCount = 10;
 
 PreviewPattern preview_for(int style_index, Section section, std::size_t role_index) {
   PreviewPattern out{};
-  out.pitch.fill(-1);
+  for (auto& slots : out.pitch) {
+    slots.fill(-1);
+  }
 
   if (style_index < 0 || style_index >= static_cast<int>(arrangrr::styles::kBuiltinCount) ||
       role_index >= kCoreRoleCount) {
@@ -101,7 +103,19 @@ PreviewPattern preview_for(int style_index, Section section, std::size_t role_in
     if (note < 0 || note > 127) {
       continue;
     }
-    out.pitch[ev.step] = note;
+    // Owner bug #13 fix: pack this StyleEvent into the first FREE voice slot
+    // at its own step, rather than overwriting `out.pitch[ev.step]` outright
+    // -- a drum kit's kick/snare colliding with the hat bed on the same 16th
+    // (e.g. basic.hpp's kVarADrums) used to lose every voice but the last
+    // one resolved. A step with more simultaneous voices than
+    // kMaxVoicesPerStep (no built-in style reaches this) defensively drops
+    // the extra event rather than overflowing.
+    for (int& slot : out.pitch[ev.step]) {
+      if (slot < 0) {
+        slot = note;
+        break;
+      }
+    }
   }
   return out;
 }
@@ -118,7 +132,9 @@ int section_bars(int style_index, Section section) {
 
 PreviewPattern preview_for_loop(const LoopPreviewEvent* events, std::size_t count) {
   PreviewPattern out{};
-  out.pitch.fill(-1);
+  for (auto& slots : out.pitch) {
+    slots.fill(-1);
+  }
   // Always approximate: even a kInterval event is resolved against the
   // placeholder harmony below, never the loop's own live one (see this
   // function's header comment).
@@ -160,7 +176,15 @@ PreviewPattern preview_for_loop(const LoopPreviewEvent* events, std::size_t coun
     if (step >= static_cast<std::size_t>(kSteps)) {
       continue;
     }
-    out.pitch[step] = note;
+    // Same voice-slot packing preview_for() uses above (owner bug #13):
+    // multiple recorded loop events landing on the same step each keep
+    // their own slot instead of the last one overwriting the others.
+    for (int& slot : out.pitch[step]) {
+      if (slot < 0) {
+        slot = note;
+        break;
+      }
+    }
   }
   return out;
 }

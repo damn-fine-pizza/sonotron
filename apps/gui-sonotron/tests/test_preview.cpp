@@ -8,6 +8,8 @@
 
 #include "test.hpp"
 
+#include <array>
+
 using sonotron::preview::preview_for;
 using sonotron::preview::PreviewPattern;
 using sonotron::preview::Section;
@@ -19,8 +21,11 @@ bool same_pattern(const PreviewPattern& a, const PreviewPattern& b) {
     return false;
   }
   for (int i = 0; i < sonotron::preview::kSteps; ++i) {
-    if (a.pitch[static_cast<std::size_t>(i)] != b.pitch[static_cast<std::size_t>(i)]) {
-      return false;
+    for (int v = 0; v < sonotron::preview::kMaxVoicesPerStep; ++v) {
+      if (a.pitch[static_cast<std::size_t>(i)][static_cast<std::size_t>(v)] !=
+          b.pitch[static_cast<std::size_t>(i)][static_cast<std::size_t>(v)]) {
+        return false;
+      }
     }
   }
   return true;
@@ -36,17 +41,35 @@ void test_determinism() {
 }
 
 // kDrums (role_index 0) in basic/kVarA is RolePolicy::kFixed: kVarADrums
-// mixes a kick/snare backbeat with a closed-hat bed, both at steps
-// {0,2,4,6,8,10,12,14}; the hat events are authored LAST in the array, so
-// they are the ones that end up resolved at those shared steps (a real,
-// literal MIDI note -- 42, GM closed hi-hat -- never a hash). This is the
-// REAL NTT output, pinned by exact value, not merely "some pitch".
+// mixes a kick/snare backbeat (steps 0,4,8,12; tones 36,38,36,38) with a
+// closed-hat bed (steps 0,2,4,6,8,10,12,14; tone 42, GM closed hi-hat). The
+// kick/snare events are authored FIRST in the array, so on the four steps
+// where both collide (0,4,8,12) the kick/snare lands in voice slot 0 and the
+// hat lands in slot 1 -- owner bug #13's exact repro: before the fix, a
+// single `pitch[step]` int could only remember the LAST StyleEvent resolved
+// per step, so the kick/snare backbeat silently vanished under the hat on
+// every one of those four steps. This is the REAL NTT output (literal tones,
+// kFixed never resolves against harmony), pinned by exact per-voice value.
 void test_known_value_fixed_role_drums() {
   const PreviewPattern p = preview_for(0, Section::kVarA, /*role_index=*/0);
   CHECK(p.approx == false);  // kFixed: literal, never approximate
   for (int step = 0; step < sonotron::preview::kSteps; ++step) {
-    const int expected = (step % 2 == 0 && step <= 14) ? 42 : -1;
-    CHECK(p.pitch[static_cast<std::size_t>(step)] == expected);
+    int expected_slot0 = -1;
+    int expected_slot1 = -1;
+    if (step == 0 || step == 8) {
+      expected_slot0 = 36;  // kick
+      expected_slot1 = 42;  // hat, collides -> its own voice slot
+    } else if (step == 4 || step == 12) {
+      expected_slot0 = 38;  // snare
+      expected_slot1 = 42;  // hat, collides -> its own voice slot
+    } else if (step == 2 || step == 6 || step == 10 || step == 14) {
+      expected_slot0 = 42;  // hat alone, no collision
+    }
+    CHECK(p.pitch[static_cast<std::size_t>(step)][0] == expected_slot0);
+    CHECK(p.pitch[static_cast<std::size_t>(step)][1] == expected_slot1);
+    // No built-in style reaches a third simultaneous voice on this pattern.
+    CHECK(p.pitch[static_cast<std::size_t>(step)][2] == -1);
+    CHECK(p.pitch[static_cast<std::size_t>(step)][3] == -1);
   }
 }
 
@@ -60,15 +83,19 @@ void test_known_value_fixed_role_drums() {
 void test_known_value_resolved_role_bass() {
   const PreviewPattern p = preview_for(0, Section::kVarA, /*role_index=*/2);
   CHECK(p.approx == true);  // kChordTone: resolved against a placeholder chord
-  CHECK(p.pitch[0] == 36);
-  CHECK(p.pitch[4] == 43);
-  CHECK(p.pitch[8] == 36);
-  CHECK(p.pitch[12] == 43);
+  CHECK(p.pitch[0][0] == 36);
+  CHECK(p.pitch[4][0] == 43);
+  CHECK(p.pitch[8][0] == 36);
+  CHECK(p.pitch[12][0] == 43);
   for (int step = 0; step < sonotron::preview::kSteps; ++step) {
-    if (step == 0 || step == 4 || step == 8 || step == 12) {
-      continue;
+    // kVarABass never has two voices on the same step -- every other slot
+    // (including slot 0 on a rest step) stays a rest.
+    for (int v = 0; v < sonotron::preview::kMaxVoicesPerStep; ++v) {
+      if ((step == 0 || step == 4 || step == 8 || step == 12) && v == 0) {
+        continue;
+      }
+      CHECK(p.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] == -1);
     }
-    CHECK(p.pitch[static_cast<std::size_t>(step)] == -1);
   }
 }
 
@@ -80,7 +107,9 @@ void test_role_absent_from_section_is_empty() {
   const PreviewPattern p = preview_for(0, Section::kVarA, /*role_index=*/7);
   CHECK(p.approx == false);
   for (int step = 0; step < sonotron::preview::kSteps; ++step) {
-    CHECK(p.pitch[static_cast<std::size_t>(step)] == -1);
+    for (int v = 0; v < sonotron::preview::kMaxVoicesPerStep; ++v) {
+      CHECK(p.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] == -1);
+    }
   }
 }
 
@@ -107,9 +136,12 @@ void test_out_of_range_arguments_are_empty() {
   const PreviewPattern huge_style = preview_for(9999, Section::kVarA, 0);
   const PreviewPattern huge_role = preview_for(0, Section::kVarA, 9999);
   for (int step = 0; step < sonotron::preview::kSteps; ++step) {
-    CHECK(negative_style.pitch[static_cast<std::size_t>(step)] == -1);
-    CHECK(huge_style.pitch[static_cast<std::size_t>(step)] == -1);
-    CHECK(huge_role.pitch[static_cast<std::size_t>(step)] == -1);
+    for (int v = 0; v < sonotron::preview::kMaxVoicesPerStep; ++v) {
+      CHECK(negative_style.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] ==
+            -1);
+      CHECK(huge_style.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] == -1);
+      CHECK(huge_role.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] == -1);
+    }
   }
   CHECK(negative_style.approx == false);
   CHECK(huge_style.approx == false);

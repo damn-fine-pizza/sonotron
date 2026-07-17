@@ -149,9 +149,21 @@ void test_grid_cell_preview_shows_fewer_real_notes_than_sequence_edit() {
                                      /*role_index=*/0);
   CHECK(pp.approx ==
         false);  // kFixed drums role: literal, not resolved against a placeholder chord
+  // Column occupancy (a STEP counts once if ANY voice slot is real content),
+  // matching count_occupied_columns_in_band()'s own per-column counting
+  // below -- steps 0,4,8,12 actually carry TWO simultaneous voices each
+  // (kick/snare + hat, owner bug #13), but they still paint as ONE occupied
+  // column each, same as the hat-only steps 2,6,10,14.
   int real_note_count = 0;
   for (int step = 0; step < sonotron::preview::kSteps; ++step) {
-    if (pp.pitch[static_cast<std::size_t>(step)] >= 0) {
+    bool step_has_content = false;
+    for (int v = 0; v < sonotron::preview::kMaxVoicesPerStep; ++v) {
+      if (pp.pitch[static_cast<std::size_t>(step)][static_cast<std::size_t>(v)] >= 0) {
+        step_has_content = true;
+        break;
+      }
+    }
+    if (step_has_content) {
       ++real_note_count;
     }
   }
