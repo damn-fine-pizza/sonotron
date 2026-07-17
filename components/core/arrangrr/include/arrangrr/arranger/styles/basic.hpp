@@ -158,34 +158,64 @@ inline constexpr StylePattern kVarBPatterns[] = {
     {.role=TrackRole::kPerc, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kPercTamb)},
 };
 
-// Intro1 (style-depth Wave-2 C): a genuine 2-bar build. Bar 1 (unchanged) is
-// the sparse hat pickup; bar 2 is the arrival -- crash + backbeat kick/snare
-// enter under a full 8th-note hat, landing the band right where VarA starts.
+// Intro1 (REDESIGNED, docs/proposals/basic-style-redesign.md sec3.2):
+// preparation, not a VarA preview. Bar 1 is a graduated pickup with
+// continuous motion (no dead bar, no isolated late tick); bar 2 is a launch
+// (driving kick pulse + closing fill), not VarA's backbeat. Nothing fires at
+// step 0 on any role (see sec1.2/1.3): the pickup breathes in from step 2.
 inline constexpr StyleEvent kIntroDrums[] = {
-    {.step=8, .tone=42, .octave=0, .vel=60, .gate=60},
-    {.step=10, .tone=42, .octave=0, .vel=65, .gate=60},
-    {.step=12, .tone=42, .octave=0, .vel=70, .gate=60},
-    {.step=14, .tone=42, .octave=0, .vel=80, .gate=60},
-    // bar 2: arrival.
-    {.step=16, .tone=49, .octave=0, .vel=90, .gate=1800},  // crash announces the downbeat
-    {.step=16, .tone=36, .octave=0, .vel=100, .gate=120},
-    {.step=20, .tone=38, .octave=0, .vel=92, .gate=120},
-    {.step=24, .tone=36, .octave=0, .vel=104, .gate=120},
-    {.step=28, .tone=38, .octave=0, .vel=98, .gate=120},
-    {.step=16, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=18, .tone=42, .octave=0, .vel=54, .gate=60},
-    {.step=20, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=22, .tone=42, .octave=0, .vel=54, .gate=60},
-    {.step=24, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=26, .tone=42, .octave=0, .vel=54, .gate=60},
-    {.step=28, .tone=42, .octave=0, .vel=66, .gate=60}, {.step=30, .tone=42, .octave=0, .vel=60, .gate=60},
+    // bar 1: soft pulse markers (side-stick, NOT VarA's kick/snare) plus a
+    // hi-hat roll that accelerates continuously into the bar-2 arrival.
+    {.step=4,  .tone=kSideStick, .octave=0, .vel=50, .gate=kGateStaccato},
+    {.step=8,  .tone=kClosedHat, .octave=0, .vel=52, .gate=kGateHat},
+    {.step=10, .tone=kClosedHat, .octave=0, .vel=58, .gate=kGateHat},
+    {.step=12, .tone=kSideStick, .octave=0, .vel=56, .gate=kGateStaccato},
+    {.step=12, .tone=kClosedHat, .octave=0, .vel=64, .gate=kGateHat},
+    {.step=13, .tone=kClosedHat, .octave=0, .vel=70, .gate=kGateHat},
+    {.step=14, .tone=kClosedHat, .octave=0, .vel=78, .gate=kGateHat},
+    {.step=15, .tone=kClosedHat, .octave=0, .vel=88, .gate=kGateHat},
+    // bar 2: the launch. Crash + a driving 8th-note kick pulse (NOT VarA's
+    // quarter-note kick/snare backbeat), then a closing tom/snare fill on
+    // the last beat that hands off into VarA's own downbeat.
+    {.step=16, .tone=kCrash, .octave=0, .vel=95, .gate=kGateHalfBar},
+    {.step=16, .tone=kKick,  .octave=0, .vel=108, .gate=kGateHat},
+    {.step=18, .tone=kKick,  .octave=0, .vel=86,  .gate=kGateHat},
+    {.step=20, .tone=kKick,  .octave=0, .vel=98,  .gate=kGateHat},
+    {.step=22, .tone=kKick,  .octave=0, .vel=84,  .gate=kGateHat},
+    {.step=24, .tone=kKick,  .octave=0, .vel=104, .gate=kGateHat},
+    {.step=26, .tone=kTomMid,   .octave=0, .vel=90,  .gate=kGateStab},
+    {.step=27, .tone=kTomMid,   .octave=0, .vel=86,  .gate=kGateStab},
+    {.step=28, .tone=kTomLow,   .octave=0, .vel=98,  .gate=kGateStab},
+    {.step=29, .tone=kTomLow,   .octave=0, .vel=92,  .gate=kGateStab},
+    {.step=30, .tone=kSnare,    .octave=0, .vel=104, .gate=kGateStab},
+    {.step=31, .tone=kSnare,    .octave=0, .vel=114, .gate=90},
 };
 inline constexpr StyleEvent kIntroBass[] = {
-    {.step=0, .tone=0, .octave=0, .vel=90, .gate=3600},  // held root pickup
-    // bar 2: hold the root again, then a short 5th anticipation into VarA.
-    {.step=16, .tone=0, .octave=0, .vel=94, .gate=3200},
-    {.step=30, .tone=2, .octave=0, .vel=80, .gate=kGate8th},
+    // bar 1: a breathing pickup, two soft pulses (NOT one static held
+    // drone) building dynamic level toward the arrival.
+    {.step=2,  .tone=kRoot, .octave=0, .vel=66, .gate=440},
+    {.step=8,  .tone=kRoot, .octave=0, .vel=76, .gate=440},
+    // bar 2: the root under the launch, released before...
+    {.step=16, .tone=kRoot,  .octave=0, .vel=92, .gate=1400},
+    // ...a short 5th anticipation into VarA's own root.
+    {.step=30, .tone=kFifth, .octave=0, .vel=84, .gate=kGate8th},
+};
+// Intro-only pad swell (distinct array from the shared kPadTriad, which
+// VarA/VarB/VarD/Ending2 all still use unmodified). Enters soft under the
+// bar-1 pickup, swells at the bar-2 arrival, decays before VarA's own
+// kPadTriad re-triggers fresh at VarA's downbeat -- no hand-off overlap.
+inline constexpr StyleEvent kIntroPad[] = {
+    {.step=2,  .tone=kRoot,  .octave=0, .vel=42, .gate=1600},
+    {.step=2,  .tone=kThird, .octave=0, .vel=40, .gate=1600},
+    {.step=2,  .tone=kFifth, .octave=0, .vel=42, .gate=1600},
+    {.step=16, .tone=kRoot,  .octave=0, .vel=58, .gate=1600},
+    {.step=16, .tone=kThird, .octave=0, .vel=56, .gate=1600},
+    {.step=16, .tone=kFifth, .octave=0, .vel=58, .gate=1600},
 };
 inline constexpr StylePattern kIntroPatterns[] = {
-    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIntroDrums)},
-    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntroBass)},
+    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed,     .events=Span<const StyleEvent>(kIntroDrums)},
+    {.role=TrackRole::kBass,  .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntroBass)},
+    {.role=TrackRole::kPad,   .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntroPad), .gm_program=kPadVoice},
 };
 
 inline constexpr StyleEvent kFillDrums[] = {
@@ -224,22 +254,40 @@ inline constexpr StylePattern kEndPatterns[] = {
     {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPad7), .gm_program=kPadVoice},
 };
 
-// intro2: a fuller one-bar intro — full backbeat over a steady hat bed.
+// intro2 (REDESIGNED, docs/proposals/basic-style-redesign.md sec3.3): the
+// fuller one-bar alternative -- same principles as the new Intro1 (nothing
+// at step 0, no VarA-grid reuse) but punchier: it gets its OWN sustained
+// announcement chord (one hit, not VarA's twice-per-bar comping figure)
+// landing WITH the arrival, not comping through it.
 inline constexpr StyleEvent kIntro2Drums[] = {
-    {.step=0, .tone=kKick, .octave=0, .vel=104, .gate=120}, {.step=8, .tone=kKick, .octave=0, .vel=100, .gate=120}, {.step=4, .tone=kSnare, .octave=0, .vel=92, .gate=120}, {.step=12, .tone=kSnare, .octave=0, .vel=98, .gate=120},
-    {.step=0, .tone=kClosedHat, .octave=0, .vel=70, .gate=60}, {.step=2, .tone=kClosedHat, .octave=0, .vel=58, .gate=60}, {.step=4, .tone=kClosedHat, .octave=0, .vel=70, .gate=60}, {.step=6, .tone=kClosedHat, .octave=0, .vel=58, .gate=60},
-    {.step=8, .tone=kClosedHat, .octave=0, .vel=70, .gate=60}, {.step=10, .tone=kClosedHat, .octave=0, .vel=58, .gate=60}, {.step=12, .tone=kClosedHat, .octave=0, .vel=70, .gate=60}, {.step=14, .tone=kClosedHat, .octave=0, .vel=64, .gate=60},
+    {.step=2, .tone=kSideStick, .octave=0, .vel=48, .gate=kGateStaccato},
+    {.step=6, .tone=kClosedHat, .octave=0, .vel=54, .gate=kGateHat},
+    {.step=7, .tone=kClosedHat, .octave=0, .vel=60, .gate=kGateHat},
+    {.step=8, .tone=kCrash, .octave=0, .vel=92, .gate=kGateHalfBar},
+    {.step=8, .tone=kKick,  .octave=0, .vel=104, .gate=kGateHat},
+    {.step=10, .tone=kKick, .octave=0, .vel=88,  .gate=kGateHat},
+    {.step=12, .tone=kKick, .octave=0, .vel=98,  .gate=kGateHat},
+    {.step=13, .tone=kTomMid, .octave=0, .vel=86, .gate=kGateStab},
+    {.step=14, .tone=kTomLow, .octave=0, .vel=94, .gate=kGateStab},
+    {.step=15, .tone=kSnare,  .octave=0, .vel=108, .gate=kGateStab},
 };
-inline constexpr StyleEvent kIntro2Bass[] = {{.step=0, .tone=kRoot, .octave=0, .vel=92, .gate=kGateHeld}};
+inline constexpr StyleEvent kIntro2Bass[] = {
+    {.step=2, .tone=kRoot, .octave=0, .vel=70, .gate=520},
+    {.step=8, .tone=kRoot, .octave=0, .vel=90, .gate=700},
+};
 inline constexpr StyleEvent kIntro2Chord[] = {
-    {.step=0, .tone=kRoot, .octave=0, .vel=76, .gate=kGateBeat}, {.step=0, .tone=kThird, .octave=0, .vel=76, .gate=kGateBeat}, {.step=0, .tone=kFifth, .octave=0, .vel=76, .gate=kGateBeat},
-    {.step=8, .tone=kRoot, .octave=0, .vel=74, .gate=kGateBeat}, {.step=8, .tone=kThird, .octave=0, .vel=74, .gate=kGateBeat}, {.step=8, .tone=kFifth, .octave=0, .vel=74, .gate=kGateBeat},
+    // one sustained 4-note announcement, landing WITH the arrival (step 8)
+    // -- a pad-like hit, not a comping rhythm (that's VarA's own function).
+    {.step=8, .tone=kRoot,    .octave=0, .vel=76, .gate=1700},
+    {.step=8, .tone=kThird,   .octave=0, .vel=76, .gate=1700},
+    {.step=8, .tone=kFifth,   .octave=0, .vel=76, .gate=1700},
+    {.step=8, .tone=kSeventh, .octave=0, .vel=76, .gate=1700},
 };
 inline constexpr StylePattern kIntro2Patterns[] = {
-    {.role=TrackRole::kDrums, .policy=RolePolicy::kFixed, .events=Span<const StyleEvent>(kIntro2Drums)},
-    {.role=TrackRole::kBass, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntro2Bass)},
+    {.role=TrackRole::kDrums,  .policy=RolePolicy::kFixed,     .events=Span<const StyleEvent>(kIntro2Drums)},
+    {.role=TrackRole::kBass,   .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntro2Bass)},
     {.role=TrackRole::kChord1, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kIntro2Chord)},
-    {.role=TrackRole::kPad, .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice},
+    {.role=TrackRole::kPad,    .policy=RolePolicy::kChordTone, .events=Span<const StyleEvent>(kPadTriad), .gm_program=kPadVoice},
 };
 
 // Fills B..D: progressively busier one-bar tom/snare fills, all shared bass.
