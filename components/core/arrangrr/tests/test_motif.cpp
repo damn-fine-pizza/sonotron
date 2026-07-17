@@ -76,7 +76,7 @@ void test_motif_onset_falls_back_without_idiom_mask() {
   const Motif m = motif::generate(7, 6, /*allowed_steps=*/0, 0, 90, 200);
   CHECK(m.count == 6);
   for (std::uint8_t i = 0; i < m.count; ++i) {
-    CHECK(m.events[i].step < kMaxMotifLen);
+    CHECK(m.events[i].step < kStepsPerBar);
   }
 }
 
@@ -91,9 +91,9 @@ void test_motif_transform_retrograde_any_source() {
   m.events[1] = StyleEvent{.step = 4, .tone = 38, .octave = 0, .vel = 100, .gate = 200};
   m.events[2] = StyleEvent{.step = 8, .tone = 40, .octave = 0, .vel = 100, .gate = 200};
   const Motif r = motif::apply_transform_once(m, MotifTransform::kRetrograde, 0);
-  CHECK(r.events[0].step == kMaxMotifLen - 1 - 0);
-  CHECK(r.events[1].step == kMaxMotifLen - 1 - 4);
-  CHECK(r.events[2].step == kMaxMotifLen - 1 - 8);
+  CHECK(r.events[0].step == kStepsPerBar - 1 - 0);
+  CHECK(r.events[1].step == kStepsPerBar - 1 - 4);
+  CHECK(r.events[2].step == kStepsPerBar - 1 - 8);
   CHECK(r.events[0].tone == 36 && r.events[1].tone == 38 && r.events[2].tone == 40);
 }
 
@@ -251,7 +251,7 @@ void test_motif_transform_amount_branches() {
 
 // displace()'s negative-wrap branch: a negative amount can push the
 // intermediate sum below zero before the modulo correction re-enters [0,
-// kMaxMotifLen). transform_amount never produces a negative displacement
+// kStepsPerBar). transform_amount never produces a negative displacement
 // (repeat-keyed amounts are always 1..len-1), so this is only reachable via a
 // hand-built (out-of-policy) amount -- defensive, exercised directly.
 void test_motif_transform_displacement_negative_amount_wraps() {
@@ -259,7 +259,7 @@ void test_motif_transform_displacement_negative_amount_wraps() {
   m.count = 1;
   m.events[0] = StyleEvent{.step = 0, .tone = 0, .octave = 0, .vel = 90, .gate = 200};
   const Motif d = motif::apply_transform_once(m, MotifTransform::kDisplacement, no_fold(-3));
-  CHECK(d.events[0].step == kMaxMotifLen - 3);  // -3 mod 16 = 13
+  CHECK(d.events[0].step == kStepsPerBar - 3);  // -3 mod 16 = 13
 }
 
 // apply_transform's in.count <= 1 short-circuit: nothing to compare, so the
@@ -272,7 +272,7 @@ void test_motif_apply_transform_skips_guard_for_short_motif() {
   CHECK(out.events[0].step == 5);  // amount 0 -> unchanged, guard never ran
 }
 
-// A retrograde-palindromic onset set (steps 0 and kMaxMotifLen-1 reflect onto
+// A retrograde-palindromic onset set (steps 0 and kStepsPerBar-1 reflect onto
 // each other) is trivial on EVERY attempt, since retrograde ignores `amount`:
 // the anti-triviality guard exhausts all kMaxRetries and gives up honestly
 // (motif-engine-scope.md §2.5's own documented bounded-search fallback).
@@ -281,7 +281,7 @@ void test_motif_apply_transform_retrograde_exhausts_retries() {
   m.count = 2;
   m.events[0] = StyleEvent{.step = 0, .tone = 0, .octave = 0, .vel = 90, .gate = 200};
   m.events[1] =
-      StyleEvent{.step = kMaxMotifLen - 1, .tone = 0, .octave = 0, .vel = 90, .gate = 200};
+      StyleEvent{.step = kStepsPerBar - 1, .tone = 0, .octave = 0, .vel = 90, .gate = 200};
   const Motif out = motif::apply_transform(m, MotifTransform::kRetrograde, 0, 99);
   CHECK(motif::onset_mask(out) == motif::onset_mask(m));  // trivial, honestly returned
 }

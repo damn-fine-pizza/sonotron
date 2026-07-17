@@ -23,7 +23,7 @@
 // DATA FORM (a NEEDS-DECISION per Corelli's placement review §5, resolved
 // here as this first slice's default): a motif is a bounded fixed-length
 // array of the EXISTING `StyleEvent` (style_model.hpp) -- NOT a new parallel
-// type. One bar (kMaxMotifLen = 16 sixteenth-grid steps) of authored-or-
+// type. One bar (kStepsPerBar = 16 sixteenth-grid steps) of authored-or-
 // generated content, reusing the same 10-byte pinned struct every style table
 // already uses, so it flows UNCHANGED through resolve()/voice()/groove()
 // exactly like authored content does today (motif-engine-scope.md §0.1).
@@ -37,10 +37,23 @@
 
 namespace arrangrr {
 
-// One bar at the 16th-grid convention every style already uses
-// (style_model.hpp). Small enough to live entirely on the stack, exactly like
-// `Arranger`'s own `NoteReq group[kMaxVoiceNotes]`.
-inline constexpr int kMaxMotifLen = 16;
+// TWO DISTINCT QUANTITIES (task #31), previously conflated under one name:
+//
+// kStepsPerBar is the bar's 16th-grid WIDTH -- the musical quantity every
+// style table already speaks in via `StyleEvent::step` (style_model.hpp).
+// This is what bounds retrograde reflection, displacement wrap, generate()'s
+// candidate step range, and the onset bitmask below: all of them reason
+// about "where in the bar", never about how many events a Motif can hold.
+inline constexpr int kStepsPerBar = 16;
+
+// kMaxMotifLen is the `Motif::events[]` array CAPACITY only -- how many
+// StyleEvent slots a motif can carry, independent of the bar's step width.
+// 32, not 16: the densest single-bar kFixed drum pattern in the corpus packs
+// up to ~28 simultaneous onsets, and 32 is the clean power-of-two with
+// headroom above that. Used ONLY for the struct's own array size and for
+// from_span's capacity clamp below -- never where the meaning is "bar
+// width" (that is always kStepsPerBar above).
+inline constexpr int kMaxMotifLen = 32;
 
 // A motif: a short, ordered StyleEvent sequence. `count` is the number of
 // active slots in `events` ([0, count)); unused tail slots are default.
@@ -100,12 +113,12 @@ constexpr int nearest_stable_degree(int degree, bool prefer_fifth) noexcept {
 // The onset bitmask (bit i = step i is an onset) of a StyleEvent span --
 // used both to read a style's own idiomatic drum-step subset (§2.3) and to
 // compare an input/output motif's onset set for the anti-triviality guard
-// (§2.5). Steps at or past kMaxMotifLen are outside a one-bar motif and are
+// (§2.5). Steps at or past kStepsPerBar are outside a one-bar motif and are
 // ignored (defensive; no authored/generated event should ever set one).
 constexpr std::uint32_t onset_mask(Span<const StyleEvent> evs) noexcept {
   std::uint32_t mask = 0;
   for (const StyleEvent& ev : evs) {
-    if (ev.step < static_cast<std::uint16_t>(kMaxMotifLen)) {
+    if (ev.step < static_cast<std::uint16_t>(kStepsPerBar)) {
       mask |= (1u << ev.step);
     }
   }
@@ -114,7 +127,7 @@ constexpr std::uint32_t onset_mask(Span<const StyleEvent> evs) noexcept {
 constexpr std::uint32_t onset_mask(const Motif& m) noexcept {
   std::uint32_t mask = 0;
   for (std::uint8_t i = 0; i < m.count; ++i) {
-    if (m.events[i].step < static_cast<std::uint16_t>(kMaxMotifLen)) {
+    if (m.events[i].step < static_cast<std::uint16_t>(kStepsPerBar)) {
       mask |= (1u << m.events[i].step);
     }
   }
@@ -153,7 +166,7 @@ constexpr Motif from_span(Span<const StyleEvent> evs) noexcept {
 
 // Generates a fresh seed motif (Ottorino's "Option 2", constrained-random --
 // motif-engine-scope.md §3) for a kScaleDegree comping/lead role: `length`
-// onsets (bounded to kMaxMotifLen), each landing on a step drawn from
+// onsets (bounded to kStepsPerBar), each landing on a step drawn from
 // `allowed_steps` (the style's own idiomatic onset mask, §2.3 -- 0 falls back
 // to every 16th), a bounded-leap contour (§2.1) around `center_degree`, and a
 // stable-degree cadence on the LAST onset (§2.4). Generated motifs are always
@@ -165,16 +178,16 @@ constexpr Motif from_span(Span<const StyleEvent> evs) noexcept {
 constexpr Motif generate(std::uint32_t seed, std::uint8_t length, std::uint32_t allowed_steps,
                          int center_degree, std::uint8_t vel, std::uint16_t gate) noexcept {
   Motif m;
-  const std::uint8_t n = length > static_cast<std::uint8_t>(kMaxMotifLen)
-                             ? static_cast<std::uint8_t>(kMaxMotifLen)
+  const std::uint8_t n = length > static_cast<std::uint8_t>(kStepsPerBar)
+                             ? static_cast<std::uint8_t>(kStepsPerBar)
                              : length;
   if (n == 0) {
     return m;
   }
 
-  std::uint8_t candidates[kMaxMotifLen];
+  std::uint8_t candidates[kStepsPerBar];
   std::uint8_t candidate_count = 0;
-  for (std::uint8_t s = 0; s < static_cast<std::uint8_t>(kMaxMotifLen); ++s) {
+  for (std::uint8_t s = 0; s < static_cast<std::uint8_t>(kStepsPerBar); ++s) {
     if (allowed_steps == 0 || (allowed_steps & (1u << s)) != 0) {
       candidates[candidate_count] = s;
       ++candidate_count;
@@ -245,7 +258,7 @@ constexpr Motif transpose_diatonic(const Motif& in, int amount) noexcept {
   return out;
 }
 
-// kRetrograde: step -> (kMaxMotifLen - 1 - step), a reflection within the
+// kRetrograde: step -> (kStepsPerBar - 1 - step), a reflection within the
 // bar. Reordering the array itself is unnecessary: the arranger's fire loop
 // only ever asks "does an event match THIS step", so remapping each event's
 // own `step` in place is behaviorally identical to reversing the sequence
@@ -254,20 +267,20 @@ constexpr Motif transpose_diatonic(const Motif& in, int amount) noexcept {
 constexpr Motif retrograde(const Motif& in) noexcept {
   Motif out = in;
   for (std::uint8_t i = 0; i < out.count; ++i) {
-    const int reflected = (kMaxMotifLen - 1) - static_cast<int>(in.events[i].step);
+    const int reflected = (kStepsPerBar - 1) - static_cast<int>(in.events[i].step);
     out.events[i].step = static_cast<std::uint16_t>(reflected < 0 ? 0 : reflected);
   }
   return out;
 }
 
-// kDisplacement: step += amount (mod kMaxMotifLen), a rhythmic phase shift.
+// kDisplacement: step += amount (mod kStepsPerBar), a rhythmic phase shift.
 // Valid for every NoteSource, including kFixed.
 constexpr Motif displace(const Motif& in, int amount) noexcept {
   Motif out = in;
   for (std::uint8_t i = 0; i < out.count; ++i) {
-    int s = (static_cast<int>(in.events[i].step) + amount) % kMaxMotifLen;
+    int s = (static_cast<int>(in.events[i].step) + amount) % kStepsPerBar;
     if (s < 0) {
-      s += kMaxMotifLen;
+      s += kStepsPerBar;
     }
     out.events[i].step = static_cast<std::uint16_t>(s);
   }
@@ -294,7 +307,7 @@ constexpr Motif apply_transform_once(const Motif& in, MotifTransform kind, int a
 // "transpose +1 diatonic step every repeat" or "displace by a repeat-varying
 // shift" is computed fresh every tick from a small counter, never
 // accumulated drift (motif-engine-placement.md §3). Offset from `generate`'s
-// own per-index hashing range (i < kMaxMotifLen) so the two do not
+// own per-index hashing range (i < kStepsPerBar) so the two do not
 // accidentally correlate.
 constexpr int transform_amount(MotifTransform kind, std::uint32_t seed,
                                std::uint32_t repeat) noexcept {
@@ -303,7 +316,7 @@ constexpr int transform_amount(MotifTransform kind, std::uint32_t seed,
     case MotifTransform::kDiatonicTranspose:
       return static_cast<int>(h % 7u) - 3;  // -3..+3 diatonic steps
     case MotifTransform::kDisplacement:
-      return static_cast<int>(h % static_cast<std::uint32_t>(kMaxMotifLen - 1)) + 1;  // 1..len-1
+      return static_cast<int>(h % static_cast<std::uint32_t>(kStepsPerBar - 1)) + 1;  // 1..len-1
     case MotifTransform::kRetrograde:  // reflection needs no amount
     case MotifTransform::kNone:
     default:
@@ -342,7 +355,7 @@ constexpr Motif apply_transform(const Motif& in, MotifTransform kind, int amount
     const std::uint32_t h = seeded_hash(retry_seed, static_cast<std::uint32_t>(attempt));
     try_amount = (kind == MotifTransform::kDiatonicTranspose)
                      ? (static_cast<int>(h % 6u) + 1)  // 1..6, never 0
-                     : (static_cast<int>(h % static_cast<std::uint32_t>(kMaxMotifLen - 1)) + 1);
+                     : (static_cast<int>(h % static_cast<std::uint32_t>(kStepsPerBar - 1)) + 1);
   }
   return apply_transform_once(in, kind, try_amount);  // retries exhausted: give up honestly
 }

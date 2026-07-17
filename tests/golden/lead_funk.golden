@@ -105,8 +105,10 @@
 {"ev":"beat","bar":1,"beat":2,"pulse":23,"@":1880}
 {"ev":"beat","bar":1,"beat":3,"pulse":0,"@":1920}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":36,"vel":110,"@":1922}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":42,"vel":82,"@":1922}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":2,"note":36,"vel":104,"@":1922}
 {"ev":"beat","bar":1,"beat":3,"pulse":1,"@":1960}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":42,"vel":64,"@":1972}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":2,"note":36,"vel":64,"@":1972}
 {"ev":"beat","bar":1,"beat":3,"pulse":2,"@":2000}
 {"ev":"beat","bar":1,"beat":3,"pulse":3,"@":2040}
@@ -125,6 +127,7 @@
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":67,"vel":86,"@":2403}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":71,"vel":86,"@":2403}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":36,"vel":99,"@":2406}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":46,"vel":71,"@":2406}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":2,"note":47,"vel":96,"@":2407}
 {"ev":"beat","bar":1,"beat":3,"pulse":13,"@":2440}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":3,"note":60,"vel":64,"@":2453}
@@ -135,6 +138,7 @@
 {"ev":"beat","bar":1,"beat":3,"pulse":14,"@":2480}
 {"ev":"beat","bar":1,"beat":3,"pulse":15,"@":2520}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":36,"vel":64,"@":2526}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":46,"vel":64,"@":2526}
 {"ev":"beat","bar":1,"beat":3,"pulse":16,"@":2560}
 {"ev":"beat","bar":1,"beat":3,"pulse":17,"@":2600}
 {"ev":"beat","bar":1,"beat":3,"pulse":18,"@":2640}
@@ -150,7 +154,9 @@
 {"ev":"beat","bar":1,"beat":4,"pulse":0,"@":2880}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":7,"note":72,"vel":96,"@":2880}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":38,"vel":116,"@":2884}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":42,"vel":74,"@":2884}
 {"ev":"beat","bar":1,"beat":4,"pulse":1,"@":2920}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":42,"vel":64,"@":2934}
 {"ev":"beat","bar":1,"beat":4,"pulse":2,"@":2960}
 {"ev":"beat","bar":1,"beat":4,"pulse":3,"@":3000}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":38,"vel":64,"@":3004}
@@ -168,6 +174,7 @@
 {"ev":"beat","bar":1,"beat":4,"pulse":10,"@":3280}
 {"ev":"beat","bar":1,"beat":4,"pulse":11,"@":3320}
 {"ev":"beat","bar":1,"beat":4,"pulse":12,"@":3360}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":46,"vel":74,"@":3363}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":2,"note":43,"vel":94,"@":3364}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":60,"vel":83,"@":3364}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":3,"note":64,"vel":83,"@":3364}
@@ -179,6 +186,7 @@
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":3,"note":71,"vel":64,"@":3414}
 {"ev":"beat","bar":1,"beat":4,"pulse":14,"@":3440}
 {"ev":"beat","bar":1,"beat":4,"pulse":15,"@":3480}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":46,"vel":64,"@":3483}
 {"ev":"beat","bar":1,"beat":4,"pulse":16,"@":3520}
 {"ev":"beat","bar":1,"beat":4,"pulse":17,"@":3560}
 {"ev":"beat","bar":1,"beat":4,"pulse":18,"@":3600}
@@ -200,12 +208,14 @@
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":69,"vel":100,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":72,"vel":100,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":4,"note":76,"vel":100,"@":3840}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":46,"vel":74,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":2,"note":41,"vel":115,"@":3840}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":7,"note":76,"vel":96,"@":3840}
 {"ev":"beat","bar":2,"beat":1,"pulse":1,"@":3880}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":2,"note":41,"vel":64,"@":3890}
 {"ev":"beat","bar":2,"beat":1,"pulse":2,"@":3920}
 {"ev":"beat","bar":2,"beat":1,"pulse":3,"@":3960}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":46,"vel":64,"@":3960}
 {"ev":"beat","bar":2,"beat":1,"pulse":4,"@":4000}
 {"ev":"beat","bar":2,"beat":1,"pulse":5,"@":4040}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":7,"note":76,"vel":64,"@":4040}
@@ -321,8 +331,10 @@
 {"ev":"beat","bar":2,"beat":3,"pulse":11,"@":6200}
 {"ev":"beat","bar":2,"beat":3,"pulse":12,"@":6240}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":36,"vel":110,"@":6240}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":42,"vel":82,"@":6240}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":2,"note":52,"vel":95,"@":6242}
 {"ev":"beat","bar":2,"beat":3,"pulse":13,"@":6280}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":42,"vel":64,"@":6290}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":2,"note":52,"vel":64,"@":6292}
 {"ev":"beat","bar":2,"beat":3,"pulse":14,"@":6320}
 {"ev":"beat","bar":2,"beat":3,"pulse":15,"@":6360}
@@ -339,11 +351,13 @@
 {"ev":"beat","bar":2,"beat":3,"pulse":23,"@":6680}
 {"ev":"beat","bar":2,"beat":4,"pulse":0,"@":6720}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":36,"vel":101,"@":6722}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":46,"vel":73,"@":6722}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":7,"note":76,"vel":96,"@":6723}
 {"ev":"beat","bar":2,"beat":4,"pulse":1,"@":6760}
 {"ev":"beat","bar":2,"beat":4,"pulse":2,"@":6800}
 {"ev":"beat","bar":2,"beat":4,"pulse":3,"@":6840}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":36,"vel":64,"@":6842}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":46,"vel":64,"@":6842}
 {"ev":"beat","bar":2,"beat":4,"pulse":4,"@":6880}
 {"ev":"beat","bar":2,"beat":4,"pulse":5,"@":6920}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":7,"note":76,"vel":64,"@":6923}
@@ -367,8 +381,10 @@
 {"ev":"beat","bar":2,"beat":4,"pulse":11,"@":7160}
 {"ev":"beat","bar":2,"beat":4,"pulse":12,"@":7200}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":38,"vel":116,"@":7202}
+{"ev":"midi-out","port":0,"msg":"noteon","ch":10,"note":42,"vel":74,"@":7202}
 {"ev":"midi-out","port":0,"msg":"noteon","ch":2,"note":48,"vel":94,"@":7203}
 {"ev":"beat","bar":2,"beat":4,"pulse":13,"@":7240}
+{"ev":"midi-out","port":0,"msg":"noteoff","ch":10,"note":42,"vel":64,"@":7252}
 {"ev":"midi-out","port":0,"msg":"noteoff","ch":2,"note":48,"vel":64,"@":7253}
 {"ev":"beat","bar":2,"beat":4,"pulse":14,"@":7280}
 {"ev":"beat","bar":2,"beat":4,"pulse":15,"@":7320}
