@@ -64,6 +64,24 @@ struct Band {
       }
     }
   }
+  // "basic" (style index 0) is used throughout this file as a ZERO-JITTER
+  // probe for the FX chain's effect on the engine's exact schedule (Corelli
+  // fan-out ticks, echo velocity decay, kick velocity=110 @ tick=0). Wave 1
+  // of the style-depth program (9100/9210) gave "basic" a non-zero
+  // deterministic humanize (Style::groove.humanize_timing=8,
+  // humanize_velocity=16), which would otherwise perturb every one of those
+  // exact ticks/velocities. Zero the two humanize fields right after load via
+  // the existing Param::kGroove ABI (GrooveField-addressed setter,
+  // Arranger::set_groove_field) -- a live command, not a product change --
+  // restoring the flat clock this file's assertions rely on. Every other
+  // groove field ("basic" leaves swing/accent/quantize at their zero default)
+  // is untouched, so this only cancels the NEW jitter, nothing else.
+  void load_basic_zero_groove() {
+    cmd(Param::kStyleLoad, 0);  // "basic"
+    cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kHumanizeTiming), 0);
+    cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kHumanizeVelocity), 0);
+  }
+
   void configure_drum_echo(std::uint8_t slot, std::uint8_t repeats, std::uint8_t vel_decay,
                            std::uint16_t delay_ticks) {
     cmd(Param::kFxSet, slot, static_cast<std::int32_t>(InsertType::kEcho), 0,
@@ -146,7 +164,7 @@ void test_fx_clear_rejects_out_of_range_role() {
 // reconfiguration against.
 void test_fx_set_and_param_valid_configuration_takes_effect() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0);  // "basic"
+  b.load_basic_zero_groove();  // "basic", humanize zeroed: see load_basic_zero_groove()
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8));
   b.configure_drum_echo(0, /*repeats=*/2, /*vel_decay=*/128, /*delay_ticks=*/100);
 
@@ -160,7 +178,7 @@ void test_fx_set_and_param_valid_configuration_takes_effect() {
 
 void test_fx_enable_false_disables_the_configured_insert() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0);
+  b.load_basic_zero_groove();
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8));
   b.configure_drum_echo(0, 2, 128, 100);
   b.cmd(Param::kFxEnable, /*slot=*/0, /*enabled=*/0, 0,
@@ -177,7 +195,7 @@ void test_fx_enable_false_disables_the_configured_insert() {
 
 void test_fx_clear_one_slot_resets_it_to_inert() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0);
+  b.load_basic_zero_groove();
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8));
   b.configure_drum_echo(0, 2, 128, 100);
   b.cmd(Param::kFxClear, /*a=slot*/ 0, 0, 0, static_cast<std::uint16_t>(TrackRole::kDrums));
@@ -192,7 +210,7 @@ void test_fx_clear_one_slot_resets_it_to_inert() {
 
 void test_fx_clear_whole_role_with_a_negative_one() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0);
+  b.load_basic_zero_groove();
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8));
   b.configure_drum_echo(0, 2, 128, 100);
   b.cmd(Param::kFxClear, /*a=*/-1, 0, 0, static_cast<std::uint16_t>(TrackRole::kDrums));
@@ -209,7 +227,7 @@ void test_fx_clear_whole_role_with_a_negative_one() {
 
 void test_fx_echo_replicas_schedule_at_own_beat_not_the_seeds() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0);
+  b.load_basic_zero_groove();
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8));
   b.configure_drum_echo(0, /*repeats=*/2, /*vel_decay=*/128, /*delay_ticks=*/100);
 
@@ -236,7 +254,7 @@ void test_fx_echo_replicas_schedule_at_own_beat_not_the_seeds() {
 // InsertChain level).
 void test_fx_default_chain_does_not_alter_the_existing_schedule() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0);
+  b.load_basic_zero_groove();
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8));
   b.cmd(Param::kTransportStart);
   b.advance(20);

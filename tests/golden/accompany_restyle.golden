@@ -1,6 +1,6 @@
-{"ev":"midi-out","port":2,"msg":"noteon","ch":1,"note":72,"vel":103,"@":0}
 {"ev":"midi-out","port":2,"msg":"noteon","ch":10,"note":36,"vel":110,"@":0}
-{"ev":"midi-out","port":2,"msg":"noteoff","ch":1,"note":72,"vel":64,"@":959}
+{"ev":"midi-out","port":2,"msg":"noteon","ch":1,"note":72,"vel":102,"@":4}
 {"ev":"midi-out","port":2,"msg":"noteoff","ch":10,"note":36,"vel":64,"@":959}
-{"ev":"midi-out","port":2,"msg":"noteon","ch":1,"note":62,"vel":91,"@":1920}
-{"ev":"midi-out","port":2,"msg":"noteoff","ch":1,"note":62,"vel":64,"@":2880}
+{"ev":"midi-out","port":2,"msg":"noteoff","ch":1,"note":72,"vel":64,"@":963}
+{"ev":"midi-out","port":2,"msg":"noteon","ch":1,"note":62,"vel":92,"@":1932}
+{"ev":"midi-out","port":2,"msg":"noteoff","ch":1,"note":62,"vel":64,"@":2892}
