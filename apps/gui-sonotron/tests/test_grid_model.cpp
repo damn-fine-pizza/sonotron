@@ -147,6 +147,62 @@ void test_add_scene_preserves_scene_sections() {
   CHECK(grid.scene_count() == before + 1);
 }
 
+// Task #6: scene_bars/set_scene_bars is the always-visible per-scene LENGTH
+// stepper's own model storage -- every scene defaults to kDefaultSceneBars,
+// bounds-checked exactly like scene_name/scene_section above, and the setter
+// clamps to [1, kMaxSceneBars] (a sensible stepper ceiling, not a hard engine
+// limit).
+void test_scene_bars_defaults_to_default_scene_bars() {
+  GridModel grid;
+  CHECK(grid.scene_bars(0) == GridModel::kDefaultSceneBars);
+  CHECK(grid.scene_bars(2) == GridModel::kDefaultSceneBars);
+  CHECK(grid.scene_bars(GridModel::kMaxSceneCount - 1) == GridModel::kDefaultSceneBars);
+}
+
+void test_set_scene_bars_and_bounds() {
+  GridModel grid;
+  grid.set_scene_bars(1, 3);
+  CHECK(grid.scene_bars(1) == 3);
+  // A neighbour is untouched.
+  CHECK(grid.scene_bars(0) == GridModel::kDefaultSceneBars);
+  CHECK(grid.scene_bars(2) == GridModel::kDefaultSceneBars);
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_bars(GridModel::kMaxSceneCount, 3);
+  grid.set_scene_bars(GridModel::kMaxSceneCount + 10, 3);
+
+  // Out-of-range get returns the default, not garbage.
+  CHECK(grid.scene_bars(GridModel::kMaxSceneCount) == GridModel::kDefaultSceneBars);
+  CHECK(grid.scene_bars(GridModel::kMaxSceneCount + 10) == GridModel::kDefaultSceneBars);
+}
+
+void test_set_scene_bars_clamps_floor_at_one() {
+  GridModel grid;
+  grid.set_scene_bars(0, 0);
+  CHECK(grid.scene_bars(0) == 1);
+  grid.set_scene_bars(0, -5);
+  CHECK(grid.scene_bars(0) == 1);
+}
+
+void test_set_scene_bars_clamps_ceiling_at_max() {
+  GridModel grid;
+  grid.set_scene_bars(0, GridModel::kMaxSceneBars + 1);
+  CHECK(grid.scene_bars(0) == GridModel::kMaxSceneBars);
+  grid.set_scene_bars(0, 1000);
+  CHECK(grid.scene_bars(0) == GridModel::kMaxSceneBars);
+}
+
+void test_add_scene_preserves_scene_bars() {
+  GridModel grid;
+  grid.set_scene_bars(0, 4);
+  const std::size_t before = grid.scene_count();
+  grid.add_scene();
+  // Storage is decoupled from the cell-growth reindex, exactly like
+  // scene_name/scene_section above -- add_scene() only touches m_cells.
+  CHECK(grid.scene_bars(0) == 4);
+  CHECK(grid.scene_count() == before + 1);
+}
+
 // section_wire_name mirrors in_process_brain_session.cpp's own
 // parse_section_name spellings exactly (both directions of the same table).
 void test_section_wire_name_matches_known_spellings() {
@@ -214,14 +270,14 @@ void test_next_scene_advances_past_boundary() {
   CHECK(*next == 2);
 }
 
-void test_next_scene_wraps_at_last_scene() {
-  // The song loops around the scene sequence: the last scene column (index
-  // scene_count - 1) advances back to scene 0, not out of range.
-  const auto next = next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/4,
-                                         /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
-                                         /*active_scene_section_bars=*/1);
-  CHECK(next.has_value());
-  CHECK(*next == 0);
+void test_next_scene_holds_at_last_scene() {
+  // Song-form Option A: the last scene column does NOT wrap back to 0 --
+  // it holds (nullopt), matching SceneChain::on_bar's own "last step holds"
+  // precedent (scene_chain.hpp:121-124).
+  CHECK(!next_scene_to_launch(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/4,
+                              /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                              /*active_scene_section_bars=*/1)
+             .has_value());
 }
 
 void test_next_scene_zero_scene_count_stays() {
@@ -230,6 +286,49 @@ void test_next_scene_zero_scene_count_stays() {
                               /*scene_count=*/0, /*bars_elapsed_in_scene=*/5,
                               /*active_scene_section_bars=*/1)
              .has_value());
+}
+
+// auto_song_reached_song_end: song-form Option A's "cue the Ending" refinement
+// on top of next_scene_to_launch's own nullopt -- mirrors its guard order
+// exactly, then narrows to "AND it is the last column".
+using sonotron::auto_song_reached_song_end;
+
+void test_auto_song_reached_song_end_true_at_last_column_boundary() {
+  CHECK(auto_song_reached_song_end(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/4,
+                                   /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                                   /*active_scene_section_bars=*/1));
+}
+
+void test_auto_song_reached_song_end_false_not_last_column() {
+  // Same boundary reached, but active_scene=1 is not the last column.
+  CHECK(!auto_song_reached_song_end(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/1,
+                                    /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                                    /*active_scene_section_bars=*/1));
+}
+
+void test_auto_song_reached_song_end_false_before_boundary() {
+  // Last column, but not yet at the boundary (bars_elapsed < section_bars).
+  CHECK(!auto_song_reached_song_end(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/4,
+                                    /*scene_count=*/5, /*bars_elapsed_in_scene=*/0,
+                                    /*active_scene_section_bars=*/1));
+}
+
+void test_auto_song_reached_song_end_false_auto_song_off() {
+  CHECK(!auto_song_reached_song_end(/*auto_song=*/false, /*playing=*/true, /*active_scene=*/4,
+                                    /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                                    /*active_scene_section_bars=*/1));
+}
+
+void test_auto_song_reached_song_end_false_not_playing() {
+  CHECK(!auto_song_reached_song_end(/*auto_song=*/true, /*playing=*/false, /*active_scene=*/4,
+                                    /*scene_count=*/5, /*bars_elapsed_in_scene=*/1,
+                                    /*active_scene_section_bars=*/1));
+}
+
+void test_auto_song_reached_song_end_false_zero_scene_count() {
+  CHECK(!auto_song_reached_song_end(/*auto_song=*/true, /*playing=*/true, /*active_scene=*/0,
+                                    /*scene_count=*/0, /*bars_elapsed_in_scene=*/1,
+                                    /*active_scene_section_bars=*/1));
 }
 
 // bar_just_advanced: the once-per-crossing guard.
@@ -419,6 +518,11 @@ int main() {
   test_scene_sections_default_to_var_a();
   test_set_scene_section_and_bounds();
   test_add_scene_preserves_scene_sections();
+  test_scene_bars_defaults_to_default_scene_bars();
+  test_set_scene_bars_and_bounds();
+  test_set_scene_bars_clamps_floor_at_one();
+  test_set_scene_bars_clamps_ceiling_at_max();
+  test_add_scene_preserves_scene_bars();
   test_section_wire_name_matches_known_spellings();
   test_launch_wired_is_lit();
   test_next_scene_auto_song_off_stays();
@@ -426,8 +530,14 @@ int main() {
   test_next_scene_mid_scene_stays();
   test_next_scene_advances_at_boundary();
   test_next_scene_advances_past_boundary();
-  test_next_scene_wraps_at_last_scene();
+  test_next_scene_holds_at_last_scene();
   test_next_scene_zero_scene_count_stays();
+  test_auto_song_reached_song_end_true_at_last_column_boundary();
+  test_auto_song_reached_song_end_false_not_last_column();
+  test_auto_song_reached_song_end_false_before_boundary();
+  test_auto_song_reached_song_end_false_auto_song_off();
+  test_auto_song_reached_song_end_false_not_playing();
+  test_auto_song_reached_song_end_false_zero_scene_count();
   test_bar_just_advanced_fires_once_per_distinct_bar();
   test_section_playhead_phase_at_start_of_section();
   test_section_playhead_phase_mid_section_whole_bar();

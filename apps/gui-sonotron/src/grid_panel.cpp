@@ -24,11 +24,6 @@ namespace {
 
 constexpr int kDefaultLaunchQuantizeBars = 1;
 
-// Owner task #3 default: auto-song advances the active scene column only
-// after its OWN section has played this many WHOLE times (see update_auto_
-// song's own header comment for the full rationale/history of this
-// decision).
-constexpr int kDefaultSectionRepeats = 2;
 // The design's label column is 64px (square dot + track-colored name). We keep
 // the per-track M/S latches (owner: mute is per-track), compacted so the column
 // stays as close to the design as legibility allows.
@@ -112,6 +107,38 @@ std::vector<std::string> wrap_scene_name(ImFont* font, float font_size, const st
     lines.push_back(current);
   }
   return lines;
+}
+
+// Task #6: the always-visible per-scene LENGTH stepper, a small "- N +" row
+// below the scene name/caret/underline (owner lock: always visible, not an
+// on-hover-only affordance). GridModel::kMaxSceneBars caps the value at one
+// digit, so the number never needs more room than that -- these buttons only
+// have to fit two single-digit-scale glyphs plus one digit within `cz`, which
+// can be as small as 34px at the smallest zoom.
+constexpr float kStepperBtnW = 12.0F;
+constexpr float kStepperRowH = 14.0F;
+
+// A single "-"/"+" stepper button: drawn manually (InvisibleButton + draw-
+// list glyph), mirroring grid_latch's own reasoning above -- ImGui::Button's
+// RenderTextClipped centers/clips its label at the CURRENT (global, ~20px)
+// font size, illegible at this compact a footprint. `p0` is the button's own
+// top-left corner in screen space; `glyph` doubles as this InvisibleButton's
+// ID (unique within the caller's own PushID(scene_index) scope, same as
+// grid_latch's "M"/"S" pair).
+bool stepper_button(const char* glyph, ImVec2 p0) {
+  ImGui::SetCursorScreenPos(p0);
+  const bool clicked = ImGui::InvisibleButton(glyph, ImVec2(kStepperBtnW, kStepperRowH));
+  const bool hovered = ImGui::IsItemHovered();
+  const ImVec2 p1(p0.x + kStepperBtnW, p0.y + kStepperRowH);
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  dl->AddRectFilled(p0, p1, neon::u32(theme::kFrameBg, hovered ? 1.0F : 0.85F), 2.0F);
+  dl->AddRect(p0, p1, neon::u32(theme::kBorder, hovered ? 1.0F : 0.6F), 2.0F, 0, 1.0F);
+  ImFont* font = ImGui::GetFont();
+  const ImVec2 ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, glyph);
+  dl->AddText(font, kSceneNameFontSize,
+              ImVec2(p0.x + (kStepperBtnW - ts.x) * 0.5F, p0.y + (kStepperRowH - ts.y) * 0.5F),
+              neon::u32(theme::kTextSecondary), glyph);
+  return clicked;
 }
 
 // The 6 v02 launch-grid rows (spec §2b), each mapped to a GridModel part-row
@@ -461,26 +488,46 @@ void render_header(const GridModel& model, V02State& fx, const AppState& app_sta
   // playing AND auto-song is armed: with auto-song off the active scene
   // never advances on its own, so there genuinely is no "next" to report.
   if (fx.playing && fx.auto_song && scene_count > 0) {
-    const std::size_t next_scene_index = (active_scene_index + 1) % scene_count;
-    ImGui::TextColored(theme::kTextDim, "  next (intent): %d: %s",
-                       static_cast<int>(next_scene_index) + 1,
-                       std::string(model.scene_name(next_scene_index)).c_str());
+    // Reuse next_scene_to_launch itself (never re-hand-roll the wrap/hold
+    // formula a second time here, per song-form-option-a-wiring-plan.md
+    // §2.2): pass EQUAL placeholder bars values for the two timing
+    // parameters -- the function only ever compares them relatively (has the
+    // section "finished"?), so any equal pair asks "what would the decision
+    // be if the boundary were reached right now," which is exactly this
+    // display's own "next (intent)" question. Under THIS function's own outer
+    // guard (auto_song && playing && scene_count > 0), the only way this can
+    // return nullopt is the new last-column hold (song-form Option A) -- so
+    // "no value" here can only mean "-> Ending," never one of next_scene_to_
+    // launch's OTHER nullopt causes (those are already excluded above).
+    const std::optional<int> next = next_scene_to_launch(
+        fx.auto_song, fx.playing, fx.active_scene, static_cast<int>(scene_count),
+        /*bars_elapsed_in_scene=*/1, /*active_scene_section_bars=*/1);
+    if (next.has_value()) {
+      const std::size_t next_scene_index = static_cast<std::size_t>(*next);
+      ImGui::TextColored(theme::kTextDim, "  next (intent): %d: %s",
+                         static_cast<int>(next_scene_index) + 1,
+                         std::string(model.scene_name(next_scene_index)).c_str());
+    } else {
+      ImGui::TextColored(theme::kTextDim, "  next (intent): \xE2\x86\x92 Ending");
+    }
   } else {
     ImGui::Dummy(ImVec2(1.0F, placeholder_row_h));
   }
 }
 
-// The real section length behind `scene_index`'s column TODAY, in bars: the
-// STYLE's own StyleSection::bars for whatever SectionType the column carries
-// (preview::section_bars, apps/gui-sonotron/src/preview.hpp -- the same real
-// value test_preview.cpp pins, e.g. section_bars(0, kVarA) == 2), never
-// GridModel::scene_bars (see update_auto_song's own header comment for why
-// that per-column bookkeeping field is no longer the advance's source of
-// truth). Shared by update_auto_song's threshold and render_grid_panel's own
-// playhead so the two can never silently diverge on what "one repeat" means.
-int active_style_section_bars(const GridModel& model, const V02State& fx, std::size_t scene_index) {
-  const auto section = static_cast<preview::Section>(model.scene_section(scene_index));
-  return preview::section_bars(fx.active_style, section);
+// The real hold length behind `scene_index`'s column TODAY, in bars. Task #6:
+// the per-scene LENGTH STEPPER (render_scene_header_cell's own "- N +"
+// control) is now the single authoritative source for how long a scene
+// column holds before auto-song advances -- GridModel::scene_bars, user-
+// editable, no longer a vestigial/reserved field. This supersedes the
+// earlier "SOURCE-OF-TRUTH TRANSITION" (owner task #3, see update_auto_
+// song's own header comment for that history) that deliberately moved AWAY
+// from scene_bars toward the style's own section length, because at the
+// time nothing let the user edit it -- now something does. Shared by
+// update_auto_song's threshold and render_grid_panel's own playhead so the
+// two can never silently diverge on what "one hold" means.
+int active_style_section_bars(const GridModel& model, std::size_t scene_index) {
+  return model.scene_bars(scene_index);
 }
 
 // Owner task #1 (three sites -- the master-Play one-shot launch below,
@@ -588,9 +635,9 @@ void activate_scene_column(const GridModel& model, BrainSession& brain_session, 
 // (current_bar - fx.active_scene_start_bar) is always exactly 0 on that bar,
 // which next_scene_to_launch's own `bars_elapsed_in_scene < active_scene_
 // section_bars` guard rejects unconditionally (the threshold is always >= 1
-// bar -- update_auto_song's own kDefaultSectionRepeats * a real section
-// length can never be <= 0). No double-launch, no double-advance, on the
-// bar Play first lands.
+// bar -- GridModel::scene_bars is clamped to >= 1, see active_style_
+// section_bars/GridModel::set_scene_bars). No double-launch, no
+// double-advance, on the bar Play first lands.
 void handle_master_play_launch(const GridModel& model, BrainSession& brain_session,
                                const AppState& app_state, V02State& fx) {
   const bool transport_playing_now = app_state.transport() == AppState::Transport::kPlaying;
@@ -732,29 +779,26 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   const int bars_elapsed = current_bar - fx.active_scene_start_bar;
   const std::size_t active_scene_index =
       fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
-  // Owner task #3 (SOURCE-OF-TRUTH TRANSITION, documented per owner ask):
-  // the advance threshold used to be model.scene_bars(active_scene_index) --
-  // a host-only, per-column bookkeeping field (default GridModel::
-  // kDefaultSceneBars) DELIBERATELY disconnected from the style's own real
-  // section length, justified at the time by "every built-in style's own
-  // section is 1 bar today". That premise is now FALSE (Wave-1 style-depth,
-  // e.g. the "basic" style's own kVarA is 2 bars, preview::section_bars(0,
-  // kVarA) == 2, test_preview.cpp), so scene_bars() is no longer a musically
-  // honest advance gate -- it no longer bears any necessary relationship to
-  // how long the section actually plays.
+  // SECOND source-of-truth transition for this threshold (task #6). Owner
+  // task #3 had moved the advance gate AWAY from model.scene_bars() toward
+  // the style's own real section length (preview::section_bars), because at
+  // the time scene_bars() was a flat, non-editable, disconnected-from-
+  // reality default -- and Wave-1 style-depth had just made the premise that
+  // justified the move ("every built-in style's own section is 1 bar")
+  // false, e.g. the "basic" style's own kVarA is 2 bars. Task #6 gives the
+  // user real control over scene_bars() via the always-visible "- N +"
+  // stepper in each scene-header column (render_scene_header_cell), which
+  // fixes exactly the problem task #3's move was working around -- so
+  // routing the advance gate back through scene_bars() (active_style_
+  // section_bars, above) is not a regression of that reasoning, it is the
+  // fix scene_bars() was always waiting for.
   //
-  // scene_bars()/set_scene_bars() themselves are NOT removed here: they
-  // remain reserved for a future editor task (#6, per-column length
-  // override), just no longer consulted by THIS advance.
-  //
-  // The new gate: advance after the section has played kDefaultSectionRepeats
-  // WHOLE times, using the STYLE's own real section length (preview::
-  // section_bars(fx.active_style, section) via active_style_section_bars,
-  // above) as the per-repeat unit. next_scene_to_launch stays a pure function
-  // of an already-computed threshold -- only the threshold's OWN source
-  // changed here.
-  const int section_bars = active_style_section_bars(model, fx, active_scene_index);
-  const int active_section_bars = section_bars * kDefaultSectionRepeats;
+  // The gate is now a direct hold: advance once bars_elapsed reaches the
+  // scene's own stepper value, no repeat multiplier -- a user dialing the
+  // stepper down to 1 gets a 1-bar hold, not 1 * kDefaultSectionRepeats.
+  // next_scene_to_launch stays a pure function of an already-computed
+  // threshold -- only the threshold's OWN source changed here.
+  const int active_section_bars = active_style_section_bars(model, active_scene_index);
 
   // --debug/SONOTRON_DEBUG (owner ask): this is essentially the old
   // SONOTRON_AUTOSONG_TRACE stderr trace (since removed, see git history),
@@ -765,7 +809,6 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
   if (debug_enabled()) {
     debug_log("[dbg auto-song] bar=" + std::to_string(current_bar) + " active_scene=" +
               std::to_string(fx.active_scene) + " bars_elapsed=" + std::to_string(bars_elapsed) +
-              " section_bars=" + std::to_string(section_bars) +
               " advance_threshold=" + std::to_string(active_section_bars));
   }
 
@@ -773,6 +816,23 @@ void update_auto_song(const GridModel& model, BrainSession& brain_session,
       next_scene_to_launch(fx.auto_song, fx.playing, fx.active_scene, static_cast<int>(scene_count),
                            bars_elapsed, active_section_bars);
   if (!next.has_value()) {
+    // Song-form Option A (tasks #27/#12): the last authored scene column has
+    // finished its final hold. Cue the Ending EXACTLY the way the dedicated
+    // ENDING transport pad already does (transport_panel.cpp's
+    // render_ending_pad, roadmap task #37, commit 976798f) -- the bare,
+    // bar-quantized `style section ending1` verb, alone, never paired with
+    // `launch scene` (which would force an immediate, non-quantized switch).
+    // Deliberately NOT re-implemented beyond this: the very NEXT call to this
+    // function will hit the existing `if (fx.ending_cued)` guard at the top of
+    // update_auto_song and perform the in-flight-clip-arm cancellation
+    // (cancel_active_scene_clip_arms) the SAME way a manual Ending click
+    // already does -- nothing else is needed here.
+    if (auto_song_reached_song_end(fx.auto_song, fx.playing, fx.active_scene,
+                                   static_cast<int>(scene_count), bars_elapsed,
+                                   active_section_bars)) {
+      brain_session.send("style section ending1");
+      fx.ending_cued = true;
+    }
     return;
   }
   const std::size_t next_scene_index = static_cast<std::size_t>(*next);
@@ -847,7 +907,14 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     // below never shifts while a rename is in progress.
     ImGui::Dummy(ImVec2(cz, std::max(0.0F, header_h - ImGui::GetFrameHeight())));
   } else {
-    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, header_h));
+    // Task #6: reserve the bottom kStepperRowH strip for the always-visible
+    // "- N +" length stepper, and shrink the launch hit-region to the area
+    // ABOVE it -- the SAME two-separate-hit-regions fix render_track_label
+    // already applies for its own M/S latches below the track name, so
+    // clicking the stepper can never also fire activate_scene_column via the
+    // "head" InvisibleButton below.
+    const float name_area_h = std::max(0.0F, header_h - kStepperRowH);
+    const bool go = ImGui::InvisibleButton("head", ImVec2(cz, name_area_h));
     if (ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVariationDragPayloadId)) {
         const std::uint8_t section = *static_cast<const std::uint8_t*>(payload->Data);
@@ -883,8 +950,29 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     const ImVec2 caret_ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, caret);
     hdl->AddText(font, kSceneNameFontSize, ImVec2(hp0.x + cz - caret_ts.x - 3.0F, hp0.y + 3.0F),
                  neon::u32(theme::kGreen), caret);
-    const float uy = hp0.y + header_h - 2.0F;
+    const float uy = hp0.y + name_area_h - 2.0F;
     hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
+
+    // Task #6: the always-visible "- N +" length stepper, in the strip
+    // reserved below the name/caret/underline -- its own separate
+    // InvisibleButtons (stepper_button, above), never overlapping "head"'s
+    // own hit region. model.set_scene_bars' own clamp (GridModel::
+    // kMaxSceneBars) handles the 1..8 bound; no re-clamping needed here.
+    const float stepper_y = hp0.y + name_area_h;
+    const int bars = model.scene_bars(s);
+    if (stepper_button("-", ImVec2(hp0.x, stepper_y))) {
+      model.set_scene_bars(s, bars - 1);
+    }
+    const std::string bars_text = std::to_string(bars);
+    const ImVec2 bars_ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, bars_text.c_str());
+    hdl->AddText(
+        font, kSceneNameFontSize,
+        ImVec2(hp0.x + cz * 0.5F - bars_ts.x * 0.5F, stepper_y + (kStepperRowH - bars_ts.y) * 0.5F),
+        neon::u32(theme::kText), bars_text.c_str());
+    if (stepper_button("+", ImVec2(hp0.x + cz - kStepperBtnW, stepper_y))) {
+      model.set_scene_bars(s, bars + 1);
+    }
+
     if (double_clicked) {
       fx.renaming_scene = static_cast<int>(s);
       std::snprintf(fx.rename_buffer.data(), fx.rename_buffer.size(), "%s", name.c_str());
@@ -909,6 +997,17 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
       activate_scene_column(model, brain_session, fx, s, app_state.bar(),
                             kDefaultLaunchQuantizeBars);
     }
+
+    // Restore the row's Y anchor (the same trick render_track_label already
+    // uses for its own M/S latches): the stepper buttons above repositioned
+    // the cursor via SetCursorScreenPos, not SameLine, so ImGui's own
+    // "current line" bookkeeping would otherwise drift below hp0 for the
+    // NEXT scene column's own SameLine() call. Resetting to hp0 and
+    // consuming the FULL header_h here keeps every column's header starting
+    // at the identical Y, exactly like the lone "head" InvisibleButton alone
+    // used to guarantee before this stepper existed.
+    ImGui::SetCursorScreenPos(hp0);
+    ImGui::Dummy(ImVec2(cz, header_h));
   }
   ImGui::PopID();
 }
@@ -917,7 +1016,11 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
 // scene column (see render_scene_header_cell). `header_h` is computed ONCE
 // here from the LONGEST wrapped name among every visible column, and shared
 // by all of them -- every column must use the SAME header height, or the
-// track rows below would start at a different Y per column.
+// track rows below would start at a different Y per column. Task #6 adds one
+// fixed extra `kStepperRowH` to this shared height, for the always-visible
+// "- N +" length stepper every column now reserves below its own name/caret/
+// underline (render_scene_header_cell) -- reserved uniformly here, same as
+// the wrapped-name height above, so it never shifts per-column either.
 void render_scene_header_row(GridModel& model, BrainSession& brain_session,
                              const AppState& app_state, V02State& fx, std::size_t scenes,
                              float cz) {
@@ -930,7 +1033,8 @@ void render_scene_header_row(GridModel& model, BrainSession& brain_session,
     max_lines = std::max(max_lines, lines.size());
   }
   const float line_h = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, "Ag").y;
-  const float header_h = std::max(cz * 0.5F, static_cast<float>(max_lines) * line_h + 6.0F);
+  const float header_h =
+      std::max(cz * 0.5F, static_cast<float>(max_lines) * line_h + 6.0F) + kStepperRowH;
 
   ImGui::Dummy(ImVec2(kLabelColWidth, header_h));
   for (std::size_t s = 0; s < scenes; ++s) {
@@ -1140,29 +1244,25 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   update_auto_song(model, brain_session, app_state, fx, scenes);
 
   // Beat-synchronized playhead (owner-locked: "the playhead fills 0->100%
-  // over the SECTION"). SOURCE-OF-TRUTH TRANSITION (owner task #3, mirrors
-  // update_auto_song's own header comment): this used to read model.
-  // scene_bars(), a host-only per-column bookkeeping field: it now reads
-  // active_style_section_bars(), the SAME real style-section length (
-  // preview::section_bars) update_auto_song's own advance threshold is built
-  // from -- the two must stay the identical value, or the sweep would reach
-  // the cell edge at a different bar than auto-song actually advances.
+  // over the SECTION"). SECOND source-of-truth transition (task #6, mirrors
+  // update_auto_song's own header comment): this read model.scene_bars()
+  // originally, then moved to the style's own real section length (owner
+  // task #3, since scene_bars() had no editor and was a disconnected flat
+  // default); it now reads active_style_section_bars(), which itself reads
+  // model.scene_bars() again -- the SAME per-scene value the always-visible
+  // stepper (render_scene_header_cell) writes, and the SAME value update_
+  // auto_song's own advance threshold is built from, so the sweep still
+  // always reaches the cell edge at exactly the bar auto-song advances.
   //
-  // With auto-song now holding a column for kDefaultSectionRepeats WHOLE
-  // section-lengths before advancing (not just one), the owner's "sweeps the
-  // SECTION" lock reads most honestly as N separate 0->100% sweeps across the
-  // hold, one per repeat, rather than one slow sweep smeared across all of
-  // them (see grid_model.hpp's repeat_cycle_start_bar for the full
-  // rationale). repeat_cycle_start_bar re-anchors the phase calculation to
-  // whichever repeat is CURRENTLY playing, so the sweep restarts every
-  // section_bars bars instead of clamping to 1.0 partway through the hold and
-  // sitting there. If a future owner reading disagrees (e.g. one slow sweep
-  // across the whole hold IS the intended visual), that is a one-line change
-  // right here -- feed fx.active_scene_start_bar directly instead of this
-  // repeat-local anchor.
+  // With no repeat multiplier anymore (task #6 dropped kDefaultSectionRepeats,
+  // see update_auto_song's own header comment), one hold is exactly one
+  // 0->100% sweep -- repeat_cycle_start_bar (grid_model.hpp) degrades
+  // gracefully to a single-cycle pass-through in this case (there is only
+  // ever one "repeat" per hold now), so it needs no code change here, only
+  // this updated framing.
   const std::size_t active_scene_index =
       fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
-  const int active_section_bars = active_style_section_bars(model, fx, active_scene_index);
+  const int active_section_bars = active_style_section_bars(model, active_scene_index);
   const int repeat_start_bar =
       repeat_cycle_start_bar(app_state.bar(), fx.active_scene_start_bar, active_section_bars);
   const float active_section_phase =

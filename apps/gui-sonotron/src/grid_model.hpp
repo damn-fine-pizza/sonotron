@@ -126,25 +126,33 @@ class GridModel {
   std::uint8_t scene_section(std::size_t scene_index) const;
   void set_scene_section(std::size_t scene_index, std::uint8_t section);
 
-  // Host-side per-scene LENGTH, in bars (auto-song fix: the advance decision
-  // and the launch-cell playhead sweep must both use the SAME per-scene
-  // length, not the style's own section length, which is what the pre-fix
-  // code used and why the sprint was locked to 1 bar per scene for every
-  // built-in style). Every scene defaults to kDefaultSceneBars, so a fresh
-  // grid loops each column for a musically reasonable stretch before
-  // auto-song ever advances it. Bounds-checked exactly like scene_section
-  // above: an out-of-range `scene_index` is a no-op for the setter and
-  // returns kDefaultSceneBars from the getter. The setter also clamps
-  // `bars` to >= 1 -- a zero-or-negative scene length would make the
-  // auto-song "elapsed >= length" check trivially and permanently true
-  // (the same reasoning preview::section_bars' own header comment gives for
-  // why IT never returns <= 0 either).
+  // Host-side per-scene LENGTH, in bars. Task #6 makes this the REAL,
+  // user-editable, authoritative per-scene length: the always-visible
+  // "- <bars> +" stepper in each scene-header column (grid_panel.cpp's
+  // render_scene_header_cell) reads and writes this field directly, and it
+  // now drives BOTH the auto-song advance decision AND the launch-cell
+  // playhead sweep (grid_panel.cpp's active_style_section_bars reads this
+  // field directly instead of the style's own section length -- see that
+  // function's own header comment for the full source-of-truth history).
+  // Every scene defaults to kDefaultSceneBars, so a fresh grid loops each
+  // column for a musically reasonable stretch before auto-song ever
+  // advances it, or before the user dials in their own length via the
+  // stepper. Bounds-checked exactly like scene_section above: an
+  // out-of-range `scene_index` is a no-op for the setter and returns
+  // kDefaultSceneBars from the getter. The setter clamps `bars` to
+  // [1, kMaxSceneBars]: a zero-or-negative scene length would make the
+  // auto-song "elapsed >= length" check trivially and permanently true (the
+  // same reasoning preview::section_bars' own header comment gives for why
+  // IT never returns <= 0 either); kMaxSceneBars is a sensible stepper
+  // ceiling for a compact header control, not a hard engine limit.
   //
   // Reserved for a future extension (memory: auto-song-playhead-and-
-  // repeats): a per-scene REPEAT COUNT (play K times, or infinite, before
-  // advancing) will hook in here, alongside this length, once that decision
-  // is made -- not implemented yet.
+  // repeats): a SEPARATE per-scene REPEAT COUNT (play K times, or infinite,
+  // before advancing) will hook in alongside this length, once that
+  // decision is made -- not implemented yet, and not to be conflated with
+  // the length stepper above.
   static constexpr int kDefaultSceneBars = 8;
+  static constexpr int kMaxSceneBars = 8;
   int scene_bars(std::size_t scene_index) const;
   void set_scene_bars(std::size_t scene_index, int bars);
 
@@ -182,15 +190,32 @@ std::string_view section_wire_name(std::uint8_t section);
 // `auto_song` OFF or `playing` false means the active scene column just
 // loops in place (current, pre-auto-song behavior) -- nullopt (stay). ON +
 // playing, once `bars_elapsed_in_scene` reaches or passes
-// `active_scene_section_bars`, the next scene is
-// `(active_scene + 1) % scene_count` -- the song WRAPS around the scene
-// sequence rather than stopping at the last column. `active_scene` is
-// normalized modulo `scene_count` before advancing, so an out-of-range input
-// never indexes past the wrap. `scene_count <= 0` has no scene to wrap into,
-// so it is treated the same as "stay" (nullopt).
+// `active_scene_section_bars`, the next scene is `active_scene + 1` -- UNLESS
+// `active_scene` is already the LAST column, in which case the song HOLDS
+// there (nullopt) rather than wrapping back to 0 (song-form Option A, tasks
+// #27/#12: a non-wrapping song that ends on an Ending, matching SceneChain::
+// on_bar's own "last step holds, no implicit loop" precedent,
+// scene_chain.hpp:121-124/33-36). `active_scene` is normalized modulo
+// `scene_count` before advancing, so an out-of-range input never indexes out
+// of bounds. `scene_count <= 0` has no scene to advance into, so it is
+// treated the same as "stay" (nullopt).
 std::optional<int> next_scene_to_launch(bool auto_song, bool playing, int active_scene,
                                         int scene_count, int bars_elapsed_in_scene,
                                         int active_scene_section_bars);
+
+// Song-form Option A (tasks #27/#12): mirrors next_scene_to_launch's own
+// guard order EXACTLY (auto_song/playing/scene_count/bars_elapsed all
+// checked the same way), adding only the "and there is no next column"
+// refinement -- true precisely in the one case where next_scene_to_launch
+// would return nullopt because the ACTIVE section has genuinely finished
+// AND it is the last column (as opposed to nullopt for any of
+// next_scene_to_launch's OTHER reasons: auto_song off, not playing,
+// scene_count <= 0, or simply mid-scene/not yet at the boundary). The
+// caller (grid_panel.cpp's update_auto_song) uses this to decide whether to
+// cue the Ending instead of silently doing nothing when next_scene_to_
+// launch itself returns nullopt.
+bool auto_song_reached_song_end(bool auto_song, bool playing, int active_scene, int scene_count,
+                                int bars_elapsed_in_scene, int active_scene_section_bars);
 
 // Once-per-crossing guard for the auto-song advance check above: ImGui
 // re-evaluates every rendered frame, but the live bar (app_state.bar(),

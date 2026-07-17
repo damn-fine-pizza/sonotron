@@ -130,18 +130,16 @@ void test_auto_song_advances_scene_after_section_elapses() {
   AppState app_state;
   V02State fx;
 
-  // SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_
-  // auto_song header comment for the full rationale): the advance no longer
-  // reads GridModel::scene_bars (a host-only per-column bookkeeping field) --
-  // it reads the STYLE's own real section length (preview::section_bars)
-  // times kDefaultSectionRepeats (2). fx.active_style is left at its default
-  // (-1, "no style"), for which preview::section_bars() honestly falls back
-  // to 1 bar -- so the effective threshold here is 1 * 2 == 2 bars, not the
-  // 1-bar-pinned cadence this test used to set up via set_scene_bars(0, 1)
-  // (that call is gone: the field still exists, reserved for a future editor
-  // task #6, but this advance no longer consults it).
-  constexpr int kExpectedThresholdBars =
-      2;  // preview::section_bars(-1, *) fallback (1) * repeats (2)
+  // SECOND source-of-truth transition (task #6, see grid_panel.cpp's update_
+  // auto_song header comment for the full rationale): GridModel::scene_bars
+  // is real again -- task #6's always-visible length stepper made it genuinely
+  // user-editable, so the advance now reads it directly (no style-length,
+  // no kDefaultSectionRepeats multiplier). Pinned here via an explicit
+  // set_scene_bars(0, ...) call, restoring this test's own original 2-bar
+  // cadence through the NEW real mechanism instead of task #3's now-obsolete
+  // style-length-times-repeats one.
+  constexpr int kExpectedThresholdBars = 2;
+  model.set_scene_bars(0, kExpectedThresholdBars);
 
   // Transport starts playing; the first beat lands at bar 1 (kBeat's
   // beat_bar is a 1-based absolute bar counter, abi.hpp/app_state.cpp).
@@ -239,15 +237,14 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   AppState app_state;
   V02State fx;
 
-  // NOTE (owner task #3 source-of-truth transition): these set_scene_bars
-  // calls are now VESTIGIAL -- the advance no longer consults GridModel::
-  // scene_bars (see grid_panel.cpp's update_auto_song header comment) --
-  // left in place only because this test does not depend on removing them
-  // (fx.active_style stays at its default -1, so the real threshold is
-  // preview::section_bars(-1, *)'s fallback (1) * kDefaultSectionRepeats (2)
-  // == 2 bars, regardless of what is set here). The ten-bar loop below still
-  // gives several crossings at that 2-bar cadence, enough to prove the
-  // stuck-after-restart bug stays fixed.
+  // NOTE (task #6 SECOND source-of-truth transition): these set_scene_bars
+  // calls are load-bearing AGAIN -- task #6's always-visible length stepper
+  // made GridModel::scene_bars genuinely user-editable, so the advance now
+  // reads it directly once more (see grid_panel.cpp's update_auto_song header
+  // comment). Every scene here is pinned to a 1-bar hold, an even faster
+  // cadence than the style-length-based threshold this comment used to
+  // describe -- the ten-bar loop below still gives several crossings, more
+  // than enough to prove the stuck-after-restart bug stays fixed.
   for (std::size_t scene = 0; scene < model.scene_count(); ++scene) {
     model.set_scene_bars(scene, 1);
   }
@@ -299,21 +296,25 @@ void test_auto_song_stuck_after_transport_stop_then_restart() {
   ImGui::DestroyContext();
 }
 
-// POSITIVE COVERAGE (Torquato QA, auto-song fix follow-up) -- REPURPOSED for
-// owner task #3's source-of-truth transition: this test used to pin that
-// GridModel::scene_bars (a host-only per-column bookkeeping field) governed
-// the advance cadence. That premise is now false BY DESIGN -- the advance no
-// longer consults scene_bars at all (grid_panel.cpp's update_auto_song header
-// comment) -- so this test now pins the REPLACEMENT invariant: the style's
-// own REAL section length (preview::section_bars) times kDefaultSectionRepeats
-// governs the cadence instead. fx.active_style = 0 ("basic", kBuiltinStyleNames
-// [0]) whose kVarA section is 2 bars (preview::section_bars(0, kVarA) == 2,
-// pinned independently by test_preview.cpp) -- times the default 2 repeats,
-// the SAME 4-bar threshold the old set_scene_bars(0, 4) call used to pin
-// directly, so the bar-by-bar timeline below is unchanged. The active scene
-// column must NOT advance (and no `launch scene ` line may be sent) after 1,
-// 2, or 3 bars have elapsed, and MUST advance (with a `launch scene <n> ...`
-// send) exactly once 4 full bars have elapsed.
+// POSITIVE COVERAGE (Torquato QA, auto-song fix follow-up) -- REPURPOSED
+// TWICE now. Owner task #3 first moved this test's own premise from
+// GridModel::scene_bars to the style's own real section length (preview::
+// section_bars) times kDefaultSectionRepeats, because at the time nothing let
+// the user edit scene_bars. Task #6 (this pass) SECOND-transitions it right
+// back: the always-visible length stepper makes scene_bars genuinely
+// user-editable again, so grid_panel.cpp's update_auto_song reads it
+// directly once more, no style-length, no repeat multiplier -- see that
+// function's own header comment for the full history. This test is pinned
+// via an explicit set_scene_bars(0, 4) call, restoring the EXACT SAME 4-bar
+// threshold the bar-by-bar timeline below already exercised (the old
+// preview::section_bars(0, kVarA)==2 * kDefaultSectionRepeats==2 threshold
+// task #3 had introduced), so the timeline itself is unchanged; only the
+// mechanism producing that threshold changed. fx.active_style is left at 0
+// ("basic") -- no longer load-bearing for the threshold itself, but kept so
+// this test's own name/history stays traceable. The active scene column must
+// NOT advance (and no `launch scene ` line may be sent) after 1, 2, or 3 bars
+// have elapsed, and MUST advance (with a `launch scene <n> ...` send) exactly
+// once 4 full bars have elapsed.
 void test_scene_bars_governs_advance_cadence() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
@@ -329,10 +330,12 @@ void test_scene_bars_governs_advance_cadence() {
   AppState app_state;
   V02State fx;
 
-  // 0 == "basic" (kBuiltinStyleNames[0]); scene 0 keeps GridModel's own
-  // default section (kDefaultSectionType == SectionType::kVarA), whose real
-  // length in "basic" is 2 bars -- see this function's own header comment.
+  // 0 == "basic" (kBuiltinStyleNames[0]) -- kept for this test's own
+  // traceability, no longer load-bearing for the threshold (see this
+  // function's own header comment). scene 0's own LENGTH (task #6) is what
+  // actually governs the advance now, pinned to 4 bars explicitly below.
   fx.active_style = 0;
+  model.set_scene_bars(0, 4);
 
   // Transport starts playing; the first beat lands at bar 1.
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
@@ -414,11 +417,12 @@ void test_auto_song_armed_by_default_advances_without_manual_toggle() {
   CHECK(fx.auto_song);  // pins the owner default-ON decision itself
   CHECK(fx.active_scene == 0);
 
-  // fx.active_style stays at its default (-1, "no style"): preview::
-  // section_bars(-1, *) honestly falls back to 1 bar, so the effective
-  // advance threshold is 1 * kDefaultSectionRepeats (2) == 2 bars (owner
-  // task #3's source-of-truth transition, see grid_panel.cpp's update_auto_
-  // song). set_scene_bars is no longer consulted by this advance.
+  // Task #6 (SECOND source-of-truth transition, see grid_panel.cpp's update_
+  // auto_song header comment): GridModel::scene_bars is real again -- pinned
+  // here to 2 bars explicitly, restoring this test's own original 2-bar
+  // threshold through the NEW real mechanism (fx.active_style/preview::
+  // section_bars are no longer load-bearing for this decision at all).
+  model.set_scene_bars(0, 2);
 
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");
   app_state.apply_line(R"({"ev":"beat","bar":1,"beat":0,"pulse":0,"@":0})");

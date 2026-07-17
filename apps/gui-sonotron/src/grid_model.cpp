@@ -93,7 +93,7 @@ void GridModel::set_scene_bars(std::size_t scene_index, int bars) {
   if (scene_index >= kMaxSceneCount) {
     return;
   }
-  m_scene_bars[scene_index] = std::max(bars, 1);
+  m_scene_bars[scene_index] = std::clamp(bars, 1, kMaxSceneBars);
 }
 
 std::string_view section_wire_name(std::uint8_t section) {
@@ -116,11 +116,26 @@ std::optional<int> next_scene_to_launch(bool auto_song, bool playing, int active
   if (bars_elapsed_in_scene < active_scene_section_bars) {
     return std::nullopt;
   }
-  // Normalize defensively before wrapping: a caller-tracked active_scene
+  // Normalize defensively before advancing: a caller-tracked active_scene
   // should already be in [0, scene_count), but a negative or stale value
   // must still land in range rather than index out of bounds downstream.
   const int normalized = ((active_scene % scene_count) + scene_count) % scene_count;
-  return (normalized + 1) % scene_count;
+  if (normalized + 1 >= scene_count) {
+    return std::nullopt;  // last column: hold, do not wrap (song-form Option A)
+  }
+  return normalized + 1;
+}
+
+bool auto_song_reached_song_end(bool auto_song, bool playing, int active_scene, int scene_count,
+                                int bars_elapsed_in_scene, int active_scene_section_bars) {
+  if (!auto_song || !playing || scene_count <= 0) {
+    return false;
+  }
+  if (bars_elapsed_in_scene < active_scene_section_bars) {
+    return false;
+  }
+  const int normalized = ((active_scene % scene_count) + scene_count) % scene_count;
+  return normalized + 1 >= scene_count;
 }
 
 bool bar_just_advanced(int current_bar, int& last_checked_bar) {

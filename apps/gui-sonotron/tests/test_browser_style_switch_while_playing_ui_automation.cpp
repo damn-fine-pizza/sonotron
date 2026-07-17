@@ -155,41 +155,44 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   const th::Rect browser_area = th::find_child_window_rect("browser_area");
   CHECK(browser_area.found);
 
-  // Style rows sit shoulder to shoulder (no other-colored geometry drawn
-  // between consecutive labels), so find_color_clusters' vertex-index-gap
-  // heuristic (imgui_headless_harness.hpp, default index_gap=16) merges many
-  // adjacent kTextSecondary rows into ONE blob instead of one cluster per
-  // row (confirmed empirically while writing this test: clusters[0] alone
-  // spanned ~13 rows' worth of Y). A dense, evenly-spaced list needs exact
-  // layout math instead: "basic" (index 0, the pre-established active style)
-  // is the ONLY style row painted in theme::kCyan (leaf_row's `active`
-  // branch, browser_panel.cpp) plus its own left accent bar -- a real,
-  // uniquely-colored anchor -- and every subsequent row sits exactly one
-  // real ImGui::GetTextLineHeightWithSpacing() below the previous one
-  // (leaf_row emits one Selectable per row, nothing else, so this is the
-  // literal per-row advance the Selectable layout itself uses -- not a
-  // guessed constant). theme::kCyan (full alpha) is ALSO used elsewhere in
-  // THIS SAME frame (the "sonotron" title text and a same-row indicator, both
-  // in the transport panel, confirmed empirically) -- find_single_color_rect
-  // would merge those in too, so this filters clusters to the browser_area
-  // child's own Y range first, exactly like the row-locating attempt above.
-  const ImU32 active_style_text = sonotron::neon::u32(sonotron::theme::kCyan);
-  const std::vector<th::Rect> cyan_clusters = th::find_color_clusters(locate, active_style_text);
-  th::Rect basic_row;
-  for (const th::Rect& r : cyan_clusters) {
+  // Family-grouped rendering (task #30, docs/proposals/style-browser-corpus-
+  // scale.md) breaks the OLD arithmetic-offset locate strategy this test used
+  // to rely on: "basic" (index 0, kOther) and "rock" (index 2,
+  // kPopRockBallad) no longer render as two of three CONSECUTIVE, unbroken
+  // rows -- they now sit under DIFFERENT family section headers, with other
+  // families' headers (and rows) in between. Narrowing the browser's own
+  // search filter to "rock" instead is precise and stable: browser_model.hpp
+  // documents that "rock" is the only style name, AND the only family-label
+  // fragment, that contains the substring "rock" among all 16 built-ins
+  // (kPopRockBallad's own label was deliberately chosen as "Pop / Ballad",
+  // NOT "Pop / Rock / Ballad", to keep exactly this kind of narrowing
+  // precise) -- so after applying it, exactly one style leaf renders
+  // anywhere in the whole browser tree (variations/kits share the same text
+  // filter and neither list contains "rock" either). That lone leaf is not
+  // the active style ("basic" is, and "basic" is now hidden by the filter),
+  // so it paints in the same un-highlighted theme::kTextSecondary every
+  // non-active leaf uses -- locate it exactly like this file used to locate
+  // the cyan "basic" anchor (find_color_clusters, filtered to the
+  // browser_area child's own Y range: theme::kTextSecondary is also used
+  // elsewhere in this same frame, e.g. the transport inset's "4/4" label, so
+  // the Y-range filter still matters here too). With only one leaf on
+  // screen, find_color_clusters' vertex-index-gap merging heuristic (which
+  // defeated a naive per-row-cluster approach when EVERY style rendered
+  // shoulder to shoulder) is no longer a concern -- there is nothing
+  // adjacent left to merge with.
+  model.set_search_filter("rock");
+  ImDrawData* filtered = render_one_frame(model, session, app_state, fx);
+  const ImU32 leaf_text_color = sonotron::neon::u32(sonotron::theme::kTextSecondary);
+  const std::vector<th::Rect> leaf_clusters = th::find_color_clusters(filtered, leaf_text_color);
+  th::Rect target_row;
+  for (const th::Rect& r : leaf_clusters) {
     if (r.min.y >= browser_area.min.y && r.max.y <= browser_area.max.y) {
-      basic_row = r;
+      target_row = r;
       break;
     }
   }
-  CHECK(basic_row.found);
-  const float row_height = ImGui::GetTextLineHeightWithSpacing();
+  CHECK(target_row.found);
   constexpr int kTargetStyleIndex = 2;  // "rock" (kBuiltinStyleNames[2])
-  th::Rect target_row;
-  target_row.min =
-      ImVec2(basic_row.min.x, basic_row.min.y + static_cast<float>(kTargetStyleIndex) * row_height);
-  target_row.max = ImVec2(basic_row.max.x, target_row.min.y + row_height);
-  target_row.found = true;
 
   // Real click: Play.
   const ImU32 play_color = sonotron::neon::u32(sonotron::theme::kCyan, 0.9F);

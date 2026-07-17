@@ -5,8 +5,10 @@
 #include <cfloat>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "imgui.h"
 #include "neon_widgets.hpp"
@@ -17,6 +19,16 @@ namespace sonotron {
 namespace {
 
 constexpr int kFilterBufferSize = 64;
+
+// Family section render order (task #30, docs/proposals/style-browser-
+// corpus-scale.md §3.2): declaration order of StyleFamily, kOther last (true
+// by construction -- kOther IS declared last in browser_model.hpp).
+constexpr std::array<StyleFamily, 8> kFamilyRenderOrder = {
+    StyleFamily::kPopRockBallad, StyleFamily::kDanceFourOnFloor,
+    StyleFamily::kFunkGroove,    StyleFamily::kSwingShuffleJazz,
+    StyleFamily::kLatinClave,    StyleFamily::kBallroomTraditional,
+    StyleFamily::kWorldRegional, StyleFamily::kOther,
+};
 
 // The v02 non-style sections (spec §2a). "variations" is now a REAL drag
 // source (repeat-zone-real-contract.md SLICE 4a): each row carries a
@@ -92,52 +104,85 @@ bool leaf_row(std::string_view item, bool active) {
   return clicked;
 }
 
-void render_styles(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
-                   V02State& fx, const std::string& filter, int& shown) {
-  if (!section_header("styles")) {
+// One style leaf row: the SAME click-to-load/switch and drag-drop-source
+// behavior render_styles always had, factored out so both the family-
+// grouped loop below and its ImGuiListClipper wrapper can call it per row.
+void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                       V02State& fx, std::size_t i) {
+  const std::string name(model.style_name(i));
+  ImGui::PushID(static_cast<int>(i));
+  if (leaf_row(name, fx.active_style == static_cast<int>(i))) {
+    // While playing, morph live (quantized to the next bar) instead of
+    // hard-resetting the arranger -- `style load` still stops-and-reloads
+    // for the not-yet-playing case (in_process_brain_session.cpp's
+    // command_line_to_command).
+    //
+    // Owner task #2: the switch used to silently default to varA (the
+    // translator's own fallback, in_process_brain_session.cpp). Pass the
+    // engine's OWN current section (app_state.section(), the authoritative
+    // kSection echo -- never a guess) as an explicit suffix so the switch
+    // preserves it. An empty or "-" reading (no section committed yet)
+    // falls back to the translator's own 3-token/varA default rather than
+    // sending a malformed suffix.
+    const std::string_view current_section = app_state.section();
+    std::string verb = fx.playing ? "style switch " + name : "style load " + name;
+    if (fx.playing && !current_section.empty() && current_section != "-") {
+      verb += " section " + std::string(current_section);
+    }
+    brain_session.send(verb);
+    fx.active_style = static_cast<int>(i);
+  }
+  if (ImGui::BeginDragDropSource()) {
+    ImGui::SetDragDropPayload(kStyleDragPayloadId, &i, sizeof(i));
+    ImGui::TextUnformatted(name.c_str());
+    ImGui::EndDragDropSource();
+  }
+  ImGui::PopID();
+}
+
+// One family bucket: a flat, ImGuiListClipper-virtualized list of leaves
+// (task #30, docs/proposals/style-browser-corpus-scale.md §3.2) -- NOT a
+// nested tree per family, since the vendored ImGui's own demo notes
+// clipping composes awkwardly with tree nodes (imgui_demo.cpp:4200). Each
+// family gets one always-visible section_header (reusing the existing
+// helper unchanged) followed by its own flat, clipped leaf list; a family
+// with nothing matching still shows its header plus "(no match)" so a
+// player can tell the bucket exists rather than silently vanishing.
+void render_style_family_section(BrowserModel& model, BrainSession& brain_session,
+                                 const AppState& app_state, V02State& fx, StyleFamily family,
+                                 int& shown) {
+  std::vector<std::size_t> indices;
+  for (std::size_t i = 0; i < model.style_count(); ++i) {
+    if (model.style_family(i) == family && model.style_matches_filter(i)) {
+      indices.push_back(i);
+    }
+  }
+  const std::string title(style_family_label(family));
+  if (!section_header(title.c_str())) {
     return;
   }
-  int local_shown = 0;
-  for (std::size_t i = 0; i < model.style_count(); ++i) {
-    const std::string name(model.style_name(i));
-    if (!matches(name, filter)) {
-      continue;
-    }
-    ++local_shown;
-    ++shown;
-    ImGui::PushID(static_cast<int>(i));
-    if (leaf_row(name, fx.active_style == static_cast<int>(i))) {
-      // While playing, morph live (quantized to the next bar) instead of
-      // hard-resetting the arranger -- `style load` still stops-and-reloads
-      // for the not-yet-playing case (in_process_brain_session.cpp's
-      // command_line_to_command).
-      //
-      // Owner task #2: the switch used to silently default to varA (the
-      // translator's own fallback, in_process_brain_session.cpp). Pass the
-      // engine's OWN current section (app_state.section(), the authoritative
-      // kSection echo -- never a guess) as an explicit suffix so the switch
-      // preserves it. An empty or "-" reading (no section committed yet)
-      // falls back to the translator's own 3-token/varA default rather than
-      // sending a malformed suffix.
-      const std::string_view current_section = app_state.section();
-      std::string verb = fx.playing ? "style switch " + name : "style load " + name;
-      if (fx.playing && !current_section.empty() && current_section != "-") {
-        verb += " section " + std::string(current_section);
-      }
-      brain_session.send(verb);
-      fx.active_style = static_cast<int>(i);
-    }
-    if (ImGui::BeginDragDropSource()) {
-      ImGui::SetDragDropPayload(kStyleDragPayloadId, &i, sizeof(i));
-      ImGui::TextUnformatted(name.c_str());
-      ImGui::EndDragDropSource();
-    }
-    ImGui::PopID();
-  }
-  if (local_shown == 0) {
+  if (indices.empty()) {
     ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  ImGuiListClipper clipper;
+  clipper.Begin(static_cast<int>(indices.size()));
+  while (clipper.Step()) {
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+      const std::size_t i = indices[static_cast<std::size_t>(row)];
+      ++shown;
+      render_style_leaf(model, brain_session, app_state, fx, i);
+    }
   }
   ImGui::TreePop();
+}
+
+void render_styles(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                   V02State& fx, int& shown) {
+  for (const StyleFamily family : kFamilyRenderOrder) {
+    render_style_family_section(model, brain_session, app_state, fx, family, shown);
+  }
 }
 
 // "variations" (kVariations/kVariationSections above): a real drag SOURCE
@@ -197,11 +242,41 @@ void render_list(const char* title, const std::array<std::string_view, N>& items
   ImGui::TreePop();
 }
 
+// Family filter combo (task #30): "All families" (nullopt) plus one entry
+// per StyleFamily, in the SAME kFamilyRenderOrder the sections below render
+// in, so the combo's own listed order matches what a player sees scrolling
+// the tree. ANDed with the text search below via BrowserModel::
+// style_matches_filter -- selecting one never clears/replaces the text
+// field's own filter.
+void render_family_filter_combo(BrowserModel& model) {
+  const std::optional<StyleFamily> current = model.family_filter();
+  const std::string preview =
+      current.has_value() ? std::string(style_family_label(*current)) : std::string("All families");
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  if (ImGui::BeginCombo("##browser_family_filter", preview.c_str())) {
+    if (ImGui::Selectable("All families", !current.has_value())) {
+      model.set_family_filter(std::nullopt);
+    }
+    for (const StyleFamily family : kFamilyRenderOrder) {
+      const bool selected = current.has_value() && *current == family;
+      const std::string label(style_family_label(family));
+      ImGui::PushID(static_cast<int>(family));
+      if (ImGui::Selectable(label.c_str(), selected)) {
+        model.set_family_filter(family);
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndCombo();
+  }
+}
+
 }  // namespace
 
 void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
                           const AppState& app_state, V02State& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
+  ImGui::Spacing();
+  render_family_filter_combo(model);
   ImGui::Spacing();
 
   const float search_h = ImGui::GetFrameHeightWithSpacing() + 4.0F;
@@ -209,7 +284,7 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
                     ImGuiChildFlags_None, ImGuiWindowFlags_None);
   const std::string filter = model.search_filter();
   int shown = 0;
-  render_styles(model, brain_session, app_state, fx, filter, shown);
+  render_styles(model, brain_session, app_state, fx, shown);
   render_variations(filter, shown);
   render_list("kits \xC2\xB7 GM", kKits, filter, shown);
   if (section_header("clips")) {

@@ -20,14 +20,13 @@
 // missing-launch defect). It asserts that among the sent command lines there
 // is one starting with "launch scene " after an auto-song advance fires.
 //
-// SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_
-// auto_song header comment): the advance no longer reads GridModel::
-// scene_bars at all -- it reads the STYLE's own real section length
-// (preview::section_bars) times kDefaultSectionRepeats (2). fx.active_style
-// is left at its default (-1, "no style"), for which preview::section_bars()
-// honestly falls back to 1 bar, so the effective threshold here is a fixed 2
-// bars, independent of any built-in style's own section length and of the
-// (now-vestigial) set_scene_bars field.
+// SECOND source-of-truth transition (task #6, see grid_panel.cpp's update_
+// auto_song header comment for the full history): GridModel::scene_bars is
+// real again -- task #6's always-visible length stepper made it genuinely
+// user-editable, so the advance now reads it directly (no style-length, no
+// kDefaultSectionRepeats multiplier). Pinned below via an explicit
+// set_scene_bars(0, 2) call, restoring the SAME 2-bar threshold this test
+// already exercised under task #3's now-obsolete mechanism.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
@@ -115,10 +114,10 @@ bool any_sent_line_starts_with(const std::vector<std::string>& sent, std::string
 // contract: not just that `style section` was sent, but that a
 // `launch scene <n> ...` command was ALSO sent for the new active scene.
 //
-// NOTE: this reproduces the single-crossing advance at the current 2-bar
-// threshold (fx.active_style stays default, see this file's own header
-// comment) -- one bar longer than the ORIGINAL 1-bar set_scene_bars pin, so
-// the boundary-crossing beat below is bar 3, not bar 2.
+// NOTE: this reproduces the single-crossing advance at a 2-bar threshold,
+// pinned via set_scene_bars(0, 2) (see this file's own header comment) -- one
+// bar longer than the ORIGINAL 1-bar pin, so the boundary-crossing beat below
+// is bar 3, not bar 2.
 void test_auto_song_advance_must_launch_next_scene_clips() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
@@ -135,6 +134,7 @@ void test_auto_song_advance_must_launch_next_scene_clips() {
   SpyBrainSession brain;
   AppState app_state;
   V02State fx;
+  model.set_scene_bars(0, 2);  // task #6: pins the 2-bar advance threshold
 
   // Transport starts playing; first beat lands at bar 1.
   app_state.apply_line(R"({"ev":"transport","state":"playing","@":0})");

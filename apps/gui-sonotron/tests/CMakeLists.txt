@@ -382,3 +382,35 @@ add_test(NAME test_transport_ending_button_ui_automation
   COMMAND test_transport_ending_button_ui_automation)
 set_tests_properties(test_transport_ending_button_ui_automation PROPERTIES
   LABELS functional)
+
+# Song-form Option A ACCEPTANCE TEST (tasks #27/#12, docs/proposals/song-
+# form-option-a-wiring-plan.md §2): the automatic counterpart to the manual
+# ENDING-pad click test above -- proves the song holds at its last authored
+# column (never wraps) and auto-song itself cues the Ending, with no click
+# on the ENDING pad at all.
+add_executable(test_grid_panel_auto_song_ends_on_ending_ui_automation
+  test_grid_panel_auto_song_ends_on_ending_ui_automation.cpp)
+target_link_libraries(test_grid_panel_auto_song_ends_on_ending_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_panel_auto_song_ends_on_ending_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_grid_panel_auto_song_ends_on_ending_ui_automation
+  COMMAND test_grid_panel_auto_song_ends_on_ending_ui_automation)
+set_tests_properties(test_grid_panel_auto_song_ends_on_ending_ui_automation PROPERTIES
+  LABELS functional)
+
+# Task #6 ACCEPTANCE TEST: the always-visible per-scene LENGTH stepper in
+# every scene-header column -- real click injection changes GridModel::
+# scene_bars, and (via a real InProcessBrainSession) a dialed-down scene
+# length genuinely gates auto-song's own advance timing, not a vestigial
+# display number.
+add_executable(test_grid_scene_length_stepper_ui_automation
+  test_grid_scene_length_stepper_ui_automation.cpp)
+target_link_libraries(test_grid_scene_length_stepper_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_grid_scene_length_stepper_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_grid_scene_length_stepper_ui_automation
+  COMMAND test_grid_scene_length_stepper_ui_automation)
+set_tests_properties(test_grid_scene_length_stepper_ui_automation PROPERTIES
+  LABELS functional)
