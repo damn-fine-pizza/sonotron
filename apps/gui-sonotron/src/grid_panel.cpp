@@ -355,7 +355,10 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
   fx.open_wav = false;
   seqedit.set_part_index(kRows[1].role_index);
   seqedit.set_clip_label("wlk");
-  seqedit.set_all_tracks_visible(false);
+  // Owner bug #1: mirrors render_track_cell's own fix below -- the initial
+  // demo default-open cell must show every role too, not just the seeded
+  // bass row.
+  seqedit.set_all_tracks_visible(true);
 }
 
 // Draws one launch cell (custom draw-list) at the cursor; returns true on
@@ -995,14 +998,21 @@ void render_track_label(PartsModel& parts, BrainSession& brain_session, const Gr
   // tight (minimal padding) so the stacked M/S row below still fits within
   // `cz` even at the smallest zoom (render_header's -/+ clamp bottoms out
   // at 34px).
-  const float name_row_h = ImGui::GetTextLineHeight() + 1.0F;
+  // Task #4: the role label used to render at a fixed size, ignoring
+  // cell_zoom -- the same cell_font_scale() ramp the scene-header name and
+  // the cell's own bottom label already follow now applies here too, so
+  // drums/bass/chord/pad/arp/lead grow alongside the cells instead of
+  // staying static while everything around them zooms.
+  ImFont* font = ImGui::GetFont();
+  const float name_font_size = ImGui::GetFontSize() * cell_font_scale(cz);
+  const float name_row_h = name_font_size + 1.0F;
   const float name_cy = lp.y + name_row_h * 0.5F;
   const ImVec2 d0(lp.x + 2.0F, name_cy - 3.5F);
   const ImVec2 d1(lp.x + 9.0F, name_cy + 3.5F);
   neon::glow_rect(dl, d0, d1, color, 1.0F, dim ? 0.4F : 1.0F, fx.glow && !dim);
   dl->AddRectFilled(d0, d1, neon::u32(color, dim ? 0.4F : 1.0F), 1.0F);
-  ImGui::SetCursorScreenPos(ImVec2(lp.x + 14.0F, name_cy - ImGui::GetTextLineHeight() * 0.5F));
-  ImGui::TextColored(dim ? theme::kTextMuted : color, "%s", row.name);
+  dl->AddText(font, name_font_size, ImVec2(lp.x + 14.0F, name_cy - name_font_size * 0.5F),
+              neon::u32(dim ? theme::kTextMuted : color), row.name);
 
   // Row 2 (below the name): the M / S latches -- bigger, explicit-letter
   // squares (kLatchSize), unambiguously lit (tone fill) when engaged.
@@ -1083,11 +1093,13 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   }
   if (clicked) {
     if (!filled) {
-      // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix
-      // registration -- only a browser style drop registers for real, see
-      // the drag-drop handler below). Short label like the design's
-      // addClip, so the cell never shows a truncated name.
-      model.set_cell(row.role_index, s, GridCellKind::kStyleSection, "clip");
+      // Owner bug #2: clicking an EMPTY cell used to fabricate a fake
+      // placeholder clip ("clip", kStyleSection) from the click alone -- no
+      // launch, no verb, no real ClipMatrix registration behind it, just a
+      // ghost that appeared in the grid. An empty-cell click is now a
+      // genuine no-op; the only real way to fill a cell is the browser
+      // style drag-drop target below, which registers a real ClipMatrix
+      // clip.
     } else {
       // Filled -> real launch + open in Sequence Edit. The launched
       // state itself is read back for real (above), not echoed locally.
@@ -1109,10 +1121,12 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       fx.open_wav = cell.kind == GridCellKind::kLoopBuffer;
       seqedit.set_part_index(row.role_index);
       seqedit.set_clip_label(cell.label);
-      // Item 3: on cell-open, ONLY the clicked role's checkbox starts ON --
-      // every other role starts OFF, until the user (or the "all tracks"
-      // toggle) turns more back on.
-      seqedit.set_all_tracks_visible(false);
+      // Owner bug #1: cell-open used to SOLO the clicked role (only its
+      // checkbox started ON, every other role hidden) -- Sequence Edit is
+      // supposed to show every track by default. All roles now start
+      // visible; the per-role checkboxes and the bulk "all tracks" toggle
+      // still work exactly as before for narrowing the view afterwards.
+      seqedit.set_all_tracks_visible(true);
     }
   }
   // Drop target: a browser style drag fills this cell for real AND

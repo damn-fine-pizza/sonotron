@@ -168,11 +168,13 @@ void test_real_click_on_filled_cell_launches_and_opens_sequence_edit() {
   CHECK(fx.open_section == model.scene_section(0));
   CHECK(seqedit.part_index() == 0);  // kRows[0].role_index
   CHECK(seqedit.clip_label() == "A");
-  CHECK(fx.open_scene == 0);        // scene/column index of the clicked cell
-  CHECK(!fx.open_wav);              // drums/scene0 demo cell is a style section, not a WAV
-  CHECK(seqedit.role_visible(0));   // drums (the clicked role) starts visible
-  CHECK(!seqedit.role_visible(2));  // bass (kRows[1].role_index, seed_demo's own
-                                    // default-opened role) starts hidden -- item 3
+  CHECK(fx.open_scene == 0);       // scene/column index of the clicked cell
+  CHECK(!fx.open_wav);             // drums/scene0 demo cell is a style section, not a WAV
+  CHECK(seqedit.role_visible(0));  // drums (the clicked role) starts visible
+  CHECK(seqedit.role_visible(2));  // bass also starts visible -- owner bug #1:
+                                   // cell-open now shows ALL roles, not just the
+                                   // clicked one (the old solo-on-open, item 3,
+                                   // was reported as a bug and reversed)
 
   // Pump the REAL per-frame pipeline until the REAL ClipMatrix round trip
   // confirms the launch (bounded wall time, same discipline every other
