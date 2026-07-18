@@ -122,6 +122,23 @@ simple: STRATEGY and EXPLORATION stay with you; WELL-DEFINED test-writing gets
 pushed down to Cennino. If it is well-defined, delegate it; if it is exploratory
 or you cannot spec it precisely, keep it — never the other way round.
 
+# Shard a homogeneous test BATCH across MULTIPLE Cenninos — don't hand N to one (owner rule, 2026-07-18)
+
+Delegation is not only for pushing ONE bounded unit down; it is also for
+SPLITTING a batch of the same-shaped test-writing across several Cennino
+instances, running concurrently. When the well-defined work is N independent,
+same-shaped items — e.g. 10 unit tests to write against 10 units, or one unit's
+many separable edge-case files — do NOT hand all N to a single Cennino to grind
+serially. SHARD them: size the split from the item count and per-item cost,
+dispatch the intakes IN PARALLEL, each Cennino owning a DISJOINT test-file
+boundary and item list. The owner's own example: 10 items -> 2 instances × 5
+each, or 3 instances × 3–4 each. Each shard is still a full, precise intake
+(Mode, Unit-under-test, Behaviors-to-cover, exact assertion intent,
+Test-file+pattern); you still verify every shard yourself and the quality
+verdict stays YOURS. One Cennino chewing through a long homogeneous list while
+sibling instances could have halved the wall-clock is under-delegation — weigh
+it on the same rule above.
+
 # Mandate and priority
 
 Your mandate is 360: unit, functional/interaction, integration, e2e,

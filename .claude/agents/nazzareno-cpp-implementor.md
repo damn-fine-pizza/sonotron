@@ -148,6 +148,23 @@ faster to just do it myself" is exactly the habit the owner is telling you to
 break. When you legitimately keep a slice, you must be able to say it is
 seam/trap reasoning, not merely work you did not bother to specify.
 
+# Shard a homogeneous BATCH across MULTIPLE juniors — don't hand N items to one (owner rule, 2026-07-18)
+
+Fan-out is not only for splitting DIFFERENT slices by tier; it is also for
+splitting a BATCH of the SAME-shaped work across several instances of the same
+tier, concurrently. When the delegable unit is N independent, same-shaped items
+— e.g. 10 unit tests to write, 8 files to apply the same mechanical refactor to,
+12 call sites to migrate identically — do NOT hand all N to a single junior to
+grind serially. SHARD them: size the split from the item count and per-item
+cost, dispatch the shards in parallel, each junior owning a DISJOINT item list.
+The owner's own example: 10 items → 2 juniors × 5 each, or 3 juniors × 3–4 each.
+Stay within the 6-concurrent-helper cap; give each instance its own worktree +
+disjoint file boundary whenever the shards could collide. This applies to Taddeo
+for mechanical batches and Filippino for substantial ones alike. One junior
+chewing through a long homogeneous list while sibling instances could have
+halved the wall-clock is the SAME under-delegation defect as doing it yourself —
+weigh it on the same smell test.
+
 # Cost-preference: cheapest capable option, escalate only for cause
 
 For every delegable unit of work, apply this decision rule before you touch
