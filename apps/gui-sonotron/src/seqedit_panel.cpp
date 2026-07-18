@@ -65,7 +65,16 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
 // see render_seqedit_panel's own call site comment for why.
 void render_role_toggle_sidebar(SeqEditModel& model) {
   ImGui::BeginChild("seq_role_list", ImVec2(kRoleListWidth, 0), ImGuiChildFlags_None,
-                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    ImGuiWindowFlags_None);
+  // Feature B item 4: a one-shot BULK action, not a persistent mode -- flips
+  // every role's visibility to all-on, or solos the currently-opened role
+  // (SeqEditModel::set_all_tracks_visible). The label reflects the state the
+  // model is offering right now (all_tracks_shown()); pressing it flips to
+  // the OTHER state.
+  if (ImGui::SmallButton(model.all_tracks_shown() ? "all tracks" : "last track")) {
+    model.set_all_tracks_visible(!model.all_tracks_shown());
+  }
+  ImGui::Spacing();
   for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
     const bool emphasized = role == model.part_index();
     ImVec4 tint = theme::kRoleTint[role];
@@ -191,6 +200,23 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
     const ImVec2 ts = ImGui::CalcTextSize(hint);
     dl->AddText(ImVec2(p0.x + (avail.x - ts.x) * 0.5F, p0.y + (avail.y - ts.y) * 0.5F),
                 neon::u32(theme::kTextMuted), hint);
+    ImGui::EndChild();
+    return;
+  }
+
+  // Feature B item 7 (WAV branch): a captured LoopBuffer clip has no
+  // piano-roll content to overlay -- show the waveform preview instead.
+  // Dormant in production today (nothing creates a kLoopBuffer cell yet,
+  // Phase 7 Looper), wired now so the branch is ready the moment one
+  // exists. Seeded off fx.open_cell so the same clip always draws the SAME
+  // deterministic waveform.
+  if (fx.open_wav) {
+    neon::clip_preview_waveform(dl, p0, p1, static_cast<std::uint32_t>(fx.open_cell), track_color);
+    if (fx.playing) {
+      const float phase = std::fmod(fx.time, 2.0F) / 2.0F;
+      const float x = p0.x + phase * avail.x;
+      dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), neon::u32(theme::kGreen), 1.5F);
+    }
     ImGui::EndChild();
     return;
   }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -34,6 +35,14 @@ constexpr float kCellGap = 7.0F;
 // (render_track_label) rather than crammed inline with it.
 constexpr float kLatchSize = 17.0F;
 constexpr float kLatchGap = 3.0F;
+
+// Repeat Zone zoom clamp (render_header's -/+ buttons): named constants so
+// the min/max/step are never duplicated bare literals across the two clamp
+// calls. Owner ask (docs/proposals/seqedit-column-view-and-zoom.md Feature
+// A): raise the max by 3 more notches (88 -> 115 == 88 + 3*9).
+constexpr float kCellZoomMin = 34.0F;
+constexpr float kCellZoomMax = 115.0F;
+constexpr float kCellZoomStep = 9.0F;
 
 // A small neon M/S latch: a SQUARE (owner: "squares are fine", not the
 // theme's usual pill-rounded ImGui::Button, which at this compact footprint
@@ -70,6 +79,21 @@ bool grid_latch(const char* glyph, bool engaged, const ImVec4& tone) {
 // same small size draw_cell's own bottom label uses (11px), word-wrapped
 // across multiple lines so it fits within the column instead.
 constexpr float kSceneNameFontSize = 11.0F;
+
+// Owner: "anche i font si ingrandiscono leggermente ad ogni livello di zoom,
+// sii equilibrato" (fonts should also grow slightly at every zoom level,
+// stay balanced) -- cell text grows with cell_zoom but SUB-LINEARLY, milder
+// than the cell edge itself (which scales 1:1). A sqrt ramp, clamped to a
+// mild [kFontScaleMin, kFontScaleMax] range, keeps text legible at the
+// smallest zoom and noticeably-but-not-proportionally larger at the
+// biggest, rather than growing in lockstep with the cell.
+constexpr float kFontScaleReferenceZoom = 52.0F;  // UiState::cell_zoom's own default.
+constexpr float kFontScaleMin = 0.85F;
+constexpr float kFontScaleMax = 1.3F;
+
+float cell_font_scale(float cell_zoom) {
+  return std::clamp(std::sqrt(cell_zoom / kFontScaleReferenceZoom), kFontScaleMin, kFontScaleMax);
+}
 
 // Greedy word-wrap of `text` into lines that fit `max_width` at `font_size`
 // -- mirrors the column-width fitting draw_cell's own bottom label already
@@ -125,7 +149,7 @@ constexpr float kStepperRowH = 14.0F;
 // top-left corner in screen space; `glyph` doubles as this InvisibleButton's
 // ID (unique within the caller's own PushID(scene_index) scope, same as
 // grid_latch's "M"/"S" pair).
-bool stepper_button(const char* glyph, ImVec2 p0) {
+bool stepper_button(const char* glyph, ImVec2 p0, float font_size) {
   ImGui::SetCursorScreenPos(p0);
   const bool clicked = ImGui::InvisibleButton(glyph, ImVec2(kStepperBtnW, kStepperRowH));
   const bool hovered = ImGui::IsItemHovered();
@@ -134,11 +158,39 @@ bool stepper_button(const char* glyph, ImVec2 p0) {
   dl->AddRectFilled(p0, p1, neon::u32(theme::kFrameBg, hovered ? 1.0F : 0.85F), 2.0F);
   dl->AddRect(p0, p1, neon::u32(theme::kBorder, hovered ? 1.0F : 0.6F), 2.0F, 0, 1.0F);
   ImFont* font = ImGui::GetFont();
-  const ImVec2 ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, glyph);
-  dl->AddText(font, kSceneNameFontSize,
+  const ImVec2 ts = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, glyph);
+  dl->AddText(font, font_size,
               ImVec2(p0.x + (kStepperBtnW - ts.x) * 0.5F, p0.y + (kStepperRowH - ts.y) * 0.5F),
               neon::u32(theme::kTextSecondary), glyph);
   return clicked;
+}
+
+// Feature B (docs/proposals/seqedit-column-view-and-zoom.md) whole-column
+// highlight for the scene-header cell: a subtle cyan tint under this header
+// cell's own [hp0, hp0+(cz,header_h)] footprint, painted only while `s` is
+// the column currently open in Sequence Edit (fx.open_scene). Drawn as a
+// FILL (not a border) since nothing else in render_scene_header_cell paints
+// an opaque background for it to be hidden under, unlike the launch cells
+// below (see render_track_cell's own highlight, a border drawn ON TOP for
+// exactly that reason). Alpha deliberately 0.13F, not the more obvious
+// 0.10F: kTrackColor[0] (drums) IS theme::kCyan, and draw_cell's own "not
+// playing" cell fill is exactly neon::u32(track_color, 0.10F) -- an
+// identical packed color here would make the UI-automation harness's
+// exact-color cell locator (find_color_clusters) pick up THIS header tint
+// instead of the real drums/scene-0 launch cell whenever that column is
+// open, silently clicking the wrong on-screen location (caught by
+// test_grid_cell_launch_open_seqedit_ui_automation.cpp regressing). Pulled
+// out of render_scene_header_cell as its own function (rather than an
+// inline `if`) purely to keep that function's own cognitive-complexity
+// score under clang-tidy's threshold -- it was already at 26/25 before this
+// feature, so a fifth inline branch pushed it over.
+void draw_scene_header_column_highlight(const UiState& fx, std::size_t s, ImVec2 hp0, float cz,
+                                        float header_h) {
+  if (fx.open_scene != static_cast<int>(s)) {
+    return;
+  }
+  ImGui::GetWindowDrawList()->AddRectFilled(hp0, ImVec2(hp0.x + cz, hp0.y + header_h),
+                                            neon::u32(theme::kCyan, 0.13F), 4.0F);
 }
 
 // The 6 launch-grid rows (spec §2b), each mapped to a GridModel part-row
@@ -296,8 +348,14 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
   fx.open_cell = static_cast<int>(cell_id(kRows[1].role_index, 0, model.scene_count()));
   fx.open_audio = kRows[1].audio;
   fx.open_section = model.scene_section(0);
+  // Feature B: mirrors the real click path's own bookkeeping (render_track_
+  // cell above) for this demo default-open cell -- column 0, never a WAV
+  // (every demo cell is GridCellKind::kStyleSection).
+  fx.open_scene = 0;
+  fx.open_wav = false;
   seqedit.set_part_index(kRows[1].role_index);
   seqedit.set_clip_label("wlk");
+  seqedit.set_all_tracks_visible(false);
 }
 
 // Draws one launch cell (custom draw-list) at the cursor; returns true on
@@ -366,7 +424,7 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
   // names ("stab","up2") fit un-truncated and descenders (p/g/y) clear the
   // cell's bottom edge.
   ImFont* font = ImGui::GetFont();
-  const float lbl_sz = 11.0F;
+  const float lbl_sz = 11.0F * cell_font_scale(size);
   std::string text = (playing ? "\xE2\x96\xB6 " : "\xE2\x96\xB7 ") + label;
   while (text.size() > 2 &&
          font->CalcTextSizeA(lbl_sz, 1.0e4F, 0.0F, text.c_str()).x > size - 6.0F) {
@@ -465,11 +523,11 @@ void render_header(const GridModel& model, UiState& fx, const AppState& app_stat
   ImGui::TextColored(theme::kTextMuted, "%s", hint);
   ImGui::SameLine(0.0F, 8.0F);
   if (ImGui::SmallButton("-")) {
-    fx.cell_zoom = std::clamp(fx.cell_zoom - 9.0F, 34.0F, 88.0F);
+    fx.cell_zoom = std::clamp(fx.cell_zoom - kCellZoomStep, kCellZoomMin, kCellZoomMax);
   }
   ImGui::SameLine(0.0F, 4.0F);
   if (ImGui::SmallButton("+")) {
-    fx.cell_zoom = std::clamp(fx.cell_zoom + 9.0F, 34.0F, 88.0F);
+    fx.cell_zoom = std::clamp(fx.cell_zoom + kCellZoomStep, kCellZoomMin, kCellZoomMax);
   }
 
   // Owner ask: "visualizza in ui che scena sta suonando (metti numero: nome)"
@@ -756,6 +814,8 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
   ImGui::SameLine(0.0F, kCellGap);
   ImGui::PushID(static_cast<int>(s));
   const ImVec2 hp0 = ImGui::GetCursorScreenPos();
+  const float font_size = kSceneNameFontSize * cell_font_scale(cz);
+  draw_scene_header_column_highlight(fx, s, hp0, cz, header_h);
 
   if (fx.renaming_scene == static_cast<int>(s)) {
     // Inline rename in progress for THIS scene column: an InputText
@@ -807,9 +867,8 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     // overflowing it at the default font size. The green launch caret sits
     // in its own fixed top-right corner (decoupled from the wrapped text's
     // own width, which can now span several lines).
-    const std::vector<std::string> lines =
-        wrap_scene_name(font, kSceneNameFontSize, name, cz - 6.0F);
-    const float line_h = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, "Ag").y;
+    const std::vector<std::string> lines = wrap_scene_name(font, font_size, name, cz - 6.0F);
+    const float line_h = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, "Ag").y;
     // SLICE 4b: the header's own text tint doubles as the "active scene"
     // indicator -- was hardcoded to column 0; now tracks fx.active_scene,
     // which auto-song's advance AND a manual scene launch both update, so
@@ -817,13 +876,13 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     const ImU32 name_color =
         neon::u32(static_cast<int>(s) == fx.active_scene ? theme::kText : theme::kTextSecondary);
     for (std::size_t i = 0; i < lines.size(); ++i) {
-      hdl->AddText(font, kSceneNameFontSize,
+      hdl->AddText(font, font_size,
                    ImVec2(hp0.x + 3.0F, hp0.y + 3.0F + static_cast<float>(i) * line_h), name_color,
                    lines[i].c_str());
     }
     const char* caret = "\xE2\x96\xB6";
-    const ImVec2 caret_ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, caret);
-    hdl->AddText(font, kSceneNameFontSize, ImVec2(hp0.x + cz - caret_ts.x - 3.0F, hp0.y + 3.0F),
+    const ImVec2 caret_ts = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, caret);
+    hdl->AddText(font, font_size, ImVec2(hp0.x + cz - caret_ts.x - 3.0F, hp0.y + 3.0F),
                  neon::u32(theme::kGreen), caret);
     const float uy = hp0.y + name_area_h - 2.0F;
     hdl->AddLine(ImVec2(hp0.x, uy), ImVec2(hp0.x + cz, uy), neon::u32(theme::kCyan, 0.25F), 2.0F);
@@ -835,16 +894,16 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     // kMaxSceneBars) handles the 1..8 bound; no re-clamping needed here.
     const float stepper_y = hp0.y + name_area_h;
     const int bars = model.scene_bars(s);
-    if (stepper_button("-", ImVec2(hp0.x, stepper_y))) {
+    if (stepper_button("-", ImVec2(hp0.x, stepper_y), font_size)) {
       model.set_scene_bars(s, bars - 1);
     }
     const std::string bars_text = std::to_string(bars);
-    const ImVec2 bars_ts = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, bars_text.c_str());
+    const ImVec2 bars_ts = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, bars_text.c_str());
     hdl->AddText(
-        font, kSceneNameFontSize,
+        font, font_size,
         ImVec2(hp0.x + cz * 0.5F - bars_ts.x * 0.5F, stepper_y + (kStepperRowH - bars_ts.y) * 0.5F),
         neon::u32(theme::kText), bars_text.c_str());
-    if (stepper_button("+", ImVec2(hp0.x + cz - kStepperBtnW, stepper_y))) {
+    if (stepper_button("+", ImVec2(hp0.x + cz - kStepperBtnW, stepper_y), font_size)) {
       model.set_scene_bars(s, bars + 1);
     }
 
@@ -898,14 +957,14 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
 void render_scene_header_row(GridModel& model, BrainSession& brain_session,
                              const AppState& app_state, UiState& fx, std::size_t scenes, float cz) {
   ImFont* font = ImGui::GetFont();
+  const float font_size = kSceneNameFontSize * cell_font_scale(cz);
   std::size_t max_lines = 1;
   for (std::size_t s = 0; s < scenes; ++s) {
     const std::string name(model.scene_name(s));
-    const std::vector<std::string> lines =
-        wrap_scene_name(font, kSceneNameFontSize, name, cz - 6.0F);
+    const std::vector<std::string> lines = wrap_scene_name(font, font_size, name, cz - 6.0F);
     max_lines = std::max(max_lines, lines.size());
   }
-  const float line_h = font->CalcTextSizeA(kSceneNameFontSize, 1.0e4F, 0.0F, "Ag").y;
+  const float line_h = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, "Ag").y;
   const float header_h =
       std::max(cz * 0.5F, static_cast<float>(max_lines) * line_h + 6.0F) + kStepperRowH;
 
@@ -1009,8 +1068,19 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   }
   const float section_phase = static_cast<int>(s) == active_scene ? active_section_phase : -1.0F;
   ImGui::PushID(static_cast<int>(s));
+  // Feature B: whole-column highlight -- captured BEFORE draw_cell (its own
+  // InvisibleButton consumes/advances the cursor), so this cell's top-left
+  // is known for the highlight ring drawn AFTER draw_cell below.
+  const ImVec2 cell_p0 = ImGui::GetCursorScreenPos();
   const bool clicked = draw_cell("cell", cz, filled, cell.label, color, pattern, approx, playing,
                                  opened, fx, section_phase);
+  if (fx.open_scene == static_cast<int>(s)) {
+    // A BORDER, not a fill: draw_cell already paints an opaque (filled or
+    // empty) background, which would hide a highlight drawn underneath --
+    // this ring is drawn ON TOP instead, so it stays visible either way.
+    ImGui::GetWindowDrawList()->AddRect(cell_p0, ImVec2(cell_p0.x + cz, cell_p0.y + cz),
+                                        neon::u32(theme::kCyan, 0.55F), 7.0F, 0, 2.0F);
+  }
   if (clicked) {
     if (!filled) {
       // Empty -> add a local demo clip (no launch, no verb, no ClipMatrix
@@ -1029,8 +1099,20 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       // SLICE 4a: seqedit_panel.cpp's own preview_for() call needs THIS
       // column's SectionType (parity with the cell preview above).
       fx.open_section = model.scene_section(s);
+      // Feature B (docs/proposals/seqedit-column-view-and-zoom.md): the
+      // whole COLUMN is now the unit of selection -- stash it so the grid
+      // can highlight every cell in this column, and flag a WAV/audio cell
+      // (GridCellKind::kLoopBuffer -- nothing creates one yet, Phase 7
+      // Looper) so Sequence Edit knows to show the waveform branch instead
+      // of the piano-roll overlay.
+      fx.open_scene = static_cast<int>(s);
+      fx.open_wav = cell.kind == GridCellKind::kLoopBuffer;
       seqedit.set_part_index(row.role_index);
       seqedit.set_clip_label(cell.label);
+      // Item 3: on cell-open, ONLY the clicked role's checkbox starts ON --
+      // every other role starts OFF, until the user (or the "all tracks"
+      // toggle) turns more back on.
+      seqedit.set_all_tracks_visible(false);
     }
   }
   // Drop target: a browser style drag fills this cell for real AND

@@ -65,6 +65,25 @@ class SeqEditModel {
     }
   }
 
+  // "all tracks / last track" bulk visibility action (docs/proposals/
+  // seqedit-column-view-and-zoom.md Feature B items 3/4): NOT a persistent
+  // view mode -- pressing the toggle, or opening a NEW cell, recomputes
+  // every role's visibility ONCE (all on, or only `part_index()` on).
+  // Individual checkboxes (role_visible/set_role_visible above) still
+  // freely override the result afterward; this only tracks which BULK
+  // state the toggle button should currently offer next, so its own label
+  // reads sensibly -- it does not re-derive "is everything currently on"
+  // from the 9 individual flags every frame; that is a deliberate
+  // simplification: this is a one-shot trigger, not a mirrored live readout
+  // of the fine-grained per-role state.
+  bool all_tracks_shown() const { return m_all_tracks_shown; }
+
+  // Sets every role's visibility in one shot: `true` shows all 9; `false`
+  // solos the CURRENT part_index() (every other role hidden). Used both by
+  // the cell-open default (item 3: solo the clicked role) and the sidebar's
+  // own "all tracks / last track" toggle button (item 4).
+  void set_all_tracks_visible(bool all);
+
  private:
   std::size_t m_part_index = 0;
   std::string m_clip_label = "-";
@@ -72,6 +91,7 @@ class SeqEditModel {
   int m_grid_division = 16;
   SeqEditView m_view = SeqEditView::kPianoRoll;
   std::array<bool, kTrackRoleCount> m_role_visible;
+  bool m_all_tracks_shown = true;
 };
 
 }  // namespace sonotron

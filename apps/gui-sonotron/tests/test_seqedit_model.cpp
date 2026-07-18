@@ -82,6 +82,29 @@ void test_role_visibility() {
   }
 }
 
+void test_all_tracks_visible_bulk_action() {
+  SeqEditModel model;
+
+  // Default: everything visible, and the model reports that state.
+  CHECK(model.all_tracks_shown());
+
+  // Soloing role 3: only role 3 stays visible, every other role hidden.
+  model.set_part_index(3);
+  model.set_all_tracks_visible(false);
+  CHECK(!model.all_tracks_shown());
+  CHECK(model.role_visible(3));
+  CHECK(!model.role_visible(0));
+  CHECK(!model.role_visible(4));
+  CHECK(!model.role_visible(8));
+
+  // Flipping back to "all tracks": every role visible again.
+  model.set_all_tracks_visible(true);
+  CHECK(model.all_tracks_shown());
+  for (std::size_t i = 0; i < sonotron::kTrackRoleCount; ++i) {
+    CHECK(model.role_visible(i));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -90,5 +113,6 @@ int main() {
   test_clip_label_and_record_arm();
   test_grid_division_and_view();
   test_role_visibility();
+  test_all_tracks_visible_bulk_action();
   return sonotron::test::failures();
 }

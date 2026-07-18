@@ -27,7 +27,7 @@ struct UiState {
   float time = 0.0F;
   bool playing = false;
 
-  // Launch-cell edge length in px (zoom -/+, 34..88).
+  // Launch-cell edge length in px (zoom -/+, 34..115).
   float cell_zoom = 52.0F;
 
   // Browser active-style echo: index into kBuiltinStyleNames of the last style
@@ -76,6 +76,27 @@ struct UiState {
   // pattern like every other row (seqedit_panel.cpp). Kept for genuine future
   // audio content (a real captured LoopBuffer waveform).
   bool open_audio = false;
+
+  // Repeat Zone column-view (docs/proposals/seqedit-column-view-and-zoom.md
+  // Feature B): the scene COLUMN index `s` of the cell currently opened into
+  // Sequence Edit -- today discarded at every cell-open site in
+  // grid_panel.cpp. -1 = none (nothing open), mirroring open_cell's own
+  // sentinel. Drives the whole-column highlight in the Repeat Zone grid
+  // (render_track_cell/render_scene_header_cell tint every cell whose column
+  // equals this); Sequence Edit itself already gets its column content
+  // through fx.open_section (SLICE 4a), so this field exists purely for the
+  // grid-side highlight, not a second source of section truth.
+  int open_scene = -1;
+
+  // True when the cell most recently opened into Sequence Edit is a
+  // GridCellKind::kLoopBuffer (a recorded WAV/audio clip, not a MIDI
+  // sequence) -- set alongside open_cell/open_row/open_scene at every
+  // cell-open site. seqedit_panel.cpp reads this to switch its canvas to
+  // neon::clip_preview_waveform instead of the piano-roll role overlay.
+  // Nothing creates a kLoopBuffer cell yet (Phase 7 Looper, node 6000), so
+  // this stays false/dormant in production today; wired now so the branch
+  // is ready the moment a real WAV cell exists.
+  bool open_wav = false;
 
   // Seeded-once guard: the renderer fills a demo clip pattern into the grid on
   // the first frame so the procedural previews have something to show (the same
