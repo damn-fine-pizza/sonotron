@@ -48,8 +48,8 @@ constexpr std::array<StyleFamily, 8> kFamilyRenderOrder = {
 // The non-style sections (spec §2a). "variations" is now a REAL drag
 // source (repeat-zone-real-contract.md SLICE 4a): each row carries a
 // SectionType byte a scene header (grid_panel.cpp) accepts as a drop target
-// to set that column's section. "kits" stays a design-intent, local-only list
-// (see docs/feature-list) -- no kit-load verb is wired from here.
+// to set that column's section. "kits" now sends the real GM percussion-kit
+// program-change verb (render_kits below), the same way "voices" already does.
 constexpr std::array<std::string_view, 8> kVariations = {
     "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro",
 };
@@ -76,10 +76,6 @@ constexpr std::array<std::uint8_t, 8> kVariationSections = {
 // 6=fillA, 11=ending1).
 constexpr std::array<std::string_view, 8> kVariationWireNames = {
     "intro1", "varA", "varB", "varC", "varD", "break", "fillA", "ending1",
-};
-constexpr std::array<std::string_view, 10> kKits = {
-    "acoustic kit", "808",    "909",      "jazz kit", "fingered bass",
-    "picked bass",  "rhodes", "dx piano", "warm pad", "saw lead",
 };
 
 bool matches(std::string_view item, const std::string& filter) {
@@ -279,27 +275,6 @@ void render_variations(BrainSession& brain_session, const std::string& filter, i
   ImGui::TreePop();
 }
 
-template <std::size_t N>
-void render_list(const char* title, const std::array<std::string_view, N>& items,
-                 const std::string& filter, int& shown) {
-  if (!section_header(title)) {
-    return;
-  }
-  int local_shown = 0;
-  for (const std::string_view item : items) {
-    if (!matches(item, filter)) {
-      continue;
-    }
-    ++local_shown;
-    ++shown;
-    leaf_row(item, /*active=*/false);
-  }
-  if (local_shown == 0) {
-    ImGui::TextDisabled("  (no match)");
-  }
-  ImGui::TreePop();
-}
-
 // Destination picker for the Voices tab (browser-redesign-taxonomy.md Phase
 // 1's own note: "genuinely new surface needed"). Port name + 1-based channel,
 // persisted on the model (not UiState -- out of scope for this slice), so it
@@ -322,6 +297,30 @@ void render_voice_destination_picker(BrowserModel& model) {
   ImGui::SetNextItemWidth(half);
   if (ImGui::InputInt("##voice_channel", &channel)) {
     model.set_voice_channel(channel);
+  }
+}
+
+// Destination picker for the Kits tab -- mirrors render_voice_destination_picker
+// exactly, but reads/writes the model's INDEPENDENT kit_port/kit_channel state
+// (defaults to channel 10, the GM percussion channel, not channel 1).
+void render_kit_destination_picker(BrowserModel& model) {
+  constexpr int kPortBufSize = 32;
+  char port_buf[kPortBufSize];
+  const std::string current_port(model.kit_port());
+  std::strncpy(port_buf, current_port.c_str(), sizeof(port_buf) - 1);
+  port_buf[sizeof(port_buf) - 1] = '\0';
+
+  ImGui::TextColored(theme::kTextMuted, "destination (port:ch)");
+  const float half = (ImGui::GetContentRegionAvail().x - 6.0F) * 0.5F;
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputTextWithHint("##kit_port", "out0", port_buf, sizeof(port_buf))) {
+    model.set_kit_port(std::string(port_buf));
+  }
+  ImGui::SameLine(0.0F, 6.0F);
+  int channel = model.kit_channel();
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputInt("##kit_channel", &channel)) {
+    model.set_kit_channel(channel);
   }
 }
 
@@ -361,6 +360,42 @@ void render_voices(BrowserModel& model, BrainSession& brain_session, const std::
       }
       ImGui::PopID();
     }
+  }
+  ImGui::TreePop();
+}
+
+// "kits · GM": the 9 canonical GM Level 2 percussion-kit names
+// (kGmDrumKitNames, browser_model.hpp). Click sends `program <port>[:ch]
+// <program-number>` to the CURRENT kit destination picker state (defaults to
+// channel 10, the GM percussion channel) and marks the row as the local
+// "last sent" echo (NOT wire-confirmed -- no per-part program readback
+// exists, parts_model.hpp -- same caveat render_voices's own comment
+// documents).
+void render_kits(BrowserModel& model, BrainSession& brain_session, const std::string& filter,
+                 int& shown) {
+  if (!section_header("kits \xC2\xB7 GM")) {
+    return;
+  }
+  std::vector<std::size_t> indices;
+  for (std::size_t i = 0; i < model.kit_count(); ++i) {
+    if (matches(model.kit_name(i), filter)) {
+      indices.push_back(i);
+    }
+  }
+  if (indices.empty()) {
+    ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  for (const std::size_t i : indices) {
+    ++shown;
+    const std::string name(model.kit_name(i));
+    ImGui::PushID(static_cast<int>(i));
+    if (leaf_row(name, model.last_kit_sent() == static_cast<int>(i))) {
+      brain_session.send(model.build_kit_verb(i));
+      model.set_last_kit_sent(static_cast<int>(i));
+    }
+    ImGui::PopID();
   }
   ImGui::TreePop();
 }
@@ -444,6 +479,10 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
     render_voice_destination_picker(model);
     ImGui::Spacing();
   }
+  if (category == BrowserCategory::kKits) {
+    render_kit_destination_picker(model);
+    ImGui::Spacing();
+  }
 
   const float search_h = ImGui::GetFrameHeightWithSpacing() + 4.0F;
   ImGui::BeginChild("browser_tree", ImVec2(0.0F, ImGui::GetContentRegionAvail().y - search_h),
@@ -461,7 +500,7 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
       render_voices(model, brain_session, filter, shown);
       break;
     case BrowserCategory::kKits:
-      render_list("kits \xC2\xB7 GM", kKits, filter, shown);
+      render_kits(model, brain_session, filter, shown);
       break;
     case BrowserCategory::kClips:
       if (section_header("clips")) {

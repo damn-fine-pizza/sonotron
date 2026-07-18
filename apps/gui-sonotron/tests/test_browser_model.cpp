@@ -267,6 +267,55 @@ void test_build_program_verb_uses_current_destination() {
   CHECK(model.build_program_verb("Acoustic Grand Piano") == "program synth:3 Acoustic Grand Piano");
 }
 
+void test_kit_count_and_names() {
+  BrowserModel model;
+  CHECK(model.kit_count() == 9);
+  CHECK(model.kit_name(0) == "Standard Kit");
+  CHECK(model.kit_name(8) == "SFX Kit");
+  CHECK(model.kit_name(4) == "TR-808 Kit");
+}
+
+void test_kit_destination_defaults() {
+  BrowserModel model;
+  CHECK(model.kit_port() == "out0");
+  CHECK(model.kit_channel() == 10);
+}
+
+void test_set_kit_channel_clamps_to_one_sixteen() {
+  BrowserModel model;
+  model.set_kit_channel(0);
+  CHECK(model.kit_channel() == 1);
+  model.set_kit_channel(99);
+  CHECK(model.kit_channel() == 16);
+  model.set_kit_channel(7);
+  CHECK(model.kit_channel() == 7);
+}
+
+void test_set_kit_port_empty_resets_to_default() {
+  BrowserModel model;
+  model.set_kit_port("synth");
+  CHECK(model.kit_port() == "synth");
+  model.set_kit_port("");
+  CHECK(model.kit_port() == "out0");
+}
+
+void test_last_kit_sent_defaults_and_round_trips() {
+  BrowserModel model;
+  CHECK(model.last_kit_sent() == -1);
+  model.set_last_kit_sent(4);
+  CHECK(model.last_kit_sent() == 4);
+}
+
+void test_build_kit_verb_uses_current_destination() {
+  BrowserModel model;
+  CHECK(model.build_kit_verb(0) == "program out0:10 0");   // Standard Kit
+  CHECK(model.build_kit_verb(4) == "program out0:10 25");  // TR-808 Kit
+
+  model.set_kit_port("synth");
+  model.set_kit_channel(11);
+  CHECK(model.build_kit_verb(8) == "program synth:11 56");  // SFX Kit
+}
+
 }  // namespace
 
 int main() {
@@ -290,5 +339,11 @@ int main() {
   test_set_voice_port_empty_resets_to_default();
   test_last_voice_sent_defaults_and_round_trips();
   test_build_program_verb_uses_current_destination();
+  test_kit_count_and_names();
+  test_kit_destination_defaults();
+  test_set_kit_channel_clamps_to_one_sixteen();
+  test_set_kit_port_empty_resets_to_default();
+  test_last_kit_sent_defaults_and_round_trips();
+  test_build_kit_verb_uses_current_destination();
   return sonotron::test::failures();
 }

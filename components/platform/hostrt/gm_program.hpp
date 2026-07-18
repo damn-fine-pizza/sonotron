@@ -20,4 +20,12 @@ const char* gm_program_name(std::uint8_t program);
 // or unknown names return -1.
 int parse_gm_program(const std::string& token);
 
+// Percussion-kit name for a channel-10 (0-based channel 9) Program Change,
+// following the General MIDI Level 2 percussion-kit map (Standard/Room/
+// Power/Electronic/TR-808/Jazz/Brush/Orchestra/SFX). Returns nullptr for a
+// program number that is not one of the nine canonical kit anchors -- most
+// GM2 soundfonts treat every OTHER program on channel 10 as a variant of the
+// nearest lower kit, but this function only names the canonical anchors.
+const char* gm_drum_kit_name(std::uint8_t program);
+
 }  // namespace arrangrr::host

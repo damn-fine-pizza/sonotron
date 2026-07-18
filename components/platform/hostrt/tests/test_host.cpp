@@ -855,6 +855,34 @@ void test_shell_program_command() {
   CHECK(trumpet_ch2 == 1);
 }
 
+void test_gm_drum_kit_names() {
+  CHECK(std::string(gm_drum_kit_name(0)) == "Standard Kit");
+  CHECK(std::string(gm_drum_kit_name(25)) == "TR-808 Kit");
+  CHECK(std::string(gm_drum_kit_name(56)) == "SFX Kit");
+  CHECK(gm_drum_kit_name(1) == nullptr);    // not a canonical kit anchor
+  CHECK(gm_drum_kit_name(127) == nullptr);  // not a canonical kit anchor
+}
+
+void test_shell_program_command_echoes_kit_name_on_percussion_channel() {
+  ShellFixture f;
+  CHECK(f.run("port open out synth"));
+  CHECK(f.run("program synth:10 0"));   // channel 10 (1-based) -> Standard Kit
+  CHECK(f.run("program synth:10 25"));  // TR-808 Kit
+  CHECK(f.run("program synth:1 0"));    // channel 1 -> still a melodic voice (Acoustic Grand Piano)
+  int programs = 0;
+  int ch10_hits = 0;
+  for (const OutEvent& o : f.events) {
+    if (o.kind == OutEvent::Kind::kMidi && (o.msg.status & 0xF0) == 0xC0) {
+      ++programs;
+      if ((o.msg.status & 0x0F) == 9) {  // channel 10, 0-based 9
+        ++ch10_hits;
+      }
+    }
+  }
+  CHECK(programs == 3);
+  CHECK(ch10_hits == 2);
+}
+
 void test_shell_chord_modes_cli() {
   ShellFixture f;
   CHECK(f.run("port open out synth"));
@@ -2499,6 +2527,8 @@ int main() {
   test_single_finger_g_then_h_does_not_collapse_to_em();
   test_gm_program_parsing();
   test_shell_program_command();
+  test_gm_drum_kit_names();
+  test_shell_program_command_echoes_kit_name_on_percussion_channel();
   test_shell_parts_command_and_panel();
   test_parts_solo_migrated_to_i_key();
   test_shell_groove_command_and_panel();

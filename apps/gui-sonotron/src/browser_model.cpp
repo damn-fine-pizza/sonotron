@@ -98,4 +98,17 @@ std::string BrowserModel::build_program_verb(std::string_view voice_name) const 
          std::string(voice_name);
 }
 
+void BrowserModel::set_kit_port(std::string port) {
+  m_kit_port = port.empty() ? std::string("out0") : std::move(port);
+}
+
+void BrowserModel::set_kit_channel(int channel_one_based) {
+  m_kit_channel = std::clamp(channel_one_based, 1, 16);
+}
+
+std::string BrowserModel::build_kit_verb(std::size_t index) const {
+  return "program " + m_kit_port + ":" + std::to_string(m_kit_channel) + " " +
+         std::to_string(kGmDrumKitPrograms[index]);
+}
+
 }  // namespace sonotron

@@ -205,6 +205,23 @@ inline constexpr std::array<std::string_view, 128> kGmVoiceNames = {
     "Gunshot",
 };
 
+// The 9 canonical General MIDI Level 2 percussion-kit names, in ASCENDING
+// program-number order -- a hand-copied literal of components/platform/
+// hostrt/gm_program.cpp's own kGmDrumKits array (read as reference only;
+// gui-sonotron never #includes a components/ header, D38, the SAME
+// discipline kGmVoiceNames above already documents). Index-parallel with
+// kGmDrumKitPrograms below.
+inline constexpr std::array<std::string_view, 9> kGmDrumKitNames = {
+    "Standard Kit", "Room Kit",  "Power Kit",     "Electronic Kit", "TR-808 Kit",
+    "Jazz Kit",     "Brush Kit", "Orchestra Kit", "SFX Kit",
+};
+
+// The GM program number each kGmDrumKitNames entry sends -- index-parallel
+// with kGmDrumKitNames above.
+inline constexpr std::array<int, 9> kGmDrumKitPrograms = {
+    0, 8, 16, 24, 25, 32, 40, 48, 56,
+};
+
 // Primary taxonomy axis for the style browser at scale (task #30, docs/
 // proposals/style-browser-corpus-scale.md §2.1's 7+1-family tree, derived
 // from the corpus's own measured rhythmic-family clustering, NOT from
@@ -333,6 +350,35 @@ class BrowserModel {
   // harness.
   std::string build_program_verb(std::string_view voice_name) const;
 
+  std::size_t kit_count() const { return kGmDrumKitNames.size(); }
+  std::string_view kit_name(std::size_t index) const { return kGmDrumKitNames[index]; }
+
+  // Kit destination (`program <port>[:channel]`): independent of the Voices
+  // tab's own destination (m_voice_port/m_voice_channel) because a kit send
+  // defaults to the GM PERCUSSION channel (10), not channel 1 -- sending a
+  // kit program change on a melodic channel would silently retune whatever
+  // instrument already lives there instead of picking a drum kit. Channel is
+  // 1-based here, matching the CLI's own display convention; clamped to
+  // [1,16]. Port defaults to "out0", the only realized/audible output port in
+  // gui-sonotron today (Phase-6 Theme 2).
+  std::string_view kit_port() const { return m_kit_port; }
+  void set_kit_port(std::string port);
+  int kit_channel() const { return m_kit_channel; }
+  void set_kit_channel(int channel_one_based);
+
+  // Client-side "last sent" echo (index into kGmDrumKitNames, -1 = none) --
+  // mirrors m_last_voice_sent's own local-only highlight discipline.
+  int last_kit_sent() const { return m_last_kit_sent; }
+  void set_last_kit_sent(int index) { m_last_kit_sent = index; }
+
+  // Builds the exact `program <port>[:ch] <program-number>` wire line for a
+  // kit pick. A BARE PROGRAM NUMBER (not the kit name) -- the host's
+  // numeric fast path (components/platform/hostrt/gm_program.cpp's
+  // parse_gm_program) already accepts 0..127 unambiguously, so this never
+  // needs the kit names taught to the melodic-name matcher. Pure string
+  // logic (no ImGui) so it is unit-testable without a headless harness.
+  std::string build_kit_verb(std::size_t index) const;
+
  private:
   std::vector<std::string> m_clips;
   std::vector<std::string> m_midi_seqs;
@@ -342,6 +388,9 @@ class BrowserModel {
   std::string m_voice_port = "out0";
   int m_voice_channel = 1;
   int m_last_voice_sent = -1;
+  std::string m_kit_port = "out0";
+  int m_kit_channel = 10;
+  int m_last_kit_sent = -1;
 };
 
 }  // namespace sonotron
