@@ -81,6 +81,7 @@
 #include <vector>
 
 #include "audio/audio_backend.hpp"
+#include "audio/reverb_sound_engine.hpp"
 #include "audio/soundfont_engine.hpp"
 #include "melodd/soundfont_discovery.hpp"
 #include "src/app_state.hpp"
@@ -410,12 +411,18 @@ void set_soundfont_path(SoundFontDialogState& dialog, const std::string& value) 
 
 // Bundles the two Theme-2/ISoundEngine-seam objects main() owns together in
 // integrated mode (control_path.empty()) -- SoundfontEngine (this build's
-// one concrete ISoundEngine) and AudioBackend (the device layer holding a
-// reference to it). A plain aggregate of references, not a class: main() is
-// the composition root, the one place allowed to name both the concrete
-// engine type and AudioBackend together (docs/proposals/
-// isoundengine-contract.md, Corelli §1's "the composition root talks to the
-// concrete type for configuration").
+// configurable concrete engine) and AudioBackend (the device layer). A
+// plain aggregate of references, not a class: main() is the composition
+// root, the one place allowed to name both the concrete engine type and
+// AudioBackend together (docs/proposals/isoundengine-contract.md, Corelli
+// §1's "the composition root talks to the concrete type for
+// configuration"). `engine` deliberately still names the CONCRETE
+// SoundfontEngine, not the ReverbSoundEngine decorator AudioBackend
+// actually renders through (Phase-1 sound task #7): SoundFont loading
+// (render_soundfont_dialog below) is a SoundfontEngine-specific
+// configuration call, independent of whichever ISoundEngine sits between it
+// and the speakers -- `backend.render_mutex()` still correctly serializes
+// the load against whatever AudioBackend renders, decorator or not.
 struct AudioHandles {
   sonotron::audio::SoundfontEngine& engine;
   sonotron::audio::AudioBackend& backend;
@@ -740,14 +747,27 @@ int main(int argc, char** argv) {
   std::unique_ptr<sonotron::BrainSession> brain_session_holder;
   // Phase-6 Theme 2 (Decision 5, docs/phase6-design-reviews.md), promoted
   // alongside the ISoundEngine seam (docs/proposals/
-  // isoundengine-contract.md): both declared AFTER brain_session_holder so
-  // C++'s reverse-destruction-order rule tears AudioBackend down (device
+  // isoundengine-contract.md): all three declared AFTER brain_session_holder
+  // so C++'s reverse-destruction-order rule tears AudioBackend down (device
   // stopped, panic sent) BEFORE InProcessBrainSession joins its engine
-  // thread at function-scope exit -- soundfont_engine outlives audio_backend
-  // (declared first, destructed last) since AudioBackend only holds a
-  // reference to it. Both stay null in --control mode (Decision 2's
-  // integrated-mode-only scope cut).
+  // thread at function-scope exit -- soundfont_engine outlives reverb_engine
+  // outlives audio_backend (declared first, destructed last) since
+  // ReverbSoundEngine only holds a reference to soundfont_engine and
+  // AudioBackend only holds a reference to reverb_engine. All three stay
+  // null in --control mode (Decision 2's integrated-mode-only scope cut).
+  //
+  // Phase-1 sound task #7 (docs/proposals/
+  // audio-engine-fluidsynth-build-vs-buy.md SS6 "B1"): reverb_engine wraps
+  // soundfont_engine and is what AudioBackend actually renders through --
+  // TSF/melodd itself has zero reverb/chorus, this decorator is what closes
+  // that gap for the whole GUI audio path. AudioHandles.engine keeps naming
+  // the CONCRETE SoundfontEngine (not the decorator): SoundFont loading
+  // (render_soundfont_dialog) is a SoundfontEngine-specific configuration
+  // call, unaffected by whichever ISoundEngine AudioBackend renders through
+  // -- see AudioHandles' own comment below. Reverb is ALWAYS-ON for Phase-1
+  // (no bypass toggle -- a later UX call, out of scope here).
   std::unique_ptr<sonotron::audio::SoundfontEngine> soundfont_engine;
+  std::unique_ptr<sonotron::audio::ReverbSoundEngine> reverb_engine;
   std::unique_ptr<sonotron::audio::AudioBackend> audio_backend;
   std::optional<AudioHandles> audio_handles;
   SoundFontDialogState soundfont_dialog;
@@ -761,13 +781,14 @@ int main(int argc, char** argv) {
     }
     brain_session_holder = std::move(uds_session);
   } else {
-    // SoundfontEngine/AudioBackend are constructed (and the default
-    // SoundFont loaded) BEFORE the engine thread starts, so note_ring() is
-    // a valid, already-wired handle the instant run_engine() can read it
-    // (set_audio_ring() below is called before start(), see that method's
-    // own doc comment).
+    // SoundfontEngine/ReverbSoundEngine/AudioBackend are constructed (and
+    // the default SoundFont loaded) BEFORE the engine thread starts, so
+    // note_ring() is a valid, already-wired handle the instant run_engine()
+    // can read it (set_audio_ring() below is called before start(), see
+    // that method's own doc comment).
     soundfont_engine = std::make_unique<sonotron::audio::SoundfontEngine>();
-    audio_backend = std::make_unique<sonotron::audio::AudioBackend>(*soundfont_engine);
+    reverb_engine = std::make_unique<sonotron::audio::ReverbSoundEngine>(*soundfont_engine);
+    audio_backend = std::make_unique<sonotron::audio::AudioBackend>(*reverb_engine);
     audio_handles.emplace(AudioHandles{.engine = *soundfont_engine, .backend = *audio_backend});
     const std::string default_soundfont = melodd::find_system_soundfont();
     if (!default_soundfont.empty()) {
@@ -832,13 +853,6 @@ int main(int argc, char** argv) {
   }
 
   sonotron::SeqEditModel seqedit_model;
-  // Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/
-  // 11610): SeqEditModel is the ONE zone model that holds a BrainSession*
-  // (seqedit_model.hpp's own header comment explains why -- layout_
-  // renderer.cpp's render_seqedit_panel call site has no BrainSession
-  // parameter to widen). Wired here, not layout_renderer.cpp, right after
-  // both objects exist.
-  seqedit_model.set_brain_session(&brain_session);
   sonotron::PartsModel parts_model;
   sonotron::UiState ui_state;  // neon workstation: glow flag, frame clock, local intent surface
 
