@@ -20,6 +20,7 @@
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
 #include "default_style_progressions.hpp"
+#include "gm_program.hpp"
 #include "midi_hal.hpp"
 #include "shell.hpp"
 
@@ -485,6 +486,58 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.param = t[2] == "mute" ? Param::kPartMute : Param::kPartSolo;
     out.a = static_cast<std::int32_t>(role);
     out.b = t[3] == "on" ? 1 : 0;
+    return TranslateOutcome::kOk;
+  }
+
+  // `program <port>[:ch] <voice>` -- Workstream B: the Browser's Voices/Kits
+  // pickers (browser_model.cpp's build_program_verb/build_kit_verb) already
+  // emit this exact line but nothing here translated it, so both pickers
+  // silently no-op in the default in-process backend. Mirrors
+  // components/platform/hostrt/shell_music_commands.cpp's own Shell::
+  // cmd_program grammar and encoding (`b = port | (channel << 8)`, channel
+  // 0-based) exactly, EXCEPT for port name resolution: cmd_program resolves
+  // an arbitrary named port through Shell::find_port's full port table
+  // (reachable only from inside Shell); this pure-client translator has no
+  // such table (D38 discipline, same as the note/loop arms above), so it
+  // accepts only the ONE named port the integrated engine's own default
+  // topology ever opens ("out0", kPrimaryAudioOutPort -- see that constant's
+  // own comment above) plus a bare numeric index (the note/loop arms' own
+  // existing convention), and rejects anything else as an unknown port.
+  if (t.size() >= 3 && t[0] == "program") {
+    const std::string_view port_token = t[1];
+    std::string_view port_name = port_token;
+    int channel = -1;
+    const std::size_t colon = port_token.find(':');
+    if (colon != std::string_view::npos) {
+      port_name = port_token.substr(0, colon);
+      std::uint64_t ch = 0;
+      if (!parse_uint(port_token.substr(colon + 1), ch) || ch < 1 || ch > 16) {
+        detail = "bad program destination: " + std::string(port_token);
+        return TranslateOutcome::kInvalidArgument;
+      }
+      channel = static_cast<int>(ch - 1);
+    }
+    std::uint64_t port = 0;
+    if (port_name == "out0") {
+      port = kPrimaryAudioOutPort;
+    } else if (!parse_uint(port_name, port) || port >= kMaxPorts) {
+      detail = "unknown output port: " + std::string(port_name);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::string voice(t[2]);
+    for (std::size_t i = 3; i < t.size(); ++i) {
+      voice += ' ';
+      voice += t[i];
+    }
+    const int program = arrangrr::host::parse_gm_program(voice);
+    if (program < 0) {
+      detail = "unknown GM voice: " + voice;
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = Param::kProgram;
+    out.a = program;
+    out.b = static_cast<std::int32_t>(port) | ((channel < 0 ? 0 : channel) << 8);
     return TranslateOutcome::kOk;
   }
 
