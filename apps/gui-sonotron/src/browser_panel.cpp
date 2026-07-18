@@ -104,8 +104,13 @@ bool section_header(const char* title) {
 }
 
 // One leaf row "· item"; `active` gives it the cyan text + left cyan border +
-// faint wash of the selected style. Returns true on click.
-bool leaf_row(std::string_view item, bool active) {
+// faint wash of the selected style. `size` defaults to (0,0), i.e. ImGui's
+// own "fill remaining width, one row" behavior -- callers that never pass it
+// (variations/voices/kits below) are completely unaffected by this
+// parameter's existence. A caller that wants the row to flow-wrap alongside
+// its neighbors (render_style_leaf's wrap_layout mode) passes an explicit
+// text-sized width instead. Returns true on click.
+bool leaf_row(std::string_view item, bool active, ImVec2 size = ImVec2(0.0F, 0.0F)) {
   const std::string label = "\xC2\xB7 " + std::string(item);
   ImGui::PushStyleColor(ImGuiCol_Text, active ? theme::kCyan : theme::kTextSecondary);
   ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
@@ -113,7 +118,7 @@ bool leaf_row(std::string_view item, bool active) {
   ImGui::PushStyleColor(ImGuiCol_HeaderActive,
                         ImVec4(theme::kCyan.x, theme::kCyan.y, theme::kCyan.z, 0.22F));
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
-  const bool clicked = ImGui::Selectable(label.c_str(), active);
+  const bool clicked = ImGui::Selectable(label.c_str(), active, ImGuiSelectableFlags_None, size);
   ImGui::PopStyleColor(3);
   if (active) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -123,14 +128,31 @@ bool leaf_row(std::string_view item, bool active) {
   return clicked;
 }
 
+// Width of a style leaf's label for wrap-flow layout, mirroring the exact
+// formula render_category_toggles uses for its own labels below -- must
+// match leaf_row's own "· " + name label construction so the computed width
+// is the row ImGui actually draws.
+float style_leaf_width(std::string_view name) {
+  const std::string label = "\xC2\xB7 " + std::string(name);
+  const ImGuiStyle& style = ImGui::GetStyle();
+  return ImGui::CalcTextSize(label.c_str()).x + style.FramePadding.x * 2.0F;
+}
+
 // One style leaf row: the SAME click-to-load/switch and drag-drop-source
 // behavior render_styles always had, factored out so both the family-
 // grouped loop below and its ImGuiListClipper wrapper can call it per row.
+// `wrap_layout` (no default -- every call site must say explicitly which
+// mode it wants) selects between today's one-per-line Selectable (false,
+// used by the ImGuiListClipper-virtualized family-section path, where a
+// variable-width wrapped row would break the clipper's fixed-row-height
+// assumption) and the flow-wrapped, text-width Selectable used by the flat,
+// small-corpus path (true, render_styles_flat below).
 void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
-                       UiState& fx, std::size_t i) {
+                       UiState& fx, std::size_t i, bool wrap_layout) {
   const std::string name(model.style_name(i));
   ImGui::PushID(static_cast<int>(i));
-  if (leaf_row(name, fx.active_style == static_cast<int>(i))) {
+  const ImVec2 size = wrap_layout ? ImVec2(style_leaf_width(name), 0.0F) : ImVec2(0.0F, 0.0F);
+  if (leaf_row(name, fx.active_style == static_cast<int>(i), size)) {
     // While playing, morph live (quantized to the next bar) instead of
     // hard-resetting the arranger -- `style load` still stops-and-reloads
     // for the not-yet-playing case (in_process_brain_session.cpp's
@@ -164,22 +186,41 @@ void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const A
 // before task #30 (see git commit f722000^'s own render_styles), factored
 // here to share render_style_leaf with the grouped path above/below. No
 // ImGuiListClipper -- a corpus this small never needs virtualizing.
+//
+// Owner item #8: entries flow-wrap horizontally instead of one-per-line,
+// mirroring render_category_toggles' own wrapping-label idiom below (same
+// window_visible_x2 bound, same "look one label ahead" SameLine() decision).
+// This IS the only reachable style-list path for today's 16 built-in
+// styles (kFlatListThreshold below), so this is where the flow-wrap matters.
 void render_styles_flat(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
                         UiState& fx, int& shown) {
   if (!section_header("styles")) {
     return;
   }
-  int local_shown = 0;
+  std::vector<std::size_t> indices;
   for (std::size_t i = 0; i < model.style_count(); ++i) {
-    if (!model.style_matches_filter(i)) {
-      continue;
+    if (model.style_matches_filter(i)) {
+      indices.push_back(i);
     }
-    ++local_shown;
-    ++shown;
-    render_style_leaf(model, brain_session, app_state, fx, i);
   }
-  if (local_shown == 0) {
+
+  if (indices.empty()) {
     ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float window_visible_x2 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+  for (std::size_t k = 0; k < indices.size(); ++k) {
+    ++shown;
+    render_style_leaf(model, brain_session, app_state, fx, indices[k], /*wrap_layout=*/true);
+    if (k + 1 < indices.size()) {
+      const float next_w = style_leaf_width(model.style_name(indices[k + 1]));
+      const float next_x2 = ImGui::GetItemRectMax().x + style.ItemSpacing.x + next_w;
+      if (next_x2 < window_visible_x2) {
+        ImGui::SameLine();
+      }
+    }
   }
   ImGui::TreePop();
 }
@@ -192,6 +233,11 @@ void render_styles_flat(BrowserModel& model, BrainSession& brain_session, const 
 // helper unchanged) followed by its own flat, clipped leaf list; an empty
 // bucket (no members, or nothing matching the current filter) now renders
 // nothing at all -- see kFlatListThreshold above for why.
+//
+// Deliberately NOT flow-wrapped (owner item #8 only targets render_styles_
+// flat above): ImGuiListClipper virtualizes on a fixed per-row height, and a
+// wrapped row's item count varies, so there is no fixed "row N" left to
+// virtualize against. This path stays one-per-line, exactly as before.
 void render_style_family_section(BrowserModel& model, BrainSession& brain_session,
                                  const AppState& app_state, UiState& fx, StyleFamily family,
                                  int& shown) {
@@ -218,7 +264,7 @@ void render_style_family_section(BrowserModel& model, BrainSession& brain_sessio
     for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
       const std::size_t i = indices[static_cast<std::size_t>(row)];
       ++shown;
-      render_style_leaf(model, brain_session, app_state, fx, i);
+      render_style_leaf(model, brain_session, app_state, fx, i, /*wrap_layout=*/false);
     }
   }
   ImGui::TreePop();

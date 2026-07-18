@@ -168,6 +168,23 @@ struct UiState {
   // transport is observed NOT playing (mirrors master_play_launched's own
   // reset shape), re-arming cleanly for the next Play/song run.
   bool ending_cued = false;
+
+  // Panel collapse state (owner item #9): each of the three side/bottom
+  // bands can be independently collapsed to a thin strip, letting the
+  // Repeat Zone hero grid reclaim the freed space. In-memory only for
+  // now -- no natural JSON-persisted UI-state home exists yet (the band
+  // layout itself is no longer JSON-driven, see layout_renderer.cpp's own
+  // file-header comment).
+  bool browser_collapsed = false;
+  bool intention_collapsed = false;
+  bool seqedit_collapsed = false;
+
+  // Sequence Edit band height in px (owner item #10), user-resizable via a
+  // drag splitter -- replaces the old fixed kSeqEditH constant. Clamped to
+  // [kSeqEditMinH, a runtime-computed max] every frame in layout_renderer.cpp
+  // so a stale value can never starve the working row below its own floor
+  // after a window resize.
+  float seqedit_height = 172.0F;
 };
 
 }  // namespace sonotron
