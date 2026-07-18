@@ -266,7 +266,7 @@ bool xy_pad(const char* id, float* valence, float* energy, const ImVec2& size, b
   const char* v_plus = "VAL +";
   dl->AddText(ImVec2(p0.x + (size.x - ImGui::CalcTextSize(e_plus).x) * 0.5F, p0.y + 3.0F), lc,
               e_plus);
-  dl->AddText(ImVec2(p0.x + (size.x - ImGui::CalcTextSize(e_minus).x) * 0.5F, p1.y - 14.0F), lc,
+  dl->AddText(ImVec2(p0.x + (size.x - ImGui::CalcTextSize(e_minus).x) * 0.5F, p1.y - 22.0F), lc,
               e_minus);
   dl->AddText(ImVec2(p0.x + 4.0F, mid_y - 7.0F), lc, v_minus);
   dl->AddText(ImVec2(p1.x - ImGui::CalcTextSize(v_plus).x - 4.0F, mid_y - 7.0F), lc, v_plus);
