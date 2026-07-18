@@ -26,9 +26,22 @@ bool mode_tab(const char* label, bool active) {
   return clicked;
 }
 
-// Left-hand per-instrument SHOW/HIDE sidebar width (owner task #1), a fixed
-// width matching this file's own compact-toolbar spacing scale.
-constexpr float kRoleListWidth = 92.0F;
+// Left-hand per-instrument SHOW/HIDE sidebar width (owner task #1): a FLOOR,
+// not a fixed width -- render_role_toggle_sidebar widens past this whenever
+// the widest role label + its checkbox box + inner spacing + both window
+// paddings need more, so no label (e.g. "Chord2"/"Phrase") is ever clipped
+// at the current font/DPI, while narrow-label runs keep this compact minimum.
+// The floor is set a comfortable notch above the natural fit of today's
+// widest default-font label (owner 2026-07-18: "enlarge the left section a
+// bit") so the section reads visibly wider now, not only when a font-scaled
+// label happens to demand it.
+constexpr float kRoleListWidth = 118.0F;
+
+// The role labels render a notch LARGER than the rest of the UI (owner,
+// 2026-07-18: the default-size labels read as "microscopic" here) -- applied
+// via SetWindowFontScale on the seq_role_list child ONLY, so the header and
+// canvas keep the base font.
+constexpr float kRoleFontScale = 1.15F;
 
 // Draws one role's note pattern into the seq_canvas draw list: every voice
 // at every step as a filled, rounded rect via the shared pitch_grid_cell()
@@ -64,8 +77,37 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
 // via a brighter alpha. A SEPARATE sibling child window from "seq_canvas" --
 // see render_seqedit_panel's own call site comment for why.
 void render_role_toggle_sidebar(SeqEditModel& model) {
-  ImGui::BeginChild("seq_role_list", ImVec2(kRoleListWidth, 0), ImGuiChildFlags_None,
+  // Size the sidebar to the WIDEST role label so none is clipped (owner,
+  // 2026-07-18), mirroring the mode-tab CalcTextSize+FramePadding idiom used
+  // in the header below. A Checkbox lays out as: a square box (one frame
+  // height) + ItemInnerSpacing.x + the label text; the top bulk-action
+  // SmallButton is text + 2*FramePadding.x. Text advances and the checkbox
+  // square scale with the font, so both are measured at the base font and
+  // multiplied by kRoleFontScale; ScrollbarSize is reserved so the vertical
+  // scrollbar (rows overflow the fixed-height band and scroll -- owner's
+  // accepted trade for full-size labels) never sits over a label. Never below
+  // kRoleListWidth (the floor).
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float scaled_box = ImGui::GetFontSize() * kRoleFontScale + style.FramePadding.y * 2.0F;
+  float widest_label = 0.0F;
+  for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
+    widest_label =
+        std::max(widest_label, ImGui::CalcTextSize(std::string(kTrackRoleLabels[role]).c_str()).x);
+  }
+  const float row_w = scaled_box + style.ItemInnerSpacing.x + widest_label * kRoleFontScale;
+  const float btn_w =
+      std::max(ImGui::CalcTextSize("all tracks").x, ImGui::CalcTextSize("last track").x) *
+          kRoleFontScale +
+      style.FramePadding.x * 2.0F;
+  const float list_w =
+      std::max(kRoleListWidth,
+               std::max(row_w, btn_w) + style.WindowPadding.x * 2.0F + style.ScrollbarSize + 4.0F);
+  // Scrollbar ENABLED (default flags): the nine rows + bulk button overflow
+  // the fixed-height band (layout_renderer.cpp kSeqEditH), and the owner
+  // prefers scrolling to fit-shrunk, unreadable labels.
+  ImGui::BeginChild("seq_role_list", ImVec2(list_w, 0), ImGuiChildFlags_None,
                     ImGuiWindowFlags_None);
+  ImGui::SetWindowFontScale(kRoleFontScale);
   // Feature B item 4: a one-shot BULK action, not a persistent mode -- flips
   // every role's visibility to all-on, or solos the currently-opened role
   // (SeqEditModel::set_all_tracks_visible). The label reflects the state the
@@ -86,6 +128,7 @@ void render_role_toggle_sidebar(SeqEditModel& model) {
     }
     ImGui::PopStyleColor();
   }
+  ImGui::SetWindowFontScale(1.0F);
   ImGui::EndChild();
 }
 
