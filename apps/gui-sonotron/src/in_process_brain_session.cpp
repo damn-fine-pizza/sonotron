@@ -14,6 +14,8 @@
 #include "arrangrr/arranger/style_model.hpp"
 #include "arrangrr/clip/clip_matrix.hpp"
 #include "arrangrr/loop/loop_buffer.hpp"
+#include "arrangrr/perf/performance.hpp"
+#include "arrangrr/scene/scene_chain.hpp"
 #include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
 #include "common/time.hpp"
@@ -47,6 +49,8 @@ using arrangrr::LoopRecordMode;
 using arrangrr::Op;
 using arrangrr::OutEvent;
 using arrangrr::Param;
+using arrangrr::Performance;
+using arrangrr::SceneTransitionKind;
 using arrangrr::SectionType;
 using arrangrr::Span;
 using arrangrr::TickAccumulator;
@@ -139,6 +143,27 @@ struct PathCommand {
 struct PathResult {
   std::array<char, kMaxPathErrorBytes> error_bytes{};
   std::uint16_t error_length = 0;
+};
+
+// Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md):
+// grid_panel.cpp's Play (auto-song armed) / manual scene-header click both
+// need to hand the engine thread an ORDERED LIST of (section, bar-length)
+// pairs -- one per populated scene column -- to build into a core SceneChain.
+// A `Command` POD has no room for a variable-length list, so this rides its
+// own pair of rings, mirroring the PathCommand precedent above: fixed-size,
+// trivially copyable, rare/user-initiated (one push per Play press or scene
+// click), never a per-tick hot path.
+constexpr std::size_t kMaxSongScenes = 8;  // grid_model.hpp's GridModel::kMaxSceneCount
+constexpr std::size_t kSongBuildRingCapacity = 4;
+
+struct SongBuildScene {
+  SectionType section = SectionType::kVarA;
+  std::uint8_t n_bars = 1;
+};
+
+struct SongBuildCommand {
+  std::array<SongBuildScene, kMaxSongScenes> scenes{};
+  std::uint8_t scene_count = 0;
 };
 
 // Splits on ASCII space (single delimiter, no quoting) -- sufficient for the
@@ -855,6 +880,68 @@ void handle_style_change_progression(Shell& shell, const Command& cmd,
 // than `>` so a transport stop/restart in between (which resets bar_index()
 // to 0) still eventually releases the pending progression instead of
 // leaving it stuck forever.
+// Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md): builds
+// and plays a SceneChain from `build`'s populated scene list. Runs entirely
+// on the engine thread -- the only place `Engine&` (and therefore
+// `Engine::performances()`, `capture_performance()` being private) is
+// reachable. Captures the CURRENT live rig into PerformanceStore slot 0 via
+// the EXISTING `kPerformanceStore` verb (Engine::perf_store's own synchronous
+// capture, engine.cpp), reads it back as `base`, then for each scene clones
+// `base` with ONLY `variation` (the scene's own SectionType) overridden --
+// Phase 1's own "scenes differ only by section" scope (design decision 2) --
+// forcing `chord_sequence_id = 0xFFFF` so `apply_performance` never restarts
+// the harmony loop on a scene transition (design decision 1). Rebuilds the
+// whole chain (`kSceneClear` + one `kSceneAdd` per scene, `n_bars` from the
+// per-scene length stepper, `beats_per_bar` from the captured base so Phase
+// 1 never forces an implicit meter reset) and starts it (`kScenePlay`) --
+// exactly the ABI sequence the observable contract requires, and no more.
+//
+// Slot 0 doubles as BOTH the scratch capture target and scene 0's own step
+// Performance: `base` is copied out locally before scene 0's own store()
+// overwrites slot 0, so this never races itself, and reusing slot 0 (rather
+// than a fresh scratch slot past the scene count) keeps every
+// PerformanceStore::store() call here trivially sequential (0, 1, 2, ...),
+// satisfying its "no gaps" contract regardless of how many scenes a PREVIOUS
+// song-build call left the pool sized to.
+void apply_song_build(Shell& shell, const SongBuildCommand& build) {
+  if (build.scene_count == 0) {
+    return;
+  }
+  Command capture_cmd{};
+  capture_cmd.param = Param::kPerformanceStore;
+  capture_cmd.idx = 0;
+  shell.push_command(capture_cmd);
+  const Performance* captured = shell.engine().performances().get(0);
+  if (captured == nullptr) {
+    return;  // defensive: PerformanceStore::store() at slot 0 can never fail.
+  }
+  const Performance base = *captured;
+
+  Command clear_cmd{};
+  clear_cmd.param = Param::kSceneClear;
+  shell.push_command(clear_cmd);
+
+  for (std::uint8_t i = 0; i < build.scene_count; ++i) {
+    Performance perf = base;
+    perf.variation = static_cast<std::uint8_t>(build.scenes[i].section);
+    perf.chord_sequence_id = 0xFFFF;
+    if (!shell.engine().performances().store(i, perf)) {
+      break;  // pool exhausted -- play the steps already built rather than none.
+    }
+    Command add_cmd{};
+    add_cmd.param = Param::kSceneAdd;
+    add_cmd.a = static_cast<std::int32_t>(i);
+    add_cmd.b = static_cast<std::int32_t>(build.scenes[i].n_bars) |
+                (static_cast<std::int32_t>(base.beats_per_bar) << 8);
+    add_cmd.c = static_cast<std::int32_t>(SceneTransitionKind::kCut);
+    shell.push_command(add_cmd);
+  }
+
+  Command play_cmd{};
+  play_cmd.param = Param::kScenePlay;
+  shell.push_command(play_cmd);
+}
+
 // Drains the Command ring: never silently dropped by the PRODUCER side (see
 // InProcessBrainSession::send()) -- the engine just applies whatever is
 // queued, in FIFO order, through the exact same Engine::push_command every
@@ -911,6 +998,8 @@ struct InProcessBrainSession::Impl {
   SpscRing<OutEvent, kOutEventRingCapacity> out_event_ring;
   SpscRing<PathCommand, kPathCommandRingCapacity> path_command_ring;
   SpscRing<PathResult, kPathResultRingCapacity> path_result_ring;
+  // Song-mode Phase 1: see SongBuildCommand's own header comment.
+  SpscRing<SongBuildCommand, kSongBuildRingCapacity> song_build_ring;
   // Phase-6 Theme 2 (Decision 1/2/3): sonotron::audio::AudioBackend's
   // producer-side ring handle, set (or left null) by set_audio_ring()
   // BEFORE start() -- see that method's own doc comment for the
@@ -1017,9 +1106,23 @@ void InProcessBrainSession::Impl::run_engine() {
   // sign-off, not done here).
   DefaultProgressionState progression_state;
 
+  // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md,
+  // design decision 3): the SceneChain HOLDS its last step rather than
+  // looping (scene_chain.hpp's own on_bar), so `playing()` flips true->false
+  // exactly once, the instant the chain's own final bar-hold elapses. This
+  // local, engine-thread-only bool is the edge detector; a fresh run_engine()
+  // (a brand-new session) naturally starts it false, matching a chain that
+  // has never played.
+  bool scene_chain_was_playing = false;
+
   while (running.load(std::memory_order_acquire)) {
     drain_command_ring(shell, command_ring, progression_state);
     release_pending_progression_if_due(shell, progression_state);
+
+    SongBuildCommand song_build;
+    while (song_build_ring.try_pop(song_build)) {
+      apply_song_build(shell, song_build);
+    }
 
     // Hardware MIDI-in (docs/proposals/looper-in-gui-contract.md §7 item 3):
     // drains ALSA input and feeds it through the SAME feed_midi() entry point
@@ -1063,6 +1166,24 @@ void InProcessBrainSession::Impl::run_engine() {
       std::string tick_error;
       shell.advance_by(ticks, tick_error);
     }
+
+    // Song-mode Phase 1, design decision 3: cue the Ending the instant the
+    // SceneChain's own last step finishes holding -- the bare, bar-quantized
+    // `style section ending1` verb alone (never paired with a scene/clip
+    // launch), the SAME cue the dedicated ENDING transport pad already sends
+    // (transport_panel.cpp), preserving the "last column plays out to an
+    // ending, transport stops" behavior without any clip-arm latch (the old
+    // race this replaces could only happen because ClipMatrix clip arms were
+    // still in flight; SceneChain never touches ClipMatrix at all).
+    const bool scene_chain_playing_now = shell.engine().scenes().playing();
+    if (scene_chain_was_playing && !scene_chain_playing_now) {
+      Command ending_cmd{};
+      ending_cmd.param = Param::kStyleSection;
+      ending_cmd.a = static_cast<std::int32_t>(SectionType::kEnding1);
+      shell.push_command(ending_cmd);
+    }
+    scene_chain_was_playing = scene_chain_playing_now;
+
     prefer_flats.store(shell.prefer_flats(), std::memory_order_relaxed);
 
     // Short sleep, not a busy spin: there is no fd to block on here (unlike
@@ -1131,6 +1252,55 @@ void InProcessBrainSession::send(std::string_view command_line) {
     if (!m_impl->path_command_ring.try_push(path_cmd)) {
       // Never-drop policy for GUI -> engine (same as the Command ring): warn
       // rather than silently swallow the user's load request.
+      BrainEvent warn;
+      warn.kind = BrainEvent::Kind::kWarn;
+      warn.valid = true;
+      warn.warn_code = "command_ring_full";
+      m_impl->local_warnings.push_back(std::move(warn));
+    }
+    return;
+  }
+
+  // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md):
+  // `song build <count> <section0> <bars0> <section1> <bars1> ...` --
+  // grid_panel.cpp's own build_and_play_song()/activate_scene_column() send
+  // this instead of the retired `style section` + `launch scene` pair. Like
+  // `midi-source load` above, the payload (a variable-length scene list)
+  // does not fit the fixed-size ABI `Command` POD, so it rides its own ring
+  // rather than command_line_to_command()'s translation, and is handled
+  // here, before that call.
+  const std::vector<std::string_view> song_tokens = split_ws(command_line);
+  if (song_tokens.size() >= 2 && song_tokens[0] == "song" && song_tokens[1] == "build") {
+    BrainEvent note;
+    note.kind = BrainEvent::Kind::kError;
+    note.valid = true;
+    note.cmd = std::string(command_line);
+    std::uint64_t count = 0;
+    if (song_tokens.size() < 3 || !parse_uint(song_tokens[2], count) || count == 0 ||
+        count > kMaxSongScenes || song_tokens.size() != 3 + count * 2) {
+      note.error = "usage: song build <count> <section> <bars> ...";
+      m_impl->local_warnings.push_back(std::move(note));
+      return;
+    }
+    SongBuildCommand build;
+    build.scene_count = static_cast<std::uint8_t>(count);
+    for (std::uint64_t i = 0; i < count; ++i) {
+      SectionType section{};
+      if (!parse_section_name(song_tokens[3 + (i * 2)], section)) {
+        note.error = "unknown section: " + std::string(song_tokens[3 + (i * 2)]);
+        m_impl->local_warnings.push_back(std::move(note));
+        return;
+      }
+      std::uint64_t bars = 0;
+      if (!parse_uint(song_tokens[4 + (i * 2)], bars) || bars == 0 || bars > 255) {
+        note.error = "bad bar count: " + std::string(song_tokens[4 + (i * 2)]);
+        m_impl->local_warnings.push_back(std::move(note));
+        return;
+      }
+      build.scenes[i] =
+          SongBuildScene{.section = section, .n_bars = static_cast<std::uint8_t>(bars)};
+    }
+    if (!m_impl->song_build_ring.try_push(build)) {
       BrainEvent warn;
       warn.kind = BrainEvent::Kind::kWarn;
       warn.valid = true;

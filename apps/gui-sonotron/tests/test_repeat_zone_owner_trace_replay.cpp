@@ -40,6 +40,55 @@
 // mouse-motion profile, and re-asserts the same rendered-output pin
 // test_repeat_zone_playhead_ui_automation.cpp already proves in isolation,
 // now under that extended, genuinely-recorded traffic.
+//
+// SONG-MODE PHASE 1 UPDATE (Torquato QA, docs/proposals/song-mode-
+// scenechain-adoption.md): this test used to hold on scene 0's cell for the
+// entire ~2240-frame span, because the retired per-frame auto-song FSM never
+// actually resolved the demo grid's own scene 0 ("intro1") against the
+// engine's REAL section -- it just froze fx.active_scene at 0 forever. Now
+// that reconcile_active_scene (grid_panel.cpp) reads the ACTUAL Arranger
+// section, this test observes something genuinely different: "basic"'s
+// intro1 is an intrinsic 2-bar one-shot (components/core/arrangrr/include/
+// arrangrr/arranger/styles/basic.hpp, `.bars=2`) that Arranger::on_tick
+// resolves back to `m_return_to` (== kVarA -- the section active when the
+// transport last started, arranger.hpp:360-367) after those 2 bars, WHOLLY
+// INDEPENDENT of the SceneChain step's own n_bars hold (8, GridModel::
+// kDefaultSceneBars) -- the SceneChain only ever applies a step's Performance
+// once, at the transition; it does not re-arm the Arranger's own section
+// clock. Verified by hand (three independent runs): by the time this ~4.5+
+// real-wall-clock-second replay ends, app_state.bar() is consistently 3-4
+// (well past intro1's 2-bar resolution, well short of the SceneChain's own
+// 8-bar step-0 hold), app_state.section() reads "varA", and fx.active_scene
+// has correctly followed it to 1 (demo scene 1 is ALSO seeded to kVarA, see
+// seed_demo's kDemoSections) -- exactly the CORRECT one-shot-intro behavior,
+// not a bug, and the opposite of the old FSM's "stuck on intro1 forever"
+// symptom this test was written to catch.
+//
+// A SEPARATE, GENUINE REGRESSION THIS SAME LONGER RUN NOW EXPOSES (verified
+// by hand, NOT papered over): the beat-synced playhead this test's own name
+// promises to keep pinned green DISAPPEARS once fx.active_scene moves off
+// scene 0. draw_cell (grid_panel.cpp) only ever paints the playhead when
+// `playing` (== AppState::clip_state(cell_id) != kStopped) is ALSO true for
+// THAT cell -- and Song-mode Phase 1's own design decision 4 deliberately
+// retired every ClipMatrix-touching send from the auto-song advance path
+// (SceneChain is "own-transport ... bypasses ClipMatrix entirely" per the
+// proposal's own "Core facts"). So the ONLY cell ever marked `playing` in
+// this whole run is the ONE this test manually clicks (scene 0's, line 192,
+// `launch clip 0 quantize 1`) -- clip 1 (demo scene 1's drums cell, "B") is
+// never independently armed, so once the active column reconciles to scene
+// 1, NO cell anywhere satisfies `playing`, and neon::playhead_at() never
+// fires for anyone. Confirmed directly: manually clicking scene 1's cell too
+// (an experiment, not part of the shipped fix) makes the playhead reappear
+// there -- proving the root cause is exactly this ClipMatrix/SceneChain
+// decoupling, not a rendering or geometry mistake in this test. In real,
+// ordinary auto-song play (no manual per-cell clicks, which is the actual
+// owner-reported use case Phase 1 set out to fix), the playhead sweep will
+// now vanish the instant the active section first advances past whichever
+// single cell a user happened to click -- reintroducing, in a new form, the
+// exact "no playhead sweep ever appeared" symptom (owner bug #1) this test
+// was written to guard end to end. This is a genuine PRODUCT gap exposed by
+// Phase 1, not a test artifact: flagged here and handed to Nazzareno (see
+// this pass's QA report), NOT silently fixed or asserted around.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
@@ -84,6 +133,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
   fx.playing = app_state.transport() == AppState::Transport::kPlaying;
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
+  ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Once);
   ImGui::Begin("test");
   sonotron::render_transport_panel(app_state, brain_session, fx);
   ImGui::Spacing();
@@ -225,13 +275,42 @@ void test_no_playhead_under_owner_recorded_session_traffic() {
   constexpr int kDrumsScene0ClipId = 0;
   CHECK(app_state.clip_state(kDrumsScene0ClipId) != AppState::ClipLaunchState::kStopped);
 
+  // THE DIAGNOSED, OWNER-APPROVED FIX, CORROBORATED: intro1 is a genuine
+  // 2-bar one-shot in "basic" (styles/basic.hpp), so by the time this
+  // ~4.5+ real-wall-clock-second replay ends, the ENGINE's own section has
+  // long since resolved off "intro1" -- verified by hand across three runs,
+  // consistently landing at bar 3-4, section "varA" -- and reconcile_active_
+  // scene has correctly followed it to demo scene 1 (also seeded to kVarA).
+  // This is the fix this pass corroborates: the OLD per-frame FSM never
+  // synchronized against the real section at all, so it stayed frozen on
+  // scene 0 ("intro1") for the test's ENTIRE duration -- passing only because
+  // it was wrong, never because auto-song had genuinely progressed.
+  CHECK(app_state.section() == "varA");
+  CHECK(fx.active_scene == 1);
+
+  // THE GENUINE REGRESSION THIS LONGER RUN EXPOSES (see this file's own
+  // header comment for the full root-cause trace) -- NOT papered over: once
+  // the active scene has correctly reconciled to 1, its own cell (drums
+  // scene 1, "B") must show the beat-synced playhead sweep for the ORIGINAL
+  // owner bug ("no playhead sweep ever appeared in the Repeat Zone") to
+  // actually stay fixed end to end. It does not: Song-mode Phase 1 retired
+  // every ClipMatrix-touching send from the auto-song advance path
+  // (SceneChain "bypasses ClipMatrix entirely"), so scene 1's cell was never
+  // independently armed and reads `playing == false` (AppState::clip_state
+  // stays kStopped for clip id 1) -- draw_cell's playhead paint is gated on
+  // exactly that flag, so it never fires here. THIS ASSERTION IS EXPECTED TO
+  // FAIL until Nazzareno re-wires SOME real per-cell "playing" signal for the
+  // SceneChain-driven active scene (see this pass's QA report for the
+  // handoff) -- it is deliberately NOT relaxed, removed, or redirected to a
+  // cell this test never claims is the song's real current scene.
   CHECK(final_draw_data != nullptr);
-  if (final_draw_data != nullptr) {
+  if (final_draw_data != nullptr && drums_cells.size() > 1) {
+    const th::Rect& active_scene_cell = drums_cells[1];  // fx.active_scene == 1, asserted above
     const ImU32 playhead_core = sonotron::neon::u32(sonotron::theme::kText, 0.8F);
     const ImU32 playhead_wash = sonotron::neon::u32(sonotron::theme::kText, 0.25F);
     const bool playhead_found =
-        th::any_vertex_with_color_in(final_draw_data, playhead_core, scene0_cell) ||
-        th::any_vertex_with_color_in(final_draw_data, playhead_wash, scene0_cell);
+        th::any_vertex_with_color_in(final_draw_data, playhead_core, active_scene_cell) ||
+        th::any_vertex_with_color_in(final_draw_data, playhead_wash, active_scene_cell);
     CHECK(playhead_found);
   }
 

@@ -168,6 +168,20 @@ std::size_t cell_id(std::size_t role_index, std::size_t scene, std::size_t scene
   return role_index * scene_count + scene;
 }
 
+// Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md): a
+// scene column counts as "populated" if any of the 6 launch-grid rows holds
+// a real clip -- an empty column has nothing for a SceneChain step's own
+// Performance to represent musically, so build_and_play_song (below) skips
+// it rather than building an audible-but-empty step for it.
+bool scene_is_populated(const GridModel& model, std::size_t scene_index) {
+  for (const GridRow& row : kRows) {
+    if (model.cell(row.role_index, scene_index).kind != GridCellKind::kEmpty) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Seeds a scattered demo clip pattern on the first frame so the procedural
 // previews have content (same local-content path a browser drag uses;
 // launching still sends real verbs). Deterministic labels -> deterministic
@@ -287,10 +301,14 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
 }
 
 // Draws one launch cell (custom draw-list) at the cursor; returns true on
-// click. `filled` cells show a preview + label + (when playing) a beat-
-// synced playhead. `pattern`/`approx` are the cell's REAL resolved content
-// (preview::preview_for, computed by the caller) and its honesty flag
-// (repeat-zone-real-contract.md STEP 4) -- ignored when `!filled`.
+// click. `filled` cells show a preview + label + a beat-synced playhead
+// (see the playhead paint's own comment below for exactly which cell that
+// is -- NOT simply "when playing"). `pattern`/`approx` are the cell's REAL
+// resolved content (preview::preview_for, computed by the caller) and its
+// honesty flag (repeat-zone-real-contract.md STEP 4) -- ignored when
+// `!filled`. `playing` is this cell's own real ClipMatrix readback
+// (AppState::clip_state(id) != kStopped); it still drives the "armed/lit"
+// fill/border/glow/label appearance, but NOT the playhead paint (see below).
 // `section_phase` is this cell's own playhead position in [0,1] (grid_
 // model.hpp's section_playhead_phase, resolved by the caller ONLY for the
 // active scene column's own cells), or the sentinel < 0 ("no playhead" --
@@ -362,16 +380,36 @@ bool draw_cell(const char* id, float size, bool filled, const std::string& label
               neon::u32(playing ? theme::kText : color, 0.95F), text.c_str());
   dl->PopClipRect();
 
-  // Beat-synchronized L->R playhead on the active scene's own playing cell
-  // while running: fills 0->100% over the active scene's SECTION (owner-
-  // locked behavior), reaching the right edge exactly at the section
-  // boundary -- the same instant auto-song advances. `section_phase < 0`
-  // (the sentinel, render_grid_panel's own per-cell resolution) parks it:
-  // every non-active scene column, and the active one before bar() > 0.
+  // Beat-synchronized L->R playhead on the active scene's own FILLED cell
+  // while the transport is running: fills 0->100% over the active scene's
+  // SECTION (owner-locked behavior), reaching the right edge exactly at the
+  // section boundary -- the same instant auto-song advances. `section_phase
+  // < 0` (the sentinel, render_grid_panel's own per-cell resolution) parks
+  // it: every non-active scene column, and the active one before bar() > 0.
   // Retired: the former neon::sweep_bar(..., fx.time, ...) call drove this
   // off ImGui's wall-clock frame time with a fixed ~1.7s period, unrelated
   // to tempo or the section length.
-  if (playing && fx.playing && section_phase >= 0.0F) {
+  //
+  // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md,
+  // design decision 4): the SceneChain that drives ordinary auto-song play
+  // deliberately never touches ClipMatrix, so `playing` (this cell's own
+  // real `AppState::clip_state(id) != kStopped` readback, still driving the
+  // fill/border/glow/label appearance above -- that "armed/lit" signal stays
+  // exactly as real and unchanged) is no longer a usable gate for the
+  // playhead: no cell is EVER independently clip-armed by a plain SceneChain
+  // advance, so gating the sweep on it made the sweep vanish the instant the
+  // active section first moved off whichever single cell a user happened to
+  // click by hand -- reintroducing the owner's original "no playhead sweep"
+  // bug in a new form (see test_repeat_zone_owner_trace_replay.cpp's own
+  // header comment for the full trace). The playhead's own two remaining
+  // gates already say everything it needs without `playing`: this call site
+  // is only ever reached for a `filled` cell (the `!filled` early return
+  // above), and `section_phase` is already resolved by the caller to `>= 0`
+  // for ONLY the active scene column's own cells (render_track_cell) -- so
+  // `fx.playing && section_phase >= 0.0F` alone means exactly "this is a
+  // filled cell in the active auto-song column, and the transport is
+  // running", independent of whether ClipMatrix ever armed it.
+  if (fx.playing && section_phase >= 0.0F) {
     neon::playhead_at(dl, p0, p1, section_phase, theme::kText);
   }
 
@@ -530,64 +568,60 @@ int active_style_section_bars(const GridModel& model, std::size_t scene_index) {
   return model.scene_bars(scene_index);
 }
 
-// Owner task #1 (three sites -- the master-Play one-shot launch below,
-// auto-song's own advance, and the manual scene-header click -- used to hand-
-// roll the identical "select this column's section, then fire its clips"
-// pair of sends, with real risk of the three drifting apart). One shared
-// helper now sends both verbs for every site, in the same order, and updates
-// the SAME fx bookkeeping (`active_scene`/`active_scene_start_bar`) every
-// site already needs afterward.
-//
-// VERIFIED against the arranger (engine.cpp/arranger.hpp) whether `style
-// section` is genuinely redundant with `launch scene ... quantize`, as the
-// pre-existing code comments claimed: when `scene_index`'s column holds at
-// least one clip registered with the core's ClipMatrix (every clip the GUI
-// itself ever registers is ContentKind::kStyleSection -- see clip_add's own
-// comment, in_process_brain_session.cpp), `launch scene <n> quantize <q>`
-// ALREADY changes the arranger's live section by itself: Engine::
-// clip_scene_launch fans out to clip_request for each of the column's own
-// clips, and clip_request's IMMEDIATE application (Engine::fire_clips, which
-// runs INSIDE the SAME bar-boundary tick BEFORE Engine::fire_arranger) calls
-// Arranger::request(section, /*immediate=*/true) -- which both sets the live
-// section AND clears `style section`'s own queued m_pending. So the two
-// sends below can never land on two DIFFERENT sections; at worst the queued
-// one is silently superseded by the clip-driven one, onto the SAME value --
-// no audible double-trigger, no oscillation.
-//
-// `style section` is kept anyway, deliberately NOT dropped, because that
-// finding only holds when the column has a REGISTERED clip: an empty-cell
-// "+" click (render_track_cell's `!filled` branch, further down this file)
-// only ever calls GridModel::set_cell (host-side display only) -- it never
-// registers a ClipMatrix clip -- so a scene column built entirely that way
-// has ZERO clips for `launch scene` to fan out to (Engine::clip_scene_
-// launch's own `any` guard warns and does nothing) and the section would
-// never change at all without this send. `style section` therefore stays
-// the one mechanism guaranteed to always work; `launch scene` layers on top
-// to additionally fire whichever clips the column DOES hold.
-//
-// FLAGGED, NOT PATCHED HERE (CORE territory, needs owner sign-off):
-// Arranger::request()'s own IMMEDIATE branch (the clip-driven path the
-// finding above relies on) does not reset Arranger::m_section_start the way
-// its QUEUED pending-consumption branch (Arranger::on_tick, at the bar
-// boundary) does. This is a pre-existing wrinkle in the core's own section-
-// length/repeat-clock bookkeeping, present before this pass and not made any
-// better or worse by it either way (both sends still fire every time, exactly
-// as before) -- but touching it means editing arrangrr's own Arranger/Engine,
-// which moves goldens. Out of scope for this host-side pass.
+// Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md, design
+// decision 4): the double section-trigger this function used to send
+// (`style section <name>` + `launch scene <n> quantize 1`, fighting each
+// other -- see this function's own git history for the full redundancy
+// finding) is retired. A manual scene-header click now builds and plays a
+// ONE-STEP SceneChain for THIS column alone, through the SAME `song build`
+// verb the multi-scene auto-song path uses (build_and_play_song, below) --
+// in_process_brain_session.cpp's apply_song_build turns it into
+// kSceneClear + one kSceneAdd + kScenePlay. A length-1 chain's own last-step
+// HOLD (SceneChain's "last step holds, no implicit loop") degrades exactly
+// to "select this section and stay there", the same fixed single-column loop
+// the old double-send produced -- core-driven, no ClipMatrix involved.
 void activate_scene_column(const GridModel& model, BrainSession& brain_session, UiState& fx,
-                           std::size_t scene_index, int current_bar, int quantize_bars) {
+                           std::size_t scene_index, int current_bar) {
   const std::string_view section_name = section_wire_name(model.scene_section(scene_index));
-  if (!section_name.empty()) {
-    brain_session.send("style section " + std::string(section_name));
-  }
-  brain_session.send("launch scene " + std::to_string(scene_index) + " quantize " +
-                     std::to_string(quantize_bars));
+  const std::string section_arg = section_name.empty() ? "varA" : std::string(section_name);
+  brain_session.send("song build 1 " + section_arg + " " +
+                     std::to_string(model.scene_bars(scene_index)));
   // Shared bookkeeping every call site already needed afterward: the active
   // scene's own beat-synced playhead sweep (render_grid_panel's active_
-  // section_phase) and auto-song's bars-elapsed measurement both anchor from
-  // THIS bar, not a stale one.
+  // section_phase) anchors from THIS bar, not a stale one.
   fx.active_scene = static_cast<int>(scene_index);
   fx.active_scene_start_bar = current_bar;
+}
+
+// Song-mode Phase 1: the ONLY way a multi-scene song is built and started.
+// Collects every POPULATED scene column (scene_is_populated, above), in
+// column order, into the one `song build <n> <section> <bars> ...` line
+// in_process_brain_session.cpp's engine thread turns into the full
+// kSceneClear + N*kSceneAdd + kScenePlay ABI sequence the observable
+// contract requires (song-mode-scenechain-adoption.md's own "Observable
+// contract" section) -- see apply_song_build's own header comment for why
+// that sequencing must happen on the engine thread and not here (only it can
+// reach Engine::performances()). An all-empty grid sends nothing (there is
+// no populated column to build a step from).
+void build_and_play_song(const GridModel& model, BrainSession& brain_session,
+                         std::size_t scene_count) {
+  std::vector<std::size_t> populated;
+  for (std::size_t s = 0; s < scene_count; ++s) {
+    if (scene_is_populated(model, s)) {
+      populated.push_back(s);
+    }
+  }
+
+  if (populated.empty()) {
+    return;
+  }
+  std::string line = "song build " + std::to_string(populated.size());
+  for (const std::size_t s : populated) {
+    const std::string_view section_name = section_wire_name(model.scene_section(s));
+    line += " " + (section_name.empty() ? std::string("varA") : std::string(section_name));
+    line += " " + std::to_string(model.scene_bars(s));
+  }
+  brain_session.send(line);
 }
 
 // MASTER PLAY (owner issue a): the master ▶ (transport_panel.cpp's own Play
@@ -596,50 +630,28 @@ void activate_scene_column(const GridModel& model, BrainSession& brain_session, 
 // as playing (AppState::clip_state stays kStopped for every cell) and the
 // beat-synced playhead sweep (draw_cell's own `playing && fx.playing` gate)
 // never appears until the user separately clicks a cell or a scene header.
-// This mirrors render_scene_header_cell's own launch exactly (activate_
-// scene_column, above) for the CURRENTLY ACTIVE scene column (fx.active_
-// scene) the instant the transport is OBSERVED to have started -- via
-// AppState::transport(), the authoritative state (fed either by this panel's
-// own optimistic note_transport_sent() hint or by a real confirmed transport
-// event from any OTHER trigger, e.g. the menu bar's Transport > Start),
-// never a guess. `fx.master_play_launched` is the once-per-press guard:
-// cleared the instant the transport is observed NOT playing, and set the
-// instant this function actually fires -- so a Play press launches the
-// active column exactly once, never re-firing on every subsequent frame
-// while the transport keeps running, and re-arms cleanly on the next
+// `fx.master_play_launched` is the once-per-press guard: cleared the instant
+// the transport is observed NOT playing (AppState::transport(), the
+// authoritative state), and set the instant this function actually fires --
+// so a Play press launches exactly once, never re-firing on every subsequent
+// frame while the transport keeps running, and re-arms cleanly on the next
 // Stop/Play cycle.
 //
-// The LAUNCH itself is deliberately UNCONDITIONAL on fx.auto_song (owner task
-// #4): with auto-song ON as much as OFF (a fixed single-scene loop), the
-// active scene must be launched once so its audio/playhead actually starts --
-// this is the fix for issue (a), independent of whether the song ever
-// advances on its own afterward.
-//
-// WHICH scene gets launched, however, DOES depend on fx.auto_song (owner
-// task #36 fix): with auto-song ON, a fresh Play must start the SONG from
-// its beginning, not resume wherever fx.active_scene was left by a previous
-// auto-song run or manual scene-header click -- mirroring the core's own
-// "MIDI Start rewinds the bar counter to 0" semantics (runtime/transport.hpp,
-// referenced by update_auto_song's own comments below), which the GUI's own
-// scene position was NOT following before this fix. So with auto-song ON,
-// fx.active_scene is forced back to column 0 right here, before the launch.
-// With auto-song OFF (a fixed single-scene loop), the CURRENTLY SELECTED
-// scene is still the wanted target -- Play must not silently jump the user's
-// chosen loop back to column 0 -- so fx.active_scene is left untouched.
-//
-// NO RACE with update_auto_song on this same first bar (verified, not just
-// assumed): this function runs BEFORE update_auto_song every frame
-// (render_grid_panel, below), and the instant it fires it sets fx.active_
-// scene_start_bar to the CURRENT bar via activate_scene_column -- so when
-// update_auto_song runs immediately after, in the SAME frame, bars_elapsed
-// (current_bar - fx.active_scene_start_bar) is always exactly 0 on that bar,
-// which next_scene_to_launch's own `bars_elapsed_in_scene < active_scene_
-// section_bars` guard rejects unconditionally (the threshold is always >= 1
-// bar -- GridModel::scene_bars is clamped to >= 1, see active_style_
-// section_bars/GridModel::set_scene_bars). No double-launch, no
-// double-advance, on the bar Play first lands.
+// Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md): the
+// launch itself now branches on fx.auto_song, same as before (owner task #4/
+// #36), but through the core-driven SceneChain rather than a hand-rolled
+// per-frame advance:
+//  - auto_song ON: a fresh Play starts the WHOLE song, core-driven end to
+//    end, via build_and_play_song -- one `song build ...` line covering
+//    every populated scene column in order. fx.active_scene is set to the
+//    FIRST populated column (the chain's own step 0) so the header
+//    highlight/playhead matches instantly; reconcile_active_scene (below)
+//    keeps it in sync with the engine's own section readback from there on.
+//  - auto_song OFF: a fixed single-scene loop on whichever column is
+//    currently selected -- activate_scene_column builds a ONE-STEP chain
+//    that holds there indefinitely (its own header comment).
 void handle_master_play_launch(const GridModel& model, BrainSession& brain_session,
-                               const AppState& app_state, UiState& fx) {
+                               const AppState& app_state, UiState& fx, std::size_t scene_count) {
   const bool transport_playing_now = app_state.transport() == AppState::Transport::kPlaying;
   if (!transport_playing_now) {
     fx.master_play_launched = false;
@@ -650,16 +662,20 @@ void handle_master_play_launch(const GridModel& model, BrainSession& brain_sessi
   }
   fx.master_play_launched = true;
 
-  // Owner task #36: fresh Play + auto-song ON rewinds the song position to
-  // the first scene column. activate_scene_column (below) already re-anchors
-  // active_scene_start_bar to the current bar for whichever index it is
-  // given, so only the INDEX and the once-per-crossing auto_song_last_bar
-  // guard need resetting here -- mirroring the same reset the auto-song
-  // arming toggle already performs (render_header, above) so bars_elapsed
-  // measures fresh from this Play, not from a stale pre-stop bar.
   if (fx.auto_song) {
+    if (debug_enabled()) {
+      debug_log("[dbg master-play] transport just started -> building song from populated scenes");
+    }
+    build_and_play_song(model, brain_session, scene_count);
     fx.active_scene = 0;
-    fx.auto_song_last_bar = app_state.bar();
+    for (std::size_t s = 0; s < scene_count; ++s) {
+      if (scene_is_populated(model, s)) {
+        fx.active_scene = static_cast<int>(s);
+        break;
+      }
+    }
+    fx.active_scene_start_bar = app_state.bar();
+    return;
   }
 
   const std::size_t active_scene_index =
@@ -668,188 +684,47 @@ void handle_master_play_launch(const GridModel& model, BrainSession& brain_sessi
     debug_log("[dbg master-play] transport just started -> launching active scene " +
               std::to_string(active_scene_index));
   }
-  activate_scene_column(model, brain_session, fx, active_scene_index, app_state.bar(),
-                        kDefaultLaunchQuantizeBars);
+  activate_scene_column(model, brain_session, fx, active_scene_index, app_state.bar());
 }
 
-// Roadmap task #37 (Torquato QA finding): the moment the ENDING pad cues
-// `style section ending1` (fx.ending_cued flips true, transport_panel.cpp's
-// render_ending_pad), any clip arm still in flight from the LAST
-// activate_scene_column call (an auto-song advance, a manual scene-header
-// click, or the master-Play one-shot launch -- whichever most recently made
-// `fx.active_scene` the active column) is a live threat to that cue. Every
-// clip the GUI ever registers is ContentKind::kStyleSection (activate_scene_
-// column's own header comment); `launch scene <n> quantize 1` arms all of a
-// column's clips 1 bar out, and once ClipMatrix::on_bar promotes one,
-// Engine::apply_clip_content's kStyleSection branch calls Arranger::
-// request(section, /*immediate=*/true) UNCONDITIONALLY -- reasserting that
-// clip's OWN (stale) section and silently clearing whatever `style section
-// ending1` itself queued (Arranger::m_pending_valid), even if the promotion
-// lands several bars into the Ending's own one-shot playout, well after
-// ending1 was already applied. `stop clip <id>` with no `quantize` suffix
-// (Boundary::kImmediate, the default -- in_process_brain_session.cpp's
-// parse_quantize_suffix) forces the clip's ClipMatrix state straight to
-// kStopped via Engine::clip_request's immediate branch (ClipMatrix::force),
-// regardless of whatever kArmed/kQueuedStop countdown it was mid-flight on --
-// ClipMatrix::on_bar's own promotion guard (`state != kArmed && state !=
-// kQueuedStop`) then never fires for it again, so it can never re-assert
-// anything. For a kStyleSection clip this is bookkeeping-only: Engine::
-// apply_clip_content's own kStyleSection comment ("stopping is bookkeeping-
-// only") means the arranger is never touched by the stop itself -- this only
-// ever forecloses a FUTURE stale reassertion, it never stops audio currently
-// playing. Cancelling every clip in the active column (not just a guessed
-// subset) mirrors clip_scene_launch's own fan-out shape exactly, one `stop
-// clip` per registered id -- host-side only, zero ABI/core change, and a
-// clip id that was never registered just warns (Engine::clip_request's own
-// `m_clips.get(id) == nullptr` guard), never crashes.
-void cancel_active_scene_clip_arms(const GridModel& model, BrainSession& brain_session,
-                                   const UiState& fx) {
-  if (fx.active_scene < 0) {
+// Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md, design
+// decision 4): replaces update_auto_song's own per-frame FSM. The core
+// SceneChain now drives the actual advance and the host-cued Ending entirely
+// on the engine thread (in_process_brain_session.cpp's run_engine, watching
+// scenes().playing()'s own true->false edge) -- this function's only
+// remaining job is keeping fx.active_scene (the GUI's OWN highlight/playhead
+// anchor, render_scene_header_cell's name-color tint and render_grid_panel's
+// beat-synced playhead) in sync with the engine's authoritative section
+// readback (app_state.section(), fed by the kSection OutEvent), exactly the
+// same divergence render_header's own "engine: %s" row already surfaces.
+//
+// Stays put if the CURRENT column's own section already matches (no
+// spurious jump on a frame where nothing changed); otherwise picks the
+// FIRST populated column, in order, whose section matches -- correct as
+// long as no two populated columns share a SectionType (build_and_play_song
+// builds the chain from these same columns in this same order, so this is
+// the chain's own step order). While an Ending plays out (or once the song
+// has ended), the readback becomes "ending1"/holds at the last real
+// section, which matches no column -- this simply leaves fx.active_scene
+// parked at its last known value, which is the wanted behavior.
+void reconcile_active_scene(const GridModel& model, const AppState& app_state, UiState& fx,
+                            std::size_t scene_count) {
+  if (!fx.playing || scene_count == 0) {
     return;
   }
-  const std::size_t scene = static_cast<std::size_t>(fx.active_scene);
-  for (const GridRow& row : kRows) {
-    const std::size_t id = cell_id(row.role_index, scene, model.scene_count());
-    brain_session.send("stop clip " + std::to_string(id));
+  const std::size_t current = fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
+  if (current < scene_count &&
+      section_wire_name(model.scene_section(current)) == app_state.section()) {
+    return;
   }
-}
-
-// Repeat-Zone auto-song advance (SLICE 4b, docs/proposals/repeat-zone-real-
-// contract.md's TIMING DECISION: GUI-DRIVEN, no new engine mechanism). Reads
-// the live bar off app_state (already reduced from the "beat" heartbeat,
-// app_state.hpp/app_state.cpp), decides via the PURE next_scene_to_launch()
-// whether the active scene column's own section has finished, and if so
-// fires the EXISTING `style section` verb (bar-quantized by the arranger
-// itself, slice 4a) for the next column and advances fx's own active-scene
-// bookkeeping. bar_just_advanced() guards against re-evaluating (and
-// re-firing) more than once per bar: ImGui runs this every rendered frame,
-// but the live bar only changes once per beat-heartbeat poll.
-void update_auto_song(const GridModel& model, BrainSession& brain_session,
-                      const AppState& app_state, UiState& fx, std::size_t scene_count) {
-  // Roadmap task #37: the ENDING pad (transport_panel.cpp) sets fx.ending_
-  // cued the instant it cues `style section ending1`. That cue is bar-
-  // quantized and, once it lands, plays out for the Ending section's own
-  // authored length before the core's own one-shot rule stops the transport
-  // (arranger.hpp's section_is_ending branch, engine.hpp's fire_arranger) --
-  // but fx.playing stays true for that whole stretch. Without this guard,
-  // auto-song's own advance below would fire `style section <next>` at the
-  // very next section boundary and re-arm a NEW section, overriding the cued
-  // Ending before it ever gets to stop the song. Suppress every advance while
-  // cued; the latch clears itself the instant the transport is actually
-  // observed stopped, re-arming auto-song cleanly for the next Play.
-  //
-  // That suppression alone only stops NEW `style section <next>` advances --
-  // it cannot undo a clip arm the core already armed a moment before the
-  // click, on its own bar clock. cancel_active_scene_clip_arms (above) closes
-  // that gap once, the very first time this function observes the cue (the
-  // `!fx.ending_clip_arms_cancelled` guard), never resent on every subsequent
-  // frame while the cue holds.
-  if (!fx.playing) {
-    fx.ending_cued = false;
-    fx.ending_clip_arms_cancelled = false;
-  }
-  if (fx.ending_cued) {
-    if (!fx.ending_clip_arms_cancelled) {
-      cancel_active_scene_clip_arms(model, brain_session, fx);
-      fx.ending_clip_arms_cancelled = true;
+  for (std::size_t s = 0; s < scene_count; ++s) {
+    if (scene_is_populated(model, s) &&
+        section_wire_name(model.scene_section(s)) == app_state.section()) {
+      fx.active_scene = static_cast<int>(s);
+      fx.active_scene_start_bar = app_state.bar();
+      return;
     }
-    return;
   }
-  const int current_bar = app_state.bar();
-  // Captured BEFORE bar_just_advanced mutates auto_song_last_bar in place, so
-  // it still holds the LAST bar this function actually evaluated (which, for
-  // a session that just resumed after a transport stop, is a stale bar from
-  // BEFORE the stop -- the core rewinds its bar counter to 0 on every fresh
-  // Start, runtime/transport.hpp's "MIDI Start semantics: rewind to zero",
-  // mirrored by AppState's own "stopped" reset).
-  const int previous_last_bar = fx.auto_song_last_bar;
-  if (!bar_just_advanced(current_bar, fx.auto_song_last_bar)) {
-    return;
-  }
-  // Bar REWIND detected (current bar fell behind the last one evaluated): a
-  // stop/restart cycle, not an ordinary forward tick. active_scene_start_bar
-  // is still anchored to the pre-stop bar count, so leaving it as-is would
-  // make bars_elapsed go deeply negative and stay there until the new
-  // session's bar count climbs all the way back past the stale anchor --
-  // "the active scene never advances". Re-anchor to the fresh bar so
-  // bars_elapsed measures from the restart, not from the stale pre-stop bar.
-  if (current_bar < previous_last_bar) {
-    fx.active_scene_start_bar = current_bar;
-  }
-  const int bars_elapsed = current_bar - fx.active_scene_start_bar;
-  const std::size_t active_scene_index =
-      fx.active_scene >= 0 ? static_cast<std::size_t>(fx.active_scene) : 0;
-  // SECOND source-of-truth transition for this threshold (task #6). Owner
-  // task #3 had moved the advance gate AWAY from model.scene_bars() toward
-  // the style's own real section length (preview::section_bars), because at
-  // the time scene_bars() was a flat, non-editable, disconnected-from-
-  // reality default -- and Wave-1 style-depth had just made the premise that
-  // justified the move ("every built-in style's own section is 1 bar")
-  // false, e.g. the "basic" style's own kVarA is 2 bars. Task #6 gives the
-  // user real control over scene_bars() via the always-visible "- N +"
-  // stepper in each scene-header column (render_scene_header_cell), which
-  // fixes exactly the problem task #3's move was working around -- so
-  // routing the advance gate back through scene_bars() (active_style_
-  // section_bars, above) is not a regression of that reasoning, it is the
-  // fix scene_bars() was always waiting for.
-  //
-  // The gate is now a direct hold: advance once bars_elapsed reaches the
-  // scene's own stepper value, no repeat multiplier -- a user dialing the
-  // stepper down to 1 gets a 1-bar hold, not 1 * kDefaultSectionRepeats.
-  // next_scene_to_launch stays a pure function of an already-computed
-  // threshold -- only the threshold's OWN source changed here.
-  const int active_section_bars = active_style_section_bars(model, active_scene_index);
-
-  // --debug/SONOTRON_DEBUG (owner ask): this is essentially the old
-  // SONOTRON_AUTOSONG_TRACE stderr trace (since removed, see git history),
-  // made permanent behind the same debug gate every other trace point in
-  // this pass uses -- printed on every bar this function actually
-  // evaluates (bar_just_advanced() above already guards the once-per-bar
-  // cadence), whether or not it decides to advance.
-  if (debug_enabled()) {
-    debug_log("[dbg auto-song] bar=" + std::to_string(current_bar) + " active_scene=" +
-              std::to_string(fx.active_scene) + " bars_elapsed=" + std::to_string(bars_elapsed) +
-              " advance_threshold=" + std::to_string(active_section_bars));
-  }
-
-  const std::optional<int> next =
-      next_scene_to_launch(fx.auto_song, fx.playing, fx.active_scene, static_cast<int>(scene_count),
-                           bars_elapsed, active_section_bars);
-  if (!next.has_value()) {
-    // Song-form Option A (tasks #27/#12): the last authored scene column has
-    // finished its final hold. Cue the Ending EXACTLY the way the dedicated
-    // ENDING transport pad already does (transport_panel.cpp's
-    // render_ending_pad, roadmap task #37, commit 976798f) -- the bare,
-    // bar-quantized `style section ending1` verb, alone, never paired with
-    // `launch scene` (which would force an immediate, non-quantized switch).
-    // Deliberately NOT re-implemented beyond this: the very NEXT call to this
-    // function will hit the existing `if (fx.ending_cued)` guard at the top of
-    // update_auto_song and perform the in-flight-clip-arm cancellation
-    // (cancel_active_scene_clip_arms) the SAME way a manual Ending click
-    // already does -- nothing else is needed here.
-    if (auto_song_reached_song_end(fx.auto_song, fx.playing, fx.active_scene,
-                                   static_cast<int>(scene_count), bars_elapsed,
-                                   active_section_bars)) {
-      brain_session.send("style section ending1");
-      fx.ending_cued = true;
-    }
-    return;
-  }
-  const std::size_t next_scene_index = static_cast<std::size_t>(*next);
-  if (debug_enabled()) {
-    debug_log("[dbg auto-song] advance -> scene " + std::to_string(next_scene_index));
-  }
-  // Root-cause fix (owner task #1): `style section` alone only selects WHICH
-  // section a future launch will use -- it never fires the newly-active
-  // column's own clips. activate_scene_column (shared with the master-Play
-  // one-shot launch and the manual scene-header click, see its own header
-  // comment for the full redundancy finding) sends BOTH verbs together and
-  // updates fx's own active-scene bookkeeping, or the newly-active column's
-  // audio never actually starts (the proven "scene 1 forever" bug --
-  // fx.active_scene DID advance internally, but nothing ever launched the
-  // column it pointed at).
-  activate_scene_column(model, brain_session, fx, next_scene_index, current_bar,
-                        kDefaultLaunchQuantizeBars);
 }
 
 // Standard solo semantics: any part soloed makes the non-soloed rows read as
@@ -994,8 +869,7 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
       // -- auto-song, if later armed (or already armed), measures
       // bars-elapsed from THIS launch, not a stale one (activate_scene_
       // column's own bookkeeping covers this).
-      activate_scene_column(model, brain_session, fx, s, app_state.bar(),
-                            kDefaultLaunchQuantizeBars);
+      activate_scene_column(model, brain_session, fx, s, app_state.bar());
     }
 
     // Restore the row's Y anchor (the same trick render_track_label already
@@ -1022,8 +896,7 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
 // underline (render_scene_header_cell) -- reserved uniformly here, same as
 // the wrapped-name height above, so it never shifts per-column either.
 void render_scene_header_row(GridModel& model, BrainSession& brain_session,
-                             const AppState& app_state, UiState& fx, std::size_t scenes,
-                             float cz) {
+                             const AppState& app_state, UiState& fx, std::size_t scenes, float cz) {
   ImFont* font = ImGui::GetFont();
   std::size_t max_lines = 1;
   for (std::size_t s = 0; s < scenes; ++s) {
@@ -1232,16 +1105,18 @@ void render_grid_panel(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   const float cz = fx.cell_zoom;
 
   // MASTER PLAY (issue a): if the transport just started, launch the active
-  // scene column so its clips read back as playing and the beat-synced
-  // sweep starts -- BEFORE update_auto_song, mirroring SLICE 4b's own
-  // "evaluate before drawing the header" ordering so a fired launch is
-  // reflected in the SAME frame's active-scene highlight.
-  handle_master_play_launch(model, brain_session, app_state, fx);
+  // scene column (or, with auto-song armed, the whole song) so its clips
+  // read back as playing and the beat-synced sweep starts -- BEFORE
+  // reconcile_active_scene, mirroring SLICE 4b's own "evaluate before
+  // drawing the header" ordering so a fired launch is reflected in the SAME
+  // frame's active-scene highlight.
+  handle_master_play_launch(model, brain_session, app_state, fx, scenes);
 
-  // SLICE 4b: evaluate the auto-song advance BEFORE drawing the scene header
-  // row below, so a fired advance is reflected in the SAME frame's active-
-  // scene highlight rather than lagging one frame behind.
-  update_auto_song(model, brain_session, app_state, fx, scenes);
+  // Song-mode Phase 1: keep fx.active_scene in sync with the engine's own
+  // section readback BEFORE drawing the scene header row below, so a real
+  // SceneChain advance is reflected in the SAME frame's active-scene
+  // highlight rather than lagging one frame behind.
+  reconcile_active_scene(model, app_state, fx, scenes);
 
   // Beat-synchronized playhead (owner-locked: "the playhead fills 0->100%
   // over the SECTION"). SECOND source-of-truth transition (task #6, mirrors

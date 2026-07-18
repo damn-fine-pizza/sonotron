@@ -178,16 +178,14 @@ endfunction()
 # residual bug). Kept as a standing regression test, not deleted.
 gui_sonotron_preview_oracle_test(test_preview_multibar_truncation_red functional)
 
-# Repeat-Zone auto-song functional/integration test (Torquato QA pass, red-
-# before-green bug repro): drives the REAL render_grid_panel entry point
-# (grid_panel.hpp) inside a headless ImGui context (no GPU, no window, no
-# backend -- font atlas self-builds on first NewFrame()), because the
-# reported bug lives in grid_panel.cpp's file-local (anonymous-namespace)
-# update_auto_song, not in the already-green pure next_scene_to_launch() unit
-# (test_grid_model.cpp). Links gui_sonotron_layout (render_grid_panel + imgui
-# + gui_sonotron_preview transitively) AND gui_sonotron_brain (AppState::
-# apply/apply_line's out-of-line implementation, needed to feed realistic
-# "beat" events) -- the only test in this directory that needs both.
+# Grid-panel functional/integration test helper: drives the REAL render_
+# grid_panel entry point (grid_panel.hpp) inside a headless ImGui context (no
+# GPU, no window, no backend -- font atlas self-builds on first NewFrame()),
+# for behaviors that live in grid_panel.cpp's own file-local (anonymous-
+# namespace) logic, not in an already-green pure unit (test_grid_model.cpp).
+# Links gui_sonotron_layout (render_grid_panel + imgui + gui_sonotron_preview
+# transitively) AND gui_sonotron_brain (AppState::apply/apply_line's
+# out-of-line implementation, needed to feed realistic "beat" events).
 function(gui_sonotron_grid_panel_test name category)
   add_executable(${name} ${name}.cpp)
   target_link_libraries(${name} PRIVATE gui_sonotron_layout gui_sonotron_brain)
@@ -196,17 +194,40 @@ function(gui_sonotron_grid_panel_test name category)
   set_tests_properties(${name} PROPERTIES LABELS ${category})
 endfunction()
 
-gui_sonotron_grid_panel_test(test_grid_panel_auto_song functional)
+# test_grid_panel_auto_song.cpp RETIRED (Torquato QA, song-mode Phase 1
+# migration pass, docs/proposals/song-mode-scenechain-adoption.md): all 4 of
+# its SpyBrainSession-based tests pinned the OLD per-frame update_auto_song
+# FSM, which Phase 1 retired wholesale in favor of the core-driven
+# SceneChain (reached only from the engine thread -- SpyBrainSession, which
+# never drives a real Engine, has nothing real left to observe). Disposition
+# of each, individually judged:
+#   - test_auto_song_advances_scene_after_section_elapses: RETIRED, superseded
+#     by test_grid_panel_auto_song_real_backend.cpp, test_grid_scene_length_
+#     stepper_ui_automation.cpp, and test_song_mode_scenechain_contract.cpp
+#     (all real-backend, real-timing equivalents of "advance after N bars").
+#   - test_auto_song_stuck_after_transport_stop_then_restart: MIGRATED to
+#     test_grid_panel_auto_song_real_backend.cpp's own test_auto_song_
+#     advances_correctly_after_transport_stop_then_restart (real backend,
+#     real stop/restart cycle).
+#   - test_scene_bars_governs_advance_cadence: RETIRED, superseded by
+#     test_grid_scene_length_stepper_ui_automation.cpp's own test 2 (proves
+#     the stepper genuinely gates the real-backend advance timing).
+#   - test_auto_song_armed_by_default_advances_without_manual_toggle:
+#     RETIRED, superseded by test_grid_panel_auto_song_ends_on_ending_ui_
+#     automation.cpp and test_grid_panel_auto_song_real_backend.cpp, neither
+#     of which ever toggles fx.auto_song by hand (it defaults true).
+# See this pass's own QA report for the full per-test rationale.
 
-# FIX PIN (Torquato QA, root-caused via a live SONOTRON_AUTOSONG_TRACE stderr
-# trace, since removed): auto-song's advance branch (update_auto_song,
-# grid_panel.cpp) advances fx.active_scene and re-sends `style section
-# <name>`, AND now also sends `launch scene <n> quantize <q>` for the
-# newly-active column -- exactly like the manual scene-header launch already
-# did. This test proves the fix stays fixed; do not weaken or remove this
-# assertion.
-gui_sonotron_grid_panel_test(test_grid_panel_auto_song_launches_next_scene functional)
-
+# test_grid_panel_auto_song_launches_next_scene.cpp RETIRED (Torquato QA,
+# song-mode Phase 1 migration pass, docs/proposals/song-mode-scenechain-
+# adoption.md): it pinned the OLD double-trigger fix ("auto-song's advance
+# must ALSO send `launch scene <n> quantize <q>`" on top of `style section`),
+# which design decision 4 of the Phase 1 proposal explicitly and permanently
+# retired -- SceneChain never touches ClipMatrix, so no `launch scene` is
+# ever sent for an auto-song advance again. The PERMANENT OPPOSITE assertion
+# (`launch scene ` must NEVER appear) now lives in
+# test_song_mode_scenechain_contract.cpp; see that file's own retirement note.
+#
 # Torquato QA pass, UI-AUTOMATING flavor of the live-bug repro (owner steer):
 # the same headless-ImGui render loop as test_grid_panel_auto_song.cpp above,
 # but wired end-to-end to a REAL InProcessBrainSession (real engine thread,
@@ -397,6 +418,22 @@ target_compile_options(test_grid_panel_auto_song_ends_on_ending_ui_automation PR
 add_test(NAME test_grid_panel_auto_song_ends_on_ending_ui_automation
   COMMAND test_grid_panel_auto_song_ends_on_ending_ui_automation)
 set_tests_properties(test_grid_panel_auto_song_ends_on_ending_ui_automation PROPERTIES
+  LABELS functional)
+
+# Song-mode Phase 1 OBSERVABLE-CONTRACT hardening (Torquato QA pass,
+# docs/proposals/song-mode-scenechain-adoption.md's own "Observable contract"
+# section): no launch-scene/style-section double-send anywhere in an
+# auto-song run, monotonic scene order, and harmony continuity across a
+# scene boundary.
+add_executable(test_song_mode_scenechain_contract
+  test_song_mode_scenechain_contract.cpp)
+target_link_libraries(test_song_mode_scenechain_contract PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_song_mode_scenechain_contract PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_song_mode_scenechain_contract
+  COMMAND test_song_mode_scenechain_contract)
+set_tests_properties(test_song_mode_scenechain_contract PROPERTIES
   LABELS functional)
 
 # Task #6 ACCEPTANCE TEST: the always-visible per-scene LENGTH stepper in

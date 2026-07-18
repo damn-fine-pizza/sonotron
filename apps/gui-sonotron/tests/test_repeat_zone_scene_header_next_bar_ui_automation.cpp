@@ -130,6 +130,17 @@ void poll_once(BrainSession& session, AppState& app_state) {
   }
 }
 
+// MIGRATED (Torquato QA, song-mode Phase 1, docs/proposals/song-mode-
+// scenechain-adoption.md): this test used to pin the OLD manual scene-header
+// click, which fanned out through `launch scene <n> quantize 1` and promoted
+// the column's own ClipMatrix clips (asserted via a real AppState::clip_state
+// flip). Phase 1's activate_scene_column (grid_panel.cpp) now builds a
+// ONE-STEP SceneChain instead (`song build 1 <section> <bars>`) --
+// deliberately OWN-TRANSPORT, never touching ClipMatrix -- so no clip ever
+// arms/flips for this click anymore. The replacement assertion below tracks
+// fx.active_scene (reconcile_active_scene's own readback of the real engine
+// section) instead of clip_state: the SAME "must land within one bar" timing
+// contract, proven against the mechanism that actually carries it now.
 void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
@@ -290,13 +301,13 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
   CHECK(app_state.section() != "varA");
 
   // Refresh the bar reading as close to the click as possible, then click:
-  // scene-header 1's REAL ▶ (`style section varA` + `launch scene 1
-  // quantize 1`, never hand-written here).
+  // scene-header 1's REAL ▶ (Phase 1: builds and plays a one-step SceneChain
+  // via `song build 1 varA <bars>`, activate_scene_column, never hand-written
+  // here).
   poll_once(session, app_state);
   render_one_frame(model, seqedit, parts, session, app_state, fx);
   const int bar_at_click = app_state.bar();
-  constexpr std::size_t kDrumsScene1ClipId = 1;  // cell_id(role=0, scene=1, scene_count=5)
-  const AppState::ClipLaunchState clip_before = app_state.clip_state(kDrumsScene1ClipId);
+  CHECK(fx.active_scene != 1);  // sanity: not already on the target column
 
   click_at(scene1_header.center(), model, seqedit, parts, session, app_state, fx);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
@@ -304,7 +315,7 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
   // Tight real-time poll (bounded wall clock, fine-grained sleep) recording
   // the FIRST bar at which each real readback flips.
   int section_flip_bar = -1;
-  int clip_flip_bar = -1;
+  int active_scene_flip_bar = -1;
   {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(6000);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -313,10 +324,10 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
       if (section_flip_bar < 0 && app_state.section() == "varA") {
         section_flip_bar = app_state.bar();
       }
-      if (clip_flip_bar < 0 && app_state.clip_state(kDrumsScene1ClipId) != clip_before) {
-        clip_flip_bar = app_state.bar();
+      if (active_scene_flip_bar < 0 && fx.active_scene == 1) {
+        active_scene_flip_bar = app_state.bar();
       }
-      if (section_flip_bar >= 0 && clip_flip_bar >= 0) {
+      if (section_flip_bar >= 0 && active_scene_flip_bar >= 0) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -328,18 +339,22 @@ void test_manual_scene_launch_click_flips_readback_within_one_bar_while_playing(
   // Sanity: both readbacks must have flipped at all within the wall-clock
   // budget, or the timing assertions below are meaningless.
   CHECK(section_flip_bar >= 0);
-  CHECK(clip_flip_bar >= 0);
+  CHECK(active_scene_flip_bar >= 0);
 
   // THE PIN: a manual scene-header click while playing must take effect at
   // the NEXT bar (bar_at_click, or bar_at_click + 1 if the click landed just
   // after that bar's own boundary already closed) -- NEVER after
   // GridModel::kDefaultSceneBars (8) bars, which is what "waiting until the
-  // cell ends" would look like if the bug the owner reports is real.
+  // cell ends" would look like if the bug the owner reports is real. The
+  // active-scene readback (reconcile_active_scene, grid_panel.cpp's own
+  // per-frame sync against the real engine section) is the Phase-1
+  // replacement for the old clip_state flip -- same one-bar contract, new
+  // mechanism.
   if (section_flip_bar >= 0) {
     CHECK(section_flip_bar - bar_at_click <= 1);
   }
-  if (clip_flip_bar >= 0) {
-    CHECK(clip_flip_bar - bar_at_click <= 1);
+  if (active_scene_flip_bar >= 0) {
+    CHECK(active_scene_flip_bar - bar_at_click <= 1);
   }
 
   ImGui::DestroyContext();

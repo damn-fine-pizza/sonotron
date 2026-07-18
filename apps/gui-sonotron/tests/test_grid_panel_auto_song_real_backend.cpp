@@ -84,6 +84,35 @@ void click_arm_auto_song(UiState& fx, const AppState& app_state) {
   fx.auto_song_last_bar = app_state.bar();
 }
 
+// Shared poll-render-until-predicate loop: drains the REAL brain session,
+// applies real events into a real AppState, renders one real frame, and
+// repeats on real wall-clock time until either the predicate goes true or
+// the timeout elapses. Extracted purely to keep each phase of the
+// stop/restart test below a single readable line instead of duplicating the
+// same four-line pump loop four times over (which is what pushed that
+// test's cognitive complexity over clang-tidy's threshold) -- no behavior
+// change from the inlined version.
+template <typename Predicate>
+bool poll_render_until(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+                       InProcessBrainSession& session, AppState& app_state, UiState& fx,
+                       std::chrono::milliseconds timeout, Predicate&& predicate) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  std::vector<BrainEvent> events;
+  while (std::chrono::steady_clock::now() < deadline) {
+    events.clear();
+    session.poll(events);
+    for (const BrainEvent& ev : events) {
+      app_state.apply(ev);
+    }
+    render_one_frame(model, seqedit, parts, session, app_state, fx);
+    if (predicate()) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return false;
+}
+
 // THE PINNED BUG (owner report, Repeat Zone): "auto-song ON + transport
 // PLAYING: the playhead bar does NOT scroll, the scenes do NOT advance --
 // scene 1 repeats forever -- even though audio plays". Reproduced here with
@@ -197,9 +226,113 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
   ImGui::DestroyContext();
 }
 
+// -----------------------------------------------------------------------
+// MIGRATED (Torquato QA, song-mode Phase 1, docs/proposals/song-mode-
+// scenechain-adoption.md): the RETIRED test_grid_panel_auto_song.cpp's own
+// test_auto_song_stuck_after_transport_stop_then_restart pinned a bug in the
+// OLD per-frame FSM -- `fx.active_scene_start_bar`/`fx.auto_song_last_bar`
+// were only ever written by an arm-click or a successful advance, so a
+// transport stop/restart cycle (which rewinds the CORE's own bar counter to
+// 0, runtime/transport.hpp) left that bookkeeping stale and HIGHER than the
+// freshly-restarted bar count, permanently blocking `bars_elapsed <
+// threshold` from ever crossing again. Phase 1 retires that whole FSM: every
+// fresh Play now calls build_and_play_song (grid_panel.cpp's handle_master_
+// play_launch, gated on fx.master_play_launched, which itself resets the
+// instant the transport is observed NOT playing) -- a BRAND-NEW `song build`
+// line, `kSceneClear` + fresh `kSceneAdd`s + `kScenePlay`, rebuilt from
+// scratch every time, with no bar-anchor bookkeeping left to go stale at
+// all. This test proves that directly: stop mid-song, restart, and confirm
+// the song genuinely advances AGAIN from scene 0 (not stuck wherever the
+// pre-stop run left off), through the REAL backend and REAL render loop,
+// exactly like the test it replaces did for the old mechanism.
+// -----------------------------------------------------------------------
+void test_auto_song_advances_correctly_after_transport_stop_then_restart() {
+  ImGui::CreateContext();
+  ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
+  unsigned char* tex_pixels = nullptr;
+  int tex_w = 0;
+  int tex_h = 0;
+  ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
+
+  GridModel model(5);  // same scene count main.cpp actually boots with
+  // Fast, deterministic cadence (mirrors test_song_mode_scenechain_contract.
+  // cpp): scene 0 ("intro1") is a genuine 2-bar one-shot in "basic"
+  // regardless of this stepper; scenes 1..4 are pinned to the stepper floor.
+  model.set_scene_bars(0, 2);
+  for (std::size_t s = 1; s < model.scene_count(); ++s) {
+    model.set_scene_bars(s, 1);
+  }
+  SeqEditModel seqedit;
+  PartsModel parts;
+  UiState fx;
+  AppState app_state;
+
+  InProcessBrainSession session;
+  CHECK(session.start());
+  for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
+    if (sonotron::kBuiltinStyleNames[i] == "basic") {
+      session.send("style load basic");
+      fx.active_style = static_cast<int>(i);
+      break;
+    }
+  }
+  session.send("bpm 400");  // shrink the wall-clock bar cadence
+
+  // FIRST run: Play, let the song genuinely advance off scene 0 at least
+  // once (proves auto-song is really live before the stop below, not merely
+  // armed-but-idle).
+  session.send("transport start");
+  app_state.note_transport_sent(true);
+  poll_render_until(model, seqedit, parts, session, app_state, fx, std::chrono::milliseconds(10000),
+                    [&fx] { return fx.active_scene != 0; });
+  CHECK(app_state.transport() == AppState::Transport::kPlaying);
+  CHECK(fx.active_scene != 0);  // GIVEN: the first run genuinely advanced
+
+  // Stop mid-song (an ordinary "stop, tweak something" moment) -- the core
+  // rewinds its own bar counter to 0 on the NEXT Start, mirrored here by
+  // AppState's own "stopped" reduction parking app_state.bar() at 0.
+  session.send("transport stop");
+  poll_render_until(
+      model, seqedit, parts, session, app_state, fx, std::chrono::milliseconds(6000), [&app_state] {
+        return app_state.transport() == AppState::Transport::kStopped && app_state.bar() == 0;
+      });
+  CHECK(app_state.transport() == AppState::Transport::kStopped);
+  CHECK(app_state.bar() == 0);
+
+  // A fresh Start: handle_master_play_launch's own guard re-arms
+  // (fx.master_play_launched resets the instant a stopped transport is
+  // observed), so this fires build_and_play_song all over again, from
+  // scratch -- a brand-new SceneChain, no stale bar anchor to inherit.
+  session.send("transport start");
+  app_state.note_transport_sent(true);
+  poll_render_until(
+      model, seqedit, parts, session, app_state, fx, std::chrono::milliseconds(6000), [&app_state] {
+        return app_state.transport() == AppState::Transport::kPlaying && app_state.bar() > 0;
+      });
+  CHECK(app_state.transport() == AppState::Transport::kPlaying);
+  CHECK(app_state.bar() > 0);
+  // The restarted run genuinely starts back at scene 0 (a fresh chain, not a
+  // frozen leftover from the run that was just stopped).
+  CHECK(fx.active_scene == 0);
+
+  // THE PIN: after the restart, the song must advance AGAIN, genuinely, off
+  // scene 0 -- the OLD bug pinned here would leave it stuck forever because
+  // the stale bar anchor from the FIRST run was never re-anchored.
+  const bool advanced_again =
+      poll_render_until(model, seqedit, parts, session, app_state, fx,
+                        std::chrono::milliseconds(10000), [&fx] { return fx.active_scene != 0; });
+  session.stop();
+
+  CHECK(advanced_again);
+  CHECK(fx.active_scene != 0);
+
+  ImGui::DestroyContext();
+}
+
 }  // namespace
 
 int main() {
   test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop();
+  test_auto_song_advances_correctly_after_transport_stop_then_restart();
   return sonotron::test::failures();
 }

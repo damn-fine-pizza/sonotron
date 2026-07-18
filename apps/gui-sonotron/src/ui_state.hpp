@@ -103,9 +103,17 @@ struct UiState {
   // `active_scene` became active; `bars_elapsed_in_scene` for the pure
   // next_scene_to_launch() decision is always `AppState::bar() -
   // active_scene_start_bar`, computed fresh at the call site rather than
-  // stored here. `auto_song_last_bar` is the once-per-crossing guard's own
-  // bookkeeping (grid_model.hpp's bar_just_advanced) -- defaults to -1 so the
-  // very first live bar (0) still counts as "not yet evaluated".
+  // stored here.
+  //
+  // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md):
+  // `active_scene` is now reconciled from the engine's own section readback
+  // (grid_panel.cpp's reconcile_active_scene) rather than driven by a
+  // per-frame host FSM. `auto_song_last_bar` was that FSM's own once-per-
+  // crossing guard (grid_model.hpp's bar_just_advanced) -- vestigial now
+  // that update_auto_song is retired, kept only because the pre-migration
+  // auto-song UI-automation tests (TODO(song-mode-migration), see those
+  // files) still write it directly. Defaults to -1 so the very first live
+  // bar (0) still counts as "not yet evaluated".
   //
   // DEFAULT ON (owner decision 2026-07-17): auto_song starts armed. The
   // still-live "I always have to click to advance" bug was that NOTHING in
@@ -139,17 +147,6 @@ struct UiState {
   // transport is observed NOT playing (mirrors master_play_launched's own
   // reset shape), re-arming cleanly for the next Play/song run.
   bool ending_cued = false;
-
-  // ENDING-vs-in-flight-clip-arm race guard (roadmap task #37, Torquato QA
-  // finding): true once grid_panel.cpp's update_auto_song has already
-  // cancelled the active scene column's own clip arms for the CURRENT ending
-  // cue (see cancel_active_scene_clip_arms's own header comment for the full
-  // race this closes). A once-per-cue latch, not a per-frame resend: sending
-  // `stop clip <id>` again on every subsequent frame while ending_cued stays
-  // true would be harmless but wasteful. Cleared alongside ending_cued the
-  // instant the transport is observed NOT playing, so the next Ending cue
-  // re-arms this guard cleanly.
-  bool ending_clip_arms_cancelled = false;
 };
 
 }  // namespace sonotron
