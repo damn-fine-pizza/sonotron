@@ -60,6 +60,21 @@ struct Band {
     }
     return n;
   }
+  // Mirrors test_arranger.cpp's own Band::ons -- counts NoteOn events on a
+  // given channel (used by the live-transition regression test below to
+  // prove the section's own pattern actually sounded).
+  int ons(std::uint8_t channel) const {
+    int n = 0;
+    for (const OutEvent& o : ev) {
+      if (o.kind != OutEvent::Kind::kMidi || o.msg.type() != midi::kNoteOn) {
+        continue;
+      }
+      if (o.msg.channel() == channel) {
+        ++n;
+      }
+    }
+    return n;
+  }
 };
 
 // A Performance with every field inside perf::validate()'s accepted range --
@@ -204,6 +219,108 @@ void test_scene_add_bad_performance_slot_warns() {
   CHECK(b.e.scenes().count() == 0);
 }
 
+// (d) Phase 7 root-cause fix regression (owner symptoms #3/#6): a live
+// SceneChain transition (scene_play/fire_scene, both funnel through
+// Engine::apply_scene_transition -> apply_performance) must RE-ANCHOR the
+// arranger's section phase at the transition's own transport tick
+// (Arranger::request_scene), and the style's OWN authored bar length must
+// NOT auto-complete the section while the scene's own (longer) hold is still
+// running -- the GUI `-N+` stepper (SceneStep::n_bars) is the real authority
+// for how long a SceneChain-driven section lasts (owner decision), not
+// StyleSection::bars.
+//
+// The transition below deliberately lands MID-SONG (after 3 bars with no
+// scene active) rather than at tick 0: Arranger::load()'s own
+// m_section_start=0 reset happens to coincide with a genuinely fresh anchor
+// at tick 0, so the pre-fix bug (m_section_start left stale) is invisible
+// there and only shows up once a live transition lands on a nonzero tick --
+// exactly the shape of a real SceneChain-driven song.
+void test_scene_live_transition_reanchors_phase_and_suppresses_intro_autoreturn() {
+  Band b;
+  Performance intro = perf_with_tempo(9000);
+  intro.style_id = 0;  // builtin "basic": Intro1.bars == 2
+  intro.variation = static_cast<std::uint8_t>(SectionType::kIntro1);
+  intro.routes[static_cast<std::uint8_t>(TrackRole::kDrums)] =
+      PerfRoute{.port = 0, .channel = 9, .enabled = 1};
+  intro.routes[static_cast<std::uint8_t>(TrackRole::kBass)] =
+      PerfRoute{.port = 0, .channel = 1, .enabled = 1};
+  CHECK(b.e.performances().store(0, intro));
+  // scene 0: Intro1, holds 5 bars -- deliberately LONGER than basic's own
+  // authored Intro1.bars (2).
+  b.add_scene(0, 5);
+
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.cmd(Param::kTransportStart);
+  b.advance(3 * kTicksPerBar);  // 3 bars with no scene active: a nonzero, mid-song transition tick
+  b.ev.clear();
+
+  b.cmd(Param::kScenePlay);
+  CHECK(b.warns() == 0);
+  CHECK(b.e.arranger().current() == SectionType::kIntro1);
+
+  // Advance across almost the whole 5-bar scene hold (one tick shy, so the
+  // one-shot chain has not yet reached its own end).
+  b.advance(5 * kTicksPerBar - 1);
+
+  // (1) Phase re-anchor: Intro1's own authored drum/bass pattern (well
+  // within its first 2 bars) must have sounded during this window. Pre-fix,
+  // the stale m_section_start leaves the per-step grid measuring from a tick
+  // far in the past, so it never lands on any of the pattern's own (small)
+  // authored step numbers -- zero notes sound.
+  CHECK(b.ons(9) > 0);
+  CHECK(b.ons(1) > 0);
+
+  // (2) Suppression: the style's OWN authored bar length (2) must not
+  // auto-complete the one-shot and return to VarA partway through the
+  // scene's 5-bar hold.
+  for (const OutEvent& o : b.ev) {
+    if (o.kind == OutEvent::Kind::kSection) {
+      CHECK(o.code != static_cast<std::uint16_t>(SectionType::kVarA));
+    }
+  }
+  CHECK(b.e.arranger().current() == SectionType::kIntro1);
+  CHECK(b.e.transport().playing());
+}
+
+// (e) Owner decision part 3: a SceneChain-driven Ending must still stop the
+// transport, timed to the SCENE's own committed hold (SceneStep::n_bars,
+// here 3 bars), NOT the style's shorter authored Ending1.bars (1) -- the
+// exact "a dragged outro/ending column doesn't reliably stop the transport"
+// symptom (#6). Same mid-song transition setup as (d), so the fix is proven
+// under the same phase-drift conditions that expose the bug.
+void test_scene_ending_stops_transport_at_its_own_hold_bars() {
+  Band b;
+  Performance ending = perf_with_tempo(9000);
+  ending.style_id = 0;  // builtin "basic": Ending1.bars == 1
+  ending.variation = static_cast<std::uint8_t>(SectionType::kEnding1);
+  CHECK(b.e.performances().store(0, ending));
+  b.add_scene(0, 3);  // scene commits to a 3-bar ending hold
+
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.cmd(Param::kTransportStart);
+  b.advance(3 * kTicksPerBar);  // a few bars first, same mid-song setup as (d)
+  b.ev.clear();
+
+  b.cmd(Param::kScenePlay);
+  CHECK(b.e.arranger().current() == SectionType::kEnding1);
+
+  // Must NOT stop at the style's own 1-bar mark.
+  b.advance(2 * kTicksPerBar);
+  CHECK(b.e.transport().playing());
+
+  // Must stop exactly at the scene's own 3-bar hold.
+  b.advance(kTicksPerBar);
+  CHECK(!b.e.transport().playing());
+  bool saw_stop = false;
+  for (const OutEvent& o : b.ev) {
+    if (o.kind == OutEvent::Kind::kTransport &&
+        o.code == static_cast<std::uint16_t>(TransportState::kStopped)) {
+      saw_stop = true;
+    }
+  }
+  CHECK(saw_stop);
+}
+
 }  // namespace
 
 int main() {
@@ -213,6 +330,8 @@ int main() {
   test_scene_default_inert();
   test_scene_play_empty_chain_warns();
   test_scene_add_bad_performance_slot_warns();
+  test_scene_live_transition_reanchors_phase_and_suppresses_intro_autoreturn();
+  test_scene_ending_stops_transport_at_its_own_hold_bars();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_scene: all OK\n");
   }

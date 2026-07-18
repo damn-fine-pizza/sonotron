@@ -1034,7 +1034,12 @@ void Engine::scene_stop(const Command& cmd, EventSink sink) {
 void Engine::apply_scene_transition(std::size_t step_index, const SceneStep& step, EventSink sink) {
   (void)step_index;
   if (const Performance* perf = m_perfs.get(step.performance_slot); perf != nullptr) {
-    apply_performance(*perf, sink);
+    // Phase 7 (SceneChain live-transition fix): thread the step's own
+    // n_bars through as apply_performance's `scene_hold_bars` -- the ONE
+    // signal that tells it this section switch is SceneChain-driven, so the
+    // scene's own committed hold length (not the style's authored bars)
+    // governs the section's phase/length (Arranger::request_scene).
+    apply_performance(*perf, sink, step.n_bars);
   }
   const std::uint8_t before = m_transport.time_sig().beats_per_bar;
   if (step.time_sig.beats_per_bar != before &&
@@ -1747,8 +1752,13 @@ bool Engine::validate_performance(const Performance& perf) const noexcept {
 // apply_pending_performance_recall exactly at the bar boundary the
 // BoundaryLatch armed for -- either way `true` (immediate, Arranger-side) is
 // always correct here: by the time this runs, the caller is already AT the
-// boundary that matters.
-bool Engine::apply_performance(const Performance& perf, EventSink sink) {
+// boundary that matters. A THIRD caller, apply_scene_transition (a live
+// SceneChain step), also lands here -- `scene_hold_bars` (see this method's
+// own declaration comment in engine.hpp) is how it tells this function apart
+// from the other two, so the section switch below can go through
+// Arranger::request_scene instead of the plain immediate request().
+bool Engine::apply_performance(const Performance& perf, EventSink sink,
+                               std::uint8_t scene_hold_bars) {
   if (!validate_performance(perf)) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
     return false;
@@ -1769,9 +1779,18 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
     // request()/set_groove() calls -- byte-identical musical effect to the
     // old request_style() path, with the style_id metadata now preserved.
     m_arranger.load(static_cast<std::uint8_t>(perf.style_id));
-    m_arranger.request(static_cast<SectionType>(perf.variation), /*immediate=*/true);
+  }
+  const auto section = static_cast<SectionType>(perf.variation);
+  // Phase 7 (SceneChain live-transition fix, owner-reported symptoms #3/#6):
+  // a live SceneChain step (scene_hold_bars != 0) re-anchors the section's
+  // own phase at the CURRENT transport tick and records the scene's own
+  // committed hold length, INSTEAD of the plain immediate request() every
+  // other caller keeps using unchanged -- see Arranger::request_scene's own
+  // comment for the full rationale.
+  if (scene_hold_bars != 0) {
+    m_arranger.request_scene(section, m_transport.tick(), scene_hold_bars);
   } else {
-    m_arranger.request(static_cast<SectionType>(perf.variation), /*immediate=*/true);
+    m_arranger.request(section, /*immediate=*/true);
   }
   for (std::uint8_t r = 0; r < kRoles; ++r) {
     const auto role = static_cast<TrackRole>(r);

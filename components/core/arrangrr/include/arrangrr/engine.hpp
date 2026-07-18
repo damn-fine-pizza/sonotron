@@ -538,7 +538,15 @@ class Engine {
   // own header comment for the persisted-format discipline these back.
   Performance capture_performance() const;
   bool validate_performance(const Performance& perf) const noexcept;
-  bool apply_performance(const Performance& perf, EventSink sink);
+  // `scene_hold_bars` (Phase 7, SceneChain live-transition fix): 0 (default)
+  // for every ordinary caller (perf_recall's own immediate path,
+  // apply_pending_performance_recall's deferred path) -- byte-identical to
+  // before this fix. Nonzero ONLY when apply_scene_transition calls this on
+  // behalf of a live SceneChain step, carrying that step's own
+  // SceneStep::n_bars through to Arranger::request_scene (see that method's
+  // own comment for why a plain request(..., /*immediate=*/true) is not
+  // enough for a SceneChain-driven transition).
+  bool apply_performance(const Performance& perf, EventSink sink, std::uint8_t scene_hold_bars = 0);
   void emit_performance_confirmation(const Performance& perf, EventSink sink);
   // Promotes a pending (armed) Performance recall whose BoundaryLatch closes
   // THIS bar -- called from on_tick's existing bar gate, AFTER fire_clips and
