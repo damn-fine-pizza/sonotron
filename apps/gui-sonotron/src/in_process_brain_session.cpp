@@ -43,6 +43,7 @@ using arrangrr::Boundary;
 using arrangrr::Command;
 using arrangrr::ContentKind;
 using arrangrr::kMaxPorts;
+using arrangrr::kMaxScenes;
 using arrangrr::kNoExplicitClipId;
 using arrangrr::kNoLoopExplicitId;
 using arrangrr::LoopLengthMode;
@@ -157,9 +158,30 @@ struct PathResult {
 constexpr std::size_t kMaxSongScenes = 8;  // grid_model.hpp's GridModel::kMaxSceneCount
 constexpr std::size_t kSongBuildRingCapacity = 4;
 
+// Task #5 (per-section REPEAT COUNT, Phase-1: host-only, ZERO ABI/core
+// change): the sentinel a SongBuildScene::repeat carries to mean "hold this
+// scene forever" -- distinct from any real finite repeat count (those are
+// always >= 1, never 0). Mirrors GridModel::kSceneRepeatInfinite's own
+// "hold forever" sentinel one layer up (grid_panel.cpp's build_and_play_song
+// translates GridModel's kSceneRepeatInfinite into the wire's own literal
+// "inf" token, decoded back into THIS constant below) -- deliberately a
+// SEPARATE constant, not the same numeric value, since this file has no
+// dependency on grid_model.hpp (D38: this whole wire-translation layer never
+// reaches into the GUI-side model headers) and the wire's own token grammar
+// ("inf", not a magic number) is what actually crosses that boundary.
+constexpr std::uint8_t kSongBuildRepeatInfinite = 0;
+
 struct SongBuildScene {
   SectionType section = SectionType::kVarA;
   std::uint8_t n_bars = 1;
+  // Task #5: 1 (the default) plays this scene once before the chain
+  // advances to the next; N in [2,255] repeats it N times (apply_song_build
+  // below emits N consecutive, identical kSceneAdd steps referencing the
+  // SAME PerformanceStore slot); kSongBuildRepeatInfinite (0) holds this
+  // scene forever and truncates the rest of the built chain -- see apply_
+  // song_build's own header comment for why that costs only ONE kSceneAdd
+  // step, not an unbounded one.
+  std::uint8_t repeat = 1;
 };
 
 struct SongBuildCommand {
@@ -1173,10 +1195,41 @@ void handle_style_change_progression(Shell& shell, const Command& cmd,
 // Phase 1's own "scenes differ only by section" scope (design decision 2) --
 // forcing `chord_sequence_id = 0xFFFF` so `apply_performance` never restarts
 // the harmony loop on a scene transition (design decision 1). Rebuilds the
-// whole chain (`kSceneClear` + one `kSceneAdd` per scene, `n_bars` from the
-// per-scene length stepper, `beats_per_bar` from the captured base so Phase
-// 1 never forces an implicit meter reset) and starts it (`kScenePlay`) --
-// exactly the ABI sequence the observable contract requires, and no more.
+// whole chain (`kSceneClear` + one or more `kSceneAdd` per scene, `n_bars`
+// from the per-scene length stepper, `beats_per_bar` from the captured base
+// so Phase 1 never forces an implicit meter reset) and starts it
+// (`kScenePlay`) -- exactly the ABI sequence the observable contract
+// requires, and no more.
+//
+// Task #5 (per-section REPEAT COUNT, Phase-1: host-only, ZERO ABI/core
+// change): each scene's own `repeat` (SongBuildScene, above) decides how
+// MANY consecutive, identical `kSceneAdd` steps this loop emits for that
+// scene -- all referencing the SAME PerformanceStore slot `i` (a SceneStep
+// is a `{performance_slot, n_bars, ...}` pair, arrangrr/scene/scene_chain.hpp;
+// `store(i, perf)` still happens exactly ONCE per scene, only the number of
+// steps that POINT AT slot `i` changes), so the section holds for
+// `n_bars * repeat` bars total before the chain advances to the next scene.
+// An infinite scene (kSongBuildRepeatInfinite) needs only ONE such step: the
+// core SceneChain's own "the last step holds forever, no implicit loop"
+// semantic (scene_chain.hpp's on_bar()) already gives the infinite hold for
+// free once that step is the chain's last one -- so this loop emits that one
+// step and then BREAKS, deliberately never building the remaining scenes at
+// all (they are simply unreachable until a fresh song-build call replaces
+// the whole chain -- e.g. a manual scene-header click, activate_scene_column
+// in grid_panel.cpp, which is exactly the "explicit user gesture to resume"
+// the design calls for).
+//
+// Budget guard: `kMaxScenes` (arrangrr/config.hpp, 64) is the core
+// SceneChain's own hard step-count ceiling (a fixed-capacity StaticVector) --
+// `steps_emitted` tracks the running total across every scene's own repeat
+// expansion so this loop NEVER pushes more than `kMaxScenes` total
+// `kSceneAdd` commands, clamping the current scene's own repeat count down
+// (or skipping it outright once the budget is exhausted) rather than relying
+// on Engine::scene_add's own defensive kSceneTableFull warn as the only
+// backstop. In practice this clamp is never actually exercised by the GUI's
+// own inputs (kMaxSongScenes(8) populated columns x GridModel::
+// kMaxSceneRepeat(8) each == exactly kMaxScenes), but a wire line is not
+// bound to have come from the GUI, so the guard stays real, not decorative.
 //
 // Slot 0 doubles as BOTH the scratch capture target and scene 0's own step
 // Performance: `base` is copied out locally before scene 0's own store()
@@ -1185,9 +1238,22 @@ void handle_style_change_progression(Shell& shell, const Command& cmd,
 // PerformanceStore::store() call here trivially sequential (0, 1, 2, ...),
 // satisfying its "no gaps" contract regardless of how many scenes a PREVIOUS
 // song-build call left the pool sized to.
-void apply_song_build(Shell& shell, const SongBuildCommand& build) {
+//
+// Returns true iff the chain just built ends on an infinite (truncated)
+// scene -- the caller (run_engine's own Ending-cue watcher, below) needs
+// this: SceneChain::playing() flips true->false BOTH when a normal song
+// genuinely reaches its last populated column's own hold-completion (the
+// real "cue the Ending" signal, design decision 3) AND when THIS build's own
+// infinite scene reaches the end of its (deliberately truncated,
+// one-step-long) chain -- the core has no way to tell those two cases apart
+// from playing() alone, since both are "the chain has no more steps to
+// advance into". An infinite hold must NEVER cue an Ending or stop the
+// transport; the caller uses this return value to suppress that cue
+// specifically for the infinite case, without touching the genuine "song
+// really ended" path at all.
+bool apply_song_build(Shell& shell, const SongBuildCommand& build) {
   if (build.scene_count == 0) {
-    return;
+    return false;
   }
   Command capture_cmd{};
   capture_cmd.param = Param::kPerformanceStore;
@@ -1195,7 +1261,7 @@ void apply_song_build(Shell& shell, const SongBuildCommand& build) {
   shell.push_command(capture_cmd);
   const Performance* captured = shell.engine().performances().get(0);
   if (captured == nullptr) {
-    return;  // defensive: PerformanceStore::store() at slot 0 can never fail.
+    return false;  // defensive: PerformanceStore::store() at slot 0 can never fail.
   }
   const Performance base = *captured;
 
@@ -1203,25 +1269,42 @@ void apply_song_build(Shell& shell, const SongBuildCommand& build) {
   clear_cmd.param = Param::kSceneClear;
   shell.push_command(clear_cmd);
 
-  for (std::uint8_t i = 0; i < build.scene_count; ++i) {
+  std::size_t steps_emitted = 0;
+  bool ends_infinite = false;
+  for (std::uint8_t i = 0; i < build.scene_count && steps_emitted < kMaxScenes; ++i) {
     Performance perf = base;
     perf.variation = static_cast<std::uint8_t>(build.scenes[i].section);
     perf.chord_sequence_id = 0xFFFF;
     if (!shell.engine().performances().store(i, perf)) {
       break;  // pool exhausted -- play the steps already built rather than none.
     }
-    Command add_cmd{};
-    add_cmd.param = Param::kSceneAdd;
-    add_cmd.a = static_cast<std::int32_t>(i);
-    add_cmd.b = static_cast<std::int32_t>(build.scenes[i].n_bars) |
-                (static_cast<std::int32_t>(base.beats_per_bar) << 8);
-    add_cmd.c = static_cast<std::int32_t>(SceneTransitionKind::kCut);
-    shell.push_command(add_cmd);
+    const std::uint8_t repeat = build.scenes[i].repeat;
+    const bool infinite = repeat == kSongBuildRepeatInfinite;
+    // One step suffices for an infinite hold (see this function's own header
+    // comment); otherwise the scene's own repeat count, clamped so this
+    // scene alone never pushes the running total past kMaxScenes.
+    const std::size_t requested = infinite ? std::size_t{1} : std::size_t{repeat};
+    const std::size_t emit_count = std::min(requested, kMaxScenes - steps_emitted);
+    for (std::size_t r = 0; r < emit_count; ++r) {
+      Command add_cmd{};
+      add_cmd.param = Param::kSceneAdd;
+      add_cmd.a = static_cast<std::int32_t>(i);
+      add_cmd.b = static_cast<std::int32_t>(build.scenes[i].n_bars) |
+                  (static_cast<std::int32_t>(base.beats_per_bar) << 8);
+      add_cmd.c = static_cast<std::int32_t>(SceneTransitionKind::kCut);
+      shell.push_command(add_cmd);
+    }
+    steps_emitted += emit_count;
+    if (infinite) {
+      ends_infinite = true;
+      break;  // truncate the rest of the built chain -- this scene holds forever.
+    }
   }
 
   Command play_cmd{};
   play_cmd.param = Param::kScenePlay;
   shell.push_command(play_cmd);
+  return ends_infinite;
 }
 
 // Drains the Command ring: never silently dropped by the PRODUCER side (see
@@ -1397,13 +1480,25 @@ void InProcessBrainSession::Impl::run_engine() {
   // has never played.
   bool scene_chain_was_playing = false;
 
+  // Task #5 Phase-1 (per-section repeat count, host-only): an infinite-hold
+  // scene's own built chain is DELIBERATELY truncated right after its single
+  // step (see apply_song_build's own header comment), which makes
+  // SceneChain::playing() flip true->false the instant that step's hold
+  // completes -- structurally identical, from the core's point of view, to a
+  // normal song genuinely reaching the end of its last populated column.
+  // This flag, set from apply_song_build's own return value each time a NEW
+  // song is built, tells the Ending-cue watcher below which case it is
+  // looking at, so an infinite hold is never mistaken for "the song
+  // finished" and never cues an Ending or stops the transport.
+  bool active_song_ends_infinite = false;
+
   while (running.load(std::memory_order_acquire)) {
     drain_command_ring(shell, command_ring, progression_state);
     release_pending_progression_if_due(shell, progression_state);
 
     SongBuildCommand song_build;
     while (song_build_ring.try_pop(song_build)) {
-      apply_song_build(shell, song_build);
+      active_song_ends_infinite = apply_song_build(shell, song_build);
     }
 
     // Hardware MIDI-in (docs/proposals/looper-in-gui-contract.md §7 item 3):
@@ -1457,8 +1552,13 @@ void InProcessBrainSession::Impl::run_engine() {
     // ending, transport stops" behavior without any clip-arm latch (the old
     // race this replaces could only happen because ClipMatrix clip arms were
     // still in flight; SceneChain never touches ClipMatrix at all).
+    //
+    // Task #5 Phase-1 addition: suppress this cue when the currently-built
+    // song ends on an infinite scene (active_song_ends_infinite) -- see the
+    // flag's own declaration above for why the two cases are otherwise
+    // indistinguishable from playing() alone.
     const bool scene_chain_playing_now = shell.engine().scenes().playing();
-    if (scene_chain_was_playing && !scene_chain_playing_now) {
+    if (scene_chain_was_playing && !scene_chain_playing_now && !active_song_ends_infinite) {
       Command ending_cmd{};
       ending_cmd.param = Param::kStyleSection;
       ending_cmd.a = static_cast<std::int32_t>(SectionType::kEnding1);
@@ -1543,14 +1643,19 @@ void InProcessBrainSession::send(std::string_view command_line) {
     return;
   }
 
-  // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md):
-  // `song build <count> <section0> <bars0> <section1> <bars1> ...` --
-  // grid_panel.cpp's own build_and_play_song()/activate_scene_column() send
-  // this instead of the retired `style section` + `launch scene` pair. Like
-  // `midi-source load` above, the payload (a variable-length scene list)
-  // does not fit the fixed-size ABI `Command` POD, so it rides its own ring
-  // rather than command_line_to_command()'s translation, and is handled
-  // here, before that call.
+  // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md) +
+  // task #5 (per-section REPEAT COUNT, host-only, ZERO ABI/core change):
+  // `song build <count> <section0> <bars0> <repeat0> <section1> <bars1>
+  // <repeat1> ...` -- grid_panel.cpp's own build_and_play_song()/
+  // activate_scene_column() send this instead of the retired `style section`
+  // + `launch scene` pair. Each scene's own `repeatN` token is either a
+  // decimal `1`..`255` (play this scene that many times before advancing) or
+  // the literal `inf` (hold this scene forever -- decoded to
+  // kSongBuildRepeatInfinite, apply_song_build's own header comment covers
+  // what that does to the built chain). Like `midi-source load` above, the
+  // payload (a variable-length scene list) does not fit the fixed-size ABI
+  // `Command` POD, so it rides its own ring rather than command_line_to_
+  // command()'s translation, and is handled here, before that call.
   const std::vector<std::string_view> song_tokens = split_ws(command_line);
   if (song_tokens.size() >= 2 && song_tokens[0] == "song" && song_tokens[1] == "build") {
     BrainEvent note;
@@ -1559,8 +1664,8 @@ void InProcessBrainSession::send(std::string_view command_line) {
     note.cmd = std::string(command_line);
     std::uint64_t count = 0;
     if (song_tokens.size() < 3 || !parse_uint(song_tokens[2], count) || count == 0 ||
-        count > kMaxSongScenes || song_tokens.size() != 3 + count * 2) {
-      note.error = "usage: song build <count> <section> <bars> ...";
+        count > kMaxSongScenes || song_tokens.size() != 3 + count * 3) {
+      note.error = "usage: song build <count> <section> <bars> <repeat> ...";
       m_impl->local_warnings.push_back(std::move(note));
       return;
     }
@@ -1568,19 +1673,32 @@ void InProcessBrainSession::send(std::string_view command_line) {
     build.scene_count = static_cast<std::uint8_t>(count);
     for (std::uint64_t i = 0; i < count; ++i) {
       SectionType section{};
-      if (!parse_section_name(song_tokens[3 + (i * 2)], section)) {
-        note.error = "unknown section: " + std::string(song_tokens[3 + (i * 2)]);
+      if (!parse_section_name(song_tokens[3 + (i * 3)], section)) {
+        note.error = "unknown section: " + std::string(song_tokens[3 + (i * 3)]);
         m_impl->local_warnings.push_back(std::move(note));
         return;
       }
       std::uint64_t bars = 0;
-      if (!parse_uint(song_tokens[4 + (i * 2)], bars) || bars == 0 || bars > 255) {
-        note.error = "bad bar count: " + std::string(song_tokens[4 + (i * 2)]);
+      if (!parse_uint(song_tokens[4 + (i * 3)], bars) || bars == 0 || bars > 255) {
+        note.error = "bad bar count: " + std::string(song_tokens[4 + (i * 3)]);
         m_impl->local_warnings.push_back(std::move(note));
         return;
       }
-      build.scenes[i] =
-          SongBuildScene{.section = section, .n_bars = static_cast<std::uint8_t>(bars)};
+      const std::string_view repeat_token = song_tokens[5 + (i * 3)];
+      std::uint8_t repeat = 1;
+      if (repeat_token == "inf") {
+        repeat = kSongBuildRepeatInfinite;
+      } else {
+        std::uint64_t repeat_value = 0;
+        if (!parse_uint(repeat_token, repeat_value) || repeat_value == 0 || repeat_value > 255) {
+          note.error = "bad repeat count: " + std::string(repeat_token);
+          m_impl->local_warnings.push_back(std::move(note));
+          return;
+        }
+        repeat = static_cast<std::uint8_t>(repeat_value);
+      }
+      build.scenes[i] = SongBuildScene{
+          .section = section, .n_bars = static_cast<std::uint8_t>(bars), .repeat = repeat};
     }
     if (!m_impl->song_build_ring.try_push(build)) {
       BrainEvent warn;

@@ -456,6 +456,22 @@ add_test(NAME test_song_mode_scenechain_contract
 set_tests_properties(test_song_mode_scenechain_contract PROPERTIES
   LABELS functional)
 
+# Task #5 Phase-1 (per-section REPEAT COUNT, host-only, ZERO ABI/core
+# change) OBSERVABLE-CONTRACT hardening: the `song build` wire line really
+# carries a repeat token per scene, a finite repeat=K genuinely holds for
+# K*n_bars real bars, and an infinite scene truncates the built chain until
+# an explicit resume gesture.
+add_executable(test_song_mode_repeat_count_contract
+  test_song_mode_repeat_count_contract.cpp)
+target_link_libraries(test_song_mode_repeat_count_contract PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_song_mode_repeat_count_contract PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_song_mode_repeat_count_contract
+  COMMAND test_song_mode_repeat_count_contract)
+set_tests_properties(test_song_mode_repeat_count_contract PROPERTIES
+  LABELS functional)
+
 # Task #6 ACCEPTANCE TEST: the always-visible per-scene LENGTH stepper in
 # every scene-header column -- real click injection changes GridModel::
 # scene_bars, and (via a real InProcessBrainSession) a dialed-down scene

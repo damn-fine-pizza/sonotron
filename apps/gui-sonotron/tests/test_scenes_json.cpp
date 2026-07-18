@@ -217,6 +217,87 @@ void test_write_then_parse_round_trips_sections() {
   }
 }
 
+// A freshly-constructed GridModel already carries the kDefaultSceneRepeat
+// default on every scene column (task #5).
+void test_default_repeats_are_one() {
+  sonotron::GridModel model;
+  for (std::size_t i = 0; i < sonotron::GridModel::kMaxSceneCount; ++i) {
+    CHECK(model.scene_repeat(i) == sonotron::GridModel::kDefaultSceneRepeat);
+  }
+}
+
+// Per-scene REPEAT COUNTS round-trip through save + a separate load into a
+// fresh GridModel exactly, alongside names/sections/bars -- the load path a
+// GUI restart takes (task #5).
+void test_repeat_survives_save_and_reload() {
+  const std::filesystem::path path = unique_temp_path();
+  std::error_code remove_error;
+  std::filesystem::remove_all(path.parent_path(), remove_error);
+
+  sonotron::GridModel writer(5);
+  writer.set_scene_name(0, "Intro");
+  writer.set_scene_repeat(0, 3);
+  writer.set_scene_repeat(1, sonotron::GridModel::kSceneRepeatInfinite);
+  writer.set_scene_repeat(4, 8);
+
+  std::string error;
+  CHECK(sonotron::save_scenes(path.string(), writer, error));
+
+  sonotron::GridModel reader(5);
+  CHECK(sonotron::load_scenes_or_create_default(path.string(), reader, error));
+  CHECK(reader.scene_name(0) == "Intro");
+  CHECK(reader.scene_repeat(0) == 3);
+  CHECK(reader.scene_repeat(1) == sonotron::GridModel::kSceneRepeatInfinite);
+  CHECK(reader.scene_repeat(4) == 8);
+  // An untouched column keeps the constructor default.
+  CHECK(reader.scene_repeat(2) == sonotron::GridModel::kDefaultSceneRepeat);
+
+  std::filesystem::remove_all(path.parent_path(), remove_error);
+}
+
+// A scenes.json written by a PRE-task-#5 binary (no "repeats" key at all) is
+// not a parse failure -- every scene keeps the constructor default repeat
+// count, exactly like GridModel's own fresh-construction default.
+void test_missing_repeats_key_falls_back_to_default() {
+  sonotron::GridModel model;
+  std::string error;
+  const bool ok = sonotron::parse_scenes(R"({ "scenes": ["Intro", "Verse"] })", model, error);
+  CHECK(ok);
+  CHECK(model.scene_name(0) == "Intro");
+  CHECK(model.scene_name(1) == "Verse");
+  for (std::size_t i = 0; i < sonotron::GridModel::kMaxSceneCount; ++i) {
+    CHECK(model.scene_repeat(i) == sonotron::GridModel::kDefaultSceneRepeat);
+  }
+}
+
+// A "repeats" array shorter than kMaxSceneCount leaves the remaining indices
+// at the constructor default, same discipline as "scenes"/"sections"/"bars"
+// above.
+void test_short_repeats_array_leaves_remaining_indices_untouched() {
+  sonotron::GridModel model;
+  std::string error;
+  const bool ok = sonotron::parse_scenes(R"({ "scenes": [], "repeats": [5] })", model, error);
+  CHECK(ok);
+  CHECK(model.scene_repeat(0) == 5);
+  CHECK(model.scene_repeat(1) == sonotron::GridModel::kDefaultSceneRepeat);
+}
+
+// write_scenes() -> parse_scenes() round-trips repeats exactly, alongside
+// names/sections/bars, through in-memory text alone.
+void test_write_then_parse_round_trips_repeats() {
+  sonotron::GridModel writer;
+  writer.set_scene_repeat(1, 6);
+  writer.set_scene_repeat(3, sonotron::GridModel::kSceneRepeatInfinite);
+  const std::string text = sonotron::write_scenes(writer);
+
+  sonotron::GridModel reader;
+  std::string error;
+  CHECK(sonotron::parse_scenes(text, reader, error));
+  for (std::size_t i = 0; i < sonotron::GridModel::kMaxSceneCount; ++i) {
+    CHECK(reader.scene_repeat(i) == writer.scene_repeat(i));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -231,5 +312,10 @@ int main() {
   test_missing_sections_key_falls_back_to_default();
   test_short_sections_array_leaves_remaining_indices_untouched();
   test_write_then_parse_round_trips_sections();
+  test_default_repeats_are_one();
+  test_repeat_survives_save_and_reload();
+  test_missing_repeats_key_falls_back_to_default();
+  test_short_repeats_array_leaves_remaining_indices_untouched();
+  test_write_then_parse_round_trips_repeats();
   return sonotron::test::failures();
 }

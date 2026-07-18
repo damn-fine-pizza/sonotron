@@ -646,6 +646,22 @@ int active_style_section_bars(const GridModel& model, std::size_t scene_index) {
   return model.scene_bars(scene_index);
 }
 
+// Task #5 (per-section REPEAT COUNT, Phase-1: host-only, ZERO ABI/core
+// change): translates GridModel::scene_repeat's own value (1..kMaxSceneRepeat
+// real counts, or the kSceneRepeatInfinite sentinel) into the `song build`
+// wire line's own repeat token grammar -- a decimal string for a real count,
+// or the literal `inf` for "hold forever" (in_process_brain_session.cpp's
+// wire parser decodes `inf` back into its own kSongBuildRepeatInfinite
+// constant, a SEPARATE numeric sentinel by design, D38: that file never
+// reaches into grid_model.hpp).
+std::string scene_repeat_wire_token(const GridModel& model, std::size_t scene_index) {
+  const int repeat = model.scene_repeat(scene_index);
+  if (repeat == GridModel::kSceneRepeatInfinite) {
+    return "inf";
+  }
+  return std::to_string(repeat);
+}
+
 // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md, design
 // decision 4): the double section-trigger this function used to send
 // (`style section <name>` + `launch scene <n> quantize 1`, fighting each
@@ -658,12 +674,20 @@ int active_style_section_bars(const GridModel& model, std::size_t scene_index) {
 // HOLD (SceneChain's "last step holds, no implicit loop") degrades exactly
 // to "select this section and stay there", the same fixed single-column loop
 // the old double-send produced -- core-driven, no ClipMatrix involved.
+//
+// Task #5: this is also the RESUME gesture out of an infinite hold (apply_
+// song_build's own header comment) -- a click here always rebuilds the WHOLE
+// chain from scratch as a fresh one-step song, regardless of whatever an
+// earlier auto-song build's own repeat/infinite state was doing, so it
+// deliberately sends a plain repeat of "1" (not this column's own configured
+// repeat -- moot anyway: a one-step chain's last (only) step already holds
+// forever on its own, independent of any repeat count).
 void activate_scene_column(const GridModel& model, BrainSession& brain_session, UiState& fx,
                            std::size_t scene_index, int current_bar) {
   const std::string_view section_name = section_wire_name(model.scene_section(scene_index));
   const std::string section_arg = section_name.empty() ? "varA" : std::string(section_name);
   brain_session.send("song build 1 " + section_arg + " " +
-                     std::to_string(model.scene_bars(scene_index)));
+                     std::to_string(model.scene_bars(scene_index)) + " 1");
   // Shared bookkeeping every call site already needed afterward: the active
   // scene's own beat-synced playhead sweep (render_grid_panel's active_
   // section_phase) anchors from THIS bar, not a stale one.
@@ -673,14 +697,17 @@ void activate_scene_column(const GridModel& model, BrainSession& brain_session, 
 
 // Song-mode Phase 1: the ONLY way a multi-scene song is built and started.
 // Collects every POPULATED scene column (scene_is_populated, above), in
-// column order, into the one `song build <n> <section> <bars> ...` line
-// in_process_brain_session.cpp's engine thread turns into the full
+// column order, into the one `song build <n> <section> <bars> <repeat> ...`
+// line in_process_brain_session.cpp's engine thread turns into the full
 // kSceneClear + N*kSceneAdd + kScenePlay ABI sequence the observable
 // contract requires (song-mode-scenechain-adoption.md's own "Observable
 // contract" section) -- see apply_song_build's own header comment for why
 // that sequencing must happen on the engine thread and not here (only it can
 // reach Engine::performances()). An all-empty grid sends nothing (there is
-// no populated column to build a step from).
+// no populated column to build a step from). Task #5: each populated
+// column's own `<repeat>` token (scene_repeat_wire_token, above) is now part
+// of this line -- apply_song_build expands it into that many consecutive
+// kSceneAdd steps, or truncates the chain right there for an infinite one.
 void build_and_play_song(const GridModel& model, BrainSession& brain_session,
                          std::size_t scene_count) {
   std::vector<std::size_t> populated;
@@ -698,6 +725,7 @@ void build_and_play_song(const GridModel& model, BrainSession& brain_session,
     const std::string_view section_name = section_wire_name(model.scene_section(s));
     line += " " + (section_name.empty() ? std::string("varA") : std::string(section_name));
     line += " " + std::to_string(model.scene_bars(s));
+    line += " " + scene_repeat_wire_token(model, s);
   }
   brain_session.send(line);
 }
@@ -862,13 +890,14 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
     // below never shifts while a rename is in progress.
     ImGui::Dummy(ImVec2(cz, std::max(0.0F, header_h - ImGui::GetFrameHeight())));
   } else {
-    // Task #6: reserve the bottom kStepperRowH strip for the always-visible
-    // "- N +" length stepper, and shrink the launch hit-region to the area
-    // ABOVE it -- the SAME two-separate-hit-regions fix render_track_label
+    // Task #6 (+ task #5 below): reserve the bottom TWO kStepperRowH strips
+    // -- the always-visible "- N +" length stepper, then the "- K +" REPEAT
+    // stepper right below it -- and shrink the launch hit-region to the area
+    // ABOVE both -- the SAME two-separate-hit-regions fix render_track_label
     // already applies for its own M/S latches below the track name, so
-    // clicking the stepper can never also fire activate_scene_column via the
-    // "head" InvisibleButton below.
-    const float name_area_h = std::max(0.0F, header_h - kStepperRowH);
+    // clicking either stepper can never also fire activate_scene_column via
+    // the "head" InvisibleButton below.
+    const float name_area_h = std::max(0.0F, header_h - kStepperRowH * 2.0F);
     const bool go = ImGui::InvisibleButton("head", ImVec2(cz, name_area_h));
     if (ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVariationDragPayloadId)) {
@@ -927,6 +956,32 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
       model.set_scene_bars(s, bars + 1);
     }
 
+    // Task #5: the always-visible "- K +" REPEAT-COUNT stepper, one row
+    // below the bars stepper -- same layout formula, own InvisibleButton IDs
+    // (PushID("repeat") keeps "-"/"+" here from colliding with the bars
+    // stepper's own "-"/"+" IDs above, both scoped inside this cell's outer
+    // PushID(s)). Displays "\xE2\x88\x9E" (infinity) once the value reaches
+    // GridModel::kSceneRepeatInfinite -- model.set_scene_repeat's own clamp
+    // handles the [1, kSceneRepeatInfinite] bound; no re-clamping needed
+    // here, matching the bars stepper's own discipline.
+    ImGui::PushID("repeat");
+    const float repeat_stepper_y = stepper_y + kStepperRowH;
+    const int repeat = model.scene_repeat(s);
+    if (stepper_button("-", ImVec2(hp0.x, repeat_stepper_y), font_size)) {
+      model.set_scene_repeat(s, repeat - 1);
+    }
+    const std::string repeat_text =
+        repeat == GridModel::kSceneRepeatInfinite ? "\xE2\x88\x9E" : std::to_string(repeat);
+    const ImVec2 repeat_ts = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, repeat_text.c_str());
+    hdl->AddText(font, font_size,
+                 ImVec2(hp0.x + cz * 0.5F - repeat_ts.x * 0.5F,
+                        repeat_stepper_y + (kStepperRowH - repeat_ts.y) * 0.5F),
+                 neon::u32(theme::kText), repeat_text.c_str());
+    if (stepper_button("+", ImVec2(hp0.x + cz - kStepperBtnW, repeat_stepper_y), font_size)) {
+      model.set_scene_repeat(s, repeat + 1);
+    }
+    ImGui::PopID();
+
     if (double_clicked) {
       fx.renaming_scene = static_cast<int>(s);
       std::snprintf(fx.rename_buffer.data(), fx.rename_buffer.size(), "%s", name.c_str());
@@ -972,8 +1027,10 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
 // track rows below would start at a different Y per column. Task #6 adds one
 // fixed extra `kStepperRowH` to this shared height, for the always-visible
 // "- N +" length stepper every column now reserves below its own name/caret/
-// underline (render_scene_header_cell) -- reserved uniformly here, same as
-// the wrapped-name height above, so it never shifts per-column either.
+// underline (render_scene_header_cell); task #5 adds a SECOND `kStepperRowH`
+// for the "- K +" repeat-count stepper right below it -- both reserved
+// uniformly here, same as the wrapped-name height above, so neither ever
+// shifts per-column either.
 void render_scene_header_row(GridModel& model, BrainSession& brain_session,
                              const AppState& app_state, UiState& fx, std::size_t scenes, float cz) {
   ImFont* font = ImGui::GetFont();
@@ -986,7 +1043,7 @@ void render_scene_header_row(GridModel& model, BrainSession& brain_session,
   }
   const float line_h = font->CalcTextSizeA(font_size, 1.0e4F, 0.0F, "Ag").y;
   const float header_h =
-      std::max(cz * 0.5F, static_cast<float>(max_lines) * line_h + 6.0F) + kStepperRowH;
+      std::max(cz * 0.5F, static_cast<float>(max_lines) * line_h + 6.0F) + kStepperRowH * 2.0F;
 
   ImGui::Dummy(ImVec2(kLabelColWidth, header_h));
   for (std::size_t s = 0; s < scenes; ++s) {

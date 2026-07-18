@@ -145,26 +145,31 @@ StepperClickPoints locate_scene_stepper(ImDrawData* locate, const th::Rect& grid
 
   const ImU32 stepper_fill = sonotron::neon::u32(sonotron::theme::kFrameBg, 0.85F);
   const std::vector<th::Rect> stepper_clusters = th::find_color_clusters(locate, stepper_fill);
-  th::Rect band;
+  // Task #5 added a SECOND stepper row (repeat count) directly below this
+  // one, same fill color and flush against it (no vertical gap) -- so
+  // find_color_clusters no longer returns two small per-row rects at all: the
+  // "-" fill (and, separately, the "+" fill) of both rows now merges into ONE
+  // tall rect spanning both rows, since cluster grouping only needs adjacent
+  // same-colored pixels, not a shared row. This test targets the BARS
+  // stepper specifically (task #6, the topmost row), so rather than trust any
+  // merged rect's own extent, it locates ONLY that top edge (the minimum
+  // min.y among matching clusters) and clicks a few pixels below it --
+  // solidly inside the top row, clear of the second row's own territory.
+  float top_row_y = -1.0F;
   for (const th::Rect& r : stepper_clusters) {
     if (r.min.x >= col_left - 5.0F && r.max.x <= col_left + cz + 5.0F &&
         r.min.y >= col_caret.min.y && r.max.y <= col_caret.min.y + 100.0F) {
-      if (!band.found) {
-        band = r;
-      } else {
-        band.min.x = std::min(band.min.x, r.min.x);
-        band.min.y = std::min(band.min.y, r.min.y);
-        band.max.x = std::max(band.max.x, r.max.x);
-        band.max.y = std::max(band.max.y, r.max.y);
+      if (top_row_y < 0.0F || r.min.y < top_row_y) {
+        top_row_y = r.min.y;
       }
     }
   }
-  if (!band.found) {
+  if (top_row_y < 0.0F) {
     return out;
   }
-  const float mid_y = (band.min.y + band.max.y) * 0.5F;
-  out.minus_click = ImVec2(col_left + 6.0F, mid_y);
-  out.plus_click = ImVec2(col_left + cz - 6.0F, mid_y);
+  const float click_y = top_row_y + 6.0F;
+  out.minus_click = ImVec2(col_left + 6.0F, click_y);
+  out.plus_click = ImVec2(col_left + cz - 6.0F, click_y);
   out.found = true;
   return out;
 }

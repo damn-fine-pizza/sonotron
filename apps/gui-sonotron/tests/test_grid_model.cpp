@@ -203,6 +203,63 @@ void test_add_scene_preserves_scene_bars() {
   CHECK(grid.scene_count() == before + 1);
 }
 
+// Task #5: scene_repeat/set_scene_repeat is the always-visible per-scene
+// REPEAT-COUNT stepper's own model storage -- every scene defaults to
+// kDefaultSceneRepeat (1, "play once"), bounds-checked exactly like
+// scene_bars above, and the setter clamps to [1, kSceneRepeatInfinite] (one
+// past kMaxSceneRepeat, the "hold forever" sentinel).
+void test_scene_repeat_defaults_to_default_scene_repeat() {
+  GridModel grid;
+  CHECK(grid.scene_repeat(0) == GridModel::kDefaultSceneRepeat);
+  CHECK(grid.scene_repeat(2) == GridModel::kDefaultSceneRepeat);
+  CHECK(grid.scene_repeat(GridModel::kMaxSceneCount - 1) == GridModel::kDefaultSceneRepeat);
+}
+
+void test_set_scene_repeat_and_bounds() {
+  GridModel grid;
+  grid.set_scene_repeat(1, 3);
+  CHECK(grid.scene_repeat(1) == 3);
+  // A neighbour is untouched.
+  CHECK(grid.scene_repeat(0) == GridModel::kDefaultSceneRepeat);
+  CHECK(grid.scene_repeat(2) == GridModel::kDefaultSceneRepeat);
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_repeat(GridModel::kMaxSceneCount, 3);
+  grid.set_scene_repeat(GridModel::kMaxSceneCount + 10, 3);
+
+  // Out-of-range get returns the default, not garbage.
+  CHECK(grid.scene_repeat(GridModel::kMaxSceneCount) == GridModel::kDefaultSceneRepeat);
+  CHECK(grid.scene_repeat(GridModel::kMaxSceneCount + 10) == GridModel::kDefaultSceneRepeat);
+}
+
+void test_set_scene_repeat_clamps_floor_at_one() {
+  GridModel grid;
+  grid.set_scene_repeat(0, 0);
+  CHECK(grid.scene_repeat(0) == 1);
+  grid.set_scene_repeat(0, -5);
+  CHECK(grid.scene_repeat(0) == 1);
+}
+
+void test_set_scene_repeat_clamps_ceiling_at_infinite_sentinel() {
+  GridModel grid;
+  grid.set_scene_repeat(0, GridModel::kSceneRepeatInfinite + 1);
+  CHECK(grid.scene_repeat(0) == GridModel::kSceneRepeatInfinite);
+  grid.set_scene_repeat(0, 1000);
+  CHECK(grid.scene_repeat(0) == GridModel::kSceneRepeatInfinite);
+}
+
+void test_add_scene_preserves_scene_repeat() {
+  GridModel grid;
+  grid.set_scene_repeat(0, 4);
+  const std::size_t before = grid.scene_count();
+  grid.add_scene();
+  // Storage is decoupled from the cell-growth reindex, exactly like
+  // scene_bars/scene_name/scene_section above -- add_scene() only touches
+  // m_cells.
+  CHECK(grid.scene_repeat(0) == 4);
+  CHECK(grid.scene_count() == before + 1);
+}
+
 // section_wire_name mirrors in_process_brain_session.cpp's own
 // parse_section_name spellings exactly (both directions of the same table).
 void test_section_wire_name_matches_known_spellings() {
@@ -523,6 +580,11 @@ int main() {
   test_set_scene_bars_clamps_floor_at_one();
   test_set_scene_bars_clamps_ceiling_at_max();
   test_add_scene_preserves_scene_bars();
+  test_scene_repeat_defaults_to_default_scene_repeat();
+  test_set_scene_repeat_and_bounds();
+  test_set_scene_repeat_clamps_floor_at_one();
+  test_set_scene_repeat_clamps_ceiling_at_infinite_sentinel();
+  test_add_scene_preserves_scene_repeat();
   test_section_wire_name_matches_known_spellings();
   test_launch_wired_is_lit();
   test_next_scene_auto_song_off_stays();

@@ -163,6 +163,36 @@ class GridModel {
   int scene_bars(std::size_t scene_index) const;
   void set_scene_bars(std::size_t scene_index, int bars);
 
+  // Host-side per-scene REPEAT COUNT (task #5, docs/proposals/song-mode-
+  // scenechain-adoption.md's own "reserved for a future extension" note on
+  // scene_bars above -- this is that extension, Phase-1: host-only, ZERO ABI
+  // change). Every scene defaults to kDefaultSceneRepeat (1 -- "play once",
+  // the pre-existing behavior every populated column already had before this
+  // field existed), so a fresh grid behaves identically to before until the
+  // user dials in a repeat via the "- K +" stepper (grid_panel.cpp's
+  // render_scene_header_cell, below the existing bars stepper). Value
+  // semantics: 1 (kDefaultSceneRepeat) plays the scene once before auto-song
+  // advances past it; K in [2, kMaxSceneRepeat] repeats the scene K times;
+  // kSceneRepeatInfinite (one past kMaxSceneRepeat, a value no finite repeat
+  // count can ever collide with) holds the scene forever -- in_process_
+  // brain_session.cpp's apply_song_build reads this value (by way of the
+  // `song build` wire line's own repeat token, grid_panel.cpp's build_and_
+  // play_song) and truncates the rest of the built chain the instant it
+  // emits an infinite scene, since the core SceneChain's own "last step
+  // holds forever" semantic already gives the hold for free. Bounds-checked
+  // exactly like scene_bars above: an out-of-range `scene_index` is a no-op
+  // for the setter and returns kDefaultSceneRepeat from the getter. The
+  // setter clamps `repeat` to [1, kSceneRepeatInfinite] -- kSceneRepeatInfinite
+  // itself is a legal, settable value (stepping "+" past kMaxSceneRepeat
+  // lands there and shows "∞"; stepping "-" from there returns to
+  // kMaxSceneRepeat), matching kSceneRepeatInfinite's own "one past max"
+  // definition below.
+  static constexpr int kDefaultSceneRepeat = 1;
+  static constexpr int kMaxSceneRepeat = 8;
+  static constexpr int kSceneRepeatInfinite = kMaxSceneRepeat + 1;
+  int scene_repeat(std::size_t scene_index) const;
+  void set_scene_repeat(std::size_t scene_index, int repeat);
+
  private:
   std::size_t index_of(std::size_t part_index, std::size_t scene_index) const;
 
@@ -171,6 +201,7 @@ class GridModel {
   std::array<std::string, kMaxSceneCount> m_scene_names;
   std::array<std::uint8_t, kMaxSceneCount> m_scene_sections;
   std::array<int, kMaxSceneCount> m_scene_bars;
+  std::array<int, kMaxSceneCount> m_scene_repeat;
 };
 
 // Section-type wire-name table, numerically/spelling-IDENTICAL to

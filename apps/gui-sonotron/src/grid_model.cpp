@@ -12,6 +12,7 @@ GridModel::GridModel(std::size_t scene_count)
   }
   m_scene_sections.fill(kDefaultSectionType);
   m_scene_bars.fill(kDefaultSceneBars);
+  m_scene_repeat.fill(kDefaultSceneRepeat);
 }
 
 std::string_view GridModel::part_label(std::size_t part_index) const {
@@ -95,6 +96,20 @@ void GridModel::set_scene_bars(std::size_t scene_index, int bars) {
     return;
   }
   m_scene_bars[scene_index] = std::clamp(bars, 1, kMaxSceneBars);
+}
+
+int GridModel::scene_repeat(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return kDefaultSceneRepeat;
+  }
+  return m_scene_repeat[scene_index];
+}
+
+void GridModel::set_scene_repeat(std::size_t scene_index, int repeat) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  m_scene_repeat[scene_index] = std::clamp(repeat, 1, kSceneRepeatInfinite);
 }
 
 std::string_view section_wire_name(std::uint8_t section) {
