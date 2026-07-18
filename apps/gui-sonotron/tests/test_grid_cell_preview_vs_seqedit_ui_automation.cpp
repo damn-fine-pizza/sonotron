@@ -41,11 +41,13 @@
 #include "src/browser_model.hpp"
 #include "src/grid_model.hpp"
 #include "src/grid_panel.hpp"
+#include "src/launch_rows.hpp"
 #include "src/neon_widgets.hpp"
 #include "src/parts_model.hpp"
 #include "src/preview.hpp"
 #include "src/seqedit_model.hpp"
 #include "src/seqedit_panel.hpp"
+#include "src/step_pattern_model.hpp"
 #include "src/theme.hpp"
 #include "src/ui_state.hpp"
 
@@ -61,9 +63,14 @@ using sonotron::AppState;
 using sonotron::BrainEvent;
 using sonotron::BrainSession;
 using sonotron::BrainSnapshot;
+using sonotron::GridCell;
+using sonotron::GridCellKind;
 using sonotron::GridModel;
+using sonotron::GridRow;
 using sonotron::PartsModel;
 using sonotron::SeqEditModel;
+using sonotron::StepPatternModel;
+using sonotron::TrackCellPreview;
 using sonotron::UiState;
 namespace th = sonotron::test_harness;
 
@@ -100,9 +107,10 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
   ImGui::NewFrame();
   // Tall enough that "sequence_edit"'s seq_canvas never needs to scroll for
   // this fixture (owner task #1's lane-partition fix, seqedit_panel.cpp:
-  // every visible role -- all 9, default -- now gets its own kLaneH-tall
-  // lane; 9 lanes comfortably need more than the previous 700px window's
-  // remaining seq_canvas height). This test's own column-occupancy math
+  // every visible launch_rows.hpp kRows role -- all 6, default -- now gets
+  // its own kLaneH-tall lane; 6 lanes comfortably need more than the
+  // previous 700px window's remaining seq_canvas height). This test's own
+  // column-occupancy math
   // below assumes the canvas child's OUTER rect (find_child_window_rect)
   // exactly equals its INNER content width -- true only when no scrollbar
   // is showing, so keeping this window tall enough to avoid one at all
@@ -115,7 +123,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
   ImGui::EndChild();
   ImGui::Spacing();
   ImGui::BeginChild("sequence_edit", ImVec2(0, 0), ImGuiChildFlags_None);
-  sonotron::render_seqedit_panel(seqedit, fx);
+  sonotron::render_seqedit_panel(seqedit, fx, model);
   ImGui::EndChild();
   ImGui::End();
   ImGui::Render();
@@ -293,9 +301,180 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   ImGui::DestroyContext();
 }
 
+// Fabrizio review (2026-07-18, track-set + content divergence): before this
+// pass, seqedit_panel.cpp drew every lane from the STATIC style table
+// (preview::preview_for(active_style, section, role)), completely ignoring
+// what a cell's REAL GridModel content actually was -- a live kStepTrack
+// cell's Sequence Edit lane and its Repeat-Zone mini-preview could show
+// UNRELATED content. Both panels now resolve every cell through the SAME
+// launch_rows.hpp::resolve_track_cell_preview(), so this test proves that
+// closes for real: (1) a REAL kStepTrack cell (created the same way the
+// Repeat Zone's own right-click gesture does, populated with real notes)
+// renders IDENTICAL note content in both panels; (2) a cell left
+// GridCellKind::kEmpty resolves to a blank pattern -- the exact function
+// both panels call, so a blank result there is blank in both by
+// construction.
+void test_step_track_and_empty_cell_content_matches_across_panels() {
+  ImGui::CreateContext();
+  ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 1500.0F);
+  unsigned char* tex_pixels = nullptr;
+  int tex_w = 0;
+  int tex_h = 0;
+  ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
+
+  // 5 scenes (same scene count main.cpp actually boots with, and the cap
+  // render_grid_panel itself renders). seed_demo()'s own demo pattern below
+  // uses kRows POSITION as its `row` field, not raw role_index -- it touches
+  // drums(kRows[0])'s scenes {0,1,3} and bass(kRows[1])'s scenes {0,2}, so
+  // scene 4 is the one column neither role has, keeping this fixture's own
+  // cells there safe from collision.
+  GridModel model(5);
+  SeqEditModel seqedit;
+  PartsModel parts;
+  SpyBrainSession brain;
+  AppState app_state;
+  UiState fx;
+  fx.cell_zoom = 88.0F;
+  for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
+    if (sonotron::kBuiltinStyleNames[i] == "basic") {
+      fx.active_style = static_cast<int>(i);
+      break;
+    }
+  }
+
+  // Real step-track content for drums (role_index 0), the same StepPatternStore
+  // API try_create_step_track_on_empty_cell (grid_panel.cpp) itself uses --
+  // 4 real notes on the backbeat, well inside the default 16-step/1-bar
+  // length (preview::preview_for_track's own bars-from-length math).
+  const int track_idx = seqedit.step_tracks().create_track(/*role_index=*/0, /*port=*/0,
+                                                           /*channel=*/0);
+  CHECK(track_idx >= 0);
+  StepPatternModel* track = seqedit.step_tracks().track(static_cast<std::size_t>(track_idx));
+  CHECK(track != nullptr);
+  if (track == nullptr) {
+    ImGui::DestroyContext();
+    return;
+  }
+  CHECK(track->set_step(0, 60, 100, 120));
+  CHECK(track->set_step(4, 60, 100, 120));
+  CHECK(track->set_step(8, 60, 100, 120));
+  CHECK(track->set_step(12, 60, 100, 120));
+  model.set_cell(/*part_index=*/0, /*scene_index=*/4, GridCellKind::kStepTrack, "step",
+                 /*loop_slot_id=*/-1, /*step_track_index=*/track_idx);
+  // Bass (role_index 2)'s scene 4 is left at its GridModel default,
+  // GridCellKind::kEmpty -- the empty-cell half of this pin below.
+
+  // Frame 1: seed_demo() latches; verify it really did leave our own cells
+  // alone before trusting anything else.
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  CHECK(model.cell(0, 4).kind == GridCellKind::kStepTrack);
+  CHECK(model.cell(2, 4).kind == GridCellKind::kEmpty);
+
+  // Locate the drums/scene-4 launch cell for real (same rest-fill-color
+  // clustering technique as the sibling test above; drums is kRows[0], so
+  // its row color is theme::kTrackColor[0] regardless of role_index). Only
+  // scene 0 ("A") and scene 1 ("B") are used as the anchor pair here (both
+  // seed_demo-filled, so both are guaranteed to cluster cleanly): an EMPTY
+  // scene column (like this fixture's own scene 2, never seeded) draws far
+  // fewer vertices between its neighbors than a filled one, which can make
+  // find_color_clusters' draw-order-proximity grouping merge or drop an
+  // all-empty column's own rest-fill cluster -- so scene 4's rect is
+  // computed from the known, uniform column spacing between two RELIABLY
+  // separate anchors, rather than trusted-by-index out of however many
+  // clusters happen to survive that fragmentation for every column.
+  ImGui::GetIO().MousePos = ImVec2(-100.0F, -100.0F);
+  th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
+  ImDrawData* locate = render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  const ImU32 drums_not_playing = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.10F);
+  const std::vector<th::Rect> drums_cells = th::find_color_clusters(locate, drums_not_playing);
+  CHECK(drums_cells.size() >= 2);
+  if (drums_cells.size() < 2) {
+    ImGui::DestroyContext();
+    return;
+  }
+  const float column_spacing = drums_cells[1].min.x - drums_cells[0].min.x;
+  th::Rect scene4_cell = drums_cells[0];
+  scene4_cell.min.x += 4.0F * column_spacing;
+  scene4_cell.max.x += 4.0F * column_spacing;
+
+  // Real click: open the step-track cell for real (render_track_cell's REAL
+  // click handler -- never hand-written by this test).
+  th::queue_mouse_down(scene4_cell.center());
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  th::queue_mouse_up(scene4_cell.center());
+  render_one_frame(model, seqedit, parts, brain, app_state, fx);
+  th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
+  ImDrawData* final_draw_data = render_one_frame(model, seqedit, parts, brain, app_state, fx);
+
+  CHECK(fx.open_cell >= 0);
+  CHECK(seqedit.open_step_track() == track_idx);  // real click set this for real
+
+  // Cell geometry never moves from opening it (draw_cell's own "opened" ring
+  // is drawn ON TOP of, not instead of, the same rest fill/position) -- the
+  // pre-click `scene4_cell` rect is still exactly right, no re-locate needed.
+  const th::Rect& grid_cell_rect = scene4_cell;
+  th::Rect grid_band;
+  grid_band.min = ImVec2(grid_cell_rect.min.x + 6.0F, grid_cell_rect.min.y + fx.cell_zoom * 0.22F);
+  grid_band.max = ImVec2(grid_cell_rect.max.x - 6.0F, grid_cell_rect.max.y - 14.0F);
+  grid_band.found = true;
+
+  const th::Rect canvas_rect = th::find_child_window_rect("seq_canvas");
+  CHECK(canvas_rect.found);
+
+  // The opened role's own note color -- IDENTICAL constant in both panels
+  // (grid_panel.cpp's row color is theme::kTrackColor[r], keyed by kRows
+  // POSITION; seqedit_panel.cpp's track_color is theme::kTrackColor[fx.
+  // open_row], and a real click sets fx.open_row to that SAME kRows position
+  // -- see render_track_cell's own comment), both painted at 0.85F alpha.
+  const ImU32 note_color = sonotron::neon::u32(sonotron::theme::kTrackColor[0], 0.85F);
+  constexpr int kStepTrackBars = 1;  // 4 real notes, all inside the default 16-step length
+  const int grid_notes_shown =
+      th::count_occupied_columns_in_band(final_draw_data, note_color, grid_band,
+                                         kStepTrackBars * sonotron::neon::ClipPattern::kCellSteps);
+  const int seqedit_notes_shown =
+      th::count_occupied_columns_in_band(final_draw_data, note_color, canvas_rect,
+                                         kStepTrackBars * sonotron::neon::ClipPattern::kSteps);
+
+  // THE STEP-TRACK PARITY PIN: 4 authored notes, painted identically by both
+  // panels through the one shared resolver.
+  CHECK(seqedit_notes_shown == 4);
+  CHECK(grid_notes_shown == seqedit_notes_shown);
+
+  // THE EMPTY-CELL BLANK PIN: bass' own scene-4 cell was never registered
+  // (still GridCellKind::kEmpty). Both panels resolve every cell's content
+  // through this EXACT function -- proving it returns an all-blank pattern
+  // for an empty cell is therefore a direct proof the rendered lane/mini-
+  // preview is blank in BOTH panels, not a re-derivation of the same fact
+  // twice via two separate pixel scans of an intentionally-absent primitive.
+  const GridRow* bass_row = nullptr;
+  for (const GridRow& row : sonotron::kRows) {
+    if (row.role_index == 2) {
+      bass_row = &row;
+      break;
+    }
+  }
+  CHECK(bass_row != nullptr);
+  if (bass_row != nullptr) {
+    const GridCell& bass_cell = model.cell(2, 4);
+    CHECK(bass_cell.kind == GridCellKind::kEmpty);
+    const TrackCellPreview bass_preview = sonotron::resolve_track_cell_preview(
+        model, seqedit, *bass_row, /*s=*/4, bass_cell, /*filled=*/false, fx.active_style);
+    bool any_note = false;
+    for (const auto& voices : bass_preview.pattern.pitch) {
+      for (const int pitch : voices) {
+        any_note = any_note || pitch >= 0;
+      }
+    }
+    CHECK(!any_note);
+  }
+
+  ImGui::DestroyContext();
+}
+
 }  // namespace
 
 int main() {
   test_grid_cell_preview_matches_sequence_edit_across_all_bars();
+  test_step_track_and_empty_cell_content_matches_across_panels();
   return sonotron::test::failures();
 }

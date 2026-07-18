@@ -8,7 +8,9 @@
 #include <string>
 
 #include "brain_session.hpp"
+#include "grid_model.hpp"
 #include "imgui.h"
+#include "launch_rows.hpp"
 #include "neon_widgets.hpp"
 #include "preview.hpp"
 #include "step_pattern_model.hpp"
@@ -29,23 +31,6 @@ bool mode_tab(const char* label, bool active) {
   ImGui::PopStyleColor(2);
   return clicked;
 }
-
-// Left-hand per-instrument SHOW/HIDE sidebar width (owner task #1): a FLOOR,
-// not a fixed width -- render_role_toggle_sidebar widens past this whenever
-// the widest role label + its checkbox box + inner spacing + both window
-// paddings need more, so no label (e.g. "Chord2"/"Phrase") is ever clipped
-// at the current font/DPI, while narrow-label runs keep this compact minimum.
-// The floor is set a comfortable notch above the natural fit of today's
-// widest default-font label (owner 2026-07-18: "enlarge the left section a
-// bit") so the section reads visibly wider now, not only when a font-scaled
-// label happens to demand it.
-constexpr float kRoleListWidth = 118.0F;
-
-// The role labels render a notch LARGER than the rest of the UI (owner,
-// 2026-07-18: the default-size labels read as "microscopic" here) -- applied
-// via SetWindowFontScale on the seq_role_list child ONLY, so the header and
-// canvas keep the base font.
-constexpr float kRoleFontScale = 1.15F;
 
 // Piano-roll lane height in px (owner bug: "Sequence Edit still doesn't
 // show all tracks" -- draw_role_pattern used to draw every visible role
@@ -87,30 +72,56 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
 // Lane-partition fix (owner bug: "Sequence Edit still doesn't show all
 // tracks" -- overlaying every visible role into ONE shared rect made 9
 // roles mutually occlude each other on the same pitch axis). Draws each
-// `lane_roles[0..lane_count)` role into its OWN horizontal strip of the
-// canvas (`kLaneH` tall, stacked top to bottom in role order), a thin
-// divider between lanes, and a small role-label glyph -- extracted out of
-// render_seqedit_panel (readability-function-cognitive-complexity), pure
-// refactor of task #1's original single-rect overlay loop, same color/alpha
-// rules: the opened role (model.part_index()) keeps its full track_color/
-// 0.85F/glow treatment, every other role stays dimmed and unglowed.
-void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int total_steps,
-                           const neon::ClipPattern& pat, const ImVec4& track_color,
-                           const UiState& fx, const SeqEditModel& model, preview::Section section,
-                           const std::array<std::size_t, kTrackRoleCount>& lane_roles,
+// `lane_row_indices[0..lane_count)` launch-grid row into its OWN horizontal
+// strip of the canvas (`kLaneH` tall, stacked top to bottom in kRows order),
+// a thin divider between lanes, and a small role-label glyph -- extracted
+// out of render_seqedit_panel (readability-function-cognitive-complexity),
+// pure refactor of task #1's original single-rect overlay loop, same
+// color/alpha rules: the opened role (model.part_index()) keeps its full
+// track_color/0.85F/glow treatment, every other role stays dimmed and
+// unglowed.
+//
+// Owner decision (sidebar removal, 2026-07-18): the role name used to be
+// drawn HERE *and* a second time in the now-deleted left-hand sidebar
+// (render_role_toggle_sidebar). The sidebar is gone; each lane's header now
+// also carries a small "x" HIDE button next to its name -- the per-role
+// counterpart the sidebar's checkbox used to be, now living on the lane it
+// actually names, wired straight to the same SeqEditModel::set_role_visible
+// the sidebar called. `model` is therefore taken by non-const reference (it
+// was const before, since the sidebar owned every mutation).
+//
+// Fabrizio review (2026-07-18, track-set + content divergence from the
+// Repeat Zone): each lane's own `total_steps` and note content are now
+// resolved from `grid`'s REAL cell content at (row.role_index, `scene`) via
+// launch_rows.hpp's shared resolve_track_cell_preview() -- the SAME resolver
+// grid_panel.cpp's own launch-cell mini-preview calls -- instead of a static
+// style-table lookup keyed only by role. A step-track cell's lane therefore
+// carries its OWN bar count (a step track's real length), not the single
+// bar count of whatever role happens to be OPEN; an empty cell's lane is
+// blank, matching the Repeat Zone's own blank "+"-cell mini-preview.
+void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1,
+                           const ImVec4& track_color, const UiState& fx, SeqEditModel& model,
+                           const GridModel& grid, std::size_t scene,
+                           const std::array<std::size_t, kRows.size()>& lane_row_indices,
                            std::size_t lane_count) {
   for (std::size_t i = 0; i < lane_count; ++i) {
-    const std::size_t role = lane_roles[i];
+    const GridRow& row = kRows[lane_row_indices[i]];
+    const std::size_t role = row.role_index;
+    const GridCell& cell = grid.cell(role, scene);
+    const bool filled = cell.kind != GridCellKind::kEmpty;
+    const TrackCellPreview preview =
+        resolve_track_cell_preview(grid, model, row, scene, cell, filled, fx.active_style);
+    const int lane_bars = std::clamp(preview.pattern.bars, 1, neon::ClipPattern::kMaxBars);
+    const int lane_total_steps = lane_bars * neon::ClipPattern::kSteps;
+
     const ImVec2 lane_p0(p0.x, p0.y + static_cast<float>(i) * kLaneH);
     const ImVec2 lane_p1(p1.x, lane_p0.y + kLaneH);
     if (role == model.part_index()) {
-      draw_role_pattern(dl, lane_p0, lane_p1, total_steps, pat, track_color, 0.85F, fx.glow);
+      draw_role_pattern(dl, lane_p0, lane_p1, lane_total_steps, preview.pattern, track_color, 0.85F,
+                        fx.glow);
     } else {
-      const preview::PreviewPattern role_pp = preview::preview_for(fx.active_style, section, role);
-      const neon::ClipPattern role_pat =
-          neon::clip_pattern_from_pitches(role_pp.pitch, role_pp.bars);
-      draw_role_pattern(dl, lane_p0, lane_p1, total_steps, role_pat, theme::kRoleTint[role], 0.45F,
-                        false);
+      draw_role_pattern(dl, lane_p0, lane_p1, lane_total_steps, preview.pattern,
+                        theme::kRoleTint[role], 0.45F, false);
     }
     if (i > 0) {
       dl->AddLine(lane_p0, ImVec2(lane_p1.x, lane_p0.y), neon::u32(theme::kTextMuted, 0.18F), 1.0F);
@@ -118,6 +129,20 @@ void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, i
     dl->AddText(ImVec2(lane_p0.x + 4.0F, lane_p0.y + 2.0F),
                 neon::u32(theme::kRoleTint[role], role == model.part_index() ? 0.95F : 0.6F),
                 std::string(kTrackRoleLabels[role]).c_str());
+
+    // Per-lane HIDE control: a real ImGui widget (not draw-list-only, unlike
+    // the rest of this function) so it is actually clickable -- laid out
+    // top-right of the lane header via SetCursorScreenPos, mirroring the
+    // InvisibleButton idiom render_step_grid already uses to place widgets
+    // over draw-list content inside this same "seq_canvas" child. PushID(role)
+    // keeps every lane's "x" button ID distinct across the loop.
+    ImGui::PushID(static_cast<int>(role));
+    const float x_w = ImGui::CalcTextSize("x").x + ImGui::GetStyle().FramePadding.x * 2.0F;
+    ImGui::SetCursorScreenPos(ImVec2(lane_p1.x - x_w - 4.0F, lane_p0.y));
+    if (ImGui::SmallButton("x")) {
+      model.set_role_visible(role, false);
+    }
+    ImGui::PopID();
   }
 }
 
@@ -242,121 +267,121 @@ bool try_render_step_canvas(SeqEditModel& model, ImDrawList* dl, const ImVec2& p
   return true;
 }
 
-// Left-hand per-instrument SHOW/HIDE toggle list (owner task #1): one
-// Checkbox per role, bound to SeqEditModel::role_visible()/set_role_visible(),
-// text-tinted with theme::kRoleTint and the currently-opened role emphasized
-// via a brighter alpha. A SEPARATE sibling child window from "seq_canvas" --
-// see render_seqedit_panel's own call site comment for why.
-void render_role_toggle_sidebar(SeqEditModel& model) {
-  // Size the sidebar to the WIDEST role label so none is clipped (owner,
-  // 2026-07-18), mirroring the mode-tab CalcTextSize+FramePadding idiom used
-  // in the header below. A Checkbox lays out as: a square box (one frame
-  // height) + ItemInnerSpacing.x + the label text; the top bulk-action
-  // SmallButton is text + 2*FramePadding.x. Text advances and the checkbox
-  // square scale with the font, so both are measured at the base font and
-  // multiplied by kRoleFontScale; ScrollbarSize is reserved so the vertical
-  // scrollbar (rows overflow the fixed-height band and scroll -- owner's
-  // accepted trade for full-size labels) never sits over a label. Never below
-  // kRoleListWidth (the floor).
-  const ImGuiStyle& style = ImGui::GetStyle();
-  const float scaled_box = ImGui::GetFontSize() * kRoleFontScale + style.FramePadding.y * 2.0F;
-  float widest_label = 0.0F;
-  for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
-    widest_label =
-        std::max(widest_label, ImGui::CalcTextSize(std::string(kTrackRoleLabels[role]).c_str()).x);
+// "+ track" popup (owner decision, 2026-07-18: the role name used to render
+// TWICE -- once in the now-deleted left-hand sidebar, once on the lane
+// itself -- so the sidebar, including its bulk "all tracks"/"last track"
+// toggle, is gone entirely). This is the RE-SHOW half of the show/hide pair;
+// draw_piano_roll_lanes' per-lane "x" button above is the HIDE half. Lists
+// every launch_rows.hpp kRows role SeqEditModel::role_visible() currently
+// reports hidden; clicking an entry re-shows it. When nothing is hidden the
+// menu shows a single disabled placeholder rather than opening empty.
+//
+// Fabrizio review (2026-07-18): the candidate set here MUST be kRows, not
+// every kTrackRoleCount role -- a role outside kRows (Perc/Chord2/Phrase)
+// has no matching Repeat-Zone row to resolve real content against, so
+// offering it here would reopen the exact track-set divergence this pass
+// closes the instant a user added one.
+void render_add_track_menu(SeqEditModel& model) {
+  if (ImGui::SmallButton("+ track")) {
+    ImGui::OpenPopup("seq_add_track_popup");
   }
-  const float row_w = scaled_box + style.ItemInnerSpacing.x + widest_label * kRoleFontScale;
-  const float btn_w =
-      std::max(ImGui::CalcTextSize("all tracks").x, ImGui::CalcTextSize("last track").x) *
-          kRoleFontScale +
-      style.FramePadding.x * 2.0F;
-  const float list_w =
-      std::max(kRoleListWidth,
-               std::max(row_w, btn_w) + style.WindowPadding.x * 2.0F + style.ScrollbarSize + 4.0F);
-  // Scrollbar ENABLED (default flags): the nine rows + bulk button overflow
-  // the fixed-height band (layout_renderer.cpp kSeqEditH), and the owner
-  // prefers scrolling to fit-shrunk, unreadable labels.
-  ImGui::BeginChild("seq_role_list", ImVec2(list_w, 0), ImGuiChildFlags_None,
-                    ImGuiWindowFlags_None);
-  ImGui::SetWindowFontScale(kRoleFontScale);
-  // Feature B item 4: a one-shot BULK action, not a persistent mode -- flips
-  // every role's visibility to all-on, or solos the currently-opened role
-  // (SeqEditModel::set_all_tracks_visible). The label reflects the state the
-  // model is offering right now (all_tracks_shown()); pressing it flips to
-  // the OTHER state.
-  if (ImGui::SmallButton(model.all_tracks_shown() ? "all tracks" : "last track")) {
-    model.set_all_tracks_visible(!model.all_tracks_shown());
-  }
-  ImGui::Spacing();
-  for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
-    const bool emphasized = role == model.part_index();
-    ImVec4 tint = theme::kRoleTint[role];
-    tint.w = emphasized ? 1.0F : 0.55F;
-    bool visible = model.role_visible(role);
-    ImGui::PushStyleColor(ImGuiCol_Text, tint);
-    if (ImGui::Checkbox(std::string(kTrackRoleLabels[role]).c_str(), &visible)) {
-      model.set_role_visible(role, visible);
+  if (ImGui::BeginPopup("seq_add_track_popup")) {
+    bool any_hidden = false;
+    for (const GridRow& row : kRows) {
+      if (model.role_visible(row.role_index)) {
+        continue;
+      }
+      any_hidden = true;
+      if (ImGui::MenuItem(std::string(kTrackRoleLabels[row.role_index]).c_str())) {
+        model.set_role_visible(row.role_index, true);
+      }
     }
-    ImGui::PopStyleColor();
+    if (!any_hidden) {
+      ImGui::MenuItem("(all tracks shown)", nullptr, false, false);
+    }
+    ImGui::EndPopup();
   }
-  ImGui::SetWindowFontScale(1.0F);
-  ImGui::EndChild();
 }
 
-// Which visible roles get a piano-roll lane this frame -- extracted out of
-// render_seqedit_panel (readability-function-cognitive-complexity), pure
-// refactor. Mirrors try_render_step_canvas's own guard (model.view() !=
-// kStep || open_step_track() < 0) so the two branches can never disagree
-// about which one is about to run this frame: the WAV preview and the
-// step-track canvas both keep their single full-height rect (an empty
-// `lane_roles`/a 0 return degrades the caller's content height back to
-// avail.y), only the read-only piano-roll overlay gets partitioned. Returns
-// the lane count (0 when this frame isn't the piano-roll overlay at all).
+// Which of the 6 kRows launch rows get a piano-roll lane this frame --
+// extracted out of render_seqedit_panel (readability-function-cognitive-
+// complexity), pure refactor. Mirrors try_render_step_canvas's own guard
+// (model.view() != kStep || open_step_track() < 0) so the two branches can
+// never disagree about which one is about to run this frame: the WAV
+// preview and the step-track canvas both keep their single full-height rect
+// (an empty `lane_row_indices`/a 0 return degrades the caller's content
+// height back to avail.y), only the read-only piano-roll overlay gets
+// partitioned. Returns the lane count (0 when this frame isn't the
+// piano-roll overlay at all). `lane_row_indices` holds INDICES INTO kRows
+// (not raw TrackRole indices) -- draw_piano_roll_lanes needs the whole
+// GridRow (role_index AND name) to resolve each lane's real content.
+//
+// Fabrizio review (2026-07-18): walks kRows (the Repeat Zone's own 6 real
+// rows), not every kTrackRoleCount role -- three roles (Perc/Chord2/Phrase)
+// have no Repeat-Zone row at all, so a lane for them used to be a phantom
+// with no corresponding launch cell.
 std::size_t compute_piano_roll_lanes(bool open, const UiState& fx, const SeqEditModel& model,
-                                     std::array<std::size_t, kTrackRoleCount>& lane_roles) {
+                                     std::array<std::size_t, kRows.size()>& lane_row_indices) {
   const bool is_piano_roll =
       open && !fx.open_wav && (model.view() != SeqEditView::kStep || model.open_step_track() < 0);
   if (!is_piano_roll) {
     return 0;
   }
   std::size_t lane_count = 0;
-  for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
-    if (model.role_visible(role)) {
-      lane_roles[lane_count++] = role;
+  for (std::size_t i = 0; i < kRows.size(); ++i) {
+    if (model.role_visible(kRows[i].role_index)) {
+      lane_row_indices[lane_count++] = i;
     }
   }
   return lane_count;
 }
 
+// Finds the launch-grid row (kRows) for a given TrackRole index, or nullptr
+// if this role is not one of the 6 real launch rows. Every OPENED cell's
+// role always IS one (render_track_cell/grid_panel.cpp only ever opens a
+// kRows role into Sequence Edit), so a nullptr here is purely defensive --
+// it never happens in practice, but the caller (render_seqedit_panel)
+// degrades to a blank/1-bar default rather than crashing if it ever did.
+const GridRow* find_launch_row(std::size_t role_index) {
+  for (const GridRow& row : kRows) {
+    if (row.role_index == role_index) {
+      return &row;
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace
 
-void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
+void render_seqedit_panel(SeqEditModel& model, const UiState& fx, const GridModel& grid) {
   const bool open = fx.open_cell >= 0;
   const ImVec4 track_color =
       (fx.open_row >= 0 && fx.open_row < static_cast<int>(theme::kTrackColor.size()))
           ? theme::kTrackColor[fx.open_row]
           : theme::kCyan;
+  const std::size_t scene = static_cast<std::size_t>(std::max(fx.open_scene, 0));
 
-  // Real content (repeat-zone-real-contract.md "cell preview made real"):
-  // the SAME preview_for(...) call grid_panel.cpp's mini-thumbnail uses,
-  // keyed by the SAME (style, section, role) the opened cell represents --
-  // model.part_index() is the role this clip was opened from, and (SLICE 4a)
-  // fx.open_section is that cell's own COLUMN's SectionType byte (set by
-  // grid_panel.cpp at every cell-open site, GridModel::scene_section), so
-  // the two views match by construction. Only computed while a cell is
-  // actually open.
-  const preview::Section section = static_cast<preview::Section>(fx.open_section);
-  const preview::PreviewPattern pp =
-      open ? preview::preview_for(fx.active_style, section, model.part_index())
-           : preview::PreviewPattern{};
-  // Owner tasks #2/#3 (multi-bar widening): `bars` is a property of the
-  // SECTION, not the role -- every one of the 9 roles' PreviewPattern for
-  // this same (style, section) carries the IDENTICAL bars value, so it is
-  // read once here off the opened role's own pattern and reused for every
-  // overlay below instead of being recomputed per role.
-  const neon::ClipPattern pat = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
-  const int bars = std::clamp(pat.bars, 1, neon::ClipPattern::kMaxBars);
-  const int total_steps = bars * neon::ClipPattern::kSteps;
+  // Fabrizio review (2026-07-18): the OPENED role's own content -- used only
+  // for the header's "~approx" marker and the canvas-wide bar-guide division
+  // count below -- is now resolved through the SAME launch_rows.hpp
+  // resolve_track_cell_preview() every lane (draw_piano_roll_lanes) and the
+  // Repeat Zone's own mini-preview (grid_panel.cpp's render_track_cell)
+  // already share, against `grid`'s REAL cell at (role, `scene`), replacing
+  // the previous static preview_for(fx.active_style, section, part_index())
+  // lookup -- a step-track cell's own bar count now drives the guides
+  // correctly instead of always reading the style table. Every OPENED cell's
+  // role is always one of kRows (render_track_cell only ever opens one), so
+  // find_launch_row() only returns nullptr defensively; a null falls back to
+  // the resolver's own blank/1-bar default.
+  const GridRow* opened_row = open ? find_launch_row(model.part_index()) : nullptr;
+  TrackCellPreview opened_preview;
+  if (opened_row != nullptr) {
+    const GridCell& opened_cell = grid.cell(opened_row->role_index, scene);
+    const bool opened_filled = opened_cell.kind != GridCellKind::kEmpty;
+    opened_preview = resolve_track_cell_preview(grid, model, *opened_row, scene, opened_cell,
+                                                opened_filled, fx.active_style);
+  }
+  const int bars = std::clamp(opened_preview.pattern.bars, 1, neon::ClipPattern::kMaxBars);
 
   // Header.
   ImGui::TextColored(theme::kCyan, "SEQUENCE EDIT");
@@ -368,7 +393,7 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   ImGui::TextColored(theme::kTextMuted, "clip");
   ImGui::SameLine(0.0F, 4.0F);
   ImGui::TextColored(theme::kText, "%s", model.clip_label().c_str());
-  if (open && pp.approx) {
+  if (open && opened_preview.approx) {
     // Honesty affordance (repeat-zone-real-contract.md STEP 4): a small,
     // muted marker, no new persistent chrome, for a preview that isn't the
     // exact runtime output (resolved against a placeholder harmony, and/or
@@ -382,20 +407,18 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   ImGui::SameLine(0.0F, 12.0F);
   ImGui::TextColored(theme::kTextMuted, "grid 1/%d", model.grid_division());
 
+  // "+ track" control (owner decision, sidebar removal, 2026-07-18): the
+  // left-hand SHOW/HIDE sidebar is gone -- its RE-SHOW half now lives here,
+  // at the top of the panel, as a popup menu of hidden roles. Only meaningful
+  // while a cell is open (nothing to show/hide otherwise), matching the
+  // canvas's own early-return gating and the sidebar's old guard.
+  if (open) {
+    ImGui::SameLine(0.0F, 12.0F);
+    render_add_track_menu(model);
+  }
+
   render_mode_tabs(model);
   ImGui::Spacing();
-
-  // Left-hand per-instrument SHOW/HIDE toggle list (owner task #1). A
-  // SEPARATE sibling child window, rendered BEFORE "seq_canvas" with
-  // ImGui::SameLine() so "seq_canvas" naturally occupies whatever content
-  // region remains -- no manual offset math of the canvas rect itself, so
-  // every existing p0/p1/avail computation inside "seq_canvas" stays correct
-  // by construction. Only meaningful while a cell is open (nothing to
-  // show/hide otherwise), matching the canvas's own early-return gating.
-  if (open) {
-    render_role_toggle_sidebar(model);
-    ImGui::SameLine();
-  }
 
   // Canvas. Owner bug ("Sequence Edit still doesn't show all tracks"): the
   // piano-roll view below now partitions the canvas into one horizontal LANE
@@ -410,11 +433,11 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   ImDrawList* dl = ImGui::GetWindowDrawList();
 
-  // Which visible roles get a piano-roll lane this frame, and how tall the
-  // scrollable content is -- see compute_piano_roll_lanes's own header
-  // comment.
-  std::array<std::size_t, kTrackRoleCount> lane_roles{};
-  const std::size_t lane_count = compute_piano_roll_lanes(open, fx, model, lane_roles);
+  // Which of the 6 kRows launch rows get a piano-roll lane this frame, and
+  // how tall the scrollable content is -- see compute_piano_roll_lanes's own
+  // header comment.
+  std::array<std::size_t, kRows.size()> lane_row_indices{};
+  const std::size_t lane_count = compute_piano_roll_lanes(open, fx, model, lane_row_indices);
   const float content_h =
       lane_count > 0 ? std::max(avail.y, static_cast<float>(lane_count) * kLaneH) : avail.y;
   const ImVec2 p1(p0.x + avail.x, p0.y + content_h);
@@ -481,11 +504,11 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   // OWN row block here too.
   //
   // Owner task #1 + lane-partition fix ("Sequence Edit still doesn't show
-  // all tracks"): every VISIBLE role gets its OWN horizontal lane
-  // (`lane_roles`/`kLaneH` above) instead of being overlaid into one shared
-  // rect, where 9 roles used to mutually occlude each other on the same
-  // pitch axis -- see draw_piano_roll_lanes's own header comment.
-  draw_piano_roll_lanes(dl, p0, p1, total_steps, pat, track_color, fx, model, section, lane_roles,
+  // all tracks"): every VISIBLE kRows role gets its OWN horizontal lane
+  // (`lane_row_indices`/`kLaneH` above) instead of being overlaid into one
+  // shared rect, where 9 roles used to mutually occlude each other on the
+  // same pitch axis -- see draw_piano_roll_lanes's own header comment.
+  draw_piano_roll_lanes(dl, p0, p1, track_color, fx, model, grid, scene, lane_row_indices,
                         lane_count);
 
   // Green playhead sweeping L->R while the opened clip plays, across the

@@ -121,6 +121,7 @@ add_library(gui_sonotron_layout STATIC
   src/layout_renderer.cpp
   src/transport_panel.cpp
   src/browser_panel.cpp
+  src/launch_rows.cpp
   src/grid_panel.cpp
   src/seqedit_panel.cpp
   src/parts_panel.cpp

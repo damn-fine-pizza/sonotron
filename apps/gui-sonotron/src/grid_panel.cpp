@@ -15,6 +15,7 @@
 #include "browser_model.hpp"
 #include "debug_log.hpp"
 #include "imgui.h"
+#include "launch_rows.hpp"
 #include "neon_widgets.hpp"
 #include "preview.hpp"
 #include "theme.hpp"
@@ -210,28 +211,10 @@ void draw_scene_header_column_highlight(const UiState& fx, std::size_t s, ImVec2
                                             neon::u32(theme::kCyan, 0.13F), 4.0F);
 }
 
-// The 6 launch-grid rows (spec §2b), each mapped to a GridModel part-row
-// index (so a launched cell addresses a real, stable ClipMatrix slot) and a
-// track color. `audio` marks the pad row as the design's one "audio" row --
-// it no longer selects a different preview widget (repeat-zone-real-
-// contract.md STEP 3: pad has no real audio content yet, so it shows its
-// real MIDI note pattern too, like every other row); `audio` is kept only
-// for `fx.open_audio` bookkeeping, reserved for genuine future audio
-// content. The GridModel has 9 role rows; these are the 6 the launch grid
-// surfaces.
-struct GridRow {
-  const char* name;
-  std::size_t role_index;  // into GridModel / track_roles
-  bool audio;
-};
-constexpr std::array<GridRow, 6> kRows = {{
-    {"drums", 0, false},
-    {"bass", 2, false},
-    {"chord", 3, false},
-    {"pad", 5, true},
-    {"arp", 6, false},
-    {"lead", 8, false},
-}};
+// GridRow/kRows moved to launch_rows.hpp (Fabrizio review, 2026-07-18): both
+// this panel and seqedit_panel.cpp now share the SAME 6-row launch set, so
+// Sequence Edit's lane set can never again drift from the Repeat Zone's own
+// rows -- see that header's own comment for the full rationale.
 
 std::size_t cell_id(std::size_t role_index, std::size_t scene, std::size_t scene_count) {
   return role_index * scene_count + scene;
@@ -1106,41 +1089,6 @@ void render_track_label(PartsModel& parts, BrainSession& brain_session, const Gr
   }
   ImGui::SetCursorScreenPos(lp);
   ImGui::Dummy(ImVec2(kLabelColWidth, cz));
-}
-
-// Result of resolving a track cell's mini-preview -- extracted out of
-// render_track_cell (readability-function-cognitive-complexity), pure
-// refactor, no behavior change. An empty cell resolves to the default
-// (blank, non-approx) pattern.
-struct TrackCellPreview {
-  neon::ClipPattern pattern{};
-  bool approx = false;
-};
-
-// Task #11 Phase 1: a step-track cell's mini-preview is the pattern's OWN
-// live content (preview_for_track), never the style-section table -- that
-// table has nothing to do with this cell. A style-section cell keeps the
-// existing preview_for(...) lookup unchanged.
-TrackCellPreview resolve_track_cell_preview(const GridModel& model, const SeqEditModel& seqedit,
-                                            const GridRow& row, std::size_t s, const GridCell& cell,
-                                            bool filled, int active_style) {
-  TrackCellPreview result;
-  if (!filled) {
-    return result;
-  }
-  if (cell.kind == GridCellKind::kStepTrack) {
-    if (const StepPatternModel* track =
-            seqedit.step_tracks().track(static_cast<std::size_t>(cell.step_track_index))) {
-      const preview::PreviewPattern pp = preview::preview_for_track(*track);
-      result.pattern = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
-    }
-    return result;
-  }
-  const auto section = static_cast<preview::Section>(model.scene_section(s));
-  const preview::PreviewPattern pp = preview::preview_for(active_style, section, row.role_index);
-  result.pattern = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
-  result.approx = pp.approx;
-  return result;
 }
 
 // Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/11610):

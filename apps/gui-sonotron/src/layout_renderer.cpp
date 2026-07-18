@@ -211,7 +211,7 @@ void render_layout(const Layout& layout, WorkstationState& state) {
   begin_zone("band_seqedit", ImVec2(0.0F, seqedit_h), /*scrolls=*/false);
   render_collapse_toggle(fx.seqedit_collapsed, "seqedit_collapse");
   if (!fx.seqedit_collapsed) {
-    render_seqedit_panel(state.seqedit, fx);
+    render_seqedit_panel(state.seqedit, fx, state.grid);
   }
   ImGui::EndChild();
 
