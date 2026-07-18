@@ -1122,14 +1122,54 @@ Deterministic trajectory (`0100`), no heap (`0200`), cheap on device (`0400`).*
   "renamable scene columns with scenes.json persistence" adds slice 3 (host-only scene
   naming + persistence, zero ABI). Tests: `test_app_state.cpp`,
   `test_in_process_brain_session.cpp`, `test_grid_model.cpp`, `test_scenes_json.cpp`.
-  **Still open (why the node stays ◑, not ✅):** slice 4, "auto-song" — a new
-  grid-column active-scene cursor auto-advancing at bar/section boundaries
-  (`repeat-zone-real-contract.md` §5/§8b decision 4) — is not yet built. (Separately,
-  by explicit owner decision and NOT a gap, §8b decision 2: in-app step/chord/loop
-  authoring of a cell's own content from inside the GUI stays out of scope for this
-  workstream — a cell's content is real only for a style dropped from the Browser;
-  every other content kind is still CLI/script-only.) Toolkit dependency flag:
-  RESOLVED / vendored. **Architecture
+  **Slice 4 ("auto-song") is now DELIVERED, but not as originally sketched — the
+  "new grid-column active-scene cursor auto-advancing at bar/section boundaries"
+  note this bullet used to carry (`repeat-zone-real-contract.md` §5/§8b decision 4)
+  is SUPERSEDED, per the Song-mode Phase 1 update below: the auto-advancing cursor
+  is now real, but it is core `SceneChain`-driven, not the bespoke FSM originally
+  planned.** (Separately, by explicit owner decision and NOT a gap, §8b decision 2:
+  in-app step/chord/loop authoring of a cell's own content from inside the GUI
+  stays out of scope for this workstream — a cell's content is real only for a
+  style dropped from the Browser; every other content kind is still
+  CLI/script-only.) Toolkit dependency flag: RESOLVED / vendored. **Update
+  (Song-mode Phase 1, browser redesign F1/F2, seqedit column-view + zoom,
+  2026-07-18):** commit `465bb48` ("adopt core SceneChain as the song engine
+  (Song-mode Phase 1)") replaces the hand-rolled per-frame auto-song FSM
+  (double section-trigger, immediate ClipMatrix clip promotion clobbering the
+  queued section, per-launch re-anchor) with the core `SceneChain` primitive
+  (node `8100`) as the GUI's real song engine, driven by a new host wire verb
+  `song build <count> <section> <bars>...`; `grid_panel.cpp` gains
+  `build_and_play_song`/`reconcile_active_scene`, reading the engine's REAL
+  reported Arranger section instead of a per-frame guess. The two
+  SpyBrainSession-based tests that pinned the retired FSM
+  (`test_grid_panel_auto_song.cpp`,
+  `test_grid_panel_auto_song_launches_next_scene.cpp`) are retired;
+  `test_song_mode_scenechain_contract.cpp` is the new contract pin (single
+  `song build`, no launch-scene/style-section double-send, monotonic scene
+  transitions, harmony continuity across a scene boundary).
+  Separately: browser redesign Phase F1 (commit `bce71ab`) adds a category
+  selector combo + per-tab search and wires the long-standing Sections/
+  Variations "click does nothing" gap to the existing `style section <name>`
+  verb, plus a new Voices/GM-program picker sending `program <port>[:ch]
+  <voice>` (`Param::kProgram`); Phase F2 (commit `6a8799e`) adds a real GM
+  percussion-Kit category on the SAME `program` verb (channel 10, no new ABI
+  Param), backed by 9 canonical GM2 kit names added to
+  `components/platform/hostrt/gm_program.{hpp,cpp}` (proposal:
+  `docs/proposals/browser-redesign-taxonomy.md`). Seqedit column-view +
+  Repeat-Zone zoom (commit `2bcfd4d`) wires a Repeat-Zone cell click to a
+  whole-column highlight and a Sequence-Edit column-view with visibility-only
+  checkboxes (`seqedit_model.{hpp,cpp}`, real mute/solo unchanged on the grid
+  M/S squares) and raises the zoom cap +3 notches with a sub-linear font scale.
+  **KNOWN GAP (part of why this node stays ◑, not ✅):**
+  `apps/gui-sonotron/src/in_process_brain_session.cpp`'s
+  `command_line_to_command` — the translator the DEFAULT in-process GUI backend
+  uses — has no `"program"` case among its `if` branches and falls through to
+  its closing `return TranslateOutcome::kUnknownCommand`, so BOTH the F1 Voices
+  picker and the F2 Kits picker silently no-op when the GUI runs in-process
+  (the default); `program` only reaches the engine today when the GUI runs
+  against an external server via `--control`/UDS (`shell_music_commands.cpp`'s
+  `cmd_program`, reached through `UdsBrainSession`). Not fixed as of this pass.
+  **Architecture
   fact (Phase 2a/2b, owner-decided):** the GUI now hosts the engine IN-PROCESS by
   default — a dedicated thread driven by lock-free SPSC Command/OutEvent rings;
   `apps/gui-sonotron/CMakeLists.txt`'s `gui_sonotron_engine` library links
