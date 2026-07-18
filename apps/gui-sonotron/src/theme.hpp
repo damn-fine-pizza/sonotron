@@ -85,11 +85,14 @@ inline constexpr std::array<ImVec4, kTrackRoleCount> kRoleTint = {
     kCyan, kAmber, kBlue, kGreen, kGreen, kAmber, kCyan, kLead, kLead,
 };
 
-// The 6 launch-grid track colors (drums/bass/chord/pad/arp/lead), in the
-// exact row order the launch grid renders (v02-workstation-spec.md §2b): cyan,
-// blue, green, amber, cyan, lead-purple.
-inline constexpr std::array<ImVec4, 6> kTrackColor = {
-    kCyan, kBlue, kGreen, kAmber, kCyan, kLead,
+// The 7 launch-grid track colors (drums/perc/bass/chord1/chord2/pad/arp), in
+// the exact row order the launch grid renders (launch_rows.hpp's kRows,
+// mixer-roles fix 2026-07-18) -- one entry per kRows position, taken
+// verbatim from kRoleTint above at each row's own role_index (which happens
+// to equal the row's position here, since kRows now lists roles 0..6 in
+// ascending TrackRole order): cyan, amber, blue, green, green, amber, cyan.
+inline constexpr std::array<ImVec4, 7> kTrackColor = {
+    kCyan, kAmber, kBlue, kGreen, kGreen, kAmber, kCyan,
 };
 
 // Applies every color + geometry token to ImGui::GetStyle(). Call once at

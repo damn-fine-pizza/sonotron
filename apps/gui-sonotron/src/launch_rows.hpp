@@ -7,17 +7,29 @@
 #include "neon_widgets.hpp"
 #include "seqedit_model.hpp"
 
-// The 6 REAL launch-grid rows (v02-workstation-spec.md §2b) shared by
+// The 7 REAL launch-grid rows (v02-workstation-spec.md §2b) shared by
 // grid_panel.cpp (the Repeat Zone) and seqedit_panel.cpp (Sequence Edit) --
 // lifted out of grid_panel.cpp (Fabrizio review, 2026-07-18: seqedit's own
 // lane/track-set used to walk all 9 kTrackRoleCount roles from a STATIC
-// style table, while the Repeat Zone only ever surfaces these 6 real rows
-// resolved from REAL per-cell content -- three phantom lanes with no
-// matching Repeat-Zone row, plus mismatched note content for a live
-// step-track cell). Both panels now walk this ONE role set and resolve a
-// cell's preview through the ONE resolver below, so the two views can never
-// silently diverge again. GridModel has 9 role rows; these are the 6 the
+// style table, while the Repeat Zone only ever surfaces these real rows
+// resolved from REAL per-cell content -- phantom lanes with no matching
+// Repeat-Zone row, plus mismatched note content for a live step-track
+// cell). Both panels now walk this ONE role set and resolve a cell's
+// preview through the ONE resolver below, so the two views can never
+// silently diverge again. GridModel has 9 role rows; these are the 7 the
 // launch grid (and, following it, Sequence Edit) surfaces.
+//
+// Owner bug fix (2026-07-18, mixer-roles): `kRows` used to include `lead`
+// (role 8), which the default band NEVER routes (in_process_brain_session.
+// cpp's kDefaultStyleRoutes) -- soloing "lead" therefore silenced the whole
+// band instead of isolating anything. `perc` (1) and `chord2` (4) ARE
+// routed/audible but had no row at all, so they could never be soloed.
+// This set is now aligned EXACTLY to kDefaultStyleRoutes' 7 routed roles,
+// in their natural TrackRole enum order -- `lead` removed, `perc`/`chord2`
+// added. `role_index` happens to equal each row's own array position now
+// (0..6), a direct consequence of kDefaultStyleRoutes already listing the
+// routed roles in ascending TrackRole order, not a separate invariant this
+// file relies on.
 
 namespace sonotron {
 
@@ -32,13 +44,14 @@ struct GridRow {
 // pad has no real audio content yet, so it shows its real MIDI note pattern
 // too, like every other row); `audio` is kept only for `fx.open_audio`
 // bookkeeping, reserved for genuine future audio content.
-inline constexpr std::array<GridRow, 6> kRows = {{
+inline constexpr std::array<GridRow, 7> kRows = {{
     {"drums", 0, false},
+    {"perc", 1, false},
     {"bass", 2, false},
-    {"chord", 3, false},
+    {"chord1", 3, false},
+    {"chord2", 4, false},
     {"pad", 5, true},
     {"arp", 6, false},
-    {"lead", 8, false},
 }};
 
 // Result of resolving a track cell's mini-preview. An empty cell resolves to

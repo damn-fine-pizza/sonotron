@@ -64,7 +64,7 @@ class SeqEditModel {
   // Semantics correction (owner, 2026-07-18, replacing 026e3de's wrong
   // per-lane "x" HIDE-THE-WHOLE-LANE button): this flag NO LONGER decides
   // whether a Sequence-Edit lane EXISTS -- seqedit_panel.cpp's
-  // compute_piano_roll_lanes now always lists every one of the 6 launch_
+  // compute_piano_roll_lanes now always lists every one of the 7 launch_
   // rows.hpp kRows roles, so a lane's name label is unconditional. This flag
   // now gates ONLY whether draw_piano_roll_lanes paints that lane's note
   // BARS -- toggled via a checkbox drawn directly under the lane's own name,

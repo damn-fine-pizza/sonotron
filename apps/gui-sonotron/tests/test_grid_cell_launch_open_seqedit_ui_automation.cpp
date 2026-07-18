@@ -103,12 +103,14 @@ void test_real_click_on_filled_cell_launches_and_opens_sequence_edit() {
   }
 
   // Warm-up + locate frame (seed_demo's own default open cell is bass/scene 0
-  // -- fx.open_row == 1 -- so clicking a DIFFERENT cell below, drums/scene 0,
-  // is a genuine change, not an already-true no-op).
+  // -- fx.open_row == 2 (bass sits at kRows position 2 since the mixer-roles
+  // fix, 2026-07-18, inserted perc ahead of it at position 1) -- so clicking
+  // a DIFFERENT cell below, drums/scene 0, is a genuine change, not an
+  // already-true no-op).
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   render_one_frame(model, seqedit, parts, session, app_state, fx);
   ImDrawData* locate = render_one_frame(model, seqedit, parts, session, app_state, fx);
-  CHECK(fx.open_row == 1);
+  CHECK(fx.open_row == 2);
 
   const ImU32 play_color = sonotron::neon::u32(sonotron::theme::kCyan, 0.9F);
   const th::Rect play_rect = th::find_single_color_rect(locate, play_color);

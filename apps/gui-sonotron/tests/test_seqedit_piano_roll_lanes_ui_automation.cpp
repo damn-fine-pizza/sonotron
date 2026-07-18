@@ -111,7 +111,7 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
   seed_style_section_cell(grid, 2);  // bass
   // Only drums (opened) and bass have bars visible -- isolates the two
   // lanes this test cares about; every other kRows lane still renders its
-  // own name+checkbox (draw_piano_roll_lanes always renders all 6 kRows
+  // own name+checkbox (draw_piano_roll_lanes always renders all 7 kRows
   // lanes now, regardless of role_visible), but with no seeded content and
   // no bars, it adds no note-color noise to the color scan below.
   for (std::size_t role = 0; role < sonotron::kTrackRoleCount; ++role) {
@@ -144,7 +144,9 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
   }
 
   // THE LANE-PARTITION PIN: drums (lane 0, fixed kRows order) and bass (lane
-  // 1, fixed kRows order) must occupy DISJOINT vertical ranges -- one lane's
+  // 2, fixed kRows order -- perc, inserted by the mixer-roles fix
+  // 2026-07-18, is lane 1 between them) must occupy DISJOINT vertical
+  // ranges -- one lane's
   // own note quads never reach into the other lane's Y range. Before this
   // fix, both roles drew into the SAME p0..p1 rect on the SAME pitch axis,
   // so their Y ranges would have overlapped (both spanning the same band,
@@ -154,8 +156,8 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
   CHECK(disjoint);
 
   // Both lanes stay within the canvas's own rect (no stray content drawn
-  // outside the child window) -- with only 6 lanes total (always kRows.size()
-  // now), 6*kLaneH is comfortably under this test window's avail height, so
+  // outside the child window) -- with only 7 lanes total (always kRows.size()
+  // now), 7*kLaneH is comfortably under this test window's avail height, so
   // no scrolling is needed here and both lanes render fully on-screen.
   CHECK(drums_rect.min.y >= canvas_rect.min.y - 1.0F);
   CHECK(bass_rect.max.y <= canvas_rect.max.y + 1.0F);
@@ -170,7 +172,7 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
 // ImGui::Checkbox() placed directly UNDER each lane's own name label, in a
 // left column (kLaneLabelW wide), that toggles ONLY whether that lane's
 // note BARS are drawn; the name+checkbox pair is now ALWAYS rendered for
-// all 6 kRows lanes, in fixed kRows order, regardless of role_visible --
+// all 7 kRows lanes, in fixed kRows order, regardless of role_visible --
 // there is no popup and no lane-hiding affordance left at all). This test
 // drives the REAL checkbox through REAL input injection (no direct model
 // mutation): clicking a lane's checkbox must hide that lane's BARS ONLY --
@@ -179,7 +181,7 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
 // bars.
 //
 // Fixture note: this uses SeqEditModel's TRUE DEFAULT visibility (every
-// role, including the 3 non-kRows roles, starts visible=true) rather than
+// role, including the 2 non-kRows roles, starts visible=true) rather than
 // pre-hiding roles, since there is no popup and no "currently hidden"
 // candidate list to interact with any more -- the checkbox is a direct,
 // always-present per-lane toggle.
@@ -208,8 +210,8 @@ void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
   seed_style_section_cell(grid, 0);  // drums
   seed_style_section_cell(grid, 2);  // bass
   // No visibility overrides: SeqEditModel's constructor already defaults
-  // every role visible, so all 6 kRows lanes (drums, bass, chord1, pad, arp,
-  // lead, in that order) render this frame, bars and all.
+  // every role visible, so all 7 kRows lanes (drums, perc, bass, chord1,
+  // chord2, pad, arp, in that order) render this frame, bars and all.
 
   // Every lane's own bars-visibility checkbox is a plain, unstyled
   // ImGui::Checkbox(). Dear ImGui's own Checkbox() (imgui_widgets.cpp) paints
@@ -256,11 +258,12 @@ void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
 
   // Locate every checkbox cluster. Every role starts checked (visible), so
   // at this point every cluster paints checkbox_checked_color -- assert the
-  // in-canvas count is exactly kRows.size() (6): one checkbox per fixed
+  // in-canvas count is exactly kRows.size() (7): one checkbox per fixed
   // kRows lane, never more, never fewer. Sorted by Y since draw order and
   // screen order coincide for this top-to-bottom lane stack, matching
-  // kRows' own iteration order (drums, bass, chord1, pad, arp, lead) --
-  // bass is therefore the SECOND lane from the top, index 1.
+  // kRows' own iteration order (drums, perc, bass, chord1, chord2, pad,
+  // arp) -- bass is therefore the THIRD lane from the top, index 2 (perc,
+  // inserted ahead of it by the mixer-roles fix 2026-07-18, is the second).
   std::vector<th::Rect> in_canvas_checkboxes;
   for (const th::Rect& r : th::find_color_clusters(locate, checkbox_checked_color)) {
     if (r.center().y >= canvas_rect.min.y) {
@@ -275,7 +278,7 @@ void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
   }
   std::sort(in_canvas_checkboxes.begin(), in_canvas_checkboxes.end(),
             [](const th::Rect& a, const th::Rect& b) { return a.min.y < b.min.y; });
-  const th::Rect bass_checkbox = in_canvas_checkboxes[1];  // kRows[1] == bass, 2nd from top
+  const th::Rect bass_checkbox = in_canvas_checkboxes[2];  // kRows[2] == bass, 3rd from top
 
   // Real click #1: hide bass' bars via its own checkbox.
   th::queue_mouse_down(bass_checkbox.center());
@@ -289,7 +292,7 @@ void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
   CHECK(!th::find_single_color_rect(after_hide, bass_color).found);
 
   // THE CRUX OF THE WHOLE REWRITE: the checkbox cluster count (checked +
-  // unchecked combined) is STILL exactly kRows.size() (6) after hiding
+  // unchecked combined) is STILL exactly kRows.size() (7) after hiding
   // bass' bars -- the lane, its name, and its checkbox never disappeared,
   // only the bars did (bass' own checkbox simply flipped from
   // checkbox_checked_color to checkbox_unchecked_color). This is what the
@@ -313,19 +316,23 @@ void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
 }
 
 // Fabrizio review (2026-07-18, track-set + content divergence from the
-// Repeat Zone): the Repeat Zone's own launch grid only ever has 6 real rows
-// (launch_rows.hpp's kRows -- drums, bass, chord1, pad, arp, lead); the
-// other 3 TrackRole values (Perc, Chord2, Phrase) have no corresponding
-// launch-grid row at all. draw_piano_roll_lanes therefore always renders
-// exactly kRows.size() (6) lane name+checkbox pairs, in fixed kRows order,
-// regardless of SeqEditModel::role_visible -- role_visible only gates
-// whether a lane's own note BARS are drawn, it never gates whether the lane
-// itself (name + checkbox) exists. This test proves BOTH halves of the new
-// contract: (1) the lane/checkbox count is capped at kRows.size() even
-// though the 3 non-kRows roles report role_visible() == true (the default),
-// and stays capped there when those 3 are explicitly hidden (they were
-// never lane candidates to begin with), and (2) hiding a REAL kRows role
-// (Chord, role_index 3 -- style "basic"'s own kVarAPatterns table
+// Repeat Zone): the Repeat Zone's own launch grid only ever has 7 real rows
+// (launch_rows.hpp's kRows -- drums, perc, bass, chord1, chord2, pad, arp);
+// the other 2 TrackRole values (Phrase, Lead) have no corresponding
+// launch-grid row at all -- mixer-roles fix (2026-07-18): kRows used to
+// include Lead but exclude Perc/Chord2; it now includes Perc/Chord2 and
+// excludes Lead instead, aligned to the roles the default band actually
+// routes (kDefaultStyleRoutes, in_process_brain_session.cpp). draw_piano_
+// roll_lanes therefore always renders exactly kRows.size() (7) lane
+// name+checkbox pairs, in fixed kRows order, regardless of SeqEditModel::
+// role_visible -- role_visible only gates whether a lane's own note BARS
+// are drawn, it never gates whether the lane itself (name + checkbox)
+// exists. This test proves BOTH halves of the new contract: (1) the
+// lane/checkbox count is capped at kRows.size() even though the 2
+// non-kRows roles report role_visible() == true (the default), and stays
+// capped there when those 2 are explicitly hidden (they were never lane
+// candidates to begin with), and (2) hiding a REAL kRows role (Chord,
+// role_index 3 -- style "basic"'s own kVarAPatterns table
 // (components/core/arrangrr/include/arrangrr/arranger/styles/basic.hpp)
 // only authors VarA content for Drums/Bass/Chord, never Arp, so Chord is
 // used here rather than Arp for a non-vacuous bar-color assertion) leaves
@@ -390,27 +397,30 @@ void test_lane_set_is_capped_to_launch_rows_never_all_nine_roles() {
   };
 
   // Frame 1: every role at SeqEditModel's true default (all 9 visible,
-  // including Perc/Chord2/Phrase). The lane set (one checkbox per lane)
-  // must be exactly kRows.size() (6), never kTrackRoleCount (9).
+  // including Phrase/Lead). The lane set (one checkbox per lane) must be
+  // exactly kRows.size() (7), never kTrackRoleCount (9).
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   render_one_frame(grid, seqedit, fx);
   ImDrawData* all_default = render_one_frame(grid, seqedit, fx);
   CHECK(count_in_canvas_checkboxes(all_default) == sonotron::kRows.size());
 
-  // Frame 2: hide all 3 non-kRows roles (Perc=1, Chord2=4, Phrase=7). None of
-  // them was ever a lane candidate, so the checkbox count must stay
-  // UNCHANGED at kRows.size() -- a real regression to "walk all 9 roles"
-  // would instead drop 3 lanes here. Chord (a real kRows role, still
-  // visible) must still paint its own bars this frame.
-  seqedit.set_role_visible(1, false);
-  seqedit.set_role_visible(4, false);
+  // Frame 2: hide the 2 non-kRows roles (Phrase=7, Lead=8) -- mixer-roles
+  // fix (2026-07-18): Perc/Chord2 used to be the non-kRows roles alongside
+  // Phrase, but kRows now includes them (and excludes Lead instead, since
+  // Lead is never routed by the default band), leaving only Phrase and Lead
+  // without a Repeat-Zone row. Neither was ever a lane candidate, so the
+  // checkbox count must stay UNCHANGED at kRows.size() here too -- the real
+  // discriminator against a "walk all 9 roles" regression is Frame 1 above
+  // (9 != 7) and Frame 3 below (hiding a REAL kRows role). Chord (a real
+  // kRows role, still visible) must still paint its own bars this frame.
   seqedit.set_role_visible(7, false);
+  seqedit.set_role_visible(8, false);
   ImDrawData* non_launch_hidden = render_one_frame(grid, seqedit, fx);
   CHECK(count_in_canvas_checkboxes(non_launch_hidden) == sonotron::kRows.size());
   CHECK(th::find_single_color_rect(non_launch_hidden, chord_color).found);
 
   // Frame 3: now hide one REAL kRows role (Chord, role_index 3). The
-  // checkbox count must STAY at kRows.size() (6) -- the lane itself never
+  // checkbox count must STAY at kRows.size() (7) -- the lane itself never
   // disappears -- while Chord's own bars are no longer drawn. THE SEMANTIC
   // FLIP: the pre-checkbox design used to drop the counted lane set to
   // kRows.size() - 1 here.

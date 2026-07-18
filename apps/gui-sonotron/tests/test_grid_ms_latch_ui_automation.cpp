@@ -109,7 +109,8 @@ bool poll_saw_warning(BrainSession& session, AppState& app_state) {
 // clusters' index_gap (imgui_headless_harness.hpp's own header comment).
 // This helper is robust to either outcome: it returns a point guaranteed to
 // land inside the M (which=0) or S (which=1) sub-square of the group at
-// `group_index` (0 == first track row, i.e. drums; 1 == second, bass).
+// `group_index` (0 == first track row, i.e. drums; 2 == third, bass -- the
+// mixer-roles fix, 2026-07-18, inserted perc ahead of it at position 1).
 ImVec2 latch_click_point(const std::vector<th::Rect>& latches, int group_index, int which) {
   if (latches.size() >= 12) {
     // Separate clusters: [row0 M, row0 S, row1 M, row1 S, ...].
@@ -149,11 +150,11 @@ void test_real_ms_latch_clicks_toggle_partsmodel_and_reach_engine_without_warnin
 
   const ImU32 latch_rest = sonotron::neon::u32(sonotron::theme::kFrameBg, 0.9F);
   const std::vector<th::Rect> latches = th::find_color_clusters(locate, latch_rest);
-  // Either 12 (M/S found as separate clusters, one pair per each of the 6
-  // track rows) or 6 (M+S merged per row) -- anything else means the color
+  // Either 14 (M/S found as separate clusters, one pair per each of the 7
+  // track rows) or 7 (M+S merged per row) -- anything else means the color
   // scan itself found something unexpected in this frame.
-  CHECK(latches.size() == 12 || latches.size() == 6);
-  if (latches.size() != 12 && latches.size() != 6) {
+  CHECK(latches.size() == 14 || latches.size() == 7);
+  if (latches.size() != 14 && latches.size() != 7) {
     ImGui::DestroyContext();
     return;
   }
@@ -171,8 +172,10 @@ void test_real_ms_latch_clicks_toggle_partsmodel_and_reach_engine_without_warnin
   CHECK(!parts.part(0).muted);
   CHECK(!poll_saw_warning(session, app_state));
 
-  // --- S latch, row 1 (bass, PartsModel role index 2 per kRows) ---
-  const ImVec2 bass_s = latch_click_point(latches, 1, 1);
+  // --- S latch, row 2 (bass, PartsModel role index 2 per kRows -- bass
+  // moved from position 1 to position 2 when the mixer-roles fix,
+  // 2026-07-18, inserted perc ahead of it) ---
+  const ImVec2 bass_s = latch_click_point(latches, 2, 1);
   CHECK(!parts.part(2).soloed);
   click_at(bass_s, model, seqedit, parts, session, app_state, fx);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));

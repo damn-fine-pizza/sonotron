@@ -107,8 +107,8 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
   ImGui::NewFrame();
   // Tall enough that "sequence_edit"'s seq_canvas never needs to scroll for
   // this fixture (owner task #1's lane-partition fix, seqedit_panel.cpp:
-  // every visible launch_rows.hpp kRows role -- all 6, default -- now gets
-  // its own kLaneH-tall lane; 6 lanes comfortably need more than the
+  // every visible launch_rows.hpp kRows role -- all 7, default -- now gets
+  // its own kLaneH-tall lane; 7 lanes comfortably need more than the
   // previous 700px window's remaining seq_canvas height). This test's own
   // column-occupancy math
   // below assumes the canvas child's OUTER rect (find_child_window_rect)
@@ -341,9 +341,10 @@ void test_step_track_and_empty_cell_content_matches_across_panels() {
   // 5 scenes (same scene count main.cpp actually boots with, and the cap
   // render_grid_panel itself renders). seed_demo()'s own demo pattern below
   // uses kRows POSITION as its `row` field, not raw role_index -- it touches
-  // drums(kRows[0])'s scenes {0,1,3} and bass(kRows[1])'s scenes {0,2}, so
-  // scene 4 is the one column neither role has, keeping this fixture's own
-  // cells there safe from collision.
+  // drums(kRows[0])'s scenes {0,1,3} and bass(kRows[2])'s scenes {0,2} (bass
+  // moved from position 1 to 2 when the mixer-roles fix, 2026-07-18,
+  // inserted perc ahead of it), so scene 4 is the one column neither role
+  // has, keeping this fixture's own cells there safe from collision.
   GridModel model(5);
   SeqEditModel seqedit;
   PartsModel parts;

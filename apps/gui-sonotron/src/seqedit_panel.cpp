@@ -35,7 +35,7 @@ bool mode_tab(const char* label, bool active) {
 // Piano-roll lane height in px (owner bug: "Sequence Edit still doesn't
 // show all tracks" -- draw_role_pattern used to draw every visible role
 // into the SAME shared rect on the SAME pitch axis, so all roles mutually
-// occluded each other in one lane). Each of the 6 kRows roles always gets
+// occluded each other in one lane). Each of the 7 kRows roles always gets
 // its own horizontal strip this tall; the canvas grows past the visible
 // band and scrolls (see "seq_canvas"'s dropped NoScrollbar/NoScrollWithMouse
 // flags below) rather than being squeezed to fit every lane on screen at
@@ -48,7 +48,9 @@ constexpr float kLaneH = 76.0F;
 // 026e3de's wrong per-lane "x" HIDE button -- see draw_piano_roll_lanes'
 // own header comment below). Note-bar content starts at this x-offset from
 // the lane's own left edge, clear of the label column. Sized for the
-// longest kRows label ("chord") plus the small checkbox frame under it.
+// longest rendered lane label ("Chord1"/"Chord2", kTrackRoleLabels) plus
+// the small checkbox frame under it -- unchanged by the mixer-roles fix
+// (2026-07-18), which added chord2 but did not lengthen the longest label.
 constexpr float kLaneLabelW = 96.0F;
 
 // Draws one role's note pattern into the seq_canvas draw list: every voice
@@ -104,7 +106,7 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
 // commit put a per-lane "x" SmallButton on the RIGHT of each lane, which
 // hid the WHOLE LANE -- name included -- with a "+ track" popup as the only
 // way back ("disappears forever"). The name label below is now UNCONDITIONAL
-// for every one of the 6 kRows lanes, every frame -- see compute_piano_roll_
+// for every one of the 7 kRows lanes, every frame -- see compute_piano_roll_
 // lanes' own header comment, it no longer filters by role_visible() at all.
 // The checkbox toggles ONLY whether THIS lane's BARS are drawn (below), in
 // place, reversibly -- SeqEditModel::role_visible's own header comment
@@ -296,7 +298,7 @@ bool try_render_step_canvas(SeqEditModel& model, ImDrawList* dl, const ImVec2& p
   return true;
 }
 
-// Which of the 6 kRows launch rows get a piano-roll lane this frame --
+// Which of the 7 kRows launch rows get a piano-roll lane this frame --
 // extracted out of render_seqedit_panel (readability-function-cognitive-
 // complexity), pure refactor. Mirrors try_render_step_canvas's own guard
 // (model.view() != kStep || open_step_track() < 0) so the two branches can
@@ -309,13 +311,15 @@ bool try_render_step_canvas(SeqEditModel& model, ImDrawList* dl, const ImVec2& p
 // (not raw TrackRole indices) -- draw_piano_roll_lanes needs the whole
 // GridRow (role_index AND name) to resolve each lane's real content.
 //
-// Fabrizio review (2026-07-18): walks kRows (the Repeat Zone's own 6 real
-// rows), not every kTrackRoleCount role -- three roles (Perc/Chord2/Phrase)
-// have no Repeat-Zone row at all, so a lane for them used to be a phantom
-// with no corresponding launch cell.
+// Fabrizio review (2026-07-18): walks kRows (the Repeat Zone's own real
+// rows), not every kTrackRoleCount role -- roles with no Repeat-Zone row at
+// all used to render a lane that was a phantom with no corresponding launch
+// cell. Mixer-roles fix (2026-07-18): kRows now has 7 rows (Perc/Chord2
+// added, Lead removed to match the actually-routed default band) -- only
+// Phrase and Lead have no Repeat-Zone row any more.
 //
 // Owner correction (2026-07-18) of 026e3de: the lane SET returned here is
-// now ALWAYS every one of the 6 kRows roles, unconditionally -- role_
+// now ALWAYS every one of the 7 kRows roles, unconditionally -- role_
 // visible() no longer filters which lanes EXIST (that was the wrong "x"
 // button's job, now removed), it only gates whether draw_piano_roll_lanes
 // paints a given lane's BARS. A lane's name therefore never disappears.
@@ -336,7 +340,7 @@ std::size_t compute_piano_roll_lanes(bool open, const UiState& fx, const SeqEdit
 }
 
 // Finds the launch-grid row (kRows) for a given TrackRole index, or nullptr
-// if this role is not one of the 6 real launch rows. Every OPENED cell's
+// if this role is not one of the 7 real launch rows. Every OPENED cell's
 // role always IS one (render_track_cell/grid_panel.cpp only ever opens a
 // kRows role into Sequence Edit), so a nullptr here is purely defensive --
 // it never happens in practice, but the caller (render_seqedit_panel)
@@ -427,7 +431,7 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx, const GridMode
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   ImDrawList* dl = ImGui::GetWindowDrawList();
 
-  // Which of the 6 kRows launch rows get a piano-roll lane this frame, and
+  // Which of the 7 kRows launch rows get a piano-roll lane this frame, and
   // how tall the scrollable content is -- see compute_piano_roll_lanes's own
   // header comment.
   std::array<std::size_t, kRows.size()> lane_row_indices{};

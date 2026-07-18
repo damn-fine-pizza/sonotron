@@ -212,7 +212,7 @@ void draw_scene_header_column_highlight(const UiState& fx, std::size_t s, ImVec2
 }
 
 // GridRow/kRows moved to launch_rows.hpp (Fabrizio review, 2026-07-18): both
-// this panel and seqedit_panel.cpp now share the SAME 6-row launch set, so
+// this panel and seqedit_panel.cpp now share the SAME 7-row launch set, so
 // Sequence Edit's lane set can never again drift from the Repeat Zone's own
 // rows -- see that header's own comment for the full rationale.
 
@@ -221,7 +221,7 @@ std::size_t cell_id(std::size_t role_index, std::size_t scene, std::size_t scene
 }
 
 // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md): a
-// scene column counts as "populated" if any of the 6 launch-grid rows holds
+// scene column counts as "populated" if any of the 7 launch-grid rows holds
 // a real clip -- an empty column has nothing for a SceneChain step's own
 // Performance to represent musically, so build_and_play_song (below) skips
 // it rather than building an audible-but-empty step for it.
@@ -261,27 +261,31 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
   // Match the design's default clip set + short curated labels exactly
   // (Sonotron v02 Workstation.dc.html) so the launch grid reads like the ref
   // (A/B/fil, wlk/sub, cmp/stab/out, swl, up/up2, vox/ld/end) — no truncation.
+  // Row positions below are kRows POSITIONS, not raw role_index (mirrors
+  // this struct's own long-standing convention) -- mixer-roles fix
+  // (2026-07-18) inserted `perc` at position 1 and `chord2` at position 4,
+  // shifting bass/chord1/pad/arp one-to-two slots later than their OLD
+  // positions (was 1/2/3/4, now 2/3/5/6); `lead`'s old position-5 demo cells
+  // ("vox"/"ld"/"end") are dropped outright since `lead` no longer has a row
+  // at all (the whole point of this fix -- it was never routed/audible).
   struct DemoCell {
     std::size_t row;
     std::size_t scene;
     const char* label;
   };
-  static constexpr std::array<DemoCell, 15> pattern = {{
+  static constexpr std::array<DemoCell, 12> pattern = {{
       {0, 0, "A"},
       {0, 1, "B"},
       {0, 3, "fil"},
-      {1, 0, "wlk"},
-      {1, 2, "sub"},
-      {2, 0, "cmp"},
-      {2, 1, "stab"},
-      {2, 4, "out"},
-      {3, 1, "swl"},
-      {3, 3, "swl"},
-      {4, 0, "up"},
-      {4, 2, "up2"},
-      {5, 1, "vox"},
-      {5, 2, "ld"},
-      {5, 4, "end"},
+      {2, 0, "wlk"},
+      {2, 2, "sub"},
+      {3, 0, "cmp"},
+      {3, 1, "stab"},
+      {3, 4, "out"},
+      {5, 1, "swl"},
+      {5, 3, "swl"},
+      {6, 0, "up"},
+      {6, 2, "up2"},
   }};
   for (const auto& [row, scene, label] : pattern) {
     if (row >= kRows.size() || scene >= model.scene_count()) {
@@ -343,17 +347,21 @@ void seed_demo(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
   }
 
   // Open the bass 'wlk' clip by default — the design's initial openAt {r:1,c:0}
-  // — so Sequence Edit shows a populated (blue) piano-roll, not the empty hint.
-  fx.open_row = 1;
-  fx.open_cell = static_cast<int>(cell_id(kRows[1].role_index, 0, model.scene_count()));
-  fx.open_audio = kRows[1].audio;
+  // — so Sequence Edit shows a populated (blue) piano-roll, not the empty
+  // hint. Bass now sits at kRows POSITION 2 (mixer-roles fix, 2026-07-18:
+  // `perc` was inserted at position 1, ahead of it) -- the design's own
+  // {r:1,c:0} reference predates that row-set change and names bass by its
+  // OLD position, not a re-derived intent; row 2 is still bass here.
+  fx.open_row = 2;
+  fx.open_cell = static_cast<int>(cell_id(kRows[2].role_index, 0, model.scene_count()));
+  fx.open_audio = kRows[2].audio;
   fx.open_section = model.scene_section(0);
   // Feature B: mirrors the real click path's own bookkeeping (render_track_
   // cell above) for this demo default-open cell -- column 0, never a WAV
   // (every demo cell is GridCellKind::kStyleSection).
   fx.open_scene = 0;
   fx.open_wav = false;
-  seqedit.set_part_index(kRows[1].role_index);
+  seqedit.set_part_index(kRows[2].role_index);
   seqedit.set_clip_label("wlk");
   // Owner bug #1: mirrors render_track_cell's own fix below -- the initial
   // demo default-open cell must show every role too, not just the seeded
