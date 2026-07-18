@@ -20,6 +20,21 @@ namespace {
 
 constexpr int kFilterBufferSize = 64;
 
+// Below this many total styles, render one flat, ungrouped list (the
+// pre-task-#30 behavior) instead of family headers + the family-filter
+// combo -- owner correction 2026-07-17: 16 built-in styles buried under 8
+// genre headers (two of them ALWAYS empty, kBallroomTraditional/
+// kWorldRegional -- see browser_model.hpp's kBuiltinStyleFamilies, neither
+// family has any of today's 16 members) was strictly worse than the old
+// flat list for a corpus this small. 24 sits comfortably above today's 16
+// (room to grow the built-in set a bit without flipping modes) and well
+// below the point a flat list stops fitting a 210px rail. The family/
+// genre taxonomy (task #30, docs/proposals/style-browser-corpus-scale.md)
+// stays wired for the day the ~1010-style import lands (memory:
+// browser-scale-many-styles) -- it is simply gated off until the corpus
+// actually needs it.
+constexpr std::size_t kFlatListThreshold = 24;
+
 // Family section render order (task #30, docs/proposals/style-browser-
 // corpus-scale.md §3.2): declaration order of StyleFamily, kOther last (true
 // by construction -- kOther IS declared last in browser_model.hpp).
@@ -140,14 +155,39 @@ void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const A
   ImGui::PopID();
 }
 
+// Below kFlatListThreshold, skip family grouping entirely and render one
+// flat "styles" header + list -- the same shape browser_panel.cpp had
+// before task #30 (see git commit f722000^'s own render_styles), factored
+// here to share render_style_leaf with the grouped path above/below. No
+// ImGuiListClipper -- a corpus this small never needs virtualizing.
+void render_styles_flat(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                        UiState& fx, int& shown) {
+  if (!section_header("styles")) {
+    return;
+  }
+  int local_shown = 0;
+  for (std::size_t i = 0; i < model.style_count(); ++i) {
+    if (!model.style_matches_filter(i)) {
+      continue;
+    }
+    ++local_shown;
+    ++shown;
+    render_style_leaf(model, brain_session, app_state, fx, i);
+  }
+  if (local_shown == 0) {
+    ImGui::TextDisabled("  (no match)");
+  }
+  ImGui::TreePop();
+}
+
 // One family bucket: a flat, ImGuiListClipper-virtualized list of leaves
 // (task #30, docs/proposals/style-browser-corpus-scale.md §3.2) -- NOT a
 // nested tree per family, since the vendored ImGui's own demo notes
 // clipping composes awkwardly with tree nodes (imgui_demo.cpp:4200). Each
 // family gets one always-visible section_header (reusing the existing
-// helper unchanged) followed by its own flat, clipped leaf list; a family
-// with nothing matching still shows its header plus "(no match)" so a
-// player can tell the bucket exists rather than silently vanishing.
+// helper unchanged) followed by its own flat, clipped leaf list; an empty
+// bucket (no members, or nothing matching the current filter) now renders
+// nothing at all -- see kFlatListThreshold above for why.
 void render_style_family_section(BrowserModel& model, BrainSession& brain_session,
                                  const AppState& app_state, UiState& fx, StyleFamily family,
                                  int& shown) {
@@ -157,13 +197,15 @@ void render_style_family_section(BrowserModel& model, BrainSession& brain_sessio
       indices.push_back(i);
     }
   }
-  const std::string title(style_family_label(family));
-  if (!section_header(title.c_str())) {
+  if (indices.empty()) {
+    // A family bucket with nothing in it (or nothing matching the current
+    // filter) renders NOTHING -- not a header plus "(no match)". A player
+    // should never see a bucket that can never hold anything for the
+    // current corpus (owner correction 2026-07-17).
     return;
   }
-  if (indices.empty()) {
-    ImGui::TextDisabled("  (no match)");
-    ImGui::TreePop();
+  const std::string title(style_family_label(family));
+  if (!section_header(title.c_str())) {
     return;
   }
   ImGuiListClipper clipper;
@@ -180,6 +222,10 @@ void render_style_family_section(BrowserModel& model, BrainSession& brain_sessio
 
 void render_styles(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
                    UiState& fx, int& shown) {
+  if (model.style_count() <= kFlatListThreshold) {
+    render_styles_flat(model, brain_session, app_state, fx, shown);
+    return;
+  }
   for (const StyleFamily family : kFamilyRenderOrder) {
     render_style_family_section(model, brain_session, app_state, fx, family, shown);
   }
@@ -276,8 +322,15 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
                           const AppState& app_state, UiState& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
   ImGui::Spacing();
-  render_family_filter_combo(model);
-  ImGui::Spacing();
+  // The family-filter combo only earns its vertical space once the corpus
+  // is big enough to need family grouping in the first place (see
+  // kFlatListThreshold above) -- for today's 16 built-ins it would just be
+  // dead space over a flat list.
+  const bool flat_style_mode = model.style_count() <= kFlatListThreshold;
+  if (!flat_style_mode) {
+    render_family_filter_combo(model);
+    ImGui::Spacing();
+  }
 
   const float search_h = ImGui::GetFrameHeightWithSpacing() + 4.0F;
   ImGui::BeginChild("browser_tree", ImVec2(0.0F, ImGui::GetContentRegionAvail().y - search_h),
