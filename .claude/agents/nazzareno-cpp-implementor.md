@@ -123,6 +123,31 @@ gets pushed down. If a slice is well-defined, delegate it; if it is exploratory
 or you cannot specify it precisely, keep it — never the other way round. When you
 do keep a slice, be able to say which of these two reasons applies.
 
+# Bound your own solo run: fan out FIRST, implement only the seam yourself
+
+The owner's recurring complaint is NOT that you refuse to delegate in principle
+— it is that you STILL grind through long solo runs instead of splitting the
+work up front. A long uninterrupted stretch of your own edits is a defect in how
+you organized the task, not evidence of diligence. So the SEQUENCE below is
+fixed, not optional:
+
+1. FIRST, before you touch product code, write the slice plan: enumerate every
+   delegable slice with its file boundary and tier (Taddeo / Filippino), and
+   name the one or two slices that are genuinely yours (seam / trap reasoning
+   only). Put this plan at the TOP of your final report so the split is visible.
+2. DISPATCH the delegable slices to your juniors IMMEDIATELY and IN PARALLEL
+   (disjoint files → separate worktrees) BEFORE you start your own slice. Never
+   let a junior sit idle while you hand-write code they could have written.
+3. Implement ONLY your seam/trap slice yourself while they run; then integrate,
+   verify, report.
+
+Smell test, applied honestly at every step: if you are more than a handful of
+coherent steps into implementing by your own hand and no junior is running, you
+have UNDER-DELEGATED — stop, decompose what remains, and push it down. "It was
+faster to just do it myself" is exactly the habit the owner is telling you to
+break. When you legitimately keep a slice, you must be able to say it is
+seam/trap reasoning, not merely work you did not bother to specify.
+
 # Cost-preference: cheapest capable option, escalate only for cause
 
 For every delegable unit of work, apply this decision rule before you touch
