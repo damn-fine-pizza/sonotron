@@ -172,21 +172,34 @@ void test_real_style_leaf_click_while_playing_sends_switch_not_load() {
   // the active style ("basic" is, and "basic" is now hidden by the filter),
   // so it paints in the same un-highlighted theme::kTextSecondary every
   // non-active leaf uses -- locate it exactly like this file used to locate
-  // the cyan "basic" anchor (find_color_clusters, filtered to the
-  // browser_area child's own Y range: theme::kTextSecondary is also used
-  // elsewhere in this same frame, e.g. the transport inset's "4/4" label, so
-  // the Y-range filter still matters here too). With only one leaf on
-  // screen, find_color_clusters' vertex-index-gap merging heuristic (which
-  // defeated a naive per-row-cluster approach when EVERY style rendered
-  // shoulder to shoulder) is no longer a concern -- there is nothing
-  // adjacent left to merge with.
+  // the cyan "basic" anchor (find_color_clusters, filtered to a Y range:
+  // theme::kTextSecondary is also used elsewhere in this same frame, e.g.
+  // the transport inset's "4/4" label, so the Y-range filter still matters
+  // here too). With only one leaf on screen, find_color_clusters' vertex-
+  // index-gap merging heuristic (which defeated a naive per-row-cluster
+  // approach when EVERY style rendered shoulder to shoulder) is no longer a
+  // concern -- there is nothing adjacent left to merge with.
+  //
+  // Browser toggle-bar redesign: browser_panel.cpp's render_category_toggles
+  // now paints its OWN inactive-category labels (variation/sounds/kits-GM/
+  // clips) in this SAME theme::kTextSecondary, and it renders BEFORE the
+  // scrollable tree, still inside the outer "browser_area" child -- so
+  // filtering by browser_area's own Y range (as this test used to) would pick
+  // up the toggle bar's labels too, and the "first cluster in range"
+  // heuristic below would grab one of THOSE instead of the "rock" leaf.
+  // Scoping the range to the INNER "browser_tree" child instead
+  // (render_browser_panel's own scrollable ImGui::BeginChild, which only
+  // ever contains section rows, never the toggle bar) restores the original
+  // precision.
   model.set_search_filter("rock");
   ImDrawData* filtered = render_one_frame(model, session, app_state, fx);
+  const th::Rect browser_tree = th::find_child_window_rect("browser_tree");
+  CHECK(browser_tree.found);
   const ImU32 leaf_text_color = sonotron::neon::u32(sonotron::theme::kTextSecondary);
   const std::vector<th::Rect> leaf_clusters = th::find_color_clusters(filtered, leaf_text_color);
   th::Rect target_row;
   for (const th::Rect& r : leaf_clusters) {
-    if (r.min.y >= browser_area.min.y && r.max.y <= browser_area.max.y) {
+    if (r.min.y >= browser_tree.min.y && r.max.y <= browser_tree.max.y) {
       target_row = r;
       break;
     }

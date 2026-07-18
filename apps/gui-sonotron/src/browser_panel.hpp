@@ -11,13 +11,15 @@
 
 namespace sonotron {
 
-// Draws the searchable tree for whichever category is currently selected
-// (styles / variations / voices · sounds / kits · GM / clips), gated by an
-// outer category combo (BrowserModel::category, browser-redesign-taxonomy.md
-// Phase 1) rather than rendering all sections in one scroll -- only one
-// category's tree is visible at a time, inside the CURRENT ImGui child, with
-// the search field pinned at the bottom and scoped to that category alone
-// (BrowserModel::search_filter is per-category). Every style row is a real
+// Draws the searchable tree for every category currently toggled visible
+// (styles / variation / sounds / kits-GM / clips), gated by a wrapping
+// toggle-label bar (BrowserModel::category_visible, browser-redesign-
+// taxonomy.md Phase 1) rather than a single-select combo -- MULTIPLE
+// categories' trees can be visible simultaneously, stacked inside the CURRENT
+// ImGui child (only styles is visible by default), with the search field
+// pinned at the bottom and scoped to whichever category was most recently
+// toggled (BrowserModel::search_filter/filter_for keep each category's own
+// filter isolated). Every style row is a real
 // drag source (kStyleDragPayloadId) AND a real load (`style load <name>`, a
 // shipped L1 verb) -- clicking one also marks it the active row (UiState::
 // active_style, a local highlight; there is no selection readback on the

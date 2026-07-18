@@ -22,11 +22,11 @@ std::string_view browser_category_label(BrowserCategory category) {
     case BrowserCategory::kStyles:
       return "styles";
     case BrowserCategory::kVariations:
-      return "variations";
+      return "variation";
     case BrowserCategory::kVoices:
-      return "voices \xC2\xB7 sounds";
+      return "sounds";
     case BrowserCategory::kKits:
-      return "kits \xC2\xB7 GM";
+      return "kits-GM";
     case BrowserCategory::kClips:
       return "clips";
   }

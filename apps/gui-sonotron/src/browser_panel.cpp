@@ -433,26 +433,40 @@ constexpr std::array<BrowserCategory, kBrowserCategoryCount> kCategoryOrder = {
     BrowserCategory::kKits,   BrowserCategory::kClips,
 };
 
-// Outer category selector (decision fork 1): the SAME combo idiom as
-// render_family_filter_combo above, reused rather than a literal ImGui tab
-// bar -- see this file's own family-filter combo for the precedent and
+// Outer category selector (decision fork 1): a wrapping toggle-label bar
+// (the canonical ImGui "wrapping buttons" idiom, adapted from ImGui's own
+// demo) rather than a literal ImGui tab bar or a single-select combo -- see
 // docs/proposals/browser-redesign-taxonomy.md §3 for why a tab bar does not
-// fit 210px.
-void render_category_combo(BrowserModel& model) {
-  const BrowserCategory current = model.category();
-  const std::string preview(browser_category_label(current));
-  ImGui::SetNextItemWidth(-FLT_MIN);
-  if (ImGui::BeginCombo("##browser_category", preview.c_str())) {
-    for (const BrowserCategory category : kCategoryOrder) {
-      const bool selected = category == current;
-      const std::string label(browser_category_label(category));
-      ImGui::PushID(static_cast<int>(category));
-      if (ImGui::Selectable(label.c_str(), selected)) {
-        model.set_category(category);
-      }
-      ImGui::PopID();
+// fit 210px. Any number of categories can be toggled visible at once; every
+// click also marks that category the "active" one (model.set_category) so
+// the bottom search field always edits whichever label the user last
+// touched, whether turning a section ON or OFF.
+void render_category_toggles(BrowserModel& model) {
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float window_visible_x2 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+  for (std::size_t i = 0; i < kCategoryOrder.size(); ++i) {
+    const BrowserCategory category = kCategoryOrder[i];
+    const std::string label(browser_category_label(category));
+    const bool visible = model.category_visible(category);
+    ImGui::PushID(static_cast<int>(category));
+    ImGui::PushStyleColor(ImGuiCol_Text, visible ? theme::kCyan : theme::kTextSecondary);
+    const ImVec2 size(ImGui::CalcTextSize(label.c_str()).x + style.FramePadding.x * 2.0F, 0.0F);
+    const bool clicked = ImGui::Selectable(label.c_str(), visible, ImGuiSelectableFlags_None, size);
+    ImGui::PopStyleColor();
+    ImGui::PopID();
+    if (clicked) {
+      model.set_category_visible(category, !visible);
+      model.set_category(category);
     }
-    ImGui::EndCombo();
+    if (i + 1 < kCategoryOrder.size()) {
+      const float last_x2 = ImGui::GetItemRectMax().x;
+      const std::string next_label(browser_category_label(kCategoryOrder[i + 1]));
+      const float next_w = ImGui::CalcTextSize(next_label.c_str()).x + style.FramePadding.x * 2.0F;
+      const float next_x2 = last_x2 + style.ItemSpacing.x + next_w;
+      if (next_x2 < window_visible_x2) {
+        ImGui::SameLine();
+      }
+    }
   }
 }
 
@@ -462,60 +476,67 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
                           const AppState& app_state, UiState& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
   ImGui::Spacing();
-  render_category_combo(model);
+  render_category_toggles(model);
   ImGui::Spacing();
 
-  const BrowserCategory category = model.category();
   const bool flat_style_mode = model.style_count() <= kFlatListThreshold;
-  // The family-filter combo only earns its vertical space once the corpus
-  // is big enough to need family grouping in the first place (see
-  // kFlatListThreshold above) -- for today's 16 built-ins it would just be
-  // dead space over a flat list.
-  if (category == BrowserCategory::kStyles && !flat_style_mode) {
-    render_family_filter_combo(model);
-    ImGui::Spacing();
-  }
-  if (category == BrowserCategory::kVoices) {
-    render_voice_destination_picker(model);
-    ImGui::Spacing();
-  }
-  if (category == BrowserCategory::kKits) {
-    render_kit_destination_picker(model);
-    ImGui::Spacing();
-  }
 
   const float search_h = ImGui::GetFrameHeightWithSpacing() + 4.0F;
   ImGui::BeginChild("browser_tree", ImVec2(0.0F, ImGui::GetContentRegionAvail().y - search_h),
                     ImGuiChildFlags_None, ImGuiWindowFlags_None);
-  const std::string filter = model.search_filter();
   int shown = 0;
-  switch (category) {
-    case BrowserCategory::kStyles:
-      render_styles(model, brain_session, app_state, fx, shown);
-      break;
-    case BrowserCategory::kVariations:
-      render_variations(brain_session, filter, shown);
-      break;
-    case BrowserCategory::kVoices:
-      render_voices(model, brain_session, filter, shown);
-      break;
-    case BrowserCategory::kKits:
-      render_kits(model, brain_session, filter, shown);
-      break;
-    case BrowserCategory::kClips:
-      if (section_header("clips")) {
-        ImGui::TextDisabled("  (none authored yet)");
-        ImGui::TreePop();
-      }
-      break;
+  bool first_section = true;
+  for (const BrowserCategory category : kCategoryOrder) {
+    if (!model.category_visible(category)) {
+      continue;
+    }
+    if (!first_section) {
+      ImGui::Separator();
+    }
+    first_section = false;
+    switch (category) {
+      case BrowserCategory::kStyles:
+        // The family-filter combo only earns its vertical space once the
+        // corpus is big enough to need family grouping in the first place
+        // (see kFlatListThreshold above) -- for today's 16 built-ins it
+        // would just be dead space over a flat list.
+        if (!flat_style_mode) {
+          render_family_filter_combo(model);
+          ImGui::Spacing();
+        }
+        render_styles(model, brain_session, app_state, fx, shown);
+        break;
+      case BrowserCategory::kVariations:
+        render_variations(brain_session, model.filter_for(category), shown);
+        break;
+      case BrowserCategory::kVoices:
+        render_voice_destination_picker(model);
+        ImGui::Spacing();
+        render_voices(model, brain_session, model.filter_for(category), shown);
+        break;
+      case BrowserCategory::kKits:
+        render_kit_destination_picker(model);
+        ImGui::Spacing();
+        render_kits(model, brain_session, model.filter_for(category), shown);
+        break;
+      case BrowserCategory::kClips:
+        if (section_header("clips")) {
+          ImGui::TextDisabled("  (none authored yet)");
+          ImGui::TreePop();
+        }
+        break;
+    }
   }
   ImGui::EndChild();
 
-  // Search field pinned at the bottom -- scoped to the ACTIVE category only
-  // (browser-redesign-taxonomy.md §3: per-tab search, never a global
-  // cross-family search).
+  // Search field pinned at the bottom -- edits whichever category was most
+  // recently toggled (model.category(), touched on every toggle click in
+  // render_category_toggles), NOT necessarily every visible section's own
+  // filter (each section reads its OWN slot via filter_for() above, so
+  // toggling a second section visible never clobbers the first one's text).
+  const std::string current_filter = model.search_filter();
   char buffer[kFilterBufferSize];
-  std::strncpy(buffer, filter.c_str(), sizeof(buffer) - 1);
+  std::strncpy(buffer, current_filter.c_str(), sizeof(buffer) - 1);
   buffer[sizeof(buffer) - 1] = '\0';
   ImGui::SetNextItemWidth(-FLT_MIN);
   if (ImGui::InputTextWithHint("##browser_search", "search\xE2\x80\xA6", buffer, sizeof(buffer))) {

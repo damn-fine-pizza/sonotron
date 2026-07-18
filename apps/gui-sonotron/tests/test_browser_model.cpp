@@ -184,6 +184,50 @@ void test_set_category_round_trips() {
   CHECK(model.category() == BrowserCategory::kKits);
 }
 
+// Toggle-label bar (browser-redesign-taxonomy.md Phase 1): only Styles is
+// visible by default, matching m_category_visible's own array literal.
+void test_default_visibility_only_styles_visible() {
+  BrowserModel model;
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+  CHECK(!model.category_visible(BrowserCategory::kVariations));
+  CHECK(!model.category_visible(BrowserCategory::kVoices));
+  CHECK(!model.category_visible(BrowserCategory::kKits));
+  CHECK(!model.category_visible(BrowserCategory::kClips));
+}
+
+void test_set_category_visible_toggles_independently() {
+  BrowserModel model;
+  model.set_category_visible(BrowserCategory::kVoices, true);
+  CHECK(model.category_visible(BrowserCategory::kVoices));
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+
+  model.set_category_visible(BrowserCategory::kVoices, false);
+  CHECK(!model.category_visible(BrowserCategory::kVoices));
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+}
+
+// Multiple categories can be toggled visible simultaneously (the whole point
+// of the toggle-bar redesign over the old single-select combo).
+void test_multiple_categories_can_be_visible_simultaneously() {
+  BrowserModel model;
+  model.set_category_visible(BrowserCategory::kKits, true);
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+  CHECK(model.category_visible(BrowserCategory::kKits));
+}
+
+// filter_for() reads a SPECIFIC category's own slot regardless of which
+// category is currently "active" -- proves the isolation survives through
+// the new accessor, not just through search_filter().
+void test_filter_for_returns_independent_per_category_filter() {
+  BrowserModel model;
+  model.set_category(BrowserCategory::kStyles);
+  model.set_search_filter("abc");
+  model.set_category(BrowserCategory::kVoices);
+  model.set_search_filter("xyz");
+  CHECK(model.filter_for(BrowserCategory::kStyles) == "abc");
+  CHECK(model.filter_for(BrowserCategory::kVoices) == "xyz");
+}
+
 // browser_category_label: non-empty, distinct label for every enumerator
 // (mirroring test_style_family_label_is_non_empty_for_every_enumerator).
 void test_browser_category_label_is_non_empty_for_every_enumerator() {
@@ -331,6 +375,10 @@ int main() {
   test_clearing_family_filter_restores_full_visibility_under_text_filter();
   test_default_category_is_styles();
   test_set_category_round_trips();
+  test_default_visibility_only_styles_visible();
+  test_set_category_visible_toggles_independently();
+  test_multiple_categories_can_be_visible_simultaneously();
+  test_filter_for_returns_independent_per_category_filter();
   test_browser_category_label_is_non_empty_for_every_enumerator();
   test_voice_count_and_names();
   test_search_filter_is_isolated_per_category();

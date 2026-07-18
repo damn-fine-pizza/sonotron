@@ -44,10 +44,11 @@ inline constexpr const char* kStyleDragPayloadId = "SONOTRON_STYLE_INDEX";
 inline constexpr const char* kVariationDragPayloadId = "SONOTRON_VARIATION_SECTION";
 
 // Outer category selector (browser-redesign-taxonomy.md Phase 1, decision
-// fork 1): which resource family the tree below renders. Reused via a COMBO
-// widget (browser_panel.cpp's render_category_combo), NOT a tab bar -- see
+// fork 1): which resource family(ies) the tree below renders. Reused via a
+// wrapping toggle-label bar (browser_panel.cpp's render_category_toggles) --
+// MULTIPLE categories can be visible simultaneously now, NOT a tab bar -- see
 // that doc's §3 for why a literal ImGui::BeginTabBar does not fit 210px.
-// Declaration order below is deliberately the SAME order the combo lists
+// Declaration order below is deliberately the SAME order the toggle bar lists
 // entries in (browser_panel.cpp's local kCategoryOrder mirrors it). Do NOT
 // add Songs/Performances/Chords/Loops/Pad-FX-Groove/Controller-maps/Routing
 // here -- the taxonomy doc stages every one of those into a later phase or
@@ -327,6 +328,27 @@ class BrowserModel {
   BrowserCategory category() const { return m_category; }
   void set_category(BrowserCategory category) { m_category = category; }
 
+  // Toggle-bar visibility (browser-redesign-taxonomy.md Phase 1): whether a
+  // given category's section renders inside the scrollable tree. Independent
+  // of m_category (which now only tracks "last touched" for the bottom
+  // search field, see filter_for below) -- multiple categories can be
+  // visible at once. kStyles is visible by default, the rest start hidden.
+  bool category_visible(BrowserCategory category) const {
+    return m_category_visible[static_cast<std::size_t>(category)];
+  }
+  void set_category_visible(BrowserCategory category, bool visible) {
+    m_category_visible[static_cast<std::size_t>(category)] = visible;
+  }
+
+  // Independent per-category filter accessor: unlike search_filter() (which
+  // always reads/writes whichever category is CURRENTLY active), this reads
+  // a SPECIFIC category's own filter slot regardless of which one is active
+  // -- needed once multiple sections can be visible simultaneously, so each
+  // keeps its own text filter isolated from the others.
+  const std::string& filter_for(BrowserCategory category) const {
+    return m_filters[static_cast<std::size_t>(category)];
+  }
+
   // Voice destination (`program <port>[:channel]`): local-only, no wire
   // readback (parts_model.hpp's own gm_program stays -1 for the identical
   // reason -- no per-part program readback exists on the wire today). Channel
@@ -385,6 +407,7 @@ class BrowserModel {
   std::array<std::string, kBrowserCategoryCount> m_filters;
   std::optional<StyleFamily> m_family_filter;
   BrowserCategory m_category = BrowserCategory::kStyles;
+  std::array<bool, kBrowserCategoryCount> m_category_visible = {true, false, false, false, false};
   std::string m_voice_port = "out0";
   int m_voice_channel = 1;
   int m_last_voice_sent = -1;
