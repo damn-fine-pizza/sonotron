@@ -51,15 +51,25 @@ class SeqEditModel {
   SeqEditView view() const { return m_view; }
   void set_view(SeqEditView view) { m_view = view; }
 
-  // Per-role SHOW/HIDE toggle for the Sequence-Edit overlay (owner task #1:
-  // list every instrument on the left, each individually toggleable). All 9
-  // roles default VISIBLE. An out-of-range `role_index` reads back as visible
-  // (the safe default) and a set on an out-of-range index is a silent no-op
-  // (never touches a DIFFERENT role than the caller intended) -- same
-  // clamp-or-ignore-not-crash discipline set_part_index() already uses above,
-  // except a no-op is the right call here (unlike set_part_index's clamp:
-  // silently retargeting a DIFFERENT role's visibility would be a worse bug
-  // than simply ignoring an out-of-range request).
+  // Per-role BARS-VISIBLE toggle for the Sequence-Edit piano-roll overlay
+  // (owner task #1: list every instrument, each individually toggleable).
+  // All 9 roles default VISIBLE. An out-of-range `role_index` reads back as
+  // visible (the safe default) and a set on an out-of-range index is a
+  // silent no-op (never touches a DIFFERENT role than the caller intended)
+  // -- same clamp-or-ignore-not-crash discipline set_part_index() already
+  // uses above, except a no-op is the right call here (unlike set_part_
+  // index's clamp: silently retargeting a DIFFERENT role's visibility would
+  // be a worse bug than simply ignoring an out-of-range request).
+  //
+  // Semantics correction (owner, 2026-07-18, replacing 026e3de's wrong
+  // per-lane "x" HIDE-THE-WHOLE-LANE button): this flag NO LONGER decides
+  // whether a Sequence-Edit lane EXISTS -- seqedit_panel.cpp's
+  // compute_piano_roll_lanes now always lists every one of the 6 launch_
+  // rows.hpp kRows roles, so a lane's name label is unconditional. This flag
+  // now gates ONLY whether draw_piano_roll_lanes paints that lane's note
+  // BARS -- toggled via a checkbox drawn directly under the lane's own name,
+  // fully reversible in place. This is a GUI-only host view flag: it never
+  // reaches the core, ClipMatrix, playback, or any wire command.
   bool role_visible(std::size_t role_index) const {
     return role_index >= kTrackRoleCount || m_role_visible[role_index];
   }

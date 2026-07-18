@@ -259,10 +259,26 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   const th::Rect canvas_rect = th::find_child_window_rect("seq_canvas");
   CHECK(canvas_rect.found);
 
+  // Owner correction (2026-07-18) of 026e3de: each lane's note bars now
+  // start kLaneLabelW px right of the canvas' own left edge, clear of the
+  // per-lane name+checkbox column (seqedit_panel.cpp's per-lane layout).
+  // Narrow the sampled band to match, mirroring grid_band's own "read the
+  // magic constant straight from the product code's own documented layout"
+  // discipline above -- without this, count_occupied_columns_in_band below
+  // divides the FULL (un-narrowed) canvas width into columns while the real
+  // note quads occupy only the narrower region past the label column,
+  // corrupting the bucket assignment (empirically: 16 real notes falsely
+  // spread across 28 buckets).
+  th::Rect seqedit_band = canvas_rect;
+  if (seqedit_band.found) {
+    constexpr float kLaneLabelW = 96.0F;  // seqedit_panel.cpp's own constant
+    seqedit_band.min.x += kLaneLabelW;
+  }
+
   // Both panels paint their note bars with the EXACT SAME fill color/alpha
   // (grid_panel.cpp's clip_preview_pianoroll and seqedit_panel.cpp's own
   // per-step loop both call `neon::u32(track_color, 0.85F)`) -- only the
-  // two panels' own disjoint screen regions (grid_band vs canvas_rect,
+  // two panels' own disjoint screen regions (grid_band vs seqedit_band,
   // discovered above, never overlapping) distinguish which one painted
   // which bar. Both bands are sampled at a divisor SCALED by `pp.bars`
   // (owner bug #2/#3: the fixed-resolution one-bar divisors used to
@@ -275,7 +291,7 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
       final_draw_data, note_color, grid_band, pp.bars * sonotron::neon::ClipPattern::kCellSteps);
   const int seqedit_notes_shown =
       canvas_rect.found
-          ? th::count_occupied_columns_in_band(final_draw_data, note_color, canvas_rect,
+          ? th::count_occupied_columns_in_band(final_draw_data, note_color, seqedit_band,
                                                pp.bars * sonotron::neon::ClipPattern::kSteps)
           : -1;
 
@@ -421,6 +437,15 @@ void test_step_track_and_empty_cell_content_matches_across_panels() {
   const th::Rect canvas_rect = th::find_child_window_rect("seq_canvas");
   CHECK(canvas_rect.found);
 
+  // Owner correction (2026-07-18) of 026e3de: narrow the sampled band to
+  // the note-bar region past the per-lane name+checkbox column -- see the
+  // sibling test's own header comment above for the full reasoning.
+  th::Rect seqedit_band = canvas_rect;
+  if (seqedit_band.found) {
+    constexpr float kLaneLabelW = 96.0F;  // seqedit_panel.cpp's own constant
+    seqedit_band.min.x += kLaneLabelW;
+  }
+
   // The opened role's own note color -- IDENTICAL constant in both panels
   // (grid_panel.cpp's row color is theme::kTrackColor[r], keyed by kRows
   // POSITION; seqedit_panel.cpp's track_color is theme::kTrackColor[fx.
@@ -432,7 +457,7 @@ void test_step_track_and_empty_cell_content_matches_across_panels() {
       th::count_occupied_columns_in_band(final_draw_data, note_color, grid_band,
                                          kStepTrackBars * sonotron::neon::ClipPattern::kCellSteps);
   const int seqedit_notes_shown =
-      th::count_occupied_columns_in_band(final_draw_data, note_color, canvas_rect,
+      th::count_occupied_columns_in_band(final_draw_data, note_color, seqedit_band,
                                          kStepTrackBars * sonotron::neon::ClipPattern::kSteps);
 
   // THE STEP-TRACK PARITY PIN: 4 authored notes, painted identically by both

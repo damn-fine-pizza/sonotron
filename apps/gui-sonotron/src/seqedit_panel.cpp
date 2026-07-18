@@ -35,11 +35,21 @@ bool mode_tab(const char* label, bool active) {
 // Piano-roll lane height in px (owner bug: "Sequence Edit still doesn't
 // show all tracks" -- draw_role_pattern used to draw every visible role
 // into the SAME shared rect on the SAME pitch axis, so all roles mutually
-// occluded each other in one lane). Each visible role now gets its own
-// horizontal strip this tall; the canvas grows past the visible band and
-// scrolls (see "seq_canvas"'s dropped NoScrollbar/NoScrollWithMouse flags
-// below) rather than being squeezed to fit every lane on screen at once.
+// occluded each other in one lane). Each of the 6 kRows roles always gets
+// its own horizontal strip this tall; the canvas grows past the visible
+// band and scrolls (see "seq_canvas"'s dropped NoScrollbar/NoScrollWithMouse
+// flags below) rather than being squeezed to fit every lane on screen at
+// once. Tall enough to fit a name line + a checkbox stacked in the left
+// column (kLaneLabelW below) alongside the note-bar content on the right.
 constexpr float kLaneH = 76.0F;
+
+// Width in px of each lane's LEFT column: the role name label plus, right
+// under it, the bars-visible checkbox (owner correction, 2026-07-18, of
+// 026e3de's wrong per-lane "x" HIDE button -- see draw_piano_roll_lanes'
+// own header comment below). Note-bar content starts at this x-offset from
+// the lane's own left edge, clear of the label column. Sized for the
+// longest kRows label ("chord") plus the small checkbox frame under it.
+constexpr float kLaneLabelW = 96.0F;
 
 // Draws one role's note pattern into the seq_canvas draw list: every voice
 // at every step as a filled, rounded rect via the shared pitch_grid_cell()
@@ -84,11 +94,21 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
 // Owner decision (sidebar removal, 2026-07-18): the role name used to be
 // drawn HERE *and* a second time in the now-deleted left-hand sidebar
 // (render_role_toggle_sidebar). The sidebar is gone; each lane's header now
-// also carries a small "x" HIDE button next to its name -- the per-role
+// also carries a checkbox DIRECTLY UNDER its name -- the per-role
 // counterpart the sidebar's checkbox used to be, now living on the lane it
 // actually names, wired straight to the same SeqEditModel::set_role_visible
 // the sidebar called. `model` is therefore taken by non-const reference (it
 // was const before, since the sidebar owned every mutation).
+//
+// Owner correction (2026-07-18) of an earlier wrong attempt (026e3de): that
+// commit put a per-lane "x" SmallButton on the RIGHT of each lane, which
+// hid the WHOLE LANE -- name included -- with a "+ track" popup as the only
+// way back ("disappears forever"). The name label below is now UNCONDITIONAL
+// for every one of the 6 kRows lanes, every frame -- see compute_piano_roll_
+// lanes' own header comment, it no longer filters by role_visible() at all.
+// The checkbox toggles ONLY whether THIS lane's BARS are drawn (below), in
+// place, reversibly -- SeqEditModel::role_visible's own header comment
+// documents this semantics change (was "lane exists", now "bars draw").
 //
 // Fabrizio review (2026-07-18, track-set + content divergence from the
 // Repeat Zone): each lane's own `total_steps` and note content are now
@@ -116,12 +136,20 @@ void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1,
 
     const ImVec2 lane_p0(p0.x, p0.y + static_cast<float>(i) * kLaneH);
     const ImVec2 lane_p1(p1.x, lane_p0.y + kLaneH);
-    if (role == model.part_index()) {
-      draw_role_pattern(dl, lane_p0, lane_p1, lane_total_steps, preview.pattern, track_color, 0.85F,
-                        fx.glow);
-    } else {
-      draw_role_pattern(dl, lane_p0, lane_p1, lane_total_steps, preview.pattern,
-                        theme::kRoleTint[role], 0.45F, false);
+
+    // Bars: only when this lane's own checkbox (below) is checked. Indented
+    // past kLaneLabelW so they never draw under the name/checkbox column.
+    // Unchecked leaves the name+checkbox in place and simply skips painting
+    // any note content for this lane -- fully reversible, nothing removed.
+    if (model.role_visible(role)) {
+      const ImVec2 bars_p0(lane_p0.x + kLaneLabelW, lane_p0.y);
+      if (role == model.part_index()) {
+        draw_role_pattern(dl, bars_p0, lane_p1, lane_total_steps, preview.pattern, track_color,
+                          0.85F, fx.glow);
+      } else {
+        draw_role_pattern(dl, bars_p0, lane_p1, lane_total_steps, preview.pattern,
+                          theme::kRoleTint[role], 0.45F, false);
+      }
     }
     if (i > 0) {
       dl->AddLine(lane_p0, ImVec2(lane_p1.x, lane_p0.y), neon::u32(theme::kTextMuted, 0.18F), 1.0F);
@@ -130,17 +158,18 @@ void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1,
                 neon::u32(theme::kRoleTint[role], role == model.part_index() ? 0.95F : 0.6F),
                 std::string(kTrackRoleLabels[role]).c_str());
 
-    // Per-lane HIDE control: a real ImGui widget (not draw-list-only, unlike
-    // the rest of this function) so it is actually clickable -- laid out
-    // top-right of the lane header via SetCursorScreenPos, mirroring the
+    // Per-lane BARS-VISIBLE checkbox: a real ImGui widget (not draw-list-only,
+    // unlike the rest of this function) so it is actually clickable -- laid
+    // out directly UNDER the name label via SetCursorScreenPos, mirroring the
     // InvisibleButton idiom render_step_grid already uses to place widgets
     // over draw-list content inside this same "seq_canvas" child. PushID(role)
-    // keeps every lane's "x" button ID distinct across the loop.
+    // keeps every lane's checkbox ID distinct across the loop.
     ImGui::PushID(static_cast<int>(role));
-    const float x_w = ImGui::CalcTextSize("x").x + ImGui::GetStyle().FramePadding.x * 2.0F;
-    ImGui::SetCursorScreenPos(ImVec2(lane_p1.x - x_w - 4.0F, lane_p0.y));
-    if (ImGui::SmallButton("x")) {
-      model.set_role_visible(role, false);
+    bool visible = model.role_visible(role);
+    ImGui::SetCursorScreenPos(
+        ImVec2(lane_p0.x + 4.0F, lane_p0.y + 2.0F + ImGui::GetTextLineHeight() + 2.0F));
+    if (ImGui::Checkbox("##bars_visible", &visible)) {
+      model.set_role_visible(role, visible);
     }
     ImGui::PopID();
   }
@@ -267,42 +296,6 @@ bool try_render_step_canvas(SeqEditModel& model, ImDrawList* dl, const ImVec2& p
   return true;
 }
 
-// "+ track" popup (owner decision, 2026-07-18: the role name used to render
-// TWICE -- once in the now-deleted left-hand sidebar, once on the lane
-// itself -- so the sidebar, including its bulk "all tracks"/"last track"
-// toggle, is gone entirely). This is the RE-SHOW half of the show/hide pair;
-// draw_piano_roll_lanes' per-lane "x" button above is the HIDE half. Lists
-// every launch_rows.hpp kRows role SeqEditModel::role_visible() currently
-// reports hidden; clicking an entry re-shows it. When nothing is hidden the
-// menu shows a single disabled placeholder rather than opening empty.
-//
-// Fabrizio review (2026-07-18): the candidate set here MUST be kRows, not
-// every kTrackRoleCount role -- a role outside kRows (Perc/Chord2/Phrase)
-// has no matching Repeat-Zone row to resolve real content against, so
-// offering it here would reopen the exact track-set divergence this pass
-// closes the instant a user added one.
-void render_add_track_menu(SeqEditModel& model) {
-  if (ImGui::SmallButton("+ track")) {
-    ImGui::OpenPopup("seq_add_track_popup");
-  }
-  if (ImGui::BeginPopup("seq_add_track_popup")) {
-    bool any_hidden = false;
-    for (const GridRow& row : kRows) {
-      if (model.role_visible(row.role_index)) {
-        continue;
-      }
-      any_hidden = true;
-      if (ImGui::MenuItem(std::string(kTrackRoleLabels[row.role_index]).c_str())) {
-        model.set_role_visible(row.role_index, true);
-      }
-    }
-    if (!any_hidden) {
-      ImGui::MenuItem("(all tracks shown)", nullptr, false, false);
-    }
-    ImGui::EndPopup();
-  }
-}
-
 // Which of the 6 kRows launch rows get a piano-roll lane this frame --
 // extracted out of render_seqedit_panel (readability-function-cognitive-
 // complexity), pure refactor. Mirrors try_render_step_canvas's own guard
@@ -320,20 +313,26 @@ void render_add_track_menu(SeqEditModel& model) {
 // rows), not every kTrackRoleCount role -- three roles (Perc/Chord2/Phrase)
 // have no Repeat-Zone row at all, so a lane for them used to be a phantom
 // with no corresponding launch cell.
+//
+// Owner correction (2026-07-18) of 026e3de: the lane SET returned here is
+// now ALWAYS every one of the 6 kRows roles, unconditionally -- role_
+// visible() no longer filters which lanes EXIST (that was the wrong "x"
+// button's job, now removed), it only gates whether draw_piano_roll_lanes
+// paints a given lane's BARS. A lane's name therefore never disappears.
 std::size_t compute_piano_roll_lanes(bool open, const UiState& fx, const SeqEditModel& model,
                                      std::array<std::size_t, kRows.size()>& lane_row_indices) {
+  // `model` is no longer used to FILTER lanes (see the header comment above)
+  // but stays a parameter for symmetry with the piano-roll gating condition
+  // below, which reads model.view()/open_step_track() the same as before.
   const bool is_piano_roll =
       open && !fx.open_wav && (model.view() != SeqEditView::kStep || model.open_step_track() < 0);
   if (!is_piano_roll) {
     return 0;
   }
-  std::size_t lane_count = 0;
   for (std::size_t i = 0; i < kRows.size(); ++i) {
-    if (model.role_visible(kRows[i].role_index)) {
-      lane_row_indices[lane_count++] = i;
-    }
+    lane_row_indices[i] = i;
   }
-  return lane_count;
+  return kRows.size();
 }
 
 // Finds the launch-grid row (kRows) for a given TrackRole index, or nullptr
@@ -407,16 +406,11 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx, const GridMode
   ImGui::SameLine(0.0F, 12.0F);
   ImGui::TextColored(theme::kTextMuted, "grid 1/%d", model.grid_division());
 
-  // "+ track" control (owner decision, sidebar removal, 2026-07-18): the
-  // left-hand SHOW/HIDE sidebar is gone -- its RE-SHOW half now lives here,
-  // at the top of the panel, as a popup menu of hidden roles. Only meaningful
-  // while a cell is open (nothing to show/hide otherwise), matching the
-  // canvas's own early-return gating and the sidebar's old guard.
-  if (open) {
-    ImGui::SameLine(0.0F, 12.0F);
-    render_add_track_menu(model);
-  }
-
+  // Owner correction (2026-07-18) of 026e3de: there is no "+ track"
+  // control any more -- a lane is never removed in the first place (see
+  // compute_piano_roll_lanes/draw_piano_roll_lanes' own header comments), so
+  // there is nothing to "re-add". Each lane's own checkbox is the entire
+  // show/hide affordance now.
   render_mode_tabs(model);
   ImGui::Spacing();
 

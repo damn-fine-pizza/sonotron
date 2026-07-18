@@ -27,7 +27,6 @@
 // each test's own fixture-setup comment for the GridModel cells it seeds.
 
 #include "imgui.h"
-#include "imgui_internal.h"  // ImGuiWindow/ImGuiWindowFlags_Popup -- locating the "+ track" popup below
 #include "src/grid_model.hpp"
 #include "src/launch_rows.hpp"
 #include "src/neon_widgets.hpp"
@@ -110,9 +109,11 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
   seqedit.set_view(SeqEditView::kPianoRoll);
   seed_style_section_cell(grid, 0);  // drums
   seed_style_section_cell(grid, 2);  // bass
-  // Only drums (opened) and bass visible -- isolates the two lanes this
-  // test cares about; every other role's dim overlay would just add noise
-  // to the color scan below, not change what this test proves.
+  // Only drums (opened) and bass have bars visible -- isolates the two
+  // lanes this test cares about; every other kRows lane still renders its
+  // own name+checkbox (draw_piano_roll_lanes always renders all 6 kRows
+  // lanes now, regardless of role_visible), but with no seeded content and
+  // no bars, it adds no note-color noise to the color scan below.
   for (std::size_t role = 0; role < sonotron::kTrackRoleCount; ++role) {
     seqedit.set_role_visible(role, role == 0 || role == 2);
   }
@@ -142,47 +143,47 @@ void test_piano_roll_draws_visible_roles_in_disjoint_lanes() {
     return;
   }
 
-  // THE LANE-PARTITION PIN: drums (lane 0, drawn first) and bass (lane 1,
-  // drawn second) must occupy DISJOINT vertical ranges -- one lane's own
-  // note quads never reach into the other lane's Y range. Before this fix,
-  // both roles drew into the SAME p0..p1 rect on the SAME pitch axis, so
-  // their Y ranges would have overlapped (both spanning the same band,
+  // THE LANE-PARTITION PIN: drums (lane 0, fixed kRows order) and bass (lane
+  // 1, fixed kRows order) must occupy DISJOINT vertical ranges -- one lane's
+  // own note quads never reach into the other lane's Y range. Before this
+  // fix, both roles drew into the SAME p0..p1 rect on the SAME pitch axis,
+  // so their Y ranges would have overlapped (both spanning the same band,
   // differing only by which of the 5 pitch rows a given note landed on).
   const bool disjoint =
       drums_rect.max.y <= bass_rect.min.y + 1.0F || bass_rect.max.y <= drums_rect.min.y + 1.0F;
   CHECK(disjoint);
 
   // Both lanes stay within the canvas's own rect (no stray content drawn
-  // outside the child window) -- with only 2 roles visible, 2*kLaneH is
-  // comfortably under this test window's avail height, so no scrolling is
-  // needed here and both lanes render fully on-screen.
+  // outside the child window) -- with only 6 lanes total (always kRows.size()
+  // now), 6*kLaneH is comfortably under this test window's avail height, so
+  // no scrolling is needed here and both lanes render fully on-screen.
   CHECK(drums_rect.min.y >= canvas_rect.min.y - 1.0F);
   CHECK(bass_rect.max.y <= canvas_rect.max.y + 1.0F);
 
   ImGui::DestroyContext();
 }
 
-// UI-AUTOMATION functional test (owner decision, 2026-07-18: the role name
-// used to render TWICE -- once in the now-deleted left-hand sidebar, once on
-// the lane itself -- so the sidebar, including its bulk "all tracks"/"last
-// track" toggle and per-role checkbox list, is gone entirely; each lane's
-// own header now carries a small "x" HIDE button, and a NEW "+ track" popup
-// at the top of the panel re-shows whatever is currently hidden). This test
-// drives BOTH real controls through REAL input injection (no direct model
-// mutation): clicking a lane's own "x" button must hide that lane (both the
-// model flag AND the lane's own rendered content disappearing), and picking
-// that role back from the "+ track" popup must restore it -- the two ends of
-// the replacement show/hide affordance, proven end to end.
+// UI-AUTOMATION functional test (owner decision, 2026-07-18: the previous
+// per-lane "x" SmallButton HID THE WHOLE LANE, name included, and a "+
+// track" popup re-shows whatever is currently hidden -- the owner rejected
+// this outright, a lane's NAME must never disappear. Replaced with a real
+// ImGui::Checkbox() placed directly UNDER each lane's own name label, in a
+// left column (kLaneLabelW wide), that toggles ONLY whether that lane's
+// note BARS are drawn; the name+checkbox pair is now ALWAYS rendered for
+// all 6 kRows lanes, in fixed kRows order, regardless of role_visible --
+// there is no popup and no lane-hiding affordance left at all). This test
+// drives the REAL checkbox through REAL input injection (no direct model
+// mutation): clicking a lane's checkbox must hide that lane's BARS ONLY --
+// the lane's own name, its checkbox, and the total lane/checkbox count must
+// never change -- and clicking the SAME checkbox again must restore the
+// bars.
 //
 // Fixture note: this uses SeqEditModel's TRUE DEFAULT visibility (every
 // role, including the 3 non-kRows roles, starts visible=true) rather than
-// pre-hiding roles, so hiding bass leaves EXACTLY ONE kRows role hidden --
-// the "+ track" popup's candidate set is launch_rows.hpp's kRows (6 roles),
-// not all 9 (Fabrizio review, 2026-07-18), so with the true default fixture
-// the popup renders exactly one MenuItem ("Bass") after this test's single
-// hide-click, and a click anywhere inside the (AlwaysAutoResize) popup rect
-// reliably hits it.
-void test_lane_hide_button_and_add_track_menu_toggle_visibility() {
+// pre-hiding roles, since there is no popup and no "currently hidden"
+// candidate list to interact with any more -- the checkbox is a direct,
+// always-present per-lane toggle.
+void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
   unsigned char* tex_pixels = nullptr;
@@ -208,15 +209,39 @@ void test_lane_hide_button_and_add_track_menu_toggle_visibility() {
   seed_style_section_cell(grid, 2);  // bass
   // No visibility overrides: SeqEditModel's constructor already defaults
   // every role visible, so all 6 kRows lanes (drums, bass, chord1, pad, arp,
-  // lead, in that order) render this frame.
+  // lead, in that order) render this frame, bars and all.
 
-  // Both the "+ track" header button and every lane's own "x" hide button
-  // are plain, unstyled ImGui::SmallButton()s (no ImGuiCol_Button push,
-  // unlike mode_tab's own explicitly-tinted buttons) -- they all paint the
-  // SAME rest-state fill color, queried straight off the live style rather
-  // than a guessed constant.
-  const ImU32 button_color = ImGui::GetColorU32(ImGuiCol_Button);
+  // Every lane's own bars-visibility checkbox is a plain, unstyled
+  // ImGui::Checkbox(). Dear ImGui's own Checkbox() (imgui_widgets.cpp) paints
+  // its frame in ONE OF TWO colors depending on state: ImGuiCol_FrameBg when
+  // UNCHECKED, ImGuiCol_CheckboxSelectedBg when CHECKED (a vendored-ImGui
+  // detail found empirically while writing this test -- neither color alone
+  // identifies "a checkbox", only "a checkbox in that particular state").
+  // Since role_visible() defaults every role to true (checked), a fresh
+  // SeqEditModel's checkboxes all paint CheckboxSelectedBg at first; a
+  // checkbox flips to FrameBg only once its own bars are hidden. Every
+  // in-canvas cluster helper below therefore counts BOTH colors combined --
+  // that sum is the true "how many checkbox widgets exist" regardless of
+  // which are currently checked.
+  const ImU32 checkbox_checked_color = ImGui::GetColorU32(ImGuiCol_CheckboxSelectedBg);
+  const ImU32 checkbox_unchecked_color = ImGui::GetColorU32(ImGuiCol_FrameBg);
   const ImU32 bass_color = sonotron::neon::u32(sonotron::theme::kRoleTint[2], 0.45F);
+
+  auto in_canvas_checkbox_count = [&](ImDrawData* draw_data,
+                                      const th::Rect& canvas) -> std::size_t {
+    std::size_t count = 0;
+    for (const th::Rect& r : th::find_color_clusters(draw_data, checkbox_checked_color)) {
+      if (r.center().y >= canvas.min.y) {
+        ++count;
+      }
+    }
+    for (const th::Rect& r : th::find_color_clusters(draw_data, checkbox_unchecked_color)) {
+      if (r.center().y >= canvas.min.y) {
+        ++count;
+      }
+    }
+    return count;
+  };
 
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   render_one_frame(grid, seqedit,
@@ -229,45 +254,33 @@ void test_lane_hide_button_and_add_track_menu_toggle_visibility() {
   const th::Rect canvas_rect = th::find_child_window_rect("seq_canvas");
   CHECK(canvas_rect.found);
 
-  // Classify every button-colored cluster by whether it sits above the
-  // canvas (the header's own "+ track" button) or inside it (one lane's own
-  // "x" each) -- 6 lanes (all of kRows, default-visible) means 6 in-canvas
-  // buttons plus the header's "+ track" button, 7 total. Sorted by Y since
-  // draw order and screen order coincide for this top-to-bottom lane stack,
-  // matching kRows' own iteration order (drums, bass, chord1, pad, arp,
-  // lead) -- bass is therefore the SECOND lane from the top, index 1.
-  const std::vector<th::Rect> buttons = th::find_color_clusters(locate, button_color);
-  CHECK(buttons.size() == sonotron::kRows.size() + 1);
-  th::Rect track_button;
-  std::vector<th::Rect> in_canvas_buttons;
-  for (const th::Rect& r : buttons) {
-    if (r.center().y < canvas_rect.min.y) {
-      track_button = r;
-    } else {
-      in_canvas_buttons.push_back(r);
+  // Locate every checkbox cluster. Every role starts checked (visible), so
+  // at this point every cluster paints checkbox_checked_color -- assert the
+  // in-canvas count is exactly kRows.size() (6): one checkbox per fixed
+  // kRows lane, never more, never fewer. Sorted by Y since draw order and
+  // screen order coincide for this top-to-bottom lane stack, matching
+  // kRows' own iteration order (drums, bass, chord1, pad, arp, lead) --
+  // bass is therefore the SECOND lane from the top, index 1.
+  std::vector<th::Rect> in_canvas_checkboxes;
+  for (const th::Rect& r : th::find_color_clusters(locate, checkbox_checked_color)) {
+    if (r.center().y >= canvas_rect.min.y) {
+      in_canvas_checkboxes.push_back(r);
     }
   }
-  CHECK(track_button.found);
-  CHECK(in_canvas_buttons.size() == sonotron::kRows.size());
-  if (!track_button.found || in_canvas_buttons.size() < 2) {
+  CHECK(in_canvas_checkboxes.size() == sonotron::kRows.size());
+  CHECK(in_canvas_checkbox_count(locate, canvas_rect) == sonotron::kRows.size());
+  if (in_canvas_checkboxes.size() < 2) {
     ImGui::DestroyContext();
     return;
   }
-  std::sort(in_canvas_buttons.begin(), in_canvas_buttons.end(),
+  std::sort(in_canvas_checkboxes.begin(), in_canvas_checkboxes.end(),
             [](const th::Rect& a, const th::Rect& b) { return a.min.y < b.min.y; });
-  const th::Rect bass_hide_button = in_canvas_buttons[1];  // kRows[1] == bass, 2nd from top
+  const th::Rect bass_checkbox = in_canvas_checkboxes[1];  // kRows[1] == bass, 2nd from top
 
-  // Real click #1: hide the bass lane via its own "x" button. The model
-  // mutates synchronously on the mouse-up (release) frame, but that SAME
-  // frame's canvas already computed its lane list BEFORE the click fired
-  // (compute_piano_roll_lanes runs before draw_piano_roll_lanes reaches
-  // bass' own "x" button in the loop) -- so bass still paints once more
-  // that frame, and only the FOLLOWING settle frame's canvas actually drops
-  // the now-hidden lane. Assert the rendered-content proof against that
-  // settle frame, not the click frame itself.
-  th::queue_mouse_down(bass_hide_button.center());
+  // Real click #1: hide bass' bars via its own checkbox.
+  th::queue_mouse_down(bass_checkbox.center());
   render_one_frame(grid, seqedit, fx);
-  th::queue_mouse_up(bass_hide_button.center());
+  th::queue_mouse_up(bass_checkbox.center());
   render_one_frame(grid, seqedit, fx);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   ImDrawData* after_hide = render_one_frame(grid, seqedit, fx);
@@ -275,66 +288,52 @@ void test_lane_hide_button_and_add_track_menu_toggle_visibility() {
   CHECK(!seqedit.role_visible(2));
   CHECK(!th::find_single_color_rect(after_hide, bass_color).found);
 
-  // Real click #2: reopen the "+ track" popup (its rect is unaffected by
-  // bass' lane disappearing -- the header layout above the canvas never
-  // changes shape from a lane hide/show). A freshly-opened AlwaysAutoResize
-  // popup establishes its final size on the SAME frame it opens but is not
-  // yet stably hit-testable for a synthetic click until one settle frame
-  // later, so render one extra frame before reading its rect below.
-  th::queue_mouse_down(track_button.center());
+  // THE CRUX OF THE WHOLE REWRITE: the checkbox cluster count (checked +
+  // unchecked combined) is STILL exactly kRows.size() (6) after hiding
+  // bass' bars -- the lane, its name, and its checkbox never disappeared,
+  // only the bars did (bass' own checkbox simply flipped from
+  // checkbox_checked_color to checkbox_unchecked_color). This is what the
+  // old "x" SmallButton design could never prove, since hiding a lane there
+  // hid the checkbox (and the name) along with the bars.
+  CHECK(in_canvas_checkbox_count(after_hide, canvas_rect) == sonotron::kRows.size());
+
+  // Real click #2: the checkbox never moved (the lane never disappeared),
+  // so clicking the SAME screen position again re-shows bass' bars.
+  th::queue_mouse_down(bass_checkbox.center());
   render_one_frame(grid, seqedit, fx);
-  th::queue_mouse_up(track_button.center());
+  th::queue_mouse_up(bass_checkbox.center());
   render_one_frame(grid, seqedit, fx);
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
-  render_one_frame(grid, seqedit, fx);
-
-  // Locate the popup window Dear ImGui just opened (ImGuiWindowFlags_Popup)
-  // -- read-only introspection of the already-vendored imgui_internal.h,
-  // same discipline find_child_window_rect above already uses. With exactly
-  // one hidden kRows role (bass), the popup renders exactly one MenuItem
-  // ("Bass"), so clicking anywhere inside the (AlwaysAutoResize) popup rect
-  // hits it.
-  th::Rect popup_rect;
-  ImGuiContext* ctx = ImGui::GetCurrentContext();
-  for (ImGuiWindow* w : ctx->Windows) {
-    if (w != nullptr && (w->Flags & ImGuiWindowFlags_Popup) != 0) {
-      const ImRect wr = w->Rect();
-      popup_rect.min = wr.Min;
-      popup_rect.max = wr.Max;
-      popup_rect.found = true;
-    }
-  }
-  CHECK(popup_rect.found);
-  if (!popup_rect.found) {
-    ImGui::DestroyContext();
-    return;
-  }
-
-  // Real click #3: pick "Bass" from the popup -- re-shows it.
-  th::queue_mouse_down(popup_rect.center());
-  render_one_frame(grid, seqedit, fx);
-  th::queue_mouse_up(popup_rect.center());
-  render_one_frame(grid, seqedit, fx);
+  ImDrawData* after_reshow = render_one_frame(grid, seqedit, fx);
 
   CHECK(seqedit.role_visible(2));
+  CHECK(th::find_single_color_rect(after_reshow, bass_color).found);
 
   ImGui::DestroyContext();
 }
 
-// Fabrizio review (2026-07-18, track-set divergence): the Repeat Zone's own
-// launch grid only ever has 6 real rows (launch_rows.hpp's kRows -- drums,
-// bass, chord1, pad, arp, lead); the other 3 TrackRole values (Perc,
-// Chord2, Phrase) have no corresponding launch-grid row at all. Before this
-// fix, Sequence Edit's lane set walked ALL 9 TrackRole values (filtered only
-// by SeqEditModel::role_visible, which defaults every role -- including
-// those 3 -- to true), so those 3 phantom lanes rendered with no matching
-// Repeat-Zone row to represent. This test proves BOTH halves of the fix: (1)
-// the lane set is capped at kRows even though the 3 non-kRows roles report
-// role_visible() == true (the default), and (2) hiding a non-kRows role is a
-// harmless no-op for the rendered lane set (it was never a candidate),
-// while hiding a REAL kRows role does shrink it -- so the test cannot be
-// satisfied by an implementation that is merely insensitive to role_visible
-// in general.
+// Fabrizio review (2026-07-18, track-set + content divergence from the
+// Repeat Zone): the Repeat Zone's own launch grid only ever has 6 real rows
+// (launch_rows.hpp's kRows -- drums, bass, chord1, pad, arp, lead); the
+// other 3 TrackRole values (Perc, Chord2, Phrase) have no corresponding
+// launch-grid row at all. draw_piano_roll_lanes therefore always renders
+// exactly kRows.size() (6) lane name+checkbox pairs, in fixed kRows order,
+// regardless of SeqEditModel::role_visible -- role_visible only gates
+// whether a lane's own note BARS are drawn, it never gates whether the lane
+// itself (name + checkbox) exists. This test proves BOTH halves of the new
+// contract: (1) the lane/checkbox count is capped at kRows.size() even
+// though the 3 non-kRows roles report role_visible() == true (the default),
+// and stays capped there when those 3 are explicitly hidden (they were
+// never lane candidates to begin with), and (2) hiding a REAL kRows role
+// (Chord, role_index 3 -- style "basic"'s own kVarAPatterns table
+// (components/core/arrangrr/include/arrangrr/arranger/styles/basic.hpp)
+// only authors VarA content for Drums/Bass/Chord, never Arp, so Chord is
+// used here rather than Arp for a non-vacuous bar-color assertion) leaves
+// the checkbox count UNCHANGED at kRows.size() -- the lane NEVER disappears
+// -- while Chord's own note bars stop being drawn. This is the semantic
+// flip from the pre-checkbox design, which used to shrink the counted lane
+// set by one here; now the count never shrinks, only a given lane's own
+// bars toggle.
 void test_lane_set_is_capped_to_launch_rows_never_all_nine_roles() {
   ImGui::CreateContext();
   ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
@@ -357,15 +356,32 @@ void test_lane_set_is_capped_to_launch_rows_never_all_nine_roles() {
   seqedit.set_part_index(0);
   seqedit.set_clip_label("A");
   seqedit.set_view(SeqEditView::kPianoRoll);
-  seed_style_section_cell(grid, 0);  // drums, the only real content needed here
+  seed_style_section_cell(grid, 0);  // drums
+  seed_style_section_cell(grid, 3);  // chord -- needs real content so its own
+                                     // bar-color assertion below is never
+                                     // vacuous, before or after hiding it
+                                     // (Arp has none for style "basic"/VarA,
+                                     // see this test's own header comment)
 
-  const ImU32 button_color = ImGui::GetColorU32(ImGuiCol_Button);
+  // Dear ImGui's own Checkbox() paints its frame in ImGuiCol_FrameBg when
+  // UNCHECKED, ImGuiCol_CheckboxSelectedBg when CHECKED (see the sibling
+  // test's own header comment for the empirical detail) -- roles default
+  // checked, so both colors must be counted together to get the true
+  // "how many checkbox widgets exist" regardless of individual state.
+  const ImU32 checkbox_checked_color = ImGui::GetColorU32(ImGuiCol_CheckboxSelectedBg);
+  const ImU32 checkbox_unchecked_color = ImGui::GetColorU32(ImGuiCol_FrameBg);
+  const ImU32 chord_color = sonotron::neon::u32(sonotron::theme::kRoleTint[3], 0.45F);
 
-  auto count_in_canvas_x_buttons = [&](ImDrawData* draw_data) -> std::size_t {
+  auto count_in_canvas_checkboxes = [&](ImDrawData* draw_data) -> std::size_t {
     const th::Rect canvas_rect = th::find_child_window_rect("seq_canvas");
     CHECK(canvas_rect.found);
     std::size_t count = 0;
-    for (const th::Rect& r : th::find_color_clusters(draw_data, button_color)) {
+    for (const th::Rect& r : th::find_color_clusters(draw_data, checkbox_checked_color)) {
+      if (r.center().y >= canvas_rect.min.y) {
+        ++count;
+      }
+    }
+    for (const th::Rect& r : th::find_color_clusters(draw_data, checkbox_unchecked_color)) {
       if (r.center().y >= canvas_rect.min.y) {
         ++count;
       }
@@ -374,29 +390,34 @@ void test_lane_set_is_capped_to_launch_rows_never_all_nine_roles() {
   };
 
   // Frame 1: every role at SeqEditModel's true default (all 9 visible,
-  // including Perc/Chord2/Phrase). The lane set (one "x" button per lane)
-  // must still be exactly kRows.size() (6), never kTrackRoleCount (9).
+  // including Perc/Chord2/Phrase). The lane set (one checkbox per lane)
+  // must be exactly kRows.size() (6), never kTrackRoleCount (9).
   th::queue_mouse_move(ImVec2(-100.0F, -100.0F));
   render_one_frame(grid, seqedit, fx);
   ImDrawData* all_default = render_one_frame(grid, seqedit, fx);
-  CHECK(count_in_canvas_x_buttons(all_default) == sonotron::kRows.size());
+  CHECK(count_in_canvas_checkboxes(all_default) == sonotron::kRows.size());
 
   // Frame 2: hide all 3 non-kRows roles (Perc=1, Chord2=4, Phrase=7). None of
-  // them was ever a lane candidate, so the lane count must stay UNCHANGED at
-  // kRows.size() -- a real regression to "walk all 9 roles" would instead
-  // drop 3 lanes here.
+  // them was ever a lane candidate, so the checkbox count must stay
+  // UNCHANGED at kRows.size() -- a real regression to "walk all 9 roles"
+  // would instead drop 3 lanes here. Chord (a real kRows role, still
+  // visible) must still paint its own bars this frame.
   seqedit.set_role_visible(1, false);
   seqedit.set_role_visible(4, false);
   seqedit.set_role_visible(7, false);
   ImDrawData* non_launch_hidden = render_one_frame(grid, seqedit, fx);
-  CHECK(count_in_canvas_x_buttons(non_launch_hidden) == sonotron::kRows.size());
+  CHECK(count_in_canvas_checkboxes(non_launch_hidden) == sonotron::kRows.size());
+  CHECK(th::find_single_color_rect(non_launch_hidden, chord_color).found);
 
-  // Frame 3: now hide one REAL kRows role (Arp, role_index 6). The lane
-  // count must drop to kRows.size() - 1, proving this test is not simply
-  // insensitive to role_visible altogether.
-  seqedit.set_role_visible(6, false);
-  ImDrawData* arp_hidden = render_one_frame(grid, seqedit, fx);
-  CHECK(count_in_canvas_x_buttons(arp_hidden) == sonotron::kRows.size() - 1);
+  // Frame 3: now hide one REAL kRows role (Chord, role_index 3). The
+  // checkbox count must STAY at kRows.size() (6) -- the lane itself never
+  // disappears -- while Chord's own bars are no longer drawn. THE SEMANTIC
+  // FLIP: the pre-checkbox design used to drop the counted lane set to
+  // kRows.size() - 1 here.
+  seqedit.set_role_visible(3, false);
+  ImDrawData* chord_hidden = render_one_frame(grid, seqedit, fx);
+  CHECK(count_in_canvas_checkboxes(chord_hidden) == sonotron::kRows.size());
+  CHECK(!th::find_single_color_rect(chord_hidden, chord_color).found);
 
   ImGui::DestroyContext();
 }
@@ -405,7 +426,7 @@ void test_lane_set_is_capped_to_launch_rows_never_all_nine_roles() {
 
 int main() {
   test_piano_roll_draws_visible_roles_in_disjoint_lanes();
-  test_lane_hide_button_and_add_track_menu_toggle_visibility();
+  test_lane_checkbox_toggles_bars_visibility_lane_stays();
   test_lane_set_is_capped_to_launch_rows_never_all_nine_roles();
   return sonotron::test::failures();
 }
