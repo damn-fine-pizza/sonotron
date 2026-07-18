@@ -69,6 +69,14 @@ constexpr std::array<std::uint8_t, 8> kVariationSections = {
     6,   // fill    -> kFillA
     11,  // outro   -> kEnding1
 };
+// Wire name each kVariations row sends via `style section <name>` on click --
+// index-parallel with kVariations/kVariationSections above, mirroring
+// grid_model.cpp's own section_wire_name() table at these same numeric
+// SectionType indices (0=intro1, 2=varA, 3=varB, 4=varC, 5=varD, 10=break,
+// 6=fillA, 11=ending1).
+constexpr std::array<std::string_view, 8> kVariationWireNames = {
+    "intro1", "varA", "varB", "varC", "varD", "break", "fillA", "ending1",
+};
 constexpr std::array<std::string_view, 10> kKits = {
     "acoustic kit", "808",    "909",      "jazz kit", "fingered bass",
     "picked bass",  "rhodes", "dx piano", "warm pad", "saw lead",
@@ -231,15 +239,17 @@ void render_styles(BrowserModel& model, BrainSession& brain_session, const AppSt
   }
 }
 
-// "variations" (kVariations/kVariationSections above): a real drag SOURCE
-// (repeat-zone-real-contract.md SLICE 4a), each row carrying its own
-// SectionType byte under kVariationDragPayloadId -- distinct from
+// "variations" (kVariations/kVariationSections/kVariationWireNames above): a
+// real drag SOURCE (repeat-zone-real-contract.md SLICE 4a), each row carrying
+// its own SectionType byte under kVariationDragPayloadId -- distinct from
 // kStyleDragPayloadId so grid_panel.cpp's scene-header drop target never
 // confuses the two payload shapes. Clicking a row (leaf_row's own return
-// value) does nothing yet -- there is still no `style section` verb wired
-// from a plain click here, only from the drag; the scene HEADER's own ▶
-// button is what sends `style section <name>` (grid_panel.cpp).
-void render_variations(const std::string& filter, int& shown) {
+// value) now sends `style section <wire_name>` directly (Shell::cmd_style,
+// "quantized to next bar while playing, immediate otherwise") -- a simpler,
+// standalone "switch section now" action, independent of grid_panel.cpp's own
+// scene-header mechanism. Click and drag are not mutually exclusive: click
+// applies the section now, drag still targets a grid scene-header column.
+void render_variations(BrainSession& brain_session, const std::string& filter, int& shown) {
   if (!section_header("variations")) {
     return;
   }
@@ -252,7 +262,9 @@ void render_variations(const std::string& filter, int& shown) {
     ++local_shown;
     ++shown;
     ImGui::PushID(static_cast<int>(i));
-    leaf_row(item, /*active=*/false);
+    if (leaf_row(item, /*active=*/false)) {
+      brain_session.send("style section " + std::string(kVariationWireNames[i]));
+    }
     if (ImGui::BeginDragDropSource()) {
       const std::uint8_t section = kVariationSections[i];
       ImGui::SetDragDropPayload(kVariationDragPayloadId, &section, sizeof(section));
@@ -288,6 +300,71 @@ void render_list(const char* title, const std::array<std::string_view, N>& items
   ImGui::TreePop();
 }
 
+// Destination picker for the Voices tab (browser-redesign-taxonomy.md Phase
+// 1's own note: "genuinely new surface needed"). Port name + 1-based channel,
+// persisted on the model (not UiState -- out of scope for this slice), so it
+// survives switching categories and scrolling the voice list.
+void render_voice_destination_picker(BrowserModel& model) {
+  constexpr int kPortBufSize = 32;
+  char port_buf[kPortBufSize];
+  const std::string current_port(model.voice_port());
+  std::strncpy(port_buf, current_port.c_str(), sizeof(port_buf) - 1);
+  port_buf[sizeof(port_buf) - 1] = '\0';
+
+  ImGui::TextColored(theme::kTextMuted, "destination (port:ch)");
+  const float half = (ImGui::GetContentRegionAvail().x - 6.0F) * 0.5F;
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputTextWithHint("##voice_port", "out0", port_buf, sizeof(port_buf))) {
+    model.set_voice_port(std::string(port_buf));
+  }
+  ImGui::SameLine(0.0F, 6.0F);
+  int channel = model.voice_channel();
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputInt("##voice_channel", &channel)) {
+    model.set_voice_channel(channel);
+  }
+}
+
+// "voices · sounds": the 128 GM program names (kGmVoiceNames, browser_model.
+// hpp), ImGuiListClipper-virtualized like the style-family buckets (§3.2 --
+// 128 rows is well past kFlatListThreshold). Click sends `program <port>[:ch]
+// <voice>` to the CURRENT destination picker state and marks the row as the
+// local "last sent" echo (NOT wire-confirmed -- no per-part program readback
+// exists, parts_model.hpp).
+void render_voices(BrowserModel& model, BrainSession& brain_session, const std::string& filter,
+                   int& shown) {
+  if (!section_header("voices \xC2\xB7 sounds")) {
+    return;
+  }
+  std::vector<std::size_t> indices;
+  for (std::size_t i = 0; i < model.voice_count(); ++i) {
+    if (matches(model.voice_name(i), filter)) {
+      indices.push_back(i);
+    }
+  }
+  if (indices.empty()) {
+    ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  ImGuiListClipper clipper;
+  clipper.Begin(static_cast<int>(indices.size()));
+  while (clipper.Step()) {
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+      const std::size_t i = indices[static_cast<std::size_t>(row)];
+      ++shown;
+      const std::string name(model.voice_name(i));
+      ImGui::PushID(static_cast<int>(i));
+      if (leaf_row(name, model.last_voice_sent() == static_cast<int>(i))) {
+        brain_session.send(model.build_program_verb(name));
+        model.set_last_voice_sent(static_cast<int>(i));
+      }
+      ImGui::PopID();
+    }
+  }
+  ImGui::TreePop();
+}
+
 // Family filter combo (task #30): "All families" (nullopt) plus one entry
 // per StyleFamily, in the SAME kFamilyRenderOrder the sections below render
 // in, so the combo's own listed order matches what a player sees scrolling
@@ -316,19 +393,55 @@ void render_family_filter_combo(BrowserModel& model) {
   }
 }
 
+constexpr std::array<BrowserCategory, kBrowserCategoryCount> kCategoryOrder = {
+    BrowserCategory::kStyles, BrowserCategory::kVariations, BrowserCategory::kVoices,
+    BrowserCategory::kKits,   BrowserCategory::kClips,
+};
+
+// Outer category selector (decision fork 1): the SAME combo idiom as
+// render_family_filter_combo above, reused rather than a literal ImGui tab
+// bar -- see this file's own family-filter combo for the precedent and
+// docs/proposals/browser-redesign-taxonomy.md §3 for why a tab bar does not
+// fit 210px.
+void render_category_combo(BrowserModel& model) {
+  const BrowserCategory current = model.category();
+  const std::string preview(browser_category_label(current));
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  if (ImGui::BeginCombo("##browser_category", preview.c_str())) {
+    for (const BrowserCategory category : kCategoryOrder) {
+      const bool selected = category == current;
+      const std::string label(browser_category_label(category));
+      ImGui::PushID(static_cast<int>(category));
+      if (ImGui::Selectable(label.c_str(), selected)) {
+        model.set_category(category);
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndCombo();
+  }
+}
+
 }  // namespace
 
 void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
                           const AppState& app_state, UiState& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
   ImGui::Spacing();
+  render_category_combo(model);
+  ImGui::Spacing();
+
+  const BrowserCategory category = model.category();
+  const bool flat_style_mode = model.style_count() <= kFlatListThreshold;
   // The family-filter combo only earns its vertical space once the corpus
   // is big enough to need family grouping in the first place (see
   // kFlatListThreshold above) -- for today's 16 built-ins it would just be
   // dead space over a flat list.
-  const bool flat_style_mode = model.style_count() <= kFlatListThreshold;
-  if (!flat_style_mode) {
+  if (category == BrowserCategory::kStyles && !flat_style_mode) {
     render_family_filter_combo(model);
+    ImGui::Spacing();
+  }
+  if (category == BrowserCategory::kVoices) {
+    render_voice_destination_picker(model);
     ImGui::Spacing();
   }
 
@@ -337,16 +450,31 @@ void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
                     ImGuiChildFlags_None, ImGuiWindowFlags_None);
   const std::string filter = model.search_filter();
   int shown = 0;
-  render_styles(model, brain_session, app_state, fx, shown);
-  render_variations(filter, shown);
-  render_list("kits \xC2\xB7 GM", kKits, filter, shown);
-  if (section_header("clips")) {
-    ImGui::TextDisabled("  (none authored yet)");
-    ImGui::TreePop();
+  switch (category) {
+    case BrowserCategory::kStyles:
+      render_styles(model, brain_session, app_state, fx, shown);
+      break;
+    case BrowserCategory::kVariations:
+      render_variations(brain_session, filter, shown);
+      break;
+    case BrowserCategory::kVoices:
+      render_voices(model, brain_session, filter, shown);
+      break;
+    case BrowserCategory::kKits:
+      render_list("kits \xC2\xB7 GM", kKits, filter, shown);
+      break;
+    case BrowserCategory::kClips:
+      if (section_header("clips")) {
+        ImGui::TextDisabled("  (none authored yet)");
+        ImGui::TreePop();
+      }
+      break;
   }
   ImGui::EndChild();
 
-  // Search field pinned at the bottom (filters all sections live).
+  // Search field pinned at the bottom -- scoped to the ACTIVE category only
+  // (browser-redesign-taxonomy.md §3: per-tab search, never a global
+  // cross-family search).
   char buffer[kFilterBufferSize];
   std::strncpy(buffer, filter.c_str(), sizeof(buffer) - 1);
   buffer[sizeof(buffer) - 1] = '\0';

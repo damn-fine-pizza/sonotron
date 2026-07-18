@@ -10,7 +10,10 @@
 #include <optional>
 #include <string>
 
+using sonotron::browser_category_label;
+using sonotron::BrowserCategory;
 using sonotron::BrowserModel;
+using sonotron::kBrowserCategoryCount;
 using sonotron::kBuiltinStyleFamilies;
 using sonotron::kBuiltinStyleNames;
 using sonotron::style_family_label;
@@ -165,6 +168,105 @@ void test_clearing_family_filter_restores_full_visibility_under_text_filter() {
   }
 }
 
+// browser-redesign-taxonomy.md Phase 1: the outer category selector defaults
+// to Styles, and round-trips through set_category for at least two other
+// enumerators.
+void test_default_category_is_styles() {
+  BrowserModel model;
+  CHECK(model.category() == BrowserCategory::kStyles);
+}
+
+void test_set_category_round_trips() {
+  BrowserModel model;
+  model.set_category(BrowserCategory::kVoices);
+  CHECK(model.category() == BrowserCategory::kVoices);
+  model.set_category(BrowserCategory::kKits);
+  CHECK(model.category() == BrowserCategory::kKits);
+}
+
+// browser_category_label: non-empty, distinct label for every enumerator
+// (mirroring test_style_family_label_is_non_empty_for_every_enumerator).
+void test_browser_category_label_is_non_empty_for_every_enumerator() {
+  constexpr std::array<BrowserCategory, kBrowserCategoryCount> kAllCategories = {
+      BrowserCategory::kStyles, BrowserCategory::kVariations, BrowserCategory::kVoices,
+      BrowserCategory::kKits,   BrowserCategory::kClips,
+  };
+  for (const BrowserCategory category : kAllCategories) {
+    CHECK(!browser_category_label(category).empty());
+  }
+}
+
+// The 128 canonical GM voice names, hand-copied from gm_program.cpp -- a
+// handful of representative indices, spanning the array's start/end/middle.
+void test_voice_count_and_names() {
+  BrowserModel model;
+  CHECK(model.voice_count() == 128);
+  CHECK(model.voice_name(0) == "Acoustic Grand Piano");
+  CHECK(model.voice_name(127) == "Gunshot");
+  CHECK(model.voice_name(56) == "Trumpet");
+}
+
+// browser-redesign-taxonomy.md §3: "search is per-active-tab, never a global
+// cross-family search" -- the single most important new test in this slice.
+void test_search_filter_is_isolated_per_category() {
+  BrowserModel model;
+  CHECK(model.category() == BrowserCategory::kStyles);
+  model.set_search_filter("fun");
+  CHECK(model.search_filter() == "fun");
+
+  model.set_category(BrowserCategory::kVoices);
+  // A fresh, separate slot: switching category must NOT carry over the
+  // Styles filter text.
+  CHECK(model.search_filter().empty());
+  model.set_search_filter("trumpet");
+  CHECK(model.search_filter() == "trumpet");
+
+  model.set_category(BrowserCategory::kStyles);
+  // The original Styles filter is still there, unchanged by the Voices
+  // filter that was set in between.
+  CHECK(model.search_filter() == "fun");
+}
+
+void test_voice_destination_defaults() {
+  BrowserModel model;
+  CHECK(model.voice_port() == "out0");
+  CHECK(model.voice_channel() == 1);
+}
+
+void test_set_voice_channel_clamps_to_one_sixteen() {
+  BrowserModel model;
+  model.set_voice_channel(0);
+  CHECK(model.voice_channel() == 1);
+  model.set_voice_channel(99);
+  CHECK(model.voice_channel() == 16);
+  model.set_voice_channel(7);
+  CHECK(model.voice_channel() == 7);
+}
+
+void test_set_voice_port_empty_resets_to_default() {
+  BrowserModel model;
+  model.set_voice_port("synth");
+  CHECK(model.voice_port() == "synth");
+  model.set_voice_port("");
+  CHECK(model.voice_port() == "out0");
+}
+
+void test_last_voice_sent_defaults_and_round_trips() {
+  BrowserModel model;
+  CHECK(model.last_voice_sent() == -1);
+  model.set_last_voice_sent(56);
+  CHECK(model.last_voice_sent() == 56);
+}
+
+void test_build_program_verb_uses_current_destination() {
+  BrowserModel model;
+  CHECK(model.build_program_verb("Trumpet") == "program out0:1 Trumpet");
+
+  model.set_voice_port("synth");
+  model.set_voice_channel(3);
+  CHECK(model.build_program_verb("Acoustic Grand Piano") == "program synth:3 Acoustic Grand Piano");
+}
+
 }  // namespace
 
 int main() {
@@ -178,5 +280,15 @@ int main() {
   test_family_filter_narrows_to_exactly_that_family();
   test_family_filter_and_text_filter_combine_and_narrow_further();
   test_clearing_family_filter_restores_full_visibility_under_text_filter();
+  test_default_category_is_styles();
+  test_set_category_round_trips();
+  test_browser_category_label_is_non_empty_for_every_enumerator();
+  test_voice_count_and_names();
+  test_search_filter_is_isolated_per_category();
+  test_voice_destination_defaults();
+  test_set_voice_channel_clamps_to_one_sixteen();
+  test_set_voice_port_empty_resets_to_default();
+  test_last_voice_sent_defaults_and_round_trips();
+  test_build_program_verb_uses_current_destination();
   return sonotron::test::failures();
 }
