@@ -227,6 +227,27 @@ int section_bars(int style_index, Section section) {
   return sec == nullptr ? 1 : static_cast<int>(sec->bars);
 }
 
+PreviewPattern preview_for_track(const StepPatternModel& track) {
+  PreviewPattern out{};
+  for (auto& slots : out.pitch) {
+    slots.fill(-1);
+  }
+  out.approx = false;  // authored directly, never resolved against a placeholder
+
+  const int steps =
+      std::clamp(static_cast<int>(track.length()), 1, static_cast<int>(kStepPatternMaxSteps));
+  out.bars = std::clamp((steps + kSteps - 1) / kSteps, 1, kMaxBars);
+  const int window = std::min(steps, kMaxSteps);
+  for (int i = 0; i < window; ++i) {
+    const StepPatternStep& s = track.step(static_cast<std::size_t>(i));
+    if (s.vel == 0) {
+      continue;  // empty slot -- no event
+    }
+    out.pitch[static_cast<std::size_t>(i)][0] = s.note;
+  }
+  return out;
+}
+
 PreviewPattern preview_for_loop(const LoopPreviewEvent* events, std::size_t count) {
   PreviewPattern out{};
   for (auto& slots : out.pitch) {

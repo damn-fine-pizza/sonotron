@@ -58,6 +58,13 @@ struct GridCell {
   // shadow" sentinel convention (loop_buffer.hpp's m_shadow_slot) for a
   // consistent "no value" idiom across this boundary.
   int loop_slot_id = -1;
+  // Meaningful only when `kind == GridCellKind::kStepTrack` (roadmap node
+  // 11600/11610, task #11 Phase 1): the index into SeqEditModel's own
+  // StepPatternStore (step_pattern_model.hpp) this cell's step-track pattern
+  // lives in -- the host-side mirror of what ClipMatrix::Clip::content_index
+  // means core-side for a ContentKind::kStepTrack clip. -1 = none, same
+  // sentinel convention as loop_slot_id above.
+  int step_track_index = -1;
 };
 
 // Rows are the 9 TrackRole parts (track_roles.hpp); columns are scenes. Real
@@ -85,7 +92,7 @@ class GridModel {
   // Passing it for any other `kind` is harmless (it is simply ignored by
   // every reader that checks `kind` first) but not meaningful.
   void set_cell(std::size_t part_index, std::size_t scene_index, GridCellKind kind,
-                std::string label, int loop_slot_id = -1);
+                std::string label, int loop_slot_id = -1, int step_track_index = -1);
   void clear_cell(std::size_t part_index, std::size_t scene_index);
 
   // Adds one more scene column (the "+" affordance in the §3 wireframe's

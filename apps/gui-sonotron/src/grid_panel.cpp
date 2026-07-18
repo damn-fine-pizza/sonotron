@@ -39,10 +39,27 @@ constexpr float kLatchGap = 3.0F;
 // Repeat Zone zoom clamp (render_header's -/+ buttons): named constants so
 // the min/max/step are never duplicated bare literals across the two clamp
 // calls. Owner ask (docs/proposals/seqedit-column-view-and-zoom.md Feature
-// A): raise the max by 3 more notches (88 -> 115 == 88 + 3*9).
+// A): raise the max by 3 more notches (88 -> 115 == 88 + 3*9). Task #12:
+// raise it by 3 MORE notches on top of that (115 -> 142 == 115 + 3*9); the
+// font ramp (kFontScaleMax below) is already saturated well below 115, so
+// these extra notches only grow the cell footprint itself, not the text.
 constexpr float kCellZoomMin = 34.0F;
-constexpr float kCellZoomMax = 115.0F;
+constexpr float kCellZoomMax = 142.0F;
 constexpr float kCellZoomStep = 9.0F;
+
+// Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/
+// 11610): default port/channel for a NEWLY created step track, keyed by
+// TrackRole index (track_roles.hpp) -- every step track lives on port 0;
+// only the channel varies by role so two step tracks on different roles do
+// not collide on the same MIDI channel by default (a real per-track mixer/
+// channel picker is a later enhancement, out of Phase 1 scope). Loosely
+// mirrors the CLI's own per-role default-band convention (in_process_brain_
+// session.cpp's kDefaultStyleRoutes), 0-based here to match this
+// translator's own bare-numeric `track new` convention. drums/perc share
+// channel 9 (GM's percussion channel, 0-based) deliberately -- both are
+// drum-kit-ish roles a real setup would typically route there too.
+constexpr std::uint8_t kStepTrackPort = 0;
+constexpr std::array<std::uint8_t, kTrackRoleCount> kStepTrackChannel = {9, 9, 1, 2, 3, 4, 5, 6, 7};
 
 // A small neon M/S latch: a SQUARE (owner: "squares are fine", not the
 // theme's usual pill-rounded ImGui::Button, which at this compact footprint
@@ -1034,6 +1051,75 @@ void render_track_label(PartsModel& parts, BrainSession& brain_session, const Gr
   ImGui::Dummy(ImVec2(kLabelColWidth, cz));
 }
 
+// Result of resolving a track cell's mini-preview -- extracted out of
+// render_track_cell (readability-function-cognitive-complexity), pure
+// refactor, no behavior change. An empty cell resolves to the default
+// (blank, non-approx) pattern.
+struct TrackCellPreview {
+  neon::ClipPattern pattern{};
+  bool approx = false;
+};
+
+// Task #11 Phase 1: a step-track cell's mini-preview is the pattern's OWN
+// live content (preview_for_track), never the style-section table -- that
+// table has nothing to do with this cell. A style-section cell keeps the
+// existing preview_for(...) lookup unchanged.
+TrackCellPreview resolve_track_cell_preview(const GridModel& model, const SeqEditModel& seqedit,
+                                            const GridRow& row, std::size_t s, const GridCell& cell,
+                                            bool filled, int active_style) {
+  TrackCellPreview result;
+  if (!filled) {
+    return result;
+  }
+  if (cell.kind == GridCellKind::kStepTrack) {
+    if (const StepPatternModel* track =
+            seqedit.step_tracks().track(static_cast<std::size_t>(cell.step_track_index))) {
+      const preview::PreviewPattern pp = preview::preview_for_track(*track);
+      result.pattern = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
+    }
+    return result;
+  }
+  const auto section = static_cast<preview::Section>(model.scene_section(s));
+  const preview::PreviewPattern pp = preview::preview_for(active_style, section, row.role_index);
+  result.pattern = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
+  result.approx = pp.approx;
+  return result;
+}
+
+// Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/11610):
+// extracted out of render_track_cell (readability-function-cognitive-
+// complexity), pure refactor, no behavior change. A DISTINCT gesture from
+// the plain click (which stays a deliberate no-op on an empty cell, owner
+// bug #2) -- right-click an EMPTY cell to create a real step-track clip
+// here. Pre-mutes the new track IMMEDIATELY (before it is ever registered as
+// a clip): Timeline fires every registered track unconditionally, and
+// Engine::apply_clip_content is the ONLY place that un-mutes on launch /
+// re-mutes on stop (in_process_brain_session.cpp's own `track new` comment)
+// -- an unmuted brand-new track would otherwise sound the instant the
+// transport is already running. A full track pool (StepPatternStore::
+// create_track returning -1) is a silent no-op, same "never crash on a full
+// pool" discipline ClipMatrix/Timeline themselves use core-side.
+void try_create_step_track_on_empty_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& parts,
+                                         BrainSession& brain_session, const GridRow& row,
+                                         std::size_t s, std::size_t id) {
+  const std::size_t role = row.role_index;
+  if (role >= kTrackRoleCount) {
+    return;
+  }
+  const int track_idx =
+      seqedit.step_tracks().create_track(role, kStepTrackPort, kStepTrackChannel[role]);
+  if (track_idx < 0) {
+    return;
+  }
+  const std::string role_token = std::string(parts.part_wire_token(role));
+  brain_session.send("track new " + role_token + " " + std::to_string(kStepTrackPort) + " " +
+                     std::to_string(kStepTrackChannel[role]));
+  brain_session.send("track mute " + std::to_string(track_idx) + " on");
+  brain_session.send("clip add " + role_token + " " + std::to_string(s) + " track " +
+                     std::to_string(track_idx) + " id " + std::to_string(id));
+  model.set_cell(row.role_index, s, GridCellKind::kStepTrack, "step", -1, track_idx);
+}
+
 // One launch cell for a track row: computes its real preview content, draws
 // it (draw_cell), and handles both click (launch+open a filled cell, or fill
 // an empty one with a local demo clip) and the browser style drag-drop
@@ -1067,15 +1153,10 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
   // previews visibly different content from one still at the kVarA default.
   // Empty cells never draw a preview, so this is only computed for a filled
   // one.
-  neon::ClipPattern pattern{};
-  bool approx = false;
-  if (filled) {
-    const auto section = static_cast<preview::Section>(model.scene_section(s));
-    const preview::PreviewPattern pp =
-        preview::preview_for(fx.active_style, section, row.role_index);
-    pattern = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
-    approx = pp.approx;
-  }
+  const TrackCellPreview cell_preview =
+      resolve_track_cell_preview(model, seqedit, row, s, cell, filled, fx.active_style);
+  const neon::ClipPattern& pattern = cell_preview.pattern;
+  const bool approx = cell_preview.approx;
   const float section_phase = static_cast<int>(s) == active_scene ? active_section_phase : -1.0F;
   ImGui::PushID(static_cast<int>(s));
   // Feature B: whole-column highlight -- captured BEFORE draw_cell (its own
@@ -1119,6 +1200,12 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       // of the piano-roll overlay.
       fx.open_scene = static_cast<int>(s);
       fx.open_wav = cell.kind == GridCellKind::kLoopBuffer;
+      // Task #11 Phase 1: the SeqEditModel-side counterpart of fx.open_wav
+      // above (ui_state.hpp itself is out of scope for this task) -- tells
+      // render_seqedit_panel's own "step" tab/canvas whether THIS cell has
+      // real StepPatternStore content to show.
+      seqedit.set_open_step_track(cell.kind == GridCellKind::kStepTrack ? cell.step_track_index
+                                                                        : -1);
       seqedit.set_part_index(row.role_index);
       seqedit.set_clip_label(cell.label);
       // Owner bug #1: cell-open used to SOLO the clicked role (only its
@@ -1128,6 +1215,18 @@ void render_track_cell(GridModel& model, SeqEditModel& seqedit, PartsModel& part
       // still work exactly as before for narrowing the view afterwards.
       seqedit.set_all_tracks_visible(true);
     }
+  }
+  // Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/
+  // 11610): a DISTINCT gesture from the plain click above (which stays a
+  // deliberate no-op on an empty cell, owner bug #2) -- right-click an EMPTY
+  // cell to create a real step-track clip here. Checked AFTER draw_cell's
+  // own InvisibleButton is still this scope's "last item" (draw_cell only
+  // issues raw draw-list calls after it, never another ImGui widget), so
+  // IsItemClicked(Right) validly targets the SAME cell region the left-click
+  // check above already used. See try_create_step_track_on_empty_cell above
+  // for the pre-mute rationale.
+  if (!filled && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+    try_create_step_track_on_empty_cell(model, seqedit, parts, brain_session, row, s, id);
   }
   // Drop target: a browser style drag fills this cell for real AND
   // registers a real ClipMatrix clip at this cell's own stable id

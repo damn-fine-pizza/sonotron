@@ -40,6 +40,7 @@ add_library(gui_sonotron_models STATIC
   src/grid_model.cpp
   src/scenes_json.cpp
   src/seqedit_model.cpp
+  src/step_pattern_model.cpp
 )
 target_include_directories(gui_sonotron_models PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(gui_sonotron_models PRIVATE -Wall -Wextra -Werror)
@@ -75,6 +76,12 @@ target_compile_options(gui_sonotron_brain PRIVATE -Wall -Wextra -Werror)
 add_library(gui_sonotron_preview STATIC src/preview.cpp)
 target_include_directories(gui_sonotron_preview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gui_sonotron_preview PRIVATE arrangrr)
+# Task #11 Phase 1: preview_for_track() (preview.hpp) resolves a live
+# StepPatternModel (step_pattern_model.hpp, gui_sonotron_models) -- its
+# non-inline StepPatternModel::step() accessor is defined in step_pattern_
+# model.cpp, so this static-library boundary needs the same real link edge
+# gui_sonotron_layout already carries for the model types its own panels use.
+target_link_libraries(gui_sonotron_preview PRIVATE gui_sonotron_models)
 target_compile_options(gui_sonotron_preview PRIVATE -Wall -Wextra -Werror)
 
 # Layout engine + zone panels + the sonotron theme. The zone panels (G3) are

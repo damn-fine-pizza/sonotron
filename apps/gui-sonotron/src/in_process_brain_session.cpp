@@ -291,6 +291,43 @@ std::vector<std::string_view> split_ws(std::string_view s) {
   return tokens;
 }
 
+// Task #11 Phase 1 (Sequence Edit step sequencer): mirrors shell_music_
+// commands.cpp's own parse_step_lock exactly (D38 duplication, same
+// discipline as parse_quantize_suffix/parse_section_name above) -- this
+// pure-client translator never reaches into hostrt's own parsing helpers.
+bool parse_step_lock(std::string_view key, std::string_view val, std::uint64_t& probability,
+                     std::uint64_t& ratchet, std::uint64_t& micro, bool& tie, std::string& error) {
+  if (key == "prob") {
+    if (!parse_uint(val, probability) || probability > 100) {
+      error = "bad prob (0..100): " + std::string(val);
+      return false;
+    }
+  } else if (key == "ratchet") {
+    if (!parse_uint(val, ratchet) || ratchet < 1 || ratchet > 8) {
+      error = "bad ratchet (1..8): " + std::string(val);
+      return false;
+    }
+  } else if (key == "micro") {
+    if (!parse_uint(val, micro) || micro > 127) {
+      error = "bad micro (0..127, forward-only): " + std::string(val);
+      return false;
+    }
+  } else if (key == "tie") {
+    if (val == "on") {
+      tie = true;
+    } else if (val == "off") {
+      tie = false;
+    } else {
+      error = "bad tie (on|off): " + std::string(val);
+      return false;
+    }
+  } else {
+    error = "track step: unknown param-lock: " + std::string(key);
+    return false;
+  }
+  return true;
+}
+
 // Outcome of translating one L1 text line into a Command POD.
 enum class TranslateOutcome {
   kOk,               // `out` holds the translated Command.
@@ -577,6 +614,198 @@ TranslateOutcome command_line_to_command(std::string_view line, Command& out, st
     out.b = static_cast<std::int32_t>(scene);
     out.c = static_cast<std::int32_t>(ContentKind::kStyleSection) |
             (static_cast<std::int32_t>(section) << 8);
+    return TranslateOutcome::kOk;
+  }
+
+  // Task #11 Phase 1 (Sequence Edit step sequencer, HOST-ONLY, zero ABI
+  // change -- roadmap node 11600/11610): `clip add <role> <scene> track
+  // <track-idx> id <n>` -- the kClipAdd counterpart to the style case above,
+  // registering a ContentKind::kStepTrack clip referencing an EXISTING step
+  // track (created via `track new` below) at this cell's own stable id.
+  // Mirrors the style case's shape exactly: t[4] == "track" instead of
+  // "style", t[5] a bare numeric track index instead of a section name.
+  if (t.size() == 8 && t[0] == "clip" && t[1] == "add" && t[4] == "track" && t[6] == "id") {
+    TrackRole role{};
+    if (!Shell::resolve_track_role(std::string(t[2]), role)) {
+      detail = "unknown role: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t scene = 0;
+    if (!parse_uint(t[3], scene) || scene > 255) {
+      detail = "bad scene index: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t track_idx = 0;
+    if (!parse_uint(t[5], track_idx) || track_idx > 0xFFFF) {
+      detail = "bad track index: " + std::string(t[5]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t id = 0;
+    if (!parse_uint(t[7], id) || id >= static_cast<std::uint64_t>(kNoExplicitClipId)) {
+      detail = "bad id: " + std::string(t[7]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kClipAdd;
+    out.idx = static_cast<std::uint16_t>(id);
+    out.a = static_cast<std::int32_t>(role);
+    out.b = static_cast<std::int32_t>(scene);
+    out.c = static_cast<std::int32_t>(ContentKind::kStepTrack) |
+            (static_cast<std::int32_t>(track_idx) << 8);
+    return TranslateOutcome::kOk;
+  }
+
+  // `track new <role> <port> <channel>` -- mirrors Shell::track_new
+  // (shell_music_commands.cpp) exactly for the Command shape (a = role, b =
+  // port | (channel << 8)), but with a BARE NUMERIC port/channel instead of
+  // Shell's named-port + optional ":ch" resolution (D38: this pure-client
+  // translator has no Shell state to resolve a named port against, same
+  // convention the `note <port> ...` verb above already established).
+  // `channel` here is already 0-based, mapping directly onto Command::b's
+  // own 0-based packing with no extra +/-1 step. The CALLER (grid_panel.cpp's
+  // step-track creation gesture) is responsible for following this with
+  // `track mute <idx> on` (see below): arrangrr::Timeline::add_track's own
+  // Track defaults to mute=false, so an unmuted new track would sound the
+  // instant the transport is running (Timeline fires every registered track
+  // unconditionally).
+  if (t.size() == 5 && t[0] == "track" && t[1] == "new") {
+    TrackRole role{};
+    if (!Shell::resolve_track_role(std::string(t[2]), role)) {
+      detail = "unknown role: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t port = 0;
+    if (!parse_uint(t[3], port) || port >= kMaxPorts) {
+      detail = "bad track port: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t channel = 0;
+    if (!parse_uint(t[4], channel) || channel > 15) {
+      detail = "bad track channel: " + std::string(t[4]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kTrackNew;
+    out.a = static_cast<std::int32_t>(role);
+    out.b = static_cast<std::int32_t>(port) | (static_cast<std::int32_t>(channel) << 8);
+    return TranslateOutcome::kOk;
+  }
+
+  // `track step <idx> <step#> <note|clear> [vel] [gate] [prob=][ratchet=]
+  // [micro=][tie=]` -- mirrors Shell::track_step (shell_music_commands.cpp)
+  // exactly for validation/encoding, with a BARE NUMERIC track index instead
+  // of Shell's name lookup (same D38 convention as `track new` above).
+  // `<step#>` stays 1-based (mirrors the CLI's own convention exactly). `64`
+  // below mirrors arrangrr::kMaxStepsPerTrack (config.hpp), hand-copied (D38).
+  if (t.size() >= 5 && t[0] == "track" && t[1] == "step") {
+    std::uint64_t idx = 0;
+    if (!parse_uint(t[2], idx) || idx > 0xFFFF) {
+      detail = "bad track index: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t step = 0;
+    if (!parse_uint(t[3], step) || step < 1 || step > 64) {
+      detail = "bad step number: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.param = Param::kTrackStep;
+    out.idx = static_cast<std::uint16_t>(idx);
+    out.a = static_cast<std::int32_t>(step - 1);  // wire is 0-based
+    if (t[4] == "clear") {
+      out.b = 0;
+      out.c = 0;
+      return TranslateOutcome::kOk;
+    }
+    std::uint64_t note = 0;
+    if (!parse_uint(t[4], note) || note > 127) {
+      detail = "bad note: " + std::string(t[4]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t vel = 100;
+    std::uint64_t gate = 120;  // half a step (240 ticks/step / 2), mirrors the CLI's own default
+    std::uint64_t probability = 100;
+    std::uint64_t ratchet = 1;
+    std::uint64_t micro = 0;
+    bool tie = false;
+    bool has_locks = false;
+    int positional = 0;  // 0 -> vel, 1 -> gate
+    for (std::size_t i = 5; i < t.size(); ++i) {
+      const std::string_view tok = t[i];
+      const std::size_t eq = tok.find('=');
+      if (eq == std::string_view::npos) {
+        if (positional == 0) {
+          if (!parse_uint(tok, vel) || vel < 1 || vel > 127) {
+            detail = "bad velocity: " + std::string(tok);
+            return TranslateOutcome::kInvalidArgument;
+          }
+          positional = 1;
+        } else if (positional == 1) {
+          if (!parse_uint(tok, gate) || gate == 0 || gate > 0xFFFF) {
+            detail = "bad gate: " + std::string(tok);
+            return TranslateOutcome::kInvalidArgument;
+          }
+          positional = 2;
+        } else {
+          detail = "track step: unexpected token: " + std::string(tok);
+          return TranslateOutcome::kInvalidArgument;
+        }
+        continue;
+      }
+      has_locks = true;
+      if (!parse_step_lock(tok.substr(0, eq), tok.substr(eq + 1), probability, ratchet, micro, tie,
+                           detail)) {
+        return TranslateOutcome::kInvalidArgument;
+      }
+    }
+    out.b = static_cast<std::int32_t>(note) | (static_cast<std::int32_t>(vel) << 8);
+    out.c = static_cast<std::int32_t>(gate);
+    if (has_locks) {
+      // Opt-in extended encoding (ABI kTrackStep): bit 31 of c flags the
+      // locks, mirroring abi.hpp's own kTrackStep comment exactly.
+      out.b |= static_cast<std::int32_t>(probability << 16) |
+               static_cast<std::int32_t>(ratchet << 24) |
+               static_cast<std::int32_t>(tie ? (1u << 28) : 0u);
+      out.c |= static_cast<std::int32_t>((static_cast<std::uint32_t>(micro) & 0xFFu) << 16) |
+               static_cast<std::int32_t>(0x80000000u);
+    }
+    return TranslateOutcome::kOk;
+  }
+
+  // `track length <idx> <steps>` -- mirrors Shell::cmd_track's own "length"
+  // verb exactly (Op::kSet, matching abi.hpp's kTrackLength comment).
+  if (t.size() == 4 && t[0] == "track" && t[1] == "length") {
+    std::uint64_t idx = 0;
+    if (!parse_uint(t[2], idx) || idx > 0xFFFF) {
+      detail = "bad track index: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    std::uint64_t steps = 0;
+    if (!parse_uint(t[3], steps)) {
+      detail = "bad length: " + std::string(t[3]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = Param::kTrackLength;
+    out.idx = static_cast<std::uint16_t>(idx);
+    out.a = static_cast<std::int32_t>(steps);
+    return TranslateOutcome::kOk;
+  }
+
+  // `track mute|solo <idx> on|off` -- mirrors Shell::cmd_track's own
+  // mute/solo verbs exactly (Op::kSet, matching abi.hpp's kTrackMute/
+  // kTrackSolo comments).
+  if (t.size() == 4 && t[0] == "track" && (t[1] == "mute" || t[1] == "solo")) {
+    std::uint64_t idx = 0;
+    if (!parse_uint(t[2], idx) || idx > 0xFFFF) {
+      detail = "bad track index: " + std::string(t[2]);
+      return TranslateOutcome::kInvalidArgument;
+    }
+    if (t[3] != "on" && t[3] != "off") {
+      detail = "track mute|solo <idx> on|off";
+      return TranslateOutcome::kInvalidArgument;
+    }
+    out.op = Op::kSet;
+    out.param = t[1] == "mute" ? Param::kTrackMute : Param::kTrackSolo;
+    out.idx = static_cast<std::uint16_t>(idx);
+    out.a = t[3] == "on" ? 1 : 0;
     return TranslateOutcome::kOk;
   }
 

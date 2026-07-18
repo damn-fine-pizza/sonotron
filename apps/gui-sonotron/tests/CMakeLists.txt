@@ -86,6 +86,13 @@ target_compile_definitions(test_audio_port_gate PRIVATE
 # now -- a normal, registered, always-green test like every other one here.
 gui_sonotron_engine_test(test_audio_primary_port_reachable functional)
 
+# Anti-no-op contract test (Task #11 Phase 1, Sequence Edit step sequencer --
+# roadmap node 11600/11610): proves `track new/mute/step` + `clip add ...
+# track ...` + `launch clip ... quantize 0` + `transport start` actually
+# reaches arrangrr::Timeline::on_tick and produces real MIDI on the primary
+# port -- not merely that the translator parses the five new verbs.
+gui_sonotron_engine_test(test_step_track_end_to_end_contract functional)
+
 # A/B FIX PIN (docs/reflections/cli-vs-gui-ab-2026-07.md): proves the GUI's
 # own reachable path (`style load`/`transport start`, nothing hand-written)
 # now produces real harmonic movement instead of a static tonic triad --

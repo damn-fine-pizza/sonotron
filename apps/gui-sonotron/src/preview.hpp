@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "step_pattern_model.hpp"
+
 // Real-content cell preview (repeat-zone-real-contract.md, "cell preview
 // made real" pass, owner-approved full-fidelity). Resolves a role's
 // StylePattern in a given style/section against this style's own REAL
@@ -144,6 +146,30 @@ PreviewPattern preview_for(int style_index, Section section, std::size_t role_in
 // make the caller's "elapsed >= length" check trivially and permanently
 // true).
 int section_bars(int style_index, Section section);
+
+// ---------------------------------------------------------------------------
+// Step-track preview (Task #11 Phase 1, Sequence Edit step sequencer --
+// roadmap node 11600/11610). A StepPatternModel (step_pattern_model.hpp) is
+// GUI-owned, LIVE, host-side state authored directly by the user -- unlike
+// preview_for()'s static built-in Style tables, there is no placeholder-
+// harmony resolution step here at all: a step track's note/velocity are
+// exactly what the user set, so this is a literal projection, never
+// approximate (PreviewPattern::approx stays false).
+
+// Resolves `track`'s own live steps into a PreviewPattern, so grid_panel.
+// cpp's launch-cell mini-preview and seqedit_panel.cpp's "step" canvas both
+// draw a step track's real content through the SAME neon::ClipPattern
+// pipeline every other cell kind already uses (draw_role_pattern /
+// draw_cell), never a bespoke third renderer. Capped at kMaxBars (32 steps):
+// a StepPatternModel can hold up to kStepPatternMaxSteps (64) steps, wider
+// than this preview widget supports today -- widening the widget itself is
+// a Phase-2 (piano-roll) call, out of scope here (see step_pattern_model.
+// hpp's own header comment). Steps beyond the kMaxBars*kSteps window are
+// silently not drawn, never a crash. Only voice slot 0 is used per step (a
+// step track is monophonic per step by construction, unlike a style's
+// occasional same-step chord/kit collision), the remaining kMaxVoicesPerStep
+// - 1 slots always read -1 (rest).
+PreviewPattern preview_for_track(const StepPatternModel& track);
 
 // ---------------------------------------------------------------------------
 // Loop-content preview (Phase 7, node 6000, the Looper -- docs/proposals/

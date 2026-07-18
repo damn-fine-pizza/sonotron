@@ -832,6 +832,13 @@ int main(int argc, char** argv) {
   }
 
   sonotron::SeqEditModel seqedit_model;
+  // Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/
+  // 11610): SeqEditModel is the ONE zone model that holds a BrainSession*
+  // (seqedit_model.hpp's own header comment explains why -- layout_
+  // renderer.cpp's render_seqedit_panel call site has no BrainSession
+  // parameter to widen). Wired here, not layout_renderer.cpp, right after
+  // both objects exist.
+  seqedit_model.set_brain_session(&brain_session);
   sonotron::PartsModel parts_model;
   sonotron::UiState ui_state;  // neon workstation: glow flag, frame clock, local intent surface
 

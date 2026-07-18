@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
+#include "brain_session.hpp"
 #include "imgui.h"
 #include "neon_widgets.hpp"
 #include "preview.hpp"
+#include "step_pattern_model.hpp"
 #include "theme.hpp"
 #include "track_roles.hpp"
 
@@ -69,6 +72,127 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
       dl->AddRectFilled(b0, b1, neon::u32(color, alpha), 3.0F);
     }
   }
+}
+
+// Task #11 Phase 1 (Sequence Edit step sequencer, roadmap node 11600/11610):
+// the interactive canvas for SeqEditView::kStep, active only when the open
+// cell is a real step-track cell (model.open_step_track() >= 0). The visual
+// layer reuses draw_role_pattern above (preview_for_track's own
+// PreviewPattern fed through the identical neon::clip_pattern_from_pitches
+// conversion every other view already uses), so a step track's on/off
+// content draws through the SAME routine as the read-only style overlay --
+// one shared formula, never a second bespoke renderer. The interactive
+// layer is a row of per-step InvisibleButtons laid out on the identical
+// column math draw_role_pattern used internally, drawn on top purely for
+// hit-testing (they paint nothing themselves). A click toggles the step's
+// single note slot: writes the local StepPatternStore echo AND sends the
+// matching `track step ...` wire command through the SeqEditModel-held
+// BrainSession* (see seqedit_model.hpp's own header comment for why this
+// model uniquely holds one) -- this is the one path the anti-no-op contract
+// test (test_step_track_end_to_end_contract.cpp) exercises end to end. A
+// null BrainSession* (never wired, e.g. a unit test constructing this model
+// bare) still updates the local echo but sends nothing -- a defensive
+// no-op, never a crash.
+void render_step_grid(SeqEditModel& model, StepPatternModel& track, ImDrawList* dl,
+                      const ImVec2& p0, const ImVec2& p1, const ImVec4& color) {
+  constexpr std::uint8_t kDefaultNote = 60;
+  constexpr std::uint8_t kDefaultVel = 100;
+  constexpr std::uint16_t kDefaultGate = 120;  // half a step; mirrors the translator's own default
+
+  const preview::PreviewPattern pp = preview::preview_for_track(track);
+  const neon::ClipPattern pat = neon::clip_pattern_from_pitches(pp.pitch, pp.bars);
+  const int total_steps =
+      std::clamp(pat.bars, 1, neon::ClipPattern::kMaxBars) * neon::ClipPattern::kSteps;
+  draw_role_pattern(dl, p0, p1, total_steps, pat, color, 0.85F, /*glow=*/false);
+
+  const int track_idx = model.open_step_track();
+  BrainSession* session = model.brain_session();
+  const float col_w = (p1.x - p0.x) / static_cast<float>(total_steps);
+  for (int i = 0; i < total_steps; ++i) {
+    ImGui::PushID(i);
+    ImGui::SetCursorScreenPos(ImVec2(p0.x + col_w * static_cast<float>(i), p0.y));
+    const bool clicked = ImGui::InvisibleButton("step", ImVec2(col_w, p1.y - p0.y));
+    if (clicked && track_idx >= 0) {
+      const bool was_on = track.step(static_cast<std::size_t>(i)).vel > 0;
+      if (was_on) {
+        track.clear_step(static_cast<std::size_t>(i));
+        if (session != nullptr) {
+          session->send("track step " + std::to_string(track_idx) + " " + std::to_string(i + 1) +
+                        " clear");
+        }
+      } else if (track.set_step(static_cast<std::size_t>(i), kDefaultNote, kDefaultVel,
+                                kDefaultGate)) {
+        if (session != nullptr) {
+          session->send("track step " + std::to_string(track_idx) + " " + std::to_string(i + 1) +
+                        " " + std::to_string(kDefaultNote) + " " + std::to_string(kDefaultVel) +
+                        " " + std::to_string(kDefaultGate));
+        }
+      }
+    }
+    ImGui::PopID();
+  }
+}
+
+// Right-aligned mode tabs, sized to fit BOTH labels fully (a SmallButton is
+// text + 2*FramePadding.x wide; reserve exactly that for each so neither
+// "piano-roll" nor "step" is clipped, at any DPI/font size) -- extracted out
+// of render_seqedit_panel (readability-function-cognitive-complexity), pure
+// refactor, no behavior change. Task #11 Phase 1: the "step" tab only makes
+// sense for a real step-track cell -- style-section cells have no kStep
+// content, so it is hidden entirely otherwise, and the view falls back to
+// kPianoRoll if a PRIOR step-track cell had left kStep selected before a
+// different (non-step-track) cell was opened.
+void render_mode_tabs(SeqEditModel& model) {
+  ImGui::SameLine();
+  const float pad2 = ImGui::GetStyle().FramePadding.x * 2.0F;
+  const float w_pr = ImGui::CalcTextSize("piano-roll").x + pad2;
+  const float w_st = ImGui::CalcTextSize("step").x + pad2;
+  const float tab_gap = 6.0F;
+  const bool has_step_track = model.open_step_track() >= 0;
+  const float tabs_w = has_step_track ? (w_pr + tab_gap + w_st) : w_pr;
+  ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - tabs_w);
+  if (mode_tab("piano-roll", model.view() == SeqEditView::kPianoRoll)) {
+    model.set_view(SeqEditView::kPianoRoll);
+  }
+  if (has_step_track) {
+    ImGui::SameLine(0.0F, tab_gap);
+    if (mode_tab("step", model.view() == SeqEditView::kStep)) {
+      model.set_view(SeqEditView::kStep);
+    }
+  } else if (model.view() == SeqEditView::kStep) {
+    model.set_view(SeqEditView::kPianoRoll);
+  }
+}
+
+// Task #11 Phase 1: SeqEditView::kStep, with a real step-track cell open,
+// branches the canvas into the interactive step grid instead of the
+// read-only overlay below -- extracted out of render_seqedit_panel
+// (readability-function-cognitive-complexity), pure refactor, no behavior
+// change. Returns true when it fully handled (and ended) the canvas child,
+// in which case the caller must return immediately without falling through
+// to the read-only overlay below. kPianoRoll (and a kStep view left selected
+// on a NON-step-track cell, which the mode-tab guard above already falls
+// back to kPianoRoll for) keeps today's overlay COMPLETELY UNCHANGED -- that
+// stays Phase-2's future editable canvas, per the owner's "entrambi a fasi"
+// decision.
+bool try_render_step_canvas(SeqEditModel& model, ImDrawList* dl, const ImVec2& p0, const ImVec2& p1,
+                            const ImVec2& avail, const UiState& fx, const ImVec4& track_color) {
+  if (model.view() != SeqEditView::kStep || model.open_step_track() < 0) {
+    return false;
+  }
+  StepPatternModel* track =
+      model.step_tracks().track(static_cast<std::size_t>(model.open_step_track()));
+  if (track == nullptr) {
+    return false;
+  }
+  render_step_grid(model, *track, dl, p0, p1, track_color);
+  if (fx.playing) {
+    const float phase = std::fmod(fx.time, 2.0F) / 2.0F;
+    const float x = p0.x + phase * avail.x;
+    dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), neon::u32(theme::kGreen), 1.5F);
+  }
+  ImGui::EndChild();
+  return true;
 }
 
 // Left-hand per-instrument SHOW/HIDE toggle list (owner task #1): one
@@ -186,22 +310,7 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   ImGui::SameLine(0.0F, 12.0F);
   ImGui::TextColored(theme::kTextMuted, "grid 1/%d", model.grid_division());
 
-  // Right-aligned mode tabs, sized to fit BOTH labels fully (a SmallButton is
-  // text + 2*FramePadding.x wide; reserve exactly that for each so neither
-  // "piano-roll" nor "step" is clipped, at any DPI/font size).
-  ImGui::SameLine();
-  const float pad2 = ImGui::GetStyle().FramePadding.x * 2.0F;
-  const float w_pr = ImGui::CalcTextSize("piano-roll").x + pad2;
-  const float w_st = ImGui::CalcTextSize("step").x + pad2;
-  const float tab_gap = 6.0F;
-  ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - (w_pr + tab_gap + w_st));
-  if (mode_tab("piano-roll", model.view() == SeqEditView::kPianoRoll)) {
-    model.set_view(SeqEditView::kPianoRoll);
-  }
-  ImGui::SameLine(0.0F, tab_gap);
-  if (mode_tab("step", model.view() == SeqEditView::kStep)) {
-    model.set_view(SeqEditView::kStep);
-  }
+  render_mode_tabs(model);
   ImGui::Spacing();
 
   // Left-hand per-instrument SHOW/HIDE toggle list (owner task #1). A
@@ -261,6 +370,10 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
       dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), neon::u32(theme::kGreen), 1.5F);
     }
     ImGui::EndChild();
+    return;
+  }
+
+  if (try_render_step_canvas(model, dl, p0, p1, avail, fx, track_color)) {
     return;
   }
 

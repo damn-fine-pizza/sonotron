@@ -7,20 +7,24 @@
 #include <string_view>
 #include <utility>
 
+#include "step_pattern_model.hpp"
 #include "track_roles.hpp"
 
 // Pure-data toolbar/selection state for the Sequence Edit zone
 // (ux-workstation.md §4.5/§6). No ImGui, no I/O; seqedit_panel.cpp is the
 // only file that renders this with ImGui.
 //
-// The actual note canvas (the per-step `Track` buffer edited by `track step
-// <i> <note> <vel> <gate> ...`, §7 A7) is NOT modeled here — that is a
-// bigger, later slice (a real piano-roll/step grid over live Track data).
-// This slice gives the toolbar (part/clip selection, record-arm, grid
-// resolution, view mode) a real, testable home so seqedit_panel.cpp has
-// state to render and toggle, and an honest placeholder canvas underneath.
+// Task #11 Phase 1 (roadmap node 11600/11610, "entrambi a fasi" owner
+// decision): the note canvas is now modeled for real, as a STEP SEQUENCER --
+// the per-step `Track` buffer edited by `track step <i> <note> <vel> <gate>
+// ...` (§7 A7), mirrored host-side by StepPatternStore below. A future
+// Phase-2 piano-roll is a richer VIEW over this SAME data (step_pattern_
+// model.hpp's own header comment), not a second content kind or a second
+// model.
 
 namespace sonotron {
+
+class BrainSession;
 
 enum class SeqEditView : std::uint8_t { kPianoRoll, kStep };
 
@@ -84,6 +88,39 @@ class SeqEditModel {
   // own "all tracks / last track" toggle button (item 4).
   void set_all_tracks_visible(bool all);
 
+  // Task #11 Phase 1: the editable StepPatternModel pool the "step" view
+  // reads/writes, and grid_panel.cpp's step-track creation gesture appends
+  // to. Owned HERE (not GridModel/UiState) because layout_renderer.cpp (the
+  // sole threader of WorkstationState into render_grid_panel/render_seqedit_
+  // panel) is out of scope for this task, and SeqEditModel is already the
+  // one model both entry points receive by non-const reference.
+  StepPatternStore& step_tracks() { return m_step_tracks; }
+  const StepPatternStore& step_tracks() const { return m_step_tracks; }
+
+  // Which StepPatternStore track (if any) the CURRENTLY OPEN cell (grid_
+  // panel.cpp's fx.open_cell) owns -- the SeqEditModel-side counterpart of
+  // UiState::open_wav (ui_state.hpp is out of scope for this task, so this
+  // lives here instead). -1 = the open cell is not a step-track cell (a
+  // style-section cell, or nothing open at all); render_seqedit_panel's own
+  // "step" tab is hidden and the kStep canvas branch is inactive whenever
+  // this reads < 0.
+  int open_step_track() const { return m_open_step_track; }
+  void set_open_step_track(int step_track_index) { m_open_step_track = step_track_index; }
+
+  // Task #11 Phase 1: the ONE BrainSession* this model holds, uniquely among
+  // the zone models -- render_seqedit_panel(SeqEditModel&, const UiState&)
+  // has no BrainSession parameter of its own (layout_renderer.cpp's call
+  // site is frozen/out of scope for this task), so the interactive "step"
+  // canvas has no other way to send the `track step ...` wire command a
+  // click must produce (the anti-no-op requirement: a step toggle has to
+  // reach the core, not just this model's own local echo). Wired once from
+  // main.cpp (NOT layout_renderer.cpp) right after both objects exist.
+  // Nullable and defensively checked by every caller: a SeqEditModel
+  // constructed bare (e.g. a unit test) still works for local-only state,
+  // it simply sends nothing.
+  BrainSession* brain_session() const { return m_brain_session; }
+  void set_brain_session(BrainSession* session) { m_brain_session = session; }
+
  private:
   std::size_t m_part_index = 0;
   std::string m_clip_label = "-";
@@ -92,6 +129,9 @@ class SeqEditModel {
   SeqEditView m_view = SeqEditView::kPianoRoll;
   std::array<bool, kTrackRoleCount> m_role_visible;
   bool m_all_tracks_shown = true;
+  StepPatternStore m_step_tracks;
+  int m_open_step_track = -1;
+  BrainSession* m_brain_session = nullptr;
 };
 
 }  // namespace sonotron
