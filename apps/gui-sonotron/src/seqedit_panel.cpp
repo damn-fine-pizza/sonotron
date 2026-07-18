@@ -1,6 +1,7 @@
 #include "seqedit_panel.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -46,6 +47,15 @@ constexpr float kRoleListWidth = 118.0F;
 // canvas keep the base font.
 constexpr float kRoleFontScale = 1.15F;
 
+// Piano-roll lane height in px (owner bug: "Sequence Edit still doesn't
+// show all tracks" -- draw_role_pattern used to draw every visible role
+// into the SAME shared rect on the SAME pitch axis, so all roles mutually
+// occluded each other in one lane). Each visible role now gets its own
+// horizontal strip this tall; the canvas grows past the visible band and
+// scrolls (see "seq_canvas"'s dropped NoScrollbar/NoScrollWithMouse flags
+// below) rather than being squeezed to fit every lane on screen at once.
+constexpr float kLaneH = 76.0F;
+
 // Draws one role's note pattern into the seq_canvas draw list: every voice
 // at every step as a filled, rounded rect via the shared pitch_grid_cell()
 // layout helper, optionally glowed. Shared by the opened role's own draw
@@ -71,6 +81,43 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
       }
       dl->AddRectFilled(b0, b1, neon::u32(color, alpha), 3.0F);
     }
+  }
+}
+
+// Lane-partition fix (owner bug: "Sequence Edit still doesn't show all
+// tracks" -- overlaying every visible role into ONE shared rect made 9
+// roles mutually occlude each other on the same pitch axis). Draws each
+// `lane_roles[0..lane_count)` role into its OWN horizontal strip of the
+// canvas (`kLaneH` tall, stacked top to bottom in role order), a thin
+// divider between lanes, and a small role-label glyph -- extracted out of
+// render_seqedit_panel (readability-function-cognitive-complexity), pure
+// refactor of task #1's original single-rect overlay loop, same color/alpha
+// rules: the opened role (model.part_index()) keeps its full track_color/
+// 0.85F/glow treatment, every other role stays dimmed and unglowed.
+void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int total_steps,
+                           const neon::ClipPattern& pat, const ImVec4& track_color,
+                           const UiState& fx, const SeqEditModel& model, preview::Section section,
+                           const std::array<std::size_t, kTrackRoleCount>& lane_roles,
+                           std::size_t lane_count) {
+  for (std::size_t i = 0; i < lane_count; ++i) {
+    const std::size_t role = lane_roles[i];
+    const ImVec2 lane_p0(p0.x, p0.y + static_cast<float>(i) * kLaneH);
+    const ImVec2 lane_p1(p1.x, lane_p0.y + kLaneH);
+    if (role == model.part_index()) {
+      draw_role_pattern(dl, lane_p0, lane_p1, total_steps, pat, track_color, 0.85F, fx.glow);
+    } else {
+      const preview::PreviewPattern role_pp = preview::preview_for(fx.active_style, section, role);
+      const neon::ClipPattern role_pat =
+          neon::clip_pattern_from_pitches(role_pp.pitch, role_pp.bars);
+      draw_role_pattern(dl, lane_p0, lane_p1, total_steps, role_pat, theme::kRoleTint[role], 0.45F,
+                        false);
+    }
+    if (i > 0) {
+      dl->AddLine(lane_p0, ImVec2(lane_p1.x, lane_p0.y), neon::u32(theme::kTextMuted, 0.18F), 1.0F);
+    }
+    dl->AddText(ImVec2(lane_p0.x + 4.0F, lane_p0.y + 2.0F),
+                neon::u32(theme::kRoleTint[role], role == model.part_index() ? 0.95F : 0.6F),
+                std::string(kTrackRoleLabels[role]).c_str());
   }
 }
 
@@ -256,6 +303,31 @@ void render_role_toggle_sidebar(SeqEditModel& model) {
   ImGui::EndChild();
 }
 
+// Which visible roles get a piano-roll lane this frame -- extracted out of
+// render_seqedit_panel (readability-function-cognitive-complexity), pure
+// refactor. Mirrors try_render_step_canvas's own guard (model.view() !=
+// kStep || open_step_track() < 0) so the two branches can never disagree
+// about which one is about to run this frame: the WAV preview and the
+// step-track canvas both keep their single full-height rect (an empty
+// `lane_roles`/a 0 return degrades the caller's content height back to
+// avail.y), only the read-only piano-roll overlay gets partitioned. Returns
+// the lane count (0 when this frame isn't the piano-roll overlay at all).
+std::size_t compute_piano_roll_lanes(bool open, const UiState& fx, const SeqEditModel& model,
+                                     std::array<std::size_t, kTrackRoleCount>& lane_roles) {
+  const bool is_piano_roll =
+      open && !fx.open_wav && (model.view() != SeqEditView::kStep || model.open_step_track() < 0);
+  if (!is_piano_roll) {
+    return 0;
+  }
+  std::size_t lane_count = 0;
+  for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
+    if (model.role_visible(role)) {
+      lane_roles[lane_count++] = role;
+    }
+  }
+  return lane_count;
+}
+
 }  // namespace
 
 void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
@@ -325,20 +397,35 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
     ImGui::SameLine();
   }
 
-  // Canvas.
-  ImGui::BeginChild("seq_canvas", ImVec2(0, 0), ImGuiChildFlags_None,
-                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  // Canvas. Owner bug ("Sequence Edit still doesn't show all tracks"): the
+  // piano-roll view below now partitions the canvas into one horizontal LANE
+  // per visible role instead of overlaying every role into this single
+  // child's rect, so the content can outgrow the visible band -- scrollbar
+  // and mouse-wheel scroll are both left ENABLED (dropped from the old
+  // NoScrollbar | NoScrollWithMouse) so every lane stays reachable. The WAV
+  // and step-track branches below still draw a single full-height rect (no
+  // overflow, so no scrolling occurs for them either) -- unchanged.
+  ImGui::BeginChild("seq_canvas", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_None);
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   const ImVec2 avail = ImGui::GetContentRegionAvail();
-  const ImVec2 p1(p0.x + avail.x, p0.y + avail.y);
   ImDrawList* dl = ImGui::GetWindowDrawList();
+
+  // Which visible roles get a piano-roll lane this frame, and how tall the
+  // scrollable content is -- see compute_piano_roll_lanes's own header
+  // comment.
+  std::array<std::size_t, kTrackRoleCount> lane_roles{};
+  const std::size_t lane_count = compute_piano_roll_lanes(open, fx, model, lane_roles);
+  const float content_h =
+      lane_count > 0 ? std::max(avail.y, static_cast<float>(lane_count) * kLaneH) : avail.y;
+  const ImVec2 p1(p0.x + avail.x, p0.y + content_h);
 
   dl->AddRectFilled(p0, p1, neon::u32(theme::kInsetBg), 6.0F);
 
   // Vertical bar guides (owner tasks #2/#3: `bars` groups of 8 divisions
   // each, landing exactly on a bar boundary at a stronger alpha -- mirrors
   // the bar-divider legibility touch neon::clip_preview_pianoroll already
-  // carries).
+  // carries). Spans the full scrollable content height so the guides read
+  // through every lane, not just the first screenful.
   const int total_divisions = bars * 8;
   for (int i = 1; i < total_divisions; ++i) {
     const float x = p0.x + avail.x * static_cast<float>(i) / static_cast<float>(total_divisions);
@@ -361,7 +448,8 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   // Dormant in production today (nothing creates a kLoopBuffer cell yet,
   // Phase 7 Looper), wired now so the branch is ready the moment one
   // exists. Seeded off fx.open_cell so the same clip always draws the SAME
-  // deterministic waveform.
+  // deterministic waveform. p1 == avail-height here (lane_count is always 0
+  // for this branch, is_piano_roll_lanes above already excludes fx.open_wav).
   if (fx.open_wav) {
     neon::clip_preview_waveform(dl, p0, p1, static_cast<std::uint32_t>(fx.open_cell), track_color);
     if (fx.playing) {
@@ -385,43 +473,40 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx) {
   // stays reserved for genuine future audio content (an owner-flagged
   // deviation from the design's audio->waveform mapping, see this
   // workstream's implementation report). STEP left->right, PITCH low->high
-  // (pitch 0 at the bottom), via the SAME neon::pitch_grid_cell() helper the
-  // launch-cell mini-preview uses (neon_widgets.cpp's clip_preview_pianoroll)
-  // -- one shared formula, so the two views can never silently drift apart.
-  // Every simultaneous voice at a step (owner bug #13, e.g. a drum kit's
-  // kick+hihat both on beat 1) draws its OWN row block here too -- this is
-  // the reference view the launch-cell mini-preview must match.
+  // (pitch 0 at the bottom of its OWN lane), via the SAME neon::
+  // pitch_grid_cell() helper the launch-cell mini-preview uses (neon_
+  // widgets.cpp's clip_preview_pianoroll) -- one shared formula, so the two
+  // views can never silently drift apart. Every simultaneous voice at a step
+  // (owner bug #13, e.g. a drum kit's kick+hihat both on beat 1) draws its
+  // OWN row block here too.
   //
-  // Owner task #1: overlay ALL 9 scene-column track-role instruments of the
-  // currently-opened section, color-coded per role via theme::kRoleTint,
-  // with the CURRENTLY-OPENED role emphasized. Every OTHER visible role
-  // draws first, at reduced alpha and no glow; the opened role
-  // (model.part_index()) draws LAST, unchanged from before (same
-  // `track_color`/0.85F/glow logic), so it visually sits on top.
-  for (std::size_t role = 0; role < kTrackRoleCount; ++role) {
-    if (role == model.part_index() || !model.role_visible(role)) {
-      continue;
-    }
-    const preview::PreviewPattern role_pp = preview::preview_for(fx.active_style, section, role);
-    const neon::ClipPattern role_pat = neon::clip_pattern_from_pitches(role_pp.pitch, role_pp.bars);
-    draw_role_pattern(dl, p0, p1, total_steps, role_pat, theme::kRoleTint[role], 0.45F, false);
-  }
+  // Owner task #1 + lane-partition fix ("Sequence Edit still doesn't show
+  // all tracks"): every VISIBLE role gets its OWN horizontal lane
+  // (`lane_roles`/`kLaneH` above) instead of being overlaid into one shared
+  // rect, where 9 roles used to mutually occlude each other on the same
+  // pitch axis -- see draw_piano_roll_lanes's own header comment.
+  draw_piano_roll_lanes(dl, p0, p1, total_steps, pat, track_color, fx, model, section, lane_roles,
+                        lane_count);
 
-  // The opened role draws LAST, unchanged from before (same track_color,
-  // same 0.85F alpha, same fx.glow gating), so it visually sits on top of
-  // every other overlaid role -- but it, too, honors its own sidebar toggle
-  // (owner task #1: the SHOW/HIDE list covers ALL 9 instruments, including
-  // whichever one is currently open, or the affordance would silently do
-  // nothing for the one row a user is most likely to click).
-  if (model.role_visible(model.part_index())) {
-    draw_role_pattern(dl, p0, p1, total_steps, pat, track_color, 0.85F, fx.glow);
-  }
-
-  // Green playhead sweeping L->R while the opened clip plays.
+  // Green playhead sweeping L->R while the opened clip plays, across the
+  // full scrollable content height so it reads through every lane.
   if (fx.playing) {
     const float phase = std::fmod(fx.time, 2.0F) / 2.0F;
     const float x = p0.x + phase * avail.x;
     dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), neon::u32(theme::kGreen), 1.5F);
+  }
+
+  // Registers the lanes' full content height with ImGui so the now-enabled
+  // scrollbar/mouse-wheel scroll (this child's BeginChild flags above) can
+  // actually reach every lane -- this is a draw-list-only child (no normal
+  // widgets advance the cursor), so ImGui would otherwise never learn the
+  // content extends past `avail.y`. A zero-size Dummy() (an actual submitted
+  // item, not just a cursor move) is required here: ImGui's own
+  // ErrorCheckUsingSetCursorPosToExtendParentBoundaries asserts if
+  // SetCursorScreenPos alone is used to grow the parent's content bounds.
+  if (lane_count > 0) {
+    ImGui::SetCursorScreenPos(ImVec2(p0.x, p0.y + content_h));
+    ImGui::Dummy(ImVec2(0.0F, 0.0F));
   }
 
   ImGui::EndChild();

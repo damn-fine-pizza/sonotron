@@ -42,7 +42,14 @@ constexpr float kRailW = 288.0F;
 constexpr float kCollapsedStripW = 28.0F;
 constexpr float kCollapsedStripH = 28.0F;
 constexpr float kSplitterThickness = 6.0F;
-constexpr float kSeqEditMinH = 100.0F;
+// Raised from 100 (owner bug: "Sequence Edit still doesn't show all
+// tracks") -- seqedit_panel.cpp now draws one lane per visible role instead
+// of overlaying every role into one shared rect, so a floor that only fit
+// ~1 lane made most roles invisible even though the model marked them
+// visible. 240 leaves room for a few lanes at the collapsed-to-min size;
+// the band is user-resizable (#10) and scrollable (seqedit_panel.cpp), so
+// this is a comfortable floor, not an attempt to fit every lane unscrolled.
+constexpr float kSeqEditMinH = 240.0F;
 constexpr float kMinWorkH = 120.0F;
 
 // Opens one rounded neon zone panel child; `scrolls` false pins it (fixed
@@ -140,12 +147,28 @@ void render_layout(const Layout& layout, WorkstationState& state) {
   // Sequence Edit resizable height (item #10): re-clamp every frame in case
   // the window shrank since the last drag, so a stale fx.seqedit_height can
   // never starve the working row below kMinWorkH.
-  const float max_seqedit_h =
-      std::max(kSeqEditMinH, avail.y - kTransportH - 2.0F * kBandGap - kMinWorkH);
+  //
+  // Bug fix (owner-reported "scrolling scrolls the whole page"): the drag
+  // splitter (render_seqedit_splitter below) renders as a REAL stacked item
+  // -- kSplitterThickness of its own plus one more kBandGap ItemSpacing --
+  // whenever the band is not collapsed. The budget below used to only ever
+  // subtract 2 gaps (transport->row, row->seqedit), silently omitting the
+  // splitter's own footprint from both the max-height ceiling and work_h, so
+  // the three-plus stacked bands summed to ~14px MORE than `avail.y` and
+  // overflowed the root window -- which main.cpp's Begin("sonotron") flags
+  // then let the mouse wheel scroll into. `splitter_footprint` is reserved
+  // in BOTH `max_seqedit_h` (so a dragged-to-max band still leaves exactly
+  // kMinWorkH for the row above) and `work_h` (so the row's own share
+  // shrinks by the same amount), whichever branch is active, so the visible
+  // bands always sum to EXACTLY `avail.y`.
+  const float splitter_footprint = fx.seqedit_collapsed ? 0.0F : (kSplitterThickness + kBandGap);
+  const float max_seqedit_h = std::max(
+      kSeqEditMinH, avail.y - kTransportH - 3.0F * kBandGap - kSplitterThickness - kMinWorkH);
   fx.seqedit_height = std::clamp(fx.seqedit_height, kSeqEditMinH, max_seqedit_h);
   const float seqedit_h = fx.seqedit_collapsed ? kCollapsedStripH : fx.seqedit_height;
 
-  const float work_h = std::max(kMinWorkH, avail.y - kTransportH - seqedit_h - 2.0F * kBandGap);
+  const float work_h =
+      std::max(kMinWorkH, avail.y - kTransportH - seqedit_h - 2.0F * kBandGap - splitter_footprint);
 
   // Band 1: transport rack.
   begin_zone("band_transport", ImVec2(0.0F, kTransportH), /*scrolls=*/false);

@@ -184,7 +184,13 @@ struct UiState {
   // [kSeqEditMinH, a runtime-computed max] every frame in layout_renderer.cpp
   // so a stale value can never starve the working row below its own floor
   // after a window resize.
-  float seqedit_height = 172.0F;
+  //
+  // Raised from 172 (owner bug: seqedit_panel.cpp's piano-roll view now
+  // draws one lane per visible role -- see that file's kLaneH -- so the old
+  // default only fit ~1-2 lanes on screen). 380 shows several lanes by
+  // default before the canvas needs to scroll; still clamped down every
+  // frame if the window is too small to honor it (layout_renderer.cpp).
+  float seqedit_height = 380.0F;
 };
 
 }  // namespace sonotron

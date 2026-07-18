@@ -281,6 +281,19 @@ set_tests_properties(test_repeat_zone_playhead_ui_automation PROPERTIES LABELS f
 # test_grid_panel_auto_song above.
 gui_sonotron_grid_panel_test(test_grid_cell_preview_vs_seqedit_ui_automation functional)
 
+# Owner-reported live bug (2026-07-18: "Sequence Edit still doesn't show all
+# tracks") -- pins seqedit_panel.cpp's lane-partition fix: draw_role_pattern
+# used to draw every visible role into the SAME shared rect, mutually
+# occluding them; draw_piano_roll_lanes now gives each visible role its own
+# horizontal strip. Drives render_seqedit_panel directly (no click needed --
+# this is purely about rendered output for a given model state, the click
+# path is already covered by test_grid_cell_launch_open_seqedit_ui_
+# automation.cpp above), so it needs no BrainSession at all, only the same
+# lighter grid_panel_test link set (gui_sonotron_layout + gui_sonotron_brain,
+# the latter unused by this test but required to link SeqEditModel's
+# BrainSession* forward declaration).
+gui_sonotron_grid_panel_test(test_seqedit_piano_roll_lanes_ui_automation functional)
+
 # Owner-recorded-trace corroboration (owner steer, 2026-07-16 live session):
 # replays fixtures/owner_repro_2026_07_16.jsonl -- captured with the
 # product-side --trace-input feature against the exact live session where

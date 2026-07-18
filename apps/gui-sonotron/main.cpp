@@ -606,7 +606,7 @@ void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state, A
   ImGui::SetNextWindowSize(viewport->WorkSize);
   ImGui::Begin("sonotron", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                   ImGuiWindowFlags_NoBringToFrontOnFocus);
+                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse);
   sonotron::render_layout(layout, state);
   ImGui::End();
 

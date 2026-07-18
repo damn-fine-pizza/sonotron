@@ -98,7 +98,17 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
                              BrainSession& brain_session, AppState& app_state, UiState& fx) {
   ImGui::GetIO().DeltaTime = 1.0F / 60.0F;
   ImGui::NewFrame();
-  ImGui::SetNextWindowSize(ImVec2(1200.0F, 700.0F), ImGuiCond_Always);
+  // Tall enough that "sequence_edit"'s seq_canvas never needs to scroll for
+  // this fixture (owner task #1's lane-partition fix, seqedit_panel.cpp:
+  // every visible role -- all 9, default -- now gets its own kLaneH-tall
+  // lane; 9 lanes comfortably need more than the previous 700px window's
+  // remaining seq_canvas height). This test's own column-occupancy math
+  // below assumes the canvas child's OUTER rect (find_child_window_rect)
+  // exactly equals its INNER content width -- true only when no scrollbar
+  // is showing, so keeping this window tall enough to avoid one at all
+  // keeps that assumption honest rather than adding scrollbar-width slop
+  // to the column math.
+  ImGui::SetNextWindowSize(ImVec2(1200.0F, 1400.0F), ImGuiCond_Always);
   ImGui::Begin("test");
   ImGui::BeginChild("repeat_zone", ImVec2(0, 340.0F), ImGuiChildFlags_None);
   sonotron::render_grid_panel(model, seqedit, parts, brain_session, app_state, fx);
@@ -114,7 +124,7 @@ ImDrawData* render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel
 
 void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   ImGui::CreateContext();
-  ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 800.0F);
+  ImGui::GetIO().DisplaySize = ImVec2(1280.0F, 1500.0F);
   unsigned char* tex_pixels = nullptr;
   int tex_w = 0;
   int tex_h = 0;
