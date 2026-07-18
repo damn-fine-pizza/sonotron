@@ -298,6 +298,18 @@ arrangrr_test(test_scene_hardening functional)
 # Transport's real grid under the same trigger. Handoff to Nazzareno --
 # NOT fixed here (accuse, don't repair).
 arrangrr_test(test_scene_meter_gate_regression regression)
+# test_scene_solo_regression (Torquato QA, Phase 7 node 8100 song-mode
+# hardening): pins an owner-reported RED bug -- soloing a track LIVE while a
+# Repeat-Zone SceneChain is playing does not stay isolated, because
+# Engine::apply_performance unconditionally re-applies the mute/solo mask
+# captured into a scene step's Performance at song-build time, clobbering
+# any live solo the instant the chain crosses into the next step. Kept in
+# its own file/CTest entry (mirrors test_performance_style_id_regression's
+# own isolation precedent) so its failure never masks the surrounding GREEN
+# test_scene.cpp/test_scene_hardening.cpp coverage. Fixed by Nazzareno
+# (engine.cpp gates the mute/solo restore behind scene_hold_bars == 0); was
+# RED, now GREEN.
+arrangrr_test(test_scene_solo_regression regression)
 # test_retro_capture (Phase 7, node 6300, "grab last N bars" -- retroactive
 # capture): the MINIMAL happy-path pass -- arm captures live notes across a
 # couple of bars into RetroCaptureRing, kRetroCaptureGrab materializes the

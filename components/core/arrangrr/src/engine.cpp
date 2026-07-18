@@ -1797,8 +1797,24 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink,
     const PerfRoute& route = perf.routes[r];
     m_arranger.set_route(role, route.port, route.channel);
     m_arranger.set_route_enabled(role, route.enabled != 0);
-    m_arranger.set_mute(role, (perf.track_mute_mask & (1u << r)) != 0);
-    m_arranger.set_solo(role, (perf.track_solo_mask & (1u << r)) != 0);
+    // Owner-reported symptom: pressing SOLO on a track during a live
+    // SceneChain run did not isolate it. Root cause: a scene step's own
+    // Performance is captured at `song build` time, BEFORE any live mute/
+    // solo gesture -- track_mute_mask/track_solo_mask are the base rig's
+    // stale snapshot, not the current live state. A genuine Performance/pad
+    // recall (scene_hold_bars == 0) must still restore these masks
+    // byte-exact (that IS the recall contract, test_perf_capture_recall_
+    // round_trip_restores_everything.cpp), but a live SceneChain transition
+    // (scene_hold_bars != 0, see this method's own header comment on that
+    // parameter) must NOT clobber a live mute/solo gesture with the stale
+    // captured mask on every bar-boundary step change -- mirrors the
+    // chord_sequence_id == 0xFFFF sentinel apply_song_build already forces
+    // for the same reason (a scene transition must not restart a harmony
+    // loop it never armed).
+    if (scene_hold_bars == 0) {
+      m_arranger.set_mute(role, (perf.track_mute_mask & (1u << r)) != 0);
+      m_arranger.set_solo(role, (perf.track_solo_mask & (1u << r)) != 0);
+    }
     // Phase-6 Theme 3 Item #3 (P1): restore the role's FX chain slot-for-slot,
     // byte-exact -- validate_performance() above already bounded every
     // insert_chains[r][slot].type to a real InsertType, so this is a plain
