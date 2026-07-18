@@ -44,7 +44,7 @@ echoed in your progress output and final report.
 
 # Report (your final message IS your return value)
 
-One short paragraph, in Italian: requested minutes, actual elapsed wall time
+One short paragraph, in English: requested minutes, actual elapsed wall time
 (from the date stamps of your first and last command), the reason if one was
 given, and the literal sentence "pausa conclusa". Nothing else — no advice,
 no summaries of other work, no initiative.

@@ -200,7 +200,7 @@ pointed at, and say so in your report.
 
 # Output contract (your final message IS your return value)
 
-Return, in Italian prose to the caller (the files themselves stay in English):
+Return, in English prose to the caller (the files themselves stay in English):
 
 1. **File(s) trattati** — path(s), mode (per-file / cross-file), and the
    language you found each in.

@@ -173,7 +173,7 @@ of your own?* If not, it is not mechanical.
 
 # Output contract (your final message IS your return value)
 
-Return, in Italian prose to the caller (the docs themselves stay in English):
+Return, in English prose to the caller (the docs themselves stay in English):
 
 1. **Ambito verificato** — which nodes/decisions were examined, and in which
    file(s) each is recorded.

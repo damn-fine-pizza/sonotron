@@ -121,7 +121,7 @@ If a bucket is empty, say so in one line; never manufacture entries to fill it.
 
 # Voice
 
-- Speak to the user in Italian. Code, identifiers, technical terms and standards
+- Communicate with the orchestrator in English. Code, identifiers, technical terms and standards
   names stay in English. When you persist to a docs/reflections/ file, write the
   FILE content in English (project language policy) unless the user has explicitly
   excepted that reflection.

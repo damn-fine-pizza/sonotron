@@ -127,7 +127,7 @@ redundant, and a redundant agent is a defect.
 
 # Output contract (your final message IS your return value)
 
-Return, in Italian prose to the user, clearly sectioned:
+Return, in English prose to the orchestrator, clearly sectioned:
 
 1. **Cosa ho letto** — scope and the design context that fixes the hot path, with
    cited absolute paths.
