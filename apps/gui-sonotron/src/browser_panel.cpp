@@ -50,8 +50,8 @@ constexpr std::array<StyleFamily, 8> kFamilyRenderOrder = {
 // SectionType byte a scene header (grid_panel.cpp) accepts as a drop target
 // to set that column's section. "kits" now sends the real GM percussion-kit
 // program-change verb (render_kits below), the same way "voices" already does.
-constexpr std::array<std::string_view, 8> kVariations = {
-    "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro",
+constexpr std::array<std::string_view, 9> kVariations = {
+    "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro", "outro 2",
 };
 // SectionType byte each kVariations row drags onto a scene header --
 // numerically mirrors arrangrr::SectionType (components/core/arrangrr/
@@ -59,7 +59,7 @@ constexpr std::array<std::string_view, 8> kVariations = {
 // discipline grid_model.hpp's own kDefaultSectionType/section_wire_name
 // already use (D38: this file never includes arrangrr/). Index-parallel
 // with kVariations above -- entry i's payload is kVariationSections[i].
-constexpr std::array<std::uint8_t, 8> kVariationSections = {
+constexpr std::array<std::uint8_t, 9> kVariationSections = {
     0,   // intro   -> kIntro1
     2,   // verse A -> kVarA
     3,   // verse B -> kVarB
@@ -68,14 +68,15 @@ constexpr std::array<std::uint8_t, 8> kVariationSections = {
     10,  // break   -> kBreak
     6,   // fill    -> kFillA
     11,  // outro   -> kEnding1
+    12,  // outro 2 -> kEnding2
 };
 // Wire name each kVariations row sends via `style section <name>` on click --
 // index-parallel with kVariations/kVariationSections above, mirroring
 // grid_model.cpp's own section_wire_name() table at these same numeric
 // SectionType indices (0=intro1, 2=varA, 3=varB, 4=varC, 5=varD, 10=break,
-// 6=fillA, 11=ending1).
-constexpr std::array<std::string_view, 8> kVariationWireNames = {
-    "intro1", "varA", "varB", "varC", "varD", "break", "fillA", "ending1",
+// 6=fillA, 11=ending1, 12=ending2).
+constexpr std::array<std::string_view, 9> kVariationWireNames = {
+    "intro1", "varA", "varB", "varC", "varD", "break", "fillA", "ending1", "ending2",
 };
 
 bool matches(std::string_view item, const std::string& filter) {
