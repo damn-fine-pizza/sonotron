@@ -599,6 +599,50 @@ void test_fill_one_shot_returns_to_variation() {
   CHECK(sec[1] == static_cast<std::uint16_t>(SectionType::kVarA));  // returned
 }
 
+// Ottorino's diagnosis: kBreak matches none of the section_is_* predicates,
+// so the arranger's else-branch (a plain variation loop) swallows it instead
+// of resolving it like a one-shot -- a Break plays its authored bar(s) then
+// LOOPS ON ITSELF forever rather than returning to the variation it came
+// from. Mirrors test_fill_one_shot_returns_to_variation exactly, but against
+// "rock" (style index 2), the first builtin to author a Break section --
+// "basic" (index 0) has none (see test_style_warns' "absent" case below).
+void test_break_one_shot_returns_to_variation() {
+  Band b;
+  b.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  b.cmd(Param::kStyleLoad, 2);  // rock: kVarA bars=2, kBreak bars=1
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8), 0,
+        Op::kSet);
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0, Op::kSet);
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8), 0,
+        Op::kSet);
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.cmd(Param::kTransportStart);
+  b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kBreak));
+  b.ev.clear();
+  // The deferred kStyleSection switch (transport already running) is
+  // QUANTIZED to the next bar boundary, not to VarA's own section end
+  // (test_quantized_variation_switch's own semantics): rock's VarA is 2
+  // bars, so Break actually starts one bar in (tick == kTicksPerBar), then
+  // runs its own authored 1 bar before the auto-return point -- tick ==
+  // 2 * kTicksPerBar. Mirrors test_fill_one_shot_returns_to_variation's own
+  // 2 * kTicksPerBar + 10 window (there, "basic"'s VarA is 1 bar, so the
+  // Fill starts and finishes one bar earlier, landing on the same tick).
+  b.advance(2 * kTicksPerBar + 10);
+  const auto sec = b.sections();
+  CHECK(sec.size() == 2);
+  // Guarded indexing (not unconditional like the Fill sibling test above):
+  // pre-fix, a Break loops on itself and never emits the second kSection
+  // event, so sec.size() stays 1 -- an unconditional sec[1] would read out
+  // of StaticVector's bound and trap, hiding the real RED signal (the size
+  // mismatch above) behind a crash instead of a clean failing assertion.
+  if (sec.size() >= 1) {
+    CHECK(sec[0] == static_cast<std::uint16_t>(SectionType::kBreak));
+  }
+  if (sec.size() >= 2) {
+    CHECK(sec[1] == static_cast<std::uint16_t>(SectionType::kVarA));  // auto-returned, like a Fill
+  }
+}
+
 void test_intro_leads_to_variation() {
   Band b;
   b.setup_basic();
@@ -1151,6 +1195,7 @@ int main() {
   test_part_mute_solo();
   test_quantized_variation_switch();
   test_fill_one_shot_returns_to_variation();
+  test_break_one_shot_returns_to_variation();
   test_intro_leads_to_variation();
   test_ending_stops_transport();
   test_triad_wrap_and_route_gating();

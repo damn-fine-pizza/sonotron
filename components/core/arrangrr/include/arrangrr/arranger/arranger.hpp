@@ -553,7 +553,8 @@ class Arranger {
             result.stop_transport = true;
             return result;
           } else if (!m_scene_owns_timing &&
-                     (section_is_fill(m_current) || section_is_intro(m_current))) {
+                     (section_is_fill(m_current) || section_is_intro(m_current) ||
+                      section_is_break(m_current))) {
             next = m_return_to;  // one-shots resolve to the active variation
           } else {
             // A plain variation looped back to itself -- OR (owner decision,

@@ -42,6 +42,11 @@ constexpr bool section_is_fill(SectionType t) noexcept {
 }
 constexpr bool section_is_intro(SectionType t) noexcept { return t <= SectionType::kIntro2; }
 constexpr bool section_is_ending(SectionType t) noexcept { return t >= SectionType::kEnding1; }
+// A Break is a one-shot like a Fill (auto-returns to the active variation
+// after its authored bar(s)), but it is not itself a Fill variant, so it
+// gets its own predicate rather than being folded into section_is_fill's
+// contiguous kFillA..kFillD range.
+constexpr bool section_is_break(SectionType t) noexcept { return t == SectionType::kBreak; }
 
 enum class RolePolicy : std::uint8_t {
   kFixed = 0,      // literal MIDI notes (drums/percussion — never transposed)
