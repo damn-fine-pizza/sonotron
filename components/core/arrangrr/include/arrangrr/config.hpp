@@ -176,19 +176,33 @@ static_assert((kMaxLoopSlots + 1) * kMaxLoopEvents * 12ull <= 512ull * 1024ull,
 // "kMaxSceneChainSteps" constant is needed because there is no chain-vs-step
 // split to make.
 //
-// Budget: SceneStep is a 12-byte POD (pinned by
-// static_assert(sizeof(SceneStep) == 12) in arrangrr/scene/scene_chain.hpp,
-// matching LoopEvent/ChordStep's own 12 B chord-relative precedent), so
-// kMaxScenes x 12 B stays a trivial slice of the STM32H743 512 KB envelope
-// even at generous headroom -- no target-conditional split is needed the way
-// kMaxLoopSlots/kMaxLoopEvents required (that pool's per-slot EVENT capacity
-// was the real SRAM pressure; a song's own SCENE COUNT is orders of magnitude
-// smaller by nature).
+// Budget: SceneStep is a 16-byte POD (pinned by
+// static_assert(sizeof(SceneStep) == 16) in arrangrr/scene/scene_chain.hpp --
+// repeat-count Phase-2 grew it from its original 12 B, the old LoopEvent/
+// ChordStep-precedent size, now stale prose), so kMaxScenes x 16 B stays a
+// trivial slice of the STM32H743 512 KB envelope even at generous headroom --
+// no target-conditional split is needed the way kMaxLoopSlots/kMaxLoopEvents
+// required (that pool's per-slot EVENT capacity was the real SRAM pressure;
+// a song's own SCENE COUNT is orders of magnitude smaller by nature).
 inline constexpr std::size_t kMaxScenes = 64;
 static_assert(kMaxScenes >= 1 && kMaxScenes <= 256,
               "SceneChain pool: keep the song-mode step chain bounded (D33)");
-static_assert(kMaxScenes * 12ull <= 512ull * 1024ull,
+static_assert(kMaxScenes * 16ull <= 512ull * 1024ull,
               "SceneChain pool: keep it inside the D33 SRAM envelope");
+
+// Cross-file capacity coupling (repeat-count Phase-2 hardening, docs/
+// proposals/repeat-count-phase2-abi.md §1.4): the host's Phase-1 song-build
+// expansion (apps/gui-sonotron/src/in_process_brain_session.cpp,
+// apply_song_build) assumes GridModel::kMaxSceneCount(8) * GridModel::
+// kMaxSceneRepeat(8) never exceeds kMaxScenes -- apps/gui-sonotron/src/
+// grid_model.hpp carries the matching static_assert on ITS OWN side (it
+// cannot see this core header, host/core layering) referencing THIS value by
+// name/comment, so a bump to EITHER side's constants fails loudly at compile
+// time instead of silently truncating songs.
+static_assert(kMaxScenes >= 64,
+              "kMaxScenes must stay >= GridModel::kMaxSceneCount(8) * "
+              "GridModel::kMaxSceneRepeat(8) == 64 -- see grid_model.hpp's own "
+              "mirrored static_assert");
 
 // RetroCaptureRing (Phase 7, node 6300, "grab last N bars" -- retroactive
 // capture): a bounded, static (no-heap on EITHER target, D32) fixed-capacity

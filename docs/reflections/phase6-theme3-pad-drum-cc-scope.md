@@ -251,7 +251,7 @@ field**, and cannot gain one without breaking the 12-byte pin
      in engine code, no `Pad` field growth, safer for the non-percussion
      one-shot case.
   Recommend (2) as the more defensible default, but the exact tick value is
-  a product/musical call for the owner or Nazzareno to fix, not this review.
+  a product/musical call for the owner or Giotto to fix, not this review.
 - **Stuck-note risk under option (1) if chosen**: `NoteTracker` marks the
   note "on" until an explicit off or `panic()`; a same-tick paired off
   avoids this entirely, so (1) has no real stuck-note risk either — the gap

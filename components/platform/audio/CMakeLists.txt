@@ -25,6 +25,7 @@ target_include_directories(audio_ring INTERFACE
 add_library(audio STATIC
   src/audio_backend.cpp
   src/soundfont_engine.cpp
+  src/reverb_sound_engine.cpp
 )
 target_include_directories(audio PUBLIC include)
 # i_sound_engine.hpp is reached directly via its include directory, NOT

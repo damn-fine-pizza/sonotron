@@ -3,7 +3,7 @@
 Ottorino, musical authoring pass (read-only on product code; this document is the
 only artifact written). Owner directive: 9210 is "done" only when the motif
 engine is wired into **all 16** built-in styles, not just a blues demonstrator.
-This document is the WHAT — Nazzareno decides the HOW (where `.motif = &Spec`
+This document is the WHAT — Giotto decides the HOW (where `.motif = &Spec`
 gets set in each `StylePattern` initializer, how the golden regen is staged).
 
 No new engine code is proposed. Every recommendation below uses the existing
@@ -130,7 +130,7 @@ Corpus enumerated from `components/arrangrr/include/arrangrr/arranger/styles/*.h
 funk, house, latin, motown, pop, reggae, rock, samba, shuffle, swing.
 
 Seeds below are placeholders (`ILLUSTRATIVE` — any fixed uint32 reproduces
-identically per D16; Nazzareno/owner may pick final values) written as small
+identically per D16; Giotto/owner may pick final values) written as small
 distinct decimals purely so no two patterns in the same style accidentally
 share a seed.
 
@@ -403,7 +403,7 @@ flat across 4 fills).
 
 ---
 
-## 4. Ranking summary (wiring order for Nazzareno; also the golden-regen staging order)
+## 4. Ranking summary (wiring order for Giotto; also the golden-regen staging order)
 
 | Rank | Style | Primary lane | Transform | Effort | Payoff driver |
 |---|---|---|---|---|---|
@@ -441,7 +441,7 @@ transforms (`kRetrograde`/`kDisplacement`).
 
 1. **Finding B bass exclusions (reggae excluded outright; latin, samba
    flagged as lower-confidence) are a musical judgment call, not a
-   mechanical rule** — the owner or Nazzareno may reasonably choose to wire
+   mechanical rule** — the owner or Giotto may reasonably choose to wire
    them anyway and listen, rather than hold them. I recommend NOT shipping
    them in the same golden-regen batch as the 13 unflagged lanes, so a
    regression there is isolated and reviewable on its own.

@@ -89,6 +89,15 @@ const char* clip_state_name(std::uint8_t state) {
   return state < kCount ? kNames[state] : "unknown";
 }
 
+const char* loop_event_kind_name(std::uint8_t state) {
+  // One entry per arrangrr::LoopEventKind (abi.hpp): record_started(0),
+  // record_stopped(1), erased(2), undone(3), grabbed(4).
+  static constexpr const char* kNames[] = {"record_started", "record_stopped", "erased", "undone",
+                                           "grabbed"};
+  constexpr std::uint8_t kCount = sizeof(kNames) / sizeof(kNames[0]);
+  return state < kCount ? kNames[state] : "unknown";
+}
+
 const char* quality_suffix(ChordQuality q) {
   switch (q) {
     case ChordQuality::kMaj:

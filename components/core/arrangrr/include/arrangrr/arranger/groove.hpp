@@ -94,7 +94,20 @@ constexpr GrooveOut apply(const GrooveParams& params, std::uint8_t role, std::ui
     const int jitter = static_cast<int>(h % 21u) - 10;  // -10..+10
     vel += (jitter * params.humanize_velocity) / 100;
   }
-  if (params.humanize_timing > 0) {
+  // Bar downbeats (step 0 of every bar, same `step % 16 == 0` convention the
+  // accent block above already uses) are exempt from the timing push: a
+  // multi-bar section's downbeat is the ONE grid position a live chord change
+  // is guaranteed to re-ground the harmony on (D24 NTT resolves against
+  // whatever chord is current at the tick the grid fires), so it must stay
+  // glued to its nominal tick. Letting it slide even a few ticks late risks
+  // it landing on the far side of an exact bar-length boundary, where an
+  // observer bucketing the note stream per bar (a UI meter, a bar-aligned
+  // capture window, a live re-harmonization check) would attribute it to the
+  // WRONG bar even though the chord it was resolved against was correct for
+  // the bar it actually belongs to (Torquato QA, test_harmony_steer.cpp: a
+  // multi-bar VarA's downbeat root humanized one tick late was captured as
+  // if it belonged to the NEXT chord instead of grounding the current one).
+  if (params.humanize_timing > 0 && step % 16 != 0) {
     // Push-late only (0..half a 16th) so the note never schedules in the past.
     const int push = static_cast<int>((h >> 8) % (kTicksPerStep / 2u));
     out.timing_offset += static_cast<TickOffset>((push * params.humanize_timing) / 100);

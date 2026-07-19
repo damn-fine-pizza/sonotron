@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 // D38 GUI transport: see uds_server.hpp for the design summary. This
 // translation unit owns every POSIX socket call the adapter makes; main.cpp

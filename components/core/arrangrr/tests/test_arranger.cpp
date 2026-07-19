@@ -599,6 +599,50 @@ void test_fill_one_shot_returns_to_variation() {
   CHECK(sec[1] == static_cast<std::uint16_t>(SectionType::kVarA));  // returned
 }
 
+// Ottorino's diagnosis: kBreak matches none of the section_is_* predicates,
+// so the arranger's else-branch (a plain variation loop) swallows it instead
+// of resolving it like a one-shot -- a Break plays its authored bar(s) then
+// LOOPS ON ITSELF forever rather than returning to the variation it came
+// from. Mirrors test_fill_one_shot_returns_to_variation exactly, but against
+// "rock" (style index 2), the first builtin to author a Break section --
+// "basic" (index 0) has none (see test_style_warns' "absent" case below).
+void test_break_one_shot_returns_to_variation() {
+  Band b;
+  b.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  b.cmd(Param::kStyleLoad, 2);  // rock: kVarA bars=2, kBreak bars=1
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kDrums), 0 | (9 << 8), 0,
+        Op::kSet);
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0, Op::kSet);
+  b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8), 0,
+        Op::kSet);
+  b.cmd(Param::kChordPlay, 60, -1, 100);
+  b.cmd(Param::kTransportStart);
+  b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kBreak));
+  b.ev.clear();
+  // The deferred kStyleSection switch (transport already running) is
+  // QUANTIZED to the next bar boundary, not to VarA's own section end
+  // (test_quantized_variation_switch's own semantics): rock's VarA is 2
+  // bars, so Break actually starts one bar in (tick == kTicksPerBar), then
+  // runs its own authored 1 bar before the auto-return point -- tick ==
+  // 2 * kTicksPerBar. Mirrors test_fill_one_shot_returns_to_variation's own
+  // 2 * kTicksPerBar + 10 window (there, "basic"'s VarA is 1 bar, so the
+  // Fill starts and finishes one bar earlier, landing on the same tick).
+  b.advance(2 * kTicksPerBar + 10);
+  const auto sec = b.sections();
+  CHECK(sec.size() == 2);
+  // Guarded indexing (not unconditional like the Fill sibling test above):
+  // pre-fix, a Break loops on itself and never emits the second kSection
+  // event, so sec.size() stays 1 -- an unconditional sec[1] would read out
+  // of StaticVector's bound and trap, hiding the real RED signal (the size
+  // mismatch above) behind a crash instead of a clean failing assertion.
+  if (sec.size() >= 1) {
+    CHECK(sec[0] == static_cast<std::uint16_t>(SectionType::kBreak));
+  }
+  if (sec.size() >= 2) {
+    CHECK(sec[1] == static_cast<std::uint16_t>(SectionType::kVarA));  // auto-returned, like a Fill
+  }
+}
+
 void test_intro_leads_to_variation() {
   Band b;
   b.setup_basic();
@@ -606,7 +650,10 @@ void test_intro_leads_to_variation() {
   b.cmd(Param::kChordPlay, 60, -1, 100);
   b.cmd(Param::kTransportStart);
   b.ev.clear();
-  b.advance(kTicksPerBar + 10);
+  // "basic"'s Intro1 is genuinely 2 bars now (style-depth Wave-2 C): the
+  // one-shot only resolves to VarA once the WHOLE section (both bars) has
+  // played, not after bar 1.
+  b.advance(2 * kTicksPerBar + 10);
   const auto sec = b.sections();
   CHECK(sec.size() == 1 && sec[0] == static_cast<std::uint16_t>(SectionType::kVarA));
 }
@@ -652,8 +699,12 @@ void test_style_warns() {
   b.cmd(Param::kStyleLoad, 99);    // no such builtin (past the 16 registered)
   b.cmd(Param::kStyleSection, 2);  // no style loaded
   b.cmd(Param::kStyleLoad, 0);
-  b.cmd(Param::kStyleSection, 99);                                              // bogus section id
-  b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kBreak));  // absent
+  b.cmd(Param::kStyleSection, 99);  // bogus section id
+  // A style-depth authoring pass (kBreak + 2-bar endings on all 16 builtins)
+  // gave "basic" (style 0) a kBreak section, so this request now SUCCEEDS
+  // (Arranger::request finds the section and no longer warns) instead of
+  // hitting the "absent section" reject path it used to.
+  b.cmd(Param::kStyleSection, static_cast<std::int32_t>(SectionType::kBreak));
   b.cmd(Param::kStyleRoute, 99, 0, 0, Op::kSet);
   b.cmd(Param::kStyleRoute, 0, 9, 0, Op::kSet);  // bad port
   int warns = 0;
@@ -662,7 +713,10 @@ void test_style_warns() {
       ++warns;
     }
   }
-  CHECK(warns == 6);
+  // 5 warnings: style 99 (bad builtin index), section 2 with no style loaded,
+  // section id 99 (bogus), route role 99 (bad role), route port 9 (bad port,
+  // kMaxPorts == 4). The kBreak request above no longer contributes a 6th.
+  CHECK(warns == 5);
 }
 
 namespace twobar {
@@ -869,10 +923,17 @@ void test_seamless_style_switch() {
   CHECK(!changed_before_bar);  // seamless: not a mid-bar cut
   CHECK(changed_at_bar);       // applied on the downbeat
 
-  // Immediate switch + section fallback: basic has no break section, so it lands varA.
+  // Immediate switch + section fallback: request_style() must fall back to
+  // varA when the TARGET style does not define the requested section. Every
+  // one of the 16 real builtin styles now authors all 13 SectionType entries
+  // (the kBreak + 2-bar-endings authoring pass that also touched "basic"), so
+  // no real style can exercise this path any more -- reuse the local
+  // `twobar` fixture (defined above; it authors ONLY varA) as the switch
+  // TARGET instead, which still genuinely lacks kBreak and proves the
+  // fallback rather than coupling this unit test to production style data.
   Arranger f;
-  CHECK(f.load_style(&twobar::kStyle));
-  CHECK(f.request_style(&styles::basic::kStyle, SectionType::kBreak, true));
+  CHECK(f.load_style(&styles::basic::kStyle));
+  CHECK(f.request_style(&twobar::kStyle, SectionType::kBreak, true));
   CHECK(f.current() == SectionType::kVarA);
 
   // A null style is refused.
@@ -1148,6 +1209,7 @@ int main() {
   test_part_mute_solo();
   test_quantized_variation_switch();
   test_fill_one_shot_returns_to_variation();
+  test_break_one_shot_returns_to_variation();
   test_intro_leads_to_variation();
   test_ending_stops_transport();
   test_triad_wrap_and_route_gating();

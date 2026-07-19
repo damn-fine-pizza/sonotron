@@ -408,9 +408,20 @@ bool Shell::cmd_program(const std::vector<std::string>& t, std::string& error) {
   c.a = program;
   c.b = port | (ch << 8);
   m_engine.push_command(c, m_sink);
+  // Channel 10 (0-based 9) is the GM percussion channel: program numbers
+  // there pick a DRUM KIT, not a melodic voice, so echo the kit name when
+  // it is one of the canonical GM2 kit anchors -- a plain gm_program_name()
+  // lookup would print a misleading melodic name (e.g. program 0 on channel
+  // 10 is "Standard Kit", not "Acoustic Grand Piano").
+  constexpr int kGmPercussionChannelZeroBased = 9;
+  const char* kit_name = ch == kGmPercussionChannelZeroBased
+                             ? gm_drum_kit_name(static_cast<std::uint8_t>(program))
+                             : nullptr;
+  const std::string voice_display =
+      kit_name != nullptr ? std::string(kit_name)
+                          : std::string(gm_program_name(static_cast<std::uint8_t>(program)));
   console_output("program " + port_name + ":" + std::to_string(ch + 1) + " -> " +
-                 std::to_string(program) + " " +
-                 gm_program_name(static_cast<std::uint8_t>(program)));
+                 std::to_string(program) + " " + voice_display);
   return true;
 }
 

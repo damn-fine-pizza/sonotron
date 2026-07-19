@@ -33,7 +33,7 @@
 // mid-song meter change lands on a bar Arranger's own gate is watching, its
 // internal phase permanently drifts off Transport's real grid (F4).
 //
-// Handoff to Nazzareno: NONE of this is fixed here (accuse, don't repair).
+// Handoff to Giotto: NONE of this is fixed here (accuse, don't repair).
 // All four ticks below were confirmed empirically (a scratch Engine-level
 // probe, not hand arithmetic alone) before being pinned as CHECKs.
 

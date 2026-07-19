@@ -7,57 +7,32 @@
 #include <alsa/asoundlib.h>
 
 #include "common/midi/message.hpp"
+#include "midi_hal.hpp"
 #include "shell.hpp"
 
 // ALSA sequencer backend: creates virtual MIDI ports (visible to aconnect /
 // DAWs), decodes incoming events to raw bytes for the core parser and encodes
-// core output messages back to the wire. Host-only, one backend for M0
-// (review decision: ALSA first, others behind the same HAL later).
+// core output messages back to the wire. The Linux implementation of
+// IMidiHal (docs/proposals/looper-in-gui-contract.md §7 item 12); see
+// midi_hal.hpp for the platform-selected factory every frontend should go
+// through instead of naming this class directly.
 
 namespace arrangrr::host {
 
-// Unified ALSA sequencer client name presented by every arrangrr MIDI-emitting
-// frontend (cli-arrangrr, gui-sonotron, sonotron-server). A single source of
-// truth so `aconnect sonotron:1 <destination>` works no matter which frontend
-// the user launched -- before this, each frontend picked its own client name
-// ("arrangrr" / "sonotron-gui" / "sonotron-server"), and the SAME aconnect
-// invocation silently connected nothing depending on which one was running.
-inline constexpr const char* kAlsaClientName = "sonotron";
-
-class AlsaMidi {
+class AlsaMidi : public IMidiHal {
  public:
-  ~AlsaMidi();
+  ~AlsaMidi() override;
 
-  bool open(const char* client_name, std::string& error);
-  bool create_port(const PortDef& def, std::string& error);
+  bool open(const char* client_name, std::string& error) override;
+  bool create_port(const PortDef& def, std::string& error) override;
 
-  void send(std::uint8_t core_port, const MidiMessage& msg);
+  void send(std::uint8_t core_port, const MidiMessage& msg) override;
 
   // Drains pending input events; calls on_bytes(core_port, bytes, len).
-  template <typename Fn>
-  void drain_input(Fn&& on_bytes) {
-    if (!m_seq) {
-      return;
-    }
-    snd_seq_event_t* ev = nullptr;
-    while (snd_seq_event_input(m_seq, &ev) >= 0 && ev != nullptr) {
-      const int core_port = core_port_for(ev->dest.port);
-      if (core_port >= 0) {
-        std::uint8_t buf[16];
-        const long n = snd_midi_event_decode(m_decoder, buf, sizeof(buf), ev);
-        if (n > 0) {
-          on_bytes(static_cast<std::uint8_t>(core_port), buf, static_cast<std::size_t>(n));
-        }
-      }
-      snd_seq_free_event(ev);
-      if (snd_seq_event_input_pending(m_seq, 0) <= 0) {
-        break;
-      }
-    }
-  }
+  void drain_input(const InputSink& on_bytes) override;
 
-  int poll_fd_count() const;
-  int fill_poll_fds(struct pollfd* fds, int space) const;
+  int poll_fd_count() const override;
+  int fill_poll_fds(MidiPollFd* fds, int space) const override;
 
  private:
   int core_port_for(int alsa_port) const;

@@ -1,7 +1,7 @@
 # Looper (node 6000) into gui-sonotron — as-built contract + gap analysis
 
 Status: SCOPE DOC (read-only architecture analysis, Corelli). No product code
-touched. This is a contract + gap map for Nazzareno to implement against, not
+touched. This is a contract + gap map for Giotto to implement against, not
 an implementation.
 
 Scope trigger: owner-locked goal — "press-and-hold a Repeat-Zone cell to
@@ -508,7 +508,7 @@ Build steps 1-5 (§10) are decision-independent and start immediately; steps
 
 ---
 
-## 10. Ordered build plan (for Nazzareno, once owner decisions land)
+## 10. Ordered build plan (for Giotto, once owner decisions land)
 
 1. **Fix the ALSA dead-end + wire `kNoteRaw`** (§7 items 1/2/3) — zero ABI
    risk, ships independent of every other decision, and is the single

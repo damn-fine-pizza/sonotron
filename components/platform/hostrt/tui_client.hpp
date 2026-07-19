@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
 
 #include "midi_monitor.hpp"
 #include "param_state_mirror.hpp"

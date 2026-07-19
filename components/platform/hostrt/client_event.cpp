@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <utility>
 
 // Parsing internals mirror apps/gui-sonotron/src/brain_event.cpp's own
 // hand-rolled flat-JSON scanner (a deliberate own copy there too, per that

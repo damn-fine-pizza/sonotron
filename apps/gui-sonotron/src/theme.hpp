@@ -25,9 +25,9 @@
 
 namespace sonotron::theme {
 
-// ---- v02 base neutrals (near-black neon "hardware synth" surfaces) ----
+// ---- Base neutrals (near-black neon "hardware synth" surfaces) ----
 // Redesign palette (v02-workstation-spec.md §Palette): the earlier flat
-// terminal hexes are overridden with the v02 inline neon values. The named
+// terminal hexes are overridden with the inline neon values. The named
 // constants are kept (every *_panel.cpp references a semantic token, not a
 // literal) -- only the resolved RGB moves.
 inline constexpr ImVec4 kAppBg{0.0392157F, 0.0431373F, 0.0627451F, 1.0F};      // #0a0b10 (GL clear)
@@ -55,14 +55,14 @@ inline constexpr ImVec4 kBorder{0.1098039F, 0.1411765F, 0.1960784F, 1.0F};      
 inline constexpr ImVec4 kBorderStrong{0.1333333F, 0.8784314F, 0.9019608F, 0.24F};  // cyan @ .24
 inline constexpr ImVec4 kBorderCyan{0.1333333F, 0.8784314F, 0.9019608F, 0.14F};   // rgba(34,224,230,.14)
 
-// ---- Interactive accent -- v02 blue (also the XY dot) ----
+// ---- Interactive accent -- neon blue (also the XY dot) ----
 inline constexpr ImVec4 kAccent{0.1803922F, 0.6588235F, 1.0000000F, 1.0F};        // #2ea8ff
 inline constexpr ImVec4 kAccentRest{0.1098039F, 0.3921569F, 0.6000000F, 1.0F};    // #2ea8ff @ .6
 inline constexpr ImVec4 kAccentActive{0.3803922F, 0.7607843F, 1.0000000F, 1.0F};  // #61c2ff
 inline constexpr ImVec4 kAccentGrab{0.1803922F, 0.6588235F, 1.0000000F, 1.0F};    // #2ea8ff
 inline constexpr ImVec4 kHeader{0.1098039F, 0.2000000F, 0.3098039F, 1.0F};        // dim blue wash
 
-// ---- Semantic -- v02 neon, meaning-bearing ----
+// ---- Semantic -- neon, meaning-bearing ----
 inline constexpr ImVec4 kGreen{0.2392157F, 1.0000000F, 0.6274510F, 1.0F};           // #3dffa0
 inline constexpr ImVec4 kGreenConnected{0.2392157F, 1.0000000F, 0.6274510F, 1.0F};  // #3dffa0
 inline constexpr ImVec4 kGreenSoft{0.2392157F, 1.0000000F, 0.6274510F, 1.0F};       // #3dffa0
@@ -85,11 +85,14 @@ inline constexpr std::array<ImVec4, kTrackRoleCount> kRoleTint = {
     kCyan, kAmber, kBlue, kGreen, kGreen, kAmber, kCyan, kLead, kLead,
 };
 
-// The 6 v02 launch-grid track colors (drums/bass/chord/pad/arp/lead), in the
-// exact row order the v02 grid renders (v02-workstation-spec.md §2b): cyan,
-// blue, green, amber, cyan, lead-purple.
-inline constexpr std::array<ImVec4, 6> kV02TrackColor = {
-    kCyan, kBlue, kGreen, kAmber, kCyan, kLead,
+// The 7 launch-grid track colors (drums/perc/bass/chord1/chord2/pad/arp), in
+// the exact row order the launch grid renders (launch_rows.hpp's kRows,
+// mixer-roles fix 2026-07-18) -- one entry per kRows position, taken
+// verbatim from kRoleTint above at each row's own role_index (which happens
+// to equal the row's position here, since kRows now lists roles 0..6 in
+// ascending TrackRole order): cyan, amber, blue, green, green, amber, cyan.
+inline constexpr std::array<ImVec4, 7> kTrackColor = {
+    kCyan, kAmber, kBlue, kGreen, kGreen, kAmber, kCyan,
 };
 
 // Applies every color + geometry token to ImGui::GetStyle(). Call once at

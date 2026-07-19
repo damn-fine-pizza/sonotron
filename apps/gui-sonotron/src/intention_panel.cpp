@@ -34,7 +34,7 @@ void chord_card(const char* id, float width, const char* label, const ImVec4& co
 
 }  // namespace
 
-void render_intention_panel(const AppState& app_state, V02State& fx) {
+void render_intention_panel(const AppState& app_state, UiState& fx) {
   const bool live = app_state.harmony_active();
   ImGui::TextColored(theme::kGreen, "INTENTION");
   ImGui::SameLine();

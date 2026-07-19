@@ -131,7 +131,7 @@ arrangrr_test(test_performance_validate unit)
 # test_performance_style_id_regression: Torquato QA pin for an open defect in
 # Engine::apply_performance (a recalled CONCRETE style_id degrades to 0xFFFF
 # "unknown", poisoning the metadata AND any later capture) -- written to pin
-# a not-yet-fixed bug, red-before/green-after once Nazzareno lands the fix.
+# a not-yet-fixed bug, red-before/green-after once Giotto lands the fix.
 # Currently RED; do not silence it. Kept in its OWN file/CTest entry (mirrors
 # test_chord_context_diagnosis's own precedent) so its failure never masks
 # the surrounding GREEN test_performance.cpp coverage.
@@ -147,7 +147,7 @@ arrangrr_test(test_insert_chain unit)
 # COMBINED fan-out across MULTIPLE pending input notes (an earlier stage's
 # own fan-out) exceeds kMaxChainFan. Originally pinned an open crash defect
 # (the guard's assert condition was unconditionally false, trapping via
-# ARR_ASSERT/__builtin_trap() instead of truncating); Nazzareno fixed the
+# ARR_ASSERT/__builtin_trap() instead of truncating); Giotto fixed the
 # guard to break-and-truncate. Now a normal CHECK-based green lock proving
 # the bounded/no-OOB/no-crash contract. Kept in its own minimal target
 # (mirrors test_performance_style_id_regression's isolation precedent) so a
@@ -230,7 +230,7 @@ arrangrr_test(test_loop functional)
 # test_loop_buffer_sounding_overflow_regression: Torquato QA regression guard
 # (Phase 7, node 6000 SLICE 1 hardening) -- LoopBuffer::on_tick's PLAYBACK-side
 # sounding-note table (kMaxLoopHeldNotes, loop_buffer.hpp) is bounded at 16
-# concurrently-sounding voices per slot; Nazzareno's fix gates the note-ON
+# concurrently-sounding voices per slot; Giotto's fix gates the note-ON
 # itself on store_sounding() claiming a tracking slot, so an excess voice
 # past that bound is silently CAPPED (never sounds) instead of sounding and
 # then losing its release path. Originally pinned the pre-fix orphaned-note
@@ -295,9 +295,38 @@ arrangrr_test(test_scene_hardening functional)
 # "next bar" quantize the moment they are armed after even ONE mid-song
 # meter change, not just in a contrived multi-change scenario. Also pins
 # Arranger::on_tick's own internal bar/phase gate drifting permanently off
-# Transport's real grid under the same trigger. Handoff to Nazzareno --
+# Transport's real grid under the same trigger. Handoff to Giotto --
 # NOT fixed here (accuse, don't repair).
 arrangrr_test(test_scene_meter_gate_regression regression)
+# test_scene_solo_regression (Torquato QA, Phase 7 node 8100 song-mode
+# hardening): pins an owner-reported RED bug -- soloing a track LIVE while a
+# Repeat-Zone SceneChain is playing does not stay isolated, because
+# Engine::apply_performance unconditionally re-applies the mute/solo mask
+# captured into a scene step's Performance at song-build time, clobbering
+# any live solo the instant the chain crosses into the next step. Kept in
+# its own file/CTest entry (mirrors test_performance_style_id_regression's
+# own isolation precedent) so its failure never masks the surrounding GREEN
+# test_scene.cpp/test_scene_hardening.cpp coverage. Fixed by Giotto
+# (engine.cpp gates the mute/solo restore behind scene_hold_bars == 0); was
+# RED, now GREEN.
+arrangrr_test(test_scene_solo_regression regression)
+# test_scene_repeat_cycling (Phase 7, node 8100, repeat-count Phase-2 --
+# docs/proposals/repeat-count-phase2-abi.md §3.3/§4): pure, Engine-free unit
+# tests for SceneChain::on_bar's own lap-cycling semantics (SceneStep::
+# repeat_count, SceneChain::LapFn) -- direct instantiation of the single
+# SceneChain class, no Engine involved -> unit, same precedent as
+# test_function_ref.cpp's own pure-unit coverage.
+arrangrr_test(test_scene_repeat_cycling unit)
+# test_scene_repeat_count (repeat-count Phase-2 companion, ABI level): the
+# same repeat-count contract proven through the real Engine/ABI -- a
+# kSceneAdd step's cmd.idx operand holding K*n_bars bars before
+# apply_scene_transition's real effect advances, the wire kSceneLap event
+# shape, the omitted-idx and above-255-clamp edges, and the critical
+# regression guard that an intermediate repeat lap never re-fires
+# kSection/kTimeSig (the refire-avoidance decision this whole feature exists
+# to protect). Subject is Engine's own cross-producer wiring -> functional,
+# same precedent as test_scene.cpp/test_scene_hardening.cpp.
+arrangrr_test(test_scene_repeat_count functional)
 # test_retro_capture (Phase 7, node 6300, "grab last N bars" -- retroactive
 # capture): the MINIMAL happy-path pass -- arm captures live notes across a
 # couple of bars into RetroCaptureRing, kRetroCaptureGrab materializes the

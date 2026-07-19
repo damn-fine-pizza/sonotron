@@ -428,7 +428,7 @@ inline bool deserialize(Span<const std::uint8_t> in, PerformanceStore& store) no
   const std::size_t needed = sizeof(PerformanceStoreHeader) +
                              static_cast<std::size_t>(count) * kPerformanceRecordWireSize +
                              sizeof(std::uint32_t);
-  // EXACT length required (Nazzareno fix, Torquato QA finding): a strict `<`
+  // EXACT length required (Giotto fix, Torquato QA finding): a strict `<`
   // only rejected a too-SHORT buffer, silently accepting extra trailing bytes
   // past a perfectly valid record (an interrupted resave or a file
   // concatenation would load as if nothing were wrong, see

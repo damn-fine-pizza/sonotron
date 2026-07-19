@@ -59,12 +59,12 @@ void test_sequence_quantize_edge_cases() {
   // keep order (snapped < previous_end), and the zero gap falls back to grid.
   ChordSequence t;
   t.key = Key{0, Mode::kMajor};
-  CHECK(t.record(ChordStep{10, 0, 0, -1, 100}));   // -> bar 0
-  CHECK(t.record(ChordStep{60, 0, 4, -1, 100}));    // also -> bar 0, clamped after
+  CHECK(t.record(ChordStep{10, 0, 0, -1, 100}));  // -> bar 0
+  CHECK(t.record(ChordStep{60, 0, 4, -1, 100}));  // also -> bar 0, clamped after
   t.quantize();
   CHECK(t.step(0).start == 0);
-  CHECK(t.step(1).start == kTicksPerBar);           // pushed to keep order
-  CHECK(t.step(0).duration == kTicksPerBar);        // gap fell back to a full bar
+  CHECK(t.step(1).start == kTicksPerBar);     // pushed to keep order
+  CHECK(t.step(0).duration == kTicksPerBar);  // gap fell back to a full bar
 }
 
 void test_transpose_to_valid_mode() {
@@ -250,8 +250,7 @@ void test_seq_more_engine_paths() {
   f.cmd(Param::kSeqRec);
   f.ev.clear();
   f.cmd(Param::kSeqPlay);  // playback refused while recording (symmetric)
-  CHECK(f.ev.size() == 1 &&
-        f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
+  CHECK(f.ev.size() == 1 && f.ev[0].code == static_cast<std::uint16_t>(WarnCode::kSeqEmpty));
   f.ev.clear();
   f.cmd(Param::kChordPlay, 64, -1, 90);
   f.advance(100);
@@ -285,7 +284,7 @@ void test_armed_empty_sequence() {
   CHECK(f.ev.empty());     // no warn
   CHECK(f.e.sequences().playing());
   f.cmd(Param::kTransportStart);
-  f.advance(10);           // still silent, and no crash on the empty length
+  f.advance(10);  // still silent, and no crash on the empty length
   CHECK(f.chords().size() == 0);
   f.cmd(Param::kTransportStop);
   f.add(60, kTicksPerBar);  // now write the progression
@@ -295,6 +294,193 @@ void test_armed_empty_sequence() {
   f.advance(kTicksPerBar);
   const auto ch = f.chords();
   CHECK(ch.size() == 2);  // Cmaj7 at 0, Fmaj7 at bar 2 start
+}
+
+// Engineering spike (docs/proposals/gui-live-harmony-musical-design.md
+// S3.4 Option B): does the EXISTING kSeqUse dispatch support a clean
+// A -> B -> A cadence handoff for a swapped-in cadential sequence?
+//
+// ChordSequencer::m_base and m_playing are SINGLE fields shared by the
+// WHOLE pool, not per-slot state (chord_sequencer.hpp:157-163). use()
+// (kSeqUse) only moves m_current (chord_sequencer.hpp:34-40) -- it never
+// touches m_base. So a BARE kSeqUse switch (Option B's own literal
+// wording, "kSeqUse's back to the main progression's slot") does NOT give
+// the newly-selected slot a fresh phase-0, and does NOT preserve a
+// previously-selected slot's own phase as dedicated per-slot state either
+// -- it just leaves m_base wherever the last play() call put it. This
+// probe proves the practical consequence for Option B: a bare switch to a
+// short, non-looping cadential slot goes silent forever (on_tick's
+// non-loop "pos > len" branch neither fires a step nor calls
+// stop_playback -- a second, latent bug this probe surfaces), and that
+// pairing kSeqUse with kSeqPlay -- the idiom Engine::apply_performance
+// and Engine::apply_clip_content already use for every OTHER live
+// chord-sequence switch (engine.cpp's `m_seq.use(idx) && m_seq.play(tick)`
+// pattern) -- is what actually produces a clean, bar-aligned handoff.
+void test_seq_use_bare_switch_leaves_target_out_of_phase() {
+  SeqFixture f;
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+
+  // Slot 0 (A): the "main progression", a 2-bar loop.
+  f.cmd(Param::kSeqNew);
+  f.add(62, kTicksPerBar);  // ii
+  f.add(67, kTicksPerBar);  // V
+  f.cmd(Param::kSeqLoop, 1, 0, 0, Op::kSet);
+
+  // Slot 1 (B): a short, non-looping cadential tag (V -> I), Option B's
+  // own shape ("loop=false so it holds I after resolving").
+  f.cmd(Param::kSeqNew);
+  f.add(67, kTicksPerBar);  // V
+  f.add(60, kTicksPerBar);  // I
+  // loop defaults to false (ChordSequence::loop) -- exactly what B wants.
+
+  f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 0);  // back to A
+  f.cmd(Param::kSeqPlay);
+  f.cmd(Param::kTransportStart);
+  f.advance(3 * kTicksPerBar);  // 1.5 loops into A: mid the V step, arbitrary phase
+  f.ev.clear();
+
+  // Ending entry, done as Option B's own text literally describes it: a
+  // BARE kSeqUse, no accompanying kSeqPlay.
+  f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 1);
+  f.advance(4 * kTicksPerBar);  // ample ticks for B's 2-bar content to fire, if it could
+  CHECK(f.chords().empty());    // B never sounds: pos is already far past its length
+  // Hardened on_tick (pos >= len, not pos == len) stops playback the instant
+  // the stale phase is discovered, instead of hanging silently forever --
+  // this is the pos>len defensive fix (chord_sequencer.hpp), a separate,
+  // independent fix from Option B's own plumbing (paired kSeqUse+kSeqPlay,
+  // proven below). It does NOT give B a per-slot phase; it only turns "stuck
+  // silent forever" into "stopped", which is strictly safer either way.
+  CHECK(!f.e.sequences().playing());
+
+  // "Next fresh VarA/style load": swap back to A, again bare per Option B's
+  // literal wording -- but the sequencer is stopped now, and a bare use()
+  // never calls play(), so nothing re-arms playback either.
+  f.ev.clear();
+  f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 0);
+  f.advance(2 * kTicksPerBar);
+  CHECK(f.chords().empty());  // still silent: use() alone never resumes playback
+}
+
+// Focused, minimal regression for the pos>len hardening on its own (the
+// A/B narrative above already exercises it, but incidentally; this pins the
+// exact defect described: on_tick's non-loop branch used to check
+// `pos == len`, so a phase that OVERSHOOTS the end by more than one tick
+// -- not just lands on it -- silently stalled instead of stopping).
+void test_on_tick_pos_greater_than_length_stops_playback() {
+  SeqFixture f;
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqNew);
+  f.add(60, 3 * kTicksPerBar);  // a long, non-looping sequence
+  f.cmd(Param::kSeqPlay);
+  f.cmd(Param::kTransportStart);
+  f.advance(2 * kTicksPerBar);  // well inside its length, still playing
+  CHECK(f.e.sequences().playing());
+
+  // A new, much SHORTER, non-looping sequence, selected bare (no kSeqPlay):
+  // m_base is untouched, so pos is already ~2 bars past this sequence's own
+  // 1-bar length the moment the very next tick is evaluated -- pos > len,
+  // not pos == len.
+  f.cmd(Param::kSeqNew);
+  f.add(60, kTicksPerBar);
+  f.advance(1);
+  CHECK(!f.e.sequences().playing());  // hardened: stops rather than hangs
+}
+
+// Same A/B setup, but each switch is paired with kSeqPlay -- already the
+// production idiom in Engine::apply_performance (engine.cpp:1863-1865) and
+// Engine::apply_clip_content (engine.cpp:1237-1239). Shows the fix for
+// Option B is "always rebase on switch", not a new sequencer mechanism.
+void test_seq_use_paired_with_play_gives_clean_bar_aligned_handoff() {
+  SeqFixture f;
+  f.cmd(Param::kKeySet, 0, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqNew);
+  f.add(62, kTicksPerBar);  // ii
+  f.add(67, kTicksPerBar);  // V
+  f.cmd(Param::kSeqLoop, 1, 0, 0, Op::kSet);
+  f.cmd(Param::kSeqNew);
+  f.add(67, kTicksPerBar);  // V
+  f.add(60, kTicksPerBar);  // I
+
+  f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 0);
+  f.cmd(Param::kSeqPlay);
+  f.cmd(Param::kTransportStart);
+  f.advance(3 * kTicksPerBar);  // mid A's V step, same arbitrary phase as above
+  f.ev.clear();
+
+  // Ending entry: swap to B AND rebase (kSeqUse + kSeqPlay).
+  f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 1);
+  f.cmd(Param::kSeqPlay);
+  f.advance(2 * kTicksPerBar - 1);  // through B's own two bars, short of its wrap point
+  const auto b_chords = f.chords();
+  CHECK(b_chords.size() == 2);
+  CHECK(SeqFixture::degree(b_chords[0]) == 4);  // V, fired at pos 0 by kSeqPlay itself
+  CHECK(SeqFixture::degree(b_chords[1]) == 0);  // I -- lands cleanly on the tonic
+  f.advance(2);  // cross B's own length: non-looping, so it stops itself
+  CHECK(!f.e.sequences().playing());
+  f.ev.clear();
+
+  // "Next fresh VarA/style load": swap back to A, rebased again.
+  f.cmd(Param::kSeqUse, 0, 0, 0, Op::kDo, 0);
+  f.cmd(Param::kSeqPlay);
+  f.advance(2 * kTicksPerBar - 1);
+  const auto a_chords = f.chords();
+  CHECK(a_chords.size() == 2);
+  CHECK(SeqFixture::degree(a_chords[0]) == 1);  // A resumes at ITS OWN step 0 (ii)
+  CHECK(SeqFixture::degree(a_chords[1]) == 4);  // then V -- bar-aligned to the switch tick
+}
+
+// Regression (rebase-while-stopped + fresh restart): ChordSequencer::play()
+// rebases m_base to whatever tick the Transport is AT when called --
+// including while the Transport is STOPPED (Transport::stop() intentionally
+// PRESERVES position, MIDI Stop semantics, runtime/transport.hpp). This is
+// exactly what a host-side style load/switch does today (in_process_brain_
+// session.cpp's handle_style_change_progression()/step_cadence(): they issue
+// kSeqPlay unconditionally, whether the transport is playing or stopped). If
+// the Transport is LATER given a fresh start() (which intentionally REWINDS
+// to tick 0, also MIDI semantics, also unchanged by this fix), the old
+// unconditional `transport_tick < m_base` early-return in on_tick() would
+// silently starve the sequence -- ignoring every tick until the counter
+// numerically caught back up to the stale m_base, which for any realistic
+// prior run is effectively "never" within a session. This test drives
+// ChordSequencer + Transport directly (no Engine, no ABI Command), the
+// EXACT pairing described as fragile, to pin the class's own invariant
+// independent of any one caller happening to compensate for it.
+void test_on_tick_recovers_from_stale_base_after_transport_restart() {
+  Transport transport;
+  transport.start();
+  constexpr Tick kStaleTick = 500;
+  for (Tick i = 0; i < kStaleTick; ++i) {
+    transport.advance_one();
+  }
+  transport.stop();
+  CHECK(transport.tick() == kStaleTick);  // MIDI Stop: position preserved
+
+  ChordSequencer seq;
+  CHECK(seq.add_sequence(Key{0, Mode::kMajor}) == 0);
+  CHECK(seq.current()->append(0, -1, 100, kTicksPerBar));  // I, one bar
+  seq.current()->loop = true;
+
+  // Rebase WHILE STOPPED, at the stale tick -- the unconditional kSeqPlay a
+  // style load/switch issues today, regardless of transport state.
+  CHECK(seq.play(transport.tick()));
+  CHECK(seq.playing());
+
+  // A fresh Transport::start() rewinds the transport to tick 0 -- MIDI Start
+  // semantics, unchanged by this fix. Nothing else touches `seq` here.
+  transport.start();
+  CHECK(transport.tick() == 0);
+
+  int fired = 0;
+  seq.on_tick(
+      transport.tick(),
+      [&](std::uint8_t root_note, ChordQuality, std::uint8_t degree, std::uint8_t) {
+        ++fired;
+        CHECK(root_note == 60);  // C4, degree 0 in C major
+        CHECK(degree == 0);
+      },
+      []() {});
+  CHECK(fired == 1);     // must fire the tonic step AT tick 0, not stall
+  CHECK(seq.playing());  // and must still be a live, healthy sequence
 }
 
 void test_seq_warns() {
@@ -333,6 +519,10 @@ int main() {
   test_record_quantize_playback();
   test_seq_more_engine_paths();
   test_armed_empty_sequence();
+  test_seq_use_bare_switch_leaves_target_out_of_phase();
+  test_on_tick_pos_greater_than_length_stops_playback();
+  test_seq_use_paired_with_play_gives_clean_bar_aligned_handoff();
+  test_on_tick_recovers_from_stale_base_after_transport_restart();
   test_seq_warns();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_chord_seq: all OK\n");

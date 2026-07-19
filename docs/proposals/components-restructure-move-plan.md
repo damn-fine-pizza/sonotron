@@ -4,7 +4,7 @@ Status: PROPOSAL — read-only move-plan, not executed. Physical layout only
 (directory/target/file placement, CMakeLists edits, include-path edits the
 moves force). Palladio does not judge coupling/ABI/abstraction quality here,
 does not design the `ISoundEngine` contract, and does not run any `git mv`.
-This is a handoff for a human or `nazzareno-cpp-implementor`.
+This is a handoff for a human or `giotto-cpp-implementor`.
 
 Owner-locked target (verbatim from the brief, not re-opened here):
 
@@ -431,7 +431,7 @@ CMakeLists.txt` — I counted 18 `arrangrr_golden(...)` + `clip_launch` + 3
 
 ## 5. Dove va il nuovo (placement answers for open slots)
 
-- **A new `ISoundEngine`-style contract header**, if/when Corelli/Nazzareno
+- **A new `ISoundEngine`-style contract header**, if/when Corelli/Giotto
   design one: this brief's locked layout does not name a location for it
   (unlike the earlier, more granular `docs/proposals/
   audio-engines-family-layout.md`, which put it at

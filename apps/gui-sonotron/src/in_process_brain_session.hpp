@@ -11,7 +11,8 @@
 // The SECOND concrete BrainSession (Phase 2b, docs/design/
 // sonotron-server-phase2-brief.md): the "integrated" mode -- no external
 // `sonotron-server`, no socket. The GUI binary spawns a dedicated engine
-// thread that owns the arrangrr Runtime + Stage + AlsaMidi in-process, and
+// thread that owns the arrangrr Runtime + Stage + the platform MIDI backend
+// (IMidiHal, docs/proposals/looper-in-gui-contract.md §7 item 12) in-process, and
 // the render thread talks to it through two bounded SPSC lock-free rings
 // (spsc_ring.hpp): a Command ring (GUI -> engine, this class's send()) and an
 // OutEvent ring (engine -> GUI, drained by poll()). Same BrainSession
@@ -52,10 +53,11 @@ class InProcessBrainSession final : public BrainSession {
   InProcessBrainSession(InProcessBrainSession&&) = delete;
   InProcessBrainSession& operator=(InProcessBrainSession&&) = delete;
 
-  // Spawns the engine thread (Runtime + arrangrr Stage + AlsaMidi). Returns
-  // true once the thread is running. ALSA opening failure is NOT fatal here
-  // (logged to stderr, the thread still runs silently) -- a dev/CI box with
-  // no ALSA sequencer device can still exercise the ring/decode round trip.
+  // Spawns the engine thread (Runtime + arrangrr Stage + the platform MIDI
+  // backend). Returns true once the thread is running. MIDI opening failure
+  // is NOT fatal here (logged to stderr, the thread still runs silently) --
+  // a dev/CI box with no ALSA sequencer device can still exercise the
+  // ring/decode round trip.
   // Calling start() twice without an intervening stop() is a no-op (returns
   // true, does not spawn a second thread).
   bool start();

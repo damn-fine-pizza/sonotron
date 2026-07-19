@@ -1,6 +1,7 @@
 #include "panel_manager.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #include "ui_style.hpp"
 

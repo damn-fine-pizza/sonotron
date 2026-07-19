@@ -18,7 +18,7 @@ ImVec4 wash(const ImVec4& color, float alpha) { return ImVec4(color.x, color.y, 
 void apply() {
   ImGuiStyle& style = ImGui::GetStyle();
 
-  // ---- Geometry (v02 redesign): the v02 "hardware synth" look ROUNDS its
+  // ---- Geometry (neon redesign): the "hardware synth" look ROUNDS its
   // panels (12px), inputs/buttons (8px) and cells (7px) -- the opposite of the
   // earlier square-by-default terminal theme. The full-window host stays
   // unrounded (it fills the viewport); its child zones carry the radius.

@@ -94,6 +94,14 @@ class Parser {
         if (!parse_sections_array(model)) {
           return false;
         }
+      } else if (key == "bars") {
+        if (!parse_bars_array(model)) {
+          return false;
+        }
+      } else if (key == "repeats") {
+        if (!parse_repeats_array(model)) {
+          return false;
+        }
       } else if (!skip_value()) {
         return false;
       }
@@ -199,6 +207,95 @@ class Parser {
       skip_ws();
       if (at_end()) {
         return fail("unterminated sections array");
+      }
+      if (peek() == ',') {
+        advance();
+        continue;
+      }
+      if (peek() == ']') {
+        advance();
+        return true;
+      }
+      return fail("expected ',' or ']'");
+    }
+  }
+
+  // Parses the "bars" array value (auto-song fix, additive format
+  // extension): small positive integers, GridModel::scene_bars' own
+  // per-scene length in bars. Entries at/past GridModel::kMaxSceneCount are
+  // parsed (so the array's own JSON syntax is still fully validated) but
+  // discarded -- same forward-compatibility discipline as
+  // parse_sections_array above. GridModel::set_scene_bars clamps to >= 1
+  // itself, so a stray 0 in an on-disk file is not a parse failure -- it is
+  // simply clamped on the way in.
+  bool parse_bars_array(GridModel& model) {
+    if (!expect('[')) {
+      return false;
+    }
+    skip_ws();
+    if (!at_end() && peek() == ']') {
+      advance();
+      return true;
+    }
+    std::size_t index = 0;
+    while (true) {
+      skip_ws();
+      std::uint64_t value = 0;
+      if (!parse_uint(value)) {
+        return false;
+      }
+      if (index < GridModel::kMaxSceneCount) {
+        model.set_scene_bars(index, static_cast<int>(value));
+      }
+      ++index;
+      skip_ws();
+      if (at_end()) {
+        return fail("unterminated bars array");
+      }
+      if (peek() == ',') {
+        advance();
+        continue;
+      }
+      if (peek() == ']') {
+        advance();
+        return true;
+      }
+      return fail("expected ',' or ']'");
+    }
+  }
+
+  // Parses the "repeats" array value (task #5 additive format extension):
+  // small positive integers, GridModel::scene_repeat's own per-scene repeat
+  // count (or GridModel::kSceneRepeatInfinite, the "hold forever" sentinel).
+  // Entries at/past GridModel::kMaxSceneCount are parsed (so the array's own
+  // JSON syntax is still fully validated) but discarded -- same forward-
+  // compatibility discipline as parse_bars_array above. GridModel::
+  // set_scene_repeat clamps to [1, kSceneRepeatInfinite] itself, so a stray
+  // out-of-range value in an on-disk file is not a parse failure -- it is
+  // simply clamped on the way in.
+  bool parse_repeats_array(GridModel& model) {
+    if (!expect('[')) {
+      return false;
+    }
+    skip_ws();
+    if (!at_end() && peek() == ']') {
+      advance();
+      return true;
+    }
+    std::size_t index = 0;
+    while (true) {
+      skip_ws();
+      std::uint64_t value = 0;
+      if (!parse_uint(value)) {
+        return false;
+      }
+      if (index < GridModel::kMaxSceneCount) {
+        model.set_scene_repeat(index, static_cast<int>(value));
+      }
+      ++index;
+      skip_ws();
+      if (at_end()) {
+        return fail("unterminated repeats array");
       }
       if (peek() == ',') {
         advance();
@@ -486,11 +583,49 @@ std::string write_scenes(const GridModel& model) {
   // directions.
   out += "  \"sections\": [";
   if (GridModel::kMaxSceneCount == 0) {
-    out += "]\n";
+    out += "],\n";
   } else {
     out += "\n";
     for (std::size_t i = 0; i < GridModel::kMaxSceneCount; ++i) {
       out += "    " + std::to_string(model.scene_section(i));
+      if (i + 1 < GridModel::kMaxSceneCount) {
+        out += ",";
+      }
+      out += "\n";
+    }
+    out += "  ],\n";
+  }
+  // Auto-song fix, additive format extension: the per-scene bar length,
+  // sibling to "scenes"/"sections" above. A pre-fix reader ignores an
+  // unknown key (parse_scenes_array/parse_sections_array are keyed on their
+  // own names only, the `else if (!skip_value())` branch), so this stays
+  // forward-compatible in both directions.
+  out += "  \"bars\": [";
+  if (GridModel::kMaxSceneCount == 0) {
+    out += "],\n";
+  } else {
+    out += "\n";
+    for (std::size_t i = 0; i < GridModel::kMaxSceneCount; ++i) {
+      out += "    " + std::to_string(model.scene_bars(i));
+      if (i + 1 < GridModel::kMaxSceneCount) {
+        out += ",";
+      }
+      out += "\n";
+    }
+    out += "  ],\n";
+  }
+  // Task #5 additive format extension: the per-scene REPEAT COUNT, sibling
+  // to "scenes"/"sections"/"bars" above. A pre-task-#5 reader ignores an
+  // unknown key (the same `else if (!skip_value())` branch every other
+  // sibling array already relies on), so this stays forward-compatible in
+  // both directions.
+  out += "  \"repeats\": [";
+  if (GridModel::kMaxSceneCount == 0) {
+    out += "]\n";
+  } else {
+    out += "\n";
+    for (std::size_t i = 0; i < GridModel::kMaxSceneCount; ++i) {
+      out += "    " + std::to_string(model.scene_repeat(i));
       if (i + 1 < GridModel::kMaxSceneCount) {
         out += ",";
       }

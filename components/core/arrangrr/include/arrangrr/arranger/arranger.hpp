@@ -84,6 +84,11 @@ class Arranger {
     m_return_to = SectionType::kVarA;
     m_pending_valid = false;
     m_section_start = 0;
+    // Phase 7 (SceneChain live-transition fix): a fresh style load is never
+    // scene-owned -- whatever SceneChain step may have been driving the
+    // PREVIOUS style's timing is gone the instant the style itself changes.
+    m_scene_owns_timing = false;
+    m_scene_hold_bars = 0;
     m_voicing.reset();   // a new style must not voice-lead from the old one
     m_motif_repeat = 0;  // 9210: a new style's motif call-and-response restarts at the statement
     m_groove = style->groove;  // 9110: adopt the style's default feel (user edits re-apply after)
@@ -310,10 +315,60 @@ class Arranger {
         m_return_to = t;
       }
       m_pending_valid = false;
+      // Phase 7 (SceneChain live-transition fix): a manual/style-driven
+      // immediate section switch (the kStyleSection pad while stopped, the
+      // CLI `style section` verb) ends any SceneChain ownership of this
+      // section's timing -- see request_scene()'s own comment and on_tick's
+      // `m_scene_owns_timing` field comment for what that ownership governs.
+      m_scene_owns_timing = false;
     } else {
       m_pending = t;
       m_pending_valid = true;
     }
+    return true;
+  }
+
+  // Phase 7 (SceneChain live-transition fix, owner-reported symptoms #3/#6:
+  // intros interrupt-then-restart, a dragged ending column doesn't reliably
+  // stop the transport): applies a section switch on behalf of a LIVE
+  // SceneChain step (Engine::apply_scene_transition, itself reached from
+  // scene_play/fire_scene) -- always a hard cut (SceneTransitionKind::kCut is
+  // the only kind implemented today, scene_chain.hpp), but UNLIKE the plain
+  // request(t, /*immediate=*/true) above, this RE-ANCHORS `m_section_start`
+  // at `transport_tick`. request()'s own immediate branch leaves
+  // m_section_start untouched, which is correct the instant a style/section
+  // switch rides Arranger::load()'s own fresh m_section_start=0 reset, but
+  // goes stale the moment the SAME kind of switch lands MID-SONG (any live
+  // tick past 0, e.g. every apply_performance call a live SceneChain
+  // transition makes): on_tick's own `rel = transport_tick - m_section_start`
+  // then measures the section's per-step grid from a tick far in the past,
+  // so it never lands on any of the pattern's own (small) authored step
+  // numbers again -- a live SceneChain-driven Intro effectively goes silent,
+  // and an Ending's own one-shot stop-transport point (computed against that
+  // SAME stale `rel`) is skipped over entirely.
+  //
+  // `hold_bars` is the SCENE's own committed duration (SceneStep::n_bars --
+  // the GUI `-N+` stepper the owner named as the real authority for how long
+  // a SceneChain-driven section lasts, NOT the style's authored
+  // StyleSection::bars). Recorded in `m_scene_hold_bars` and consulted by
+  // on_tick's own one-shot completion math for as long as this section stays
+  // under scene ownership (`m_scene_owns_timing`, cleared by request()/
+  // request_style()'s own immediate branches, by a deferred switch committing
+  // at a bar boundary, and by a fresh style load). Clamped to at least 1 bar
+  // (SceneChain::add_scene already applies the same floor to n_bars, this is
+  // pure defense).
+  bool request_scene(SectionType t, Tick transport_tick, std::uint8_t hold_bars) noexcept {
+    if (m_style == nullptr || m_style->find(t) == nullptr) {
+      return false;
+    }
+    m_current = t;
+    if (section_is_variation(t)) {
+      m_return_to = t;
+    }
+    m_pending_valid = false;
+    m_section_start = transport_tick;
+    m_scene_owns_timing = true;
+    m_scene_hold_bars = hold_bars == 0 ? std::uint16_t{1} : hold_bars;
     return true;
   }
 
@@ -340,6 +395,10 @@ class Arranger {
       }
       m_pending_valid = false;
       m_pending_style = nullptr;
+      // Phase 7 (SceneChain live-transition fix): same reasoning as
+      // request()'s own immediate branch above -- a live style switch is
+      // never SceneChain-owned.
+      m_scene_owns_timing = false;
       m_groove = style->groove;  // 9110: a live style switch adopts the new style's feel
       // Torquato QA (Phase-6 Theme 4 target 6): request_style() is a SEPARATE
       // entry point from load_style() and must reset every role's arp-insert
@@ -441,7 +500,17 @@ class Arranger {
     // Bar boundary: apply pending switches / one-shot transitions.
     if (transport_tick > 0 || m_section_start == transport_tick) {
       const Tick pos = transport_tick - m_section_start;
-      const Tick len = static_cast<Tick>(section->bars) * ticks_per_bar;
+      // Phase 7 (SceneChain live-transition fix): while this section is
+      // under live SceneChain ownership (request_scene, above), its length
+      // for one-shot completion purposes is the SCENE's own committed hold
+      // (`m_scene_hold_bars`, SceneStep::n_bars) -- NOT the style's authored
+      // StyleSection::bars. Byte-identical to before this fix whenever
+      // m_scene_owns_timing is false (every manual kStyleSection/CLI `style
+      // section` path, and every pre-existing test/golden, none of which
+      // ever call request_scene).
+      const Tick hold_bars = m_scene_owns_timing ? static_cast<Tick>(m_scene_hold_bars)
+                                                 : static_cast<Tick>(section->bars);
+      const Tick len = hold_bars * ticks_per_bar;
       const bool bar_boundary = pos != 0 && pos % ticks_per_bar == 0;
       const bool section_end = pos == len;
       if (bar_boundary || section_end) {
@@ -466,14 +535,35 @@ class Arranger {
           m_pending_style = nullptr;
           next = m_pending;
           m_pending_valid = false;
+          // Phase 7 (SceneChain live-transition fix): a deferred style-driven
+          // switch (kStyleSection/request_style's own queued path) is
+          // landing NOW -- it is no longer a live SceneChain transition's own
+          // section, so scene ownership ends here (mirrors request()'s/
+          // request_style()'s own immediate branches).
+          m_scene_owns_timing = false;
         } else if (section_end) {
-          if (section_is_fill(m_current) || section_is_intro(m_current)) {
-            next = m_return_to;  // one-shots resolve to the active variation
-          } else if (section_is_ending(m_current)) {
+          // Owner decision (Phase 7 SceneChain live-transition fix, part 3):
+          // an Ending's own auto-stop is PRESERVED regardless of scene
+          // ownership -- checked FIRST, unconditionally. Only its LENGTH
+          // changes (via `hold_bars` above) when the ending is scene-owned;
+          // SceneChain has no Transport access of its own (scene_chain.hpp's
+          // own header comment), so this one-shot remains the ONE place that
+          // actually stops the transport for a SceneChain-driven ending.
+          if (section_is_ending(m_current)) {
             result.stop_transport = true;
             return result;
+          } else if (!m_scene_owns_timing &&
+                     (section_is_fill(m_current) || section_is_intro(m_current) ||
+                      section_is_break(m_current))) {
+            next = m_return_to;  // one-shots resolve to the active variation
           } else {
-            // A plain variation looped back to itself: advance the motif
+            // A plain variation looped back to itself -- OR (owner decision,
+            // part 2) a scene-owned Intro/Fill, which must NOT auto-return to
+            // m_return_to merely because the style's authored bars elapsed:
+            // SceneChain's own on_bar/n_bars governs advancing instead (a
+            // fresh request_scene call pre-empts this same tick whenever the
+            // scene's own hold actually closes -- Engine::on_tick calls
+            // fire_scene before fire_arranger). Either way, advance the motif
             // engine's repeat counter (9210) so a repeat-keyed call-and-
             // response transform can progress. Bounded, wraps silently (only
             // ever read mod small ranges downstream, motif.hpp).
@@ -835,6 +925,15 @@ class Arranger {
   // `ticks_per_bar` argument already uses, so a caller that never passes a
   // live value never triggers a spurious re-anchor.
   Tick m_last_ticks_per_bar = kTicksPerBar;
+  // Phase 7 (SceneChain live-transition fix): true from the moment a live
+  // SceneChain step lands (request_scene) until a style-driven switch takes
+  // it back over (request()/request_style()'s own immediate branches, a
+  // deferred switch committing at a bar boundary, or a fresh style load) --
+  // see on_tick's own comment on what this changes (the one-shot completion
+  // length source, and whether Intro/Fill auto-return). `m_scene_hold_bars`
+  // is only meaningful while this is true.
+  bool m_scene_owns_timing = false;
+  std::uint16_t m_scene_hold_bars = 0;
   Route m_routes[kRoleCount]{};
   std::uint16_t m_muted = 0;  // per-role mute bitmask (kRoleCount bits)
   std::uint16_t m_solo = 0;   // per-role solo bitmask

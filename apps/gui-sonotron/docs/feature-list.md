@@ -1,7 +1,8 @@
-# Sonotron v02 Workstation — feature list
+# Sonotron Workstation — feature list
 
-Status: living checklist for the v02 redesign of `apps/gui-sonotron`. Every
-element the v02 reference (`Sonotron v02 Workstation.dc.html`, digested into
+Status: living checklist for the neon workstation redesign of
+`apps/gui-sonotron`. Every element the design reference
+(`Sonotron v02 Workstation.dc.html`, digested into
 `design-ref-v02/v02-workstation-spec.md`) shows is enumerated below with an
 honesty tag:
 
@@ -30,10 +31,10 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
   grid overlay behind everything. `[new-widget]` (`neon::background`). Done.
 - JetBrains Mono NL 13px base (already vendored). Done.
 - Global `glow` flag toggled by the ⚙ button (default ON); every glow honors it.
-  `[local-only]` (a client display preference, `V02State::glow`). Done.
+  `[local-only]` (a client display preference, `UiState::glow`). Done.
 - `density` comfortable/compact — NOT implemented (nice-to-have per spec). `[gap]`
 
-## Palette (v02 neon)
+## Palette (neon)
 - cyan `#22e0e6`, pink `#ff3ea5`, green `#3dffa0`, amber `#ffc24d`,
   blue `#2ea8ff`, lead purple `#c678dd`, text `#cfe0e6`, backgrounds/borders
   per spec. Done in `theme.hpp`/`theme.cpp`. `[wired]` (pure style data).
@@ -114,17 +115,17 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
   real `chord_followed_next()`; "—" when absent. Countdown derived from the
   real beat position. `[wired]`. Done.
 - XY pad: valence horiz, energy vert, draggable blue dot + radial glow + grid.
-  `[new-widget]`. Drag updates `V02State::energy/valence` — NO engine verb
+  `[new-widget]`. Drag updates `UiState::energy/valence` — NO engine verb
   exists → `[local-only]`. Done.
 - Intention knobs ENERGY/TENSION/VALENCE. `[new-widget]` (rotary). Values are
-  `V02State` intent, NO verb → `[local-only]`. Done. (XY and the energy/valence
+  `UiState` intent, NO verb → `[local-only]`. Done. (XY and the energy/valence
   knobs share the same backing values so they track each other.)
 - `PARTS` divider + "amount" hint. Done.
 - Parts knobs DRUMS/BASS/CHORD "amount" 0..1. `[new-widget]` (rotary). NO
   per-part amount/volume verb on the wire (`part <role>` only takes mute/solo)
   → `[local-only]`. Done. (Mute/solo latches from the old parts panel are NOT
-  in the v02 rail layout — the rail shows amount knobs only, per spec; the real
-  mute/solo verbs remain available but are not surfaced here. `[gap]` in v02
+  in the current rail layout — the rail shows amount knobs only, per spec; the real
+  mute/solo verbs remain available but are not surfaced here. `[gap]` in the current
   surface.)
 - Master VU: `MASTER` + dB readout (`-6.2 dB` playing / `—` stopped) +
   10-segment animated EQ meter (green→amber→pink). `[new-widget]`. The dB value
@@ -147,7 +148,7 @@ live BPM/dB/level readback — those are `[local-only]` or `[gap]` below.
 
 ## Animations (ImGui frame clock, gated on playing + glow)
 - `sn-sweepx` cell sweep, `sn-blink` status dot, `sn-eq` master VU, sequence-edit
-  playhead. All `[local-only]`, all gated on `V02State::playing`. Done.
+  playhead. All `[local-only]`, all gated on `UiState::playing`. Done.
 - Transport clock (24 pulses/beat) for bar:beat:pulse is REAL (from `kBeat`).
   `[wired]`.
 

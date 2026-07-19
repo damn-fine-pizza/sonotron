@@ -47,6 +47,21 @@
 // ring handle (set_audio_ring()). `--control` stays silent, as before. See
 // render_soundfont_dialog()/kSoundFontPathBufferSize below for the
 // "Load SoundFont…" surface (File menu).
+//
+// INPUT RECORD/REPLAY (owner ask: close the "green tests, broken app" gap --
+// see src/input_trace.hpp for the JSONL wire format): `--trace-input <path>`
+// / SONOTRON_INPUT_TRACE record every mouse/keyboard event ImGui consumes
+// each frame; `--replay-input <path>` / SONOTRON_INPUT_REPLAY feed a
+// previously recorded trace back in, suppressing real mouse/keyboard input
+// for the duration. Replay is NOT a headless-only mode: it runs in the
+// normal, visible windowed app (composes with, but does not require,
+// SONOTRON_GUI_MAX_FRAMES/SONOTRON_GUI_SCREENSHOT for headless CI use) --
+// the owner can watch a replay drive the UI live, or attach a debugger to
+// it (`gdb --args ./gui-sonotron --replay-input trace.jsonl`) and break at
+// the frame a bug shows, read off render_replay_badge()'s on-screen frame
+// counter to know which one that is. Either way the app's own per-frame
+// counter (the same one SONOTRON_GUI_MAX_FRAMES counts against) is the
+// shared clock, so record and replay always agree on framing.
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -61,20 +76,26 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "audio/audio_backend.hpp"
+#include "audio/reverb_sound_engine.hpp"
 #include "audio/soundfont_engine.hpp"
 #include "melodd/soundfont_discovery.hpp"
 #include "src/app_state.hpp"
 #include "src/brain_event.hpp"
 #include "src/brain_session.hpp"
 #include "src/browser_model.hpp"
+#include "src/debug_log.hpp"
 #include "src/grid_model.hpp"
 #include "src/in_process_brain_session.hpp"
+#include "src/input_trace.hpp"
 #include "src/layout_json.hpp"
 #include "src/layout_model.hpp"
 #include "src/layout_renderer.hpp"
+#include "src/logging_brain_session.hpp"
 #include "src/parts_model.hpp"
 #include "src/scenes_json.hpp"
 #include "src/screenshot.hpp"
@@ -82,6 +103,7 @@
 #include "src/theme.hpp"
 #include "src/uds_brain_session.hpp"
 #include "src/workstation_state.hpp"
+#include "version/version.hpp"
 
 namespace {
 
@@ -144,6 +166,101 @@ std::string control_path_from_args(int argc, char** argv) {
     return env;
   }
   return "";
+}
+
+// INPUT RECORD/REPLAY (owner ask: close the "green tests, broken app" gap;
+// see src/input_trace.hpp for the JSONL wire format and the exact capture
+// point). `--trace-input <path>` wins over SONOTRON_INPUT_TRACE, same
+// flag-over-env discipline as --control/SONOTRON_CONTROL_PATH above.
+std::string trace_input_path_from_args(int argc, char** argv) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--trace-input") {
+      return argv[i + 1];
+    }
+  }
+  if (const char* env = std::getenv("SONOTRON_INPUT_TRACE"); env != nullptr) {
+    return env;
+  }
+  return "";
+}
+
+// `--replay-input <path>` wins over SONOTRON_INPUT_REPLAY, sibling to
+// trace_input_path_from_args above.
+std::string replay_input_path_from_args(int argc, char** argv) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--replay-input") {
+      return argv[i + 1];
+    }
+  }
+  if (const char* env = std::getenv("SONOTRON_INPUT_REPLAY"); env != nullptr) {
+    return env;
+  }
+  return "";
+}
+
+// `--debug` (bare flag) / SONOTRON_DEBUG (any value) turns on the owner's
+// root-cause trace for the still-broken live auto-song (src/debug_log.hpp):
+// same flag-over-env precedence as --control/--trace-input above, but a
+// plain on/off switch rather than a path. Resolved and applied FIRST, before
+// any BrainSession/GridModel/scene load, so every send/receive and the
+// launch-time scene table below are covered from the very first line.
+bool debug_requested_from_args(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--debug") {
+      return true;
+    }
+  }
+  return std::getenv("SONOTRON_DEBUG") != nullptr;
+}
+
+// --debug/SONOTRON_DEBUG launch-time snapshot (owner ask): the resolved
+// scenes.json path plus the scene table exactly as loaded (index, name, the
+// wire section name a `style section`/`clip add` for this column would
+// actually send, and the per-scene bar length auto-song gates on) -- one
+// stamped line per scene, printed once, before the frame loop (and before
+// grid_panel.cpp's own seed_demo() may still overwrite the demo columns'
+// section/name on frame 1 if scenes.json was missing/empty). Split out of
+// main() (rather than inlined at the call site) to keep that already large
+// function's cognitive complexity from growing further -- caller already
+// gates the call itself on debug_enabled(), so this is a no-op cost when off.
+void print_debug_launch_scene_table(const std::string& scenes_file_path,
+                                    const sonotron::GridModel& grid_model) {
+  sonotron::debug_log("[dbg launch] scenes.json path=" + scenes_file_path);
+  for (std::size_t s = 0; s < grid_model.scene_count(); ++s) {
+    const std::string_view section_wire = sonotron::section_wire_name(grid_model.scene_section(s));
+    sonotron::debug_log(
+        "[dbg launch] scene " + std::to_string(s) + ": " + std::string(grid_model.scene_name(s)) +
+        " section=" + (section_wire.empty() ? std::string("?") : std::string(section_wire)) +
+        " bars=" + std::to_string(grid_model.scene_bars(s)));
+  }
+  sonotron::debug_log("[dbg launch] scene_count=" + std::to_string(grid_model.scene_count()));
+}
+
+// --debug/SONOTRON_DEBUG (src/debug_log.hpp): resolves to the
+// LoggingBrainSession decorator wrapping `real_session` (constructed into
+// `storage`, which the caller must keep alive for as long as the returned
+// reference is used) when debug tracing is on, or straight to `real_session`
+// otherwise. Split out of main() (rather than inlined at the call site) to
+// keep that already large function's cognitive complexity from growing
+// further.
+sonotron::BrainSession& resolve_debug_brain_session(
+    sonotron::BrainSession& real_session, std::optional<sonotron::LoggingBrainSession>& storage) {
+  if (sonotron::debug_enabled()) {
+    storage.emplace(real_session);
+    return *storage;
+  }
+  return real_session;
+}
+
+// `--version`: print the release version and exit, before touching GLFW/GL
+// at all -- a version query must work headless (no display needed).
+bool version_requested_from_args(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--version") {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Headless-smoke escape hatch: if SONOTRON_GUI_MAX_FRAMES=N is set, render
@@ -294,12 +411,18 @@ void set_soundfont_path(SoundFontDialogState& dialog, const std::string& value) 
 
 // Bundles the two Theme-2/ISoundEngine-seam objects main() owns together in
 // integrated mode (control_path.empty()) -- SoundfontEngine (this build's
-// one concrete ISoundEngine) and AudioBackend (the device layer holding a
-// reference to it). A plain aggregate of references, not a class: main() is
-// the composition root, the one place allowed to name both the concrete
-// engine type and AudioBackend together (docs/proposals/
-// isoundengine-contract.md, Corelli §1's "the composition root talks to the
-// concrete type for configuration").
+// configurable concrete engine) and AudioBackend (the device layer). A
+// plain aggregate of references, not a class: main() is the composition
+// root, the one place allowed to name both the concrete engine type and
+// AudioBackend together (docs/proposals/isoundengine-contract.md, Corelli
+// §1's "the composition root talks to the concrete type for
+// configuration"). `engine` deliberately still names the CONCRETE
+// SoundfontEngine, not the ReverbSoundEngine decorator AudioBackend
+// actually renders through (Phase-1 sound task #7): SoundFont loading
+// (render_soundfont_dialog below) is a SoundfontEngine-specific
+// configuration call, independent of whichever ISoundEngine sits between it
+// and the speakers -- `backend.render_mutex()` still correctly serializes
+// the load against whatever AudioBackend renders, decorator or not.
 struct AudioHandles {
   sonotron::audio::SoundfontEngine& engine;
   sonotron::audio::AudioBackend& backend;
@@ -421,11 +544,60 @@ void render_menu_bar(sonotron::Layout& layout, sonotron::BrainSession& brain_ses
   }
 }
 
+// INPUT REPLAY on-screen tell (owner ask): a small, always-on-top badge in
+// the corner so it is visually obvious a session is being driven from a
+// trace rather than by the person at the keyboard -- and so the owner can
+// read off the exact frame number to cite when a bug shows up (or to break
+// on in a debugger, see src/input_trace.hpp / this file's own header
+// comment). Deliberately tiny: one auto-sized, non-interactive window, no
+// new dependency, no state of its own beyond what the caller already has.
+void render_replay_badge(int frame) {
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 10.0F, 10.0F), ImGuiCond_Always,
+                          ImVec2(1.0F, 0.0F));
+  ImGui::SetNextWindowBgAlpha(0.65F);
+  constexpr ImGuiWindowFlags kBadgeFlags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
+  if (ImGui::Begin("##replay_badge", nullptr, kBadgeFlags)) {
+    ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F), "REPLAY  frame %d", frame);
+  }
+  ImGui::End();
+}
+
+// INPUT RECORD/REPLAY timing (src/input_trace.hpp): io.AddMousePosEvent/
+// AddMouseButtonEvent/AddKeyEvent only QUEUE an event -- Dear ImGui applies
+// the queue to io.MousePos/io.MouseDown/io.KeysData inside ImGui::NewFrame()
+// itself, not immediately and not inside ImGui_ImplGlfw_NewFrame(). Two
+// consequences, both handled right here rather than in main()'s outer loop:
+//   - REPLAY must feed AFTER ImGui_ImplGlfw_NewFrame() (which, with
+//     install_callbacks=false, still unconditionally re-queues the REAL OS
+//     cursor position every focused frame -- imgui_impl_glfw.cpp's
+//     UpdateMouseData() "fallback for when callbacks aren't installed" has
+//     no way to know we deliberately want that suppressed) and BEFORE
+//     ImGui::NewFrame(), so our replayed position is the LAST one queued
+//     this frame and wins over that leaked real one. InputTraceReplayer
+//     additionally re-asserts its last known position every frame even when
+//     the trace has no new "mp" line for this exact frame (see its own doc
+//     comment) -- otherwise that same leak would show through on every
+//     frame the trace itself does not touch the mouse. Mouse buttons/keys
+//     have no such polling fallback in the backend, so install_callbacks=
+//     false alone fully suppresses real ones for those.
+//   - RECORD must capture AFTER ImGui::NewFrame() has applied the queue,
+//     or it would read last frame's stale io state.
 void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state, AudioHandles* audio,
-                  SoundFontDialogState& soundfont_dialog, bool& quit_requested) {
+                  SoundFontDialogState& soundfont_dialog, bool& quit_requested, int frame,
+                  bool replay_active, sonotron::InputTraceReplayer& input_replayer,
+                  sonotron::InputTraceRecorder& input_recorder) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
+
+  input_replayer.feed_frame(frame, ImGui::GetIO());
+
   ImGui::NewFrame();
+
+  input_recorder.capture_frame(frame, ImGui::GetIO());
 
   render_menu_bar(layout, state.brain_session, audio, soundfont_dialog, quit_requested);
 
@@ -434,9 +606,13 @@ void render_frame(sonotron::Layout& layout, sonotron::WorkstationState& state, A
   ImGui::SetNextWindowSize(viewport->WorkSize);
   ImGui::Begin("sonotron", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                   ImGuiWindowFlags_NoBringToFrontOnFocus);
+                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse);
   sonotron::render_layout(layout, state);
   ImGui::End();
+
+  if (replay_active) {
+    render_replay_badge(frame);
+  }
 
   ImGui::Render();
 }
@@ -462,6 +638,14 @@ void present_frame(GLFWwindow* window, const char* screenshot_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  sonotron::set_debug_enabled(debug_requested_from_args(argc, argv));
+
+  if (version_requested_from_args(argc, argv)) {
+    std::printf("gui-sonotron %s (%s)\n", sonotron::version::kVersionString,
+                sonotron::version::kVersionFull);
+    return 0;
+  }
+
   glfwSetErrorCallback(glfw_error_callback);
   if (glfwInit() == GLFW_FALSE) {
     std::fprintf(stderr, "sonotron: glfwInit failed\n");
@@ -517,7 +701,35 @@ int main(int argc, char** argv) {
                static_cast<double>(content_scale), static_cast<double>(base_font_size_px),
                static_cast<double>(base_font_size_px * content_scale));
 
-  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  // INPUT RECORD/REPLAY (owner ask: close the "green tests, broken app"
+  // gap, src/input_trace.hpp). Recording is additive (the real GLFW->ImGui
+  // callback chain stays installed); replaying instead DISABLES it
+  // (install_callbacks=false below) so real mouse/keyboard input never
+  // reaches ImGui while a trace is being fed in frame-by-frame. `w`/`h` in
+  // the meta line are the GLFW logical window size, matching
+  // ImGuiIO::DisplaySize (see input_trace.hpp for why that is what replay
+  // needs to hit the same widgets).
+  const std::string trace_input_path = trace_input_path_from_args(argc, argv);
+  const std::string replay_input_path = replay_input_path_from_args(argc, argv);
+  const bool replay_active = !replay_input_path.empty();
+
+  sonotron::InputTraceRecorder input_recorder;
+  if (!trace_input_path.empty()) {
+    int window_w = 0;
+    int window_h = 0;
+    glfwGetWindowSize(window, &window_w, &window_h);
+    if (input_recorder.start(trace_input_path, window_w, window_h)) {
+      std::fprintf(stdout, "sonotron: recording input trace to %s\n", trace_input_path.c_str());
+    }
+  }
+
+  sonotron::InputTraceReplayer input_replayer;
+  if (replay_active && input_replayer.load(replay_input_path)) {
+    std::fprintf(stdout, "sonotron: replaying input trace from %s (%zu events)\n",
+                 replay_input_path.c_str(), input_replayer.event_count());
+  }
+
+  ImGui_ImplGlfw_InitForOpenGL(window, /*install_callbacks=*/!replay_active);
   ImGui_ImplOpenGL3_Init("#version 130");
 
   std::fprintf(stdout, "sonotron: window open, GL renderer: %s\n",
@@ -535,14 +747,27 @@ int main(int argc, char** argv) {
   std::unique_ptr<sonotron::BrainSession> brain_session_holder;
   // Phase-6 Theme 2 (Decision 5, docs/phase6-design-reviews.md), promoted
   // alongside the ISoundEngine seam (docs/proposals/
-  // isoundengine-contract.md): both declared AFTER brain_session_holder so
-  // C++'s reverse-destruction-order rule tears AudioBackend down (device
+  // isoundengine-contract.md): all three declared AFTER brain_session_holder
+  // so C++'s reverse-destruction-order rule tears AudioBackend down (device
   // stopped, panic sent) BEFORE InProcessBrainSession joins its engine
-  // thread at function-scope exit -- soundfont_engine outlives audio_backend
-  // (declared first, destructed last) since AudioBackend only holds a
-  // reference to it. Both stay null in --control mode (Decision 2's
-  // integrated-mode-only scope cut).
+  // thread at function-scope exit -- soundfont_engine outlives reverb_engine
+  // outlives audio_backend (declared first, destructed last) since
+  // ReverbSoundEngine only holds a reference to soundfont_engine and
+  // AudioBackend only holds a reference to reverb_engine. All three stay
+  // null in --control mode (Decision 2's integrated-mode-only scope cut).
+  //
+  // Phase-1 sound task #7 (docs/proposals/
+  // audio-engine-fluidsynth-build-vs-buy.md SS6 "B1"): reverb_engine wraps
+  // soundfont_engine and is what AudioBackend actually renders through --
+  // TSF/melodd itself has zero reverb/chorus, this decorator is what closes
+  // that gap for the whole GUI audio path. AudioHandles.engine keeps naming
+  // the CONCRETE SoundfontEngine (not the decorator): SoundFont loading
+  // (render_soundfont_dialog) is a SoundfontEngine-specific configuration
+  // call, unaffected by whichever ISoundEngine AudioBackend renders through
+  // -- see AudioHandles' own comment below. Reverb is ALWAYS-ON for Phase-1
+  // (no bypass toggle -- a later UX call, out of scope here).
   std::unique_ptr<sonotron::audio::SoundfontEngine> soundfont_engine;
+  std::unique_ptr<sonotron::audio::ReverbSoundEngine> reverb_engine;
   std::unique_ptr<sonotron::audio::AudioBackend> audio_backend;
   std::optional<AudioHandles> audio_handles;
   SoundFontDialogState soundfont_dialog;
@@ -556,13 +781,14 @@ int main(int argc, char** argv) {
     }
     brain_session_holder = std::move(uds_session);
   } else {
-    // SoundfontEngine/AudioBackend are constructed (and the default
-    // SoundFont loaded) BEFORE the engine thread starts, so note_ring() is
-    // a valid, already-wired handle the instant run_engine() can read it
-    // (set_audio_ring() below is called before start(), see that method's
-    // own doc comment).
+    // SoundfontEngine/ReverbSoundEngine/AudioBackend are constructed (and
+    // the default SoundFont loaded) BEFORE the engine thread starts, so
+    // note_ring() is a valid, already-wired handle the instant run_engine()
+    // can read it (set_audio_ring() below is called before start(), see
+    // that method's own doc comment).
     soundfont_engine = std::make_unique<sonotron::audio::SoundfontEngine>();
-    audio_backend = std::make_unique<sonotron::audio::AudioBackend>(*soundfont_engine);
+    reverb_engine = std::make_unique<sonotron::audio::ReverbSoundEngine>(*soundfont_engine);
+    audio_backend = std::make_unique<sonotron::audio::AudioBackend>(*reverb_engine);
     audio_handles.emplace(AudioHandles{.engine = *soundfont_engine, .backend = *audio_backend});
     const std::string default_soundfont = melodd::find_system_soundfont();
     if (!default_soundfont.empty()) {
@@ -588,7 +814,17 @@ int main(int argc, char** argv) {
                  "SONOTRON_CONTROL_PATH) - running the integrated engine thread\n");
     brain_session_holder = std::move(in_process_session);
   }
-  sonotron::BrainSession& brain_session = *brain_session_holder;
+  // --debug/SONOTRON_DEBUG (src/debug_log.hpp): transparently wrap whichever
+  // concrete backend was just constructed above in the LoggingBrainSession
+  // decorator (src/logging_brain_session.hpp), the single choke point every
+  // panel's send()/every decoded event funnels through. `brain_session`
+  // (the reference every panel/WorkstationState actually holds) resolves to
+  // the decorator when debug tracing is on, or straight to the real backend
+  // otherwise -- zero indirection cost when off.
+  sonotron::BrainSession& real_brain_session = *brain_session_holder;
+  std::optional<sonotron::LoggingBrainSession> debug_brain_session;
+  sonotron::BrainSession& brain_session =
+      resolve_debug_brain_session(real_brain_session, debug_brain_session);
   sonotron::AppState app_state;
 
   // The G3 zone panels' models (docs/design/gui-fase2-mechanical-plan.md):
@@ -597,7 +833,7 @@ int main(int argc, char** argv) {
   // the sequence-edit note canvas) stay honest placeholders — see each
   // model/panel pair's own header comment for the exact gap.
   sonotron::BrowserModel browser_model;
-  sonotron::GridModel grid_model(5);  // v02 launch grid: 5 scene columns
+  sonotron::GridModel grid_model(5);  // launch grid: 5 scene columns
 
   // Scene names (repeat-zone-real-contract.md §4/§8b decision 3): host-only,
   // loaded right after the GridModel they belong to is constructed, same
@@ -612,9 +848,19 @@ int main(int argc, char** argv) {
                  scenes_file_path.c_str(), scenes_error.c_str());
   }
 
+  if (sonotron::debug_enabled()) {
+    print_debug_launch_scene_table(scenes_file_path, grid_model);
+  }
+
   sonotron::SeqEditModel seqedit_model;
   sonotron::PartsModel parts_model;
-  sonotron::V02State v02_state;  // v02 redesign: glow flag, frame clock, local intent
+  sonotron::UiState ui_state;  // neon workstation: glow flag, frame clock, local intent surface
+
+  if (sonotron::debug_enabled()) {
+    sonotron::debug_log(
+        "[dbg launch] auto_song=" + std::string(ui_state.auto_song ? "on" : "off") +
+        " active_scene=" + std::to_string(ui_state.active_scene));
+  }
 
   // SLICE 4a item 1 (docs/proposals/repeat-zone-real-contract.md): boot
   // ALIVE. Only the integrated (non `--control`) path -- an external
@@ -635,7 +881,7 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < sonotron::kBuiltinStyleNames.size(); ++i) {
       if (sonotron::kBuiltinStyleNames[i] == kDefaultStyleName) {
         brain_session.send("style load " + std::string(kDefaultStyleName));
-        v02_state.active_style = static_cast<int>(i);
+        ui_state.active_style = static_cast<int>(i);
         break;
       }
     }
@@ -647,7 +893,7 @@ int main(int argc, char** argv) {
                                                .grid = grid_model,
                                                .seqedit = seqedit_model,
                                                .parts = parts_model,
-                                               .fx = v02_state};
+                                               .fx = ui_state};
 
   const int max_frames = max_frames_from_env();
   const char* screenshot_path = screenshot_path_from_env();
@@ -685,8 +931,14 @@ int main(int argc, char** argv) {
     app_state.set_connected(brain_connected);
 
     render_frame(layout, workstation_state, audio_handles ? &*audio_handles : nullptr,
-                 soundfont_dialog, quit_requested);
+                 soundfont_dialog, quit_requested, frame, replay_active, input_replayer,
+                 input_recorder);
     present_frame(window, capture_this_frame ? screenshot_path : nullptr);
+  }
+
+  if (replay_active) {
+    std::fprintf(stderr, "sonotron: replay: %d events consumed\n",
+                 input_replayer.events_consumed());
   }
 
   ImGui_ImplOpenGL3_Shutdown();

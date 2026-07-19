@@ -732,7 +732,7 @@ void test_pad_cc_release_with_nothing_sounding_is_safe() {
 }
 
 // ============================================================================
-// Torquato findings (Phase-6 Theme 3 Item #2 hand-off), fixed by Nazzareno.
+// Torquato findings (Phase-6 Theme 3 Item #2 hand-off), fixed by Giotto.
 // Each asserts the behavior consistent with the rest of the pad system / with
 // musical correctness; each used to FAIL against the pre-fix fire_pad_drum/
 // fire_pad_cc implementation, for the precise reason stated in its own
@@ -878,7 +878,7 @@ int main() {
   test_pad_drum_hold_second_trigger_without_release_restrikes_not_stuck();
   test_pad_drum_release_with_nothing_sounding_is_safe();
   test_pad_cc_release_with_nothing_sounding_is_safe();
-  // Torquato findings, fixed by Nazzareno -- kept registered as permanent
+  // Torquato findings, fixed by Giotto -- kept registered as permanent
   // regression tests (see the comment above each one).
   test_pad_drum_next_bar_sync_defers_to_boundary();
   test_pad_drum_oneshot_retrigger_not_cut_short_by_stale_gate();

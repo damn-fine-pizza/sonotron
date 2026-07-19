@@ -43,7 +43,7 @@ Phase 7 shipped both:
   describes launch as `kGridLaunchWired = false`, INERT. That has since shipped: the
   owner signed off all four forks in `docs/proposals/repeat-zone-real-contract.md`
   §8b (2026-07-16) and the implementation landed same-day, commit `3398f04` "Repeat
-  Zone real — readback + Shape-A clip binding". `apps/gui-sonotron/docs/v02-feature-list.md`
+  Zone real — readback + Shape-A clip binding". `apps/gui-sonotron/docs/feature-list.md`
   confirms: launch cells are `[wired]`, scene-column launch is `[wired]`, mute/solo
   rows are `[wired]`, and `kClip`/readback consumption is real. **The single gap left
   by design** (owner decision 2, `repeat-zone-real-contract.md:488-491`): a cell's
@@ -69,7 +69,7 @@ the invariants and module table), `docs/product-vision.md`, `docs/gui-and-ux.md`
 (the melodd/audio-input/arranger-vs-sequencer analysis), `docs/proposals/
 repeat-zone-real-contract.md`, `docs/proposals/isoundengine-contract.md`,
 `docs/reflections/phase7-scope-6000-8100-clip-timeline-seam.md`, `apps/gui-sonotron/
-docs/v02-feature-list.md`, `components/core/arrangrr/include/arrangrr/{loop,clip,
+docs/feature-list.md`, `components/core/arrangrr/include/arrangrr/{loop,clip,
 scene}/*.hpp`, `components/core/arrangrr/include/arrangrr/config.hpp`,
 `components/core/arrangrr/include/arrangrr/abi.hpp`, and the git log (`3398f04`,
 `3aa3b3a`, `1008280`, `50809da`, `617f453`, `38a7efc`, `b27c46c`, `0241dcd`, `f850ea2`,
@@ -96,7 +96,7 @@ form (form stated) · **MAKES SENSE** = real gap, not yet planned, worth adding 
 | Tracce audio / strumenti virtuali / Drummer / loop | **PARTIAL** | Sound is realized by `melodd` (GM soundfont, host-only) per style-part `Program`, not per free-assigned audio track (`product-vision.md` "Sound & audio"). The arranger's drum style-part + section/fill system (node `3160`, 13 section types) is a *generative* Drummer analog, arguably stronger (see §3). |
 | Sezioni configurabili; duplicazione/riordino/variazione | **HAVE-S** / PARTIAL | Section model shipped (node `3160`), 16 style variations (`3260`); the *engine* has sections, but no drag-to-duplicate/reorder section UI exists in the GUI — PARTIAL on the UI half. |
 | Metronomo e count-in, tap-tempo | **HAVE-R** | Node `7400` "Metronome/click, tap-tempo, tempo-nudge" — `○ SHIPPABLE`, not built. Tempo-nudge itself IS built (commit `17ea925`), the click/count-in is not. |
-| Tempo, tonalità | **HAVE-S** | `bpm <n>`, `key <root> <mode>` (node `2110`), engine-side and GUI-wired (transport rack BPM/key, `v02-feature-list.md` §1). |
+| Tempo, tonalità | **HAVE-S** | `bpm <n>`, `key <root> <mode>` (node `2110`), engine-side and GUI-wired (transport rack BPM/key, `feature-list.md` §1). |
 | Indicazione di tempo (time signature, selectable) | **MAKES SENSE, but LARGE** | `kBeatsPerBar=4` is a global `constexpr`, consumed at 13+ call sites (`docs/reflections/phase7-scope-6000-8100-clip-timeline-seam.md` §1, Fork D). A real variable-time-sig engine is a cross-cutting rewrite, explicitly descoped even for `8100`. Real, not close. |
 | Loop/cycle di una sezione | **PARTIAL** | Style sections already loop until changed (arranger behavior); no user "set a cycle range in bars" on a linear ruler — doesn't fit the non-linear model, served differently by "hold this section." |
 | Righello in battute o min:sec | **NEVER** | Needs a linear ruler timeline — refused by identity. |
@@ -114,7 +114,7 @@ form (form stated) · **MAKES SENSE** = real gap, not yet planned, worth adding 
 | Editing/copia/spostamento celle | **GAP** | `seqedit_panel.cpp` renders a procedural preview only (`neon::clip_pattern(hash_label(...))`) — no move/copy/duplicate affordance anywhere (`docs/gui-and-ux.md` §4.7, confirmed in code). |
 | Registrazione in tempo reale dell'intera performance Live Loops | **PARTIAL** | `SceneChain` (node `8100`, shipped) captures rig-state-over-time, not "record my whole live jam as a linear performance" the way GarageBand converts a Live-Loops take into Tracks-view regions — different mechanism serving a related intent. |
 | Template Live Loops preconfigurati | **MAKES SENSE** | No starter-grid concept; cheap to build on `ClipMatrix` + the 16 built-in styles. |
-| Creazione griglie personalizzate | **HAVE-S** | Drag-from-browser + "+", scene count 3–8 (`grid_panel.cpp`, `v02-feature-list.md` §2b). |
+| Creazione griglie personalizzate | **HAVE-S** | Drag-from-browser + "+", scene count 3–8 (`grid_panel.cpp`, `feature-list.md` §2b). |
 | Remix FX (filtri, repeater, scratch, tape-stop) | **NEVER (literal) / MAKES SENSE (MIDI-domain reframe)** | Needs an audio-DSP effects engine Sonotron's core structurally refuses to own (`product-vision.md`: arrangrr never processes audio). The MIDI-domain analog — glitch/ratchet/probability-mangle via the already-shipped MIDI-FX chain (node `5100`: echo/note-repeat/velocity-proc/scale-lock) exposed as a live performance panel — is a real, cheap opportunity; see TOP-10 #6. |
 | Controllo Remix FX via movimento iPad (Gyro) | **NEVER** | No touchscreen/accelerometer target class; `12400` (physical UI, pads/encoders/display "if/when in scope") does not include motion sensors. |
 
@@ -179,7 +179,7 @@ form (form stated) · **MAKES SENSE** = real gap, not yet planned, worth adding 
 
 | Feature | Bucket | Evidence |
 |---|---|---|
-| Volume/pan/mute/solo per traccia | **PARTIAL** | Mute/solo per role: **HAVE-S**, real and GUI-wired (`PartInfo`, node `8200`; grid + parts rows). Volume "amount" knobs exist in the v02 GUI but are **local-only** — no wire verb (`v02-feature-list.md`: "NO per-part amount/volume verb on the wire"). Pan: **GAP**, no dedicated concept. |
+| Volume/pan/mute/solo per traccia | **PARTIAL** | Mute/solo per role: **HAVE-S**, real and GUI-wired (`PartInfo`, node `8200`; grid + parts rows). Volume "amount" knobs exist in the v02 GUI but are **local-only** — no wire verb (`feature-list.md`: "NO per-part amount/volume verb on the wire"). Pan: **GAP**, no dedicated concept. |
 | Compressione/EQ/riverbero/echo master, Bitcrusher/Overdrive/Distortion/Chorus/Flanger/Tremolo/Vocal Transformer, Visual EQ | **NEVER** | All are audio-DSP effects requiring an audio-processing engine the core structurally refuses to own. The honest MIDI-domain substitute (an "echo" that repeats *notes*, not samples) already exists — see next row — and should never be conflated with the audio version. |
 | Plug-in per traccia (AUv3), MIDI-FX in the chain | **PARTIAL/HAVE-S** | Sonotron's own MIDI-FX insert chain (node `5000`/`5100`, SHIPPED core: scale-lock/velocity-proc/echo/note-repeat, commit `95f542b`) is the functional analog — MIDI-only, not audio-plugin hosting (VST/AUv3 hosting is named as a *future* workstation capability in `product-vision.md`, not built). |
 | Automazione grafica volume, registrazione modifiche controlli | **HAVE-R** | Same CC-lane gap as `4400` above. |

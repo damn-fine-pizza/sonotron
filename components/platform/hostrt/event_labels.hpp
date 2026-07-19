@@ -24,6 +24,11 @@ const char* section_name(std::uint16_t code);
 // plain wire code, like warn_name/section_name above, so event_labels.hpp
 // stays decoupled from clip_matrix.hpp).
 const char* clip_state_name(std::uint8_t state);
+// Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-gui-contract.md
+// §7 item 9): the numeric LoopEventKind a kLoop OutEvent carries in
+// msg.status (arrangrr::LoopEventKind, abi.hpp), same wire-code-not-enum
+// discipline as clip_state_name above.
+const char* loop_event_kind_name(std::uint8_t state);
 const char* quality_suffix(ChordQuality quality);
 std::string roman_degree(std::uint8_t degree, ChordQuality quality);
 

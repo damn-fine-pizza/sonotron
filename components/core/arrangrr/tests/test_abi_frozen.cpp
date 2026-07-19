@@ -133,7 +133,7 @@ static_assert(static_cast<std::uint16_t>(Param::kRetroCaptureDisarm) == 70);
 static_assert(static_cast<std::uint16_t>(Param::kRetroCaptureGrab) == 71);
 
 // --- OutEvent::Kind: every value pinned -------------------------------------
-// kMidi(0) .. kLoop(10). Next free id is 11.
+// kMidi(0) .. kSceneLap(11). Next free id is 12.
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kMidi) == 0);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTransport) == 1);
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kWarn) == 2);
@@ -154,6 +154,12 @@ static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kTimeSig) == 9);
 // Phase 7 (node 6000, the Looper): kLoop is a NEW appended enumerator, rides
 // the SAME 16-byte OutEvent layout unchanged (no new field, no resize).
 static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kLoop) == 10);
+
+// Phase 7 (node 8100, repeat-count Phase-2): kSceneLap is a NEW appended
+// enumerator (an intermediate SceneChain repeat-lap signal, distinct from a
+// genuine transition), rides the SAME 16-byte OutEvent layout unchanged (no
+// new field, no resize).
+static_assert(static_cast<std::uint8_t>(OutEvent::Kind::kSceneLap) == 11);
 
 // --- WarnCode: every value pinned, plus the count ---------------------------
 // kNone(0) .. kRetroCaptureTruncated(13), kWarnCodeCount == 14 (next free id).

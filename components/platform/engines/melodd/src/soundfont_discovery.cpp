@@ -7,11 +7,7 @@
 
 namespace melodd {
 
-namespace {
-constexpr const char* kSoundfontDir = "/usr/share/soundfonts";
-}  // namespace
-
-std::string find_system_soundfont(const std::string& override_path) {
+std::string find_system_soundfont(const std::string& override_path, const std::string& search_dir) {
   if (!override_path.empty()) {
     return override_path;
   }
@@ -20,8 +16,8 @@ std::string find_system_soundfont(const std::string& override_path) {
   std::error_code ec;
 
   const fs::path preferred[] = {
-      fs::path(kSoundfontDir) / "FluidR3_GM.sf2",
-      fs::path(kSoundfontDir) / "default.sf2",
+      fs::path(search_dir) / "FluidR3_GM.sf2",
+      fs::path(search_dir) / "default.sf2",
   };
   for (const fs::path& candidate : preferred) {
     if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
@@ -30,10 +26,11 @@ std::string find_system_soundfont(const std::string& override_path) {
   }
 
   std::vector<std::string> matches;
-  fs::directory_iterator it(kSoundfontDir, fs::directory_options::skip_permission_denied, ec);
+  fs::directory_iterator it(search_dir, fs::directory_options::skip_permission_denied, ec);
   if (!ec) {
     for (const auto& entry : it) {
-      if (entry.path().extension() == ".sf2" && entry.is_regular_file(ec)) {
+      const fs::path extension = entry.path().extension();
+      if ((extension == ".sf2" || extension == ".sf3") && entry.is_regular_file(ec)) {
         matches.push_back(entry.path().string());
       }
     }

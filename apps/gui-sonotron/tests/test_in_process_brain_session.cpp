@@ -639,6 +639,88 @@ void test_loop_stop_without_active_recording_warns() {
   session.stop();
 }
 
+// Workstream B: the Browser's Voices picker (browser_model.cpp's
+// build_program_verb) emits `program <port>:<ch> <voice name>` -- proves the
+// name form translates AND reaches the real Engine::cmd_voice/schedule_or_warn
+// path by polling for the resulting real MIDI program-change OutEvent
+// (brain_event_from_outevent.cpp decodes OutEvent::Kind::kMidi's
+// kProgramChange case to BrainEvent::Kind::kMidiOut/"program"). The success
+// event fires immediately (cmd_voice's own flush()), so unlike the other
+// verbs in this file (whose success is the ABSENCE of any event) this test
+// checks for no kError among the SAME drained batch that produced the match,
+// rather than a separate never_seen() poll -- a second, later poll would just
+// find the ring already empty, the event having already been drained here.
+void test_program_voice_by_name_reaches_program_command() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("program out0:1 Trumpet");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kMidiOut && ev.msg == "program" && ev.port == 0;
+  }));
+  for (const BrainEvent& ev : collected) {
+    CHECK(ev.kind != BrainEvent::Kind::kError);
+  }
+
+  session.stop();
+}
+
+// The Browser's Kits picker (browser_model.cpp's build_kit_verb) emits the
+// same `program` line with a bare GM program number instead of a name (e.g.
+// its TR-808 Kit entry) -- same shape as the name-form test above, on a
+// different channel.
+void test_program_kit_by_number_on_channel_ten_reaches_program_command() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("program out0:10 25");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kMidiOut && ev.msg == "program" && ev.port == 0;
+  }));
+  for (const BrainEvent& ev : collected) {
+    CHECK(ev.kind != BrainEvent::Kind::kError);
+  }
+
+  session.stop();
+}
+
+// An unresolvable GM voice name must surface a clean kError from the
+// TRANSLATOR itself (arrangrr::host::parse_gm_program returns -1 before a
+// Command is ever built), never reach push_command.
+void test_program_unknown_voice_name_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("program out0:1 not-a-real-voice-xyz");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("unknown GM voice") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
+// An arbitrary named port (e.g. a user typing "synth" into the Browser's
+// free-text port field) is a genuine unresolvable port for this pure-client
+// translator (it has no Shell::find_port table, D38) -- must be rejected
+// cleanly, never silently dropped or defaulted to out0.
+void test_program_unknown_port_surfaces_clean_error() {
+  InProcessBrainSession session;
+  CHECK(session.start());
+
+  std::vector<BrainEvent> collected;
+  session.send("program synth:1 40");
+  CHECK(poll_until(session, collected, [](const BrainEvent& ev) {
+    return ev.kind == BrainEvent::Kind::kError &&
+           ev.error.find("unknown output port") != std::string::npos;
+  }));
+
+  session.stop();
+}
+
 void test_stop_is_idempotent_and_safe_before_start() {
   InProcessBrainSession session;
   session.stop();  // never started: must be a safe no-op
@@ -678,6 +760,10 @@ int main() {
   test_loop_verbs_translate_and_reach_engine_without_error();
   test_loop_record_bad_mode_surfaces_clean_error();
   test_loop_stop_without_active_recording_warns();
+  test_program_voice_by_name_reaches_program_command();
+  test_program_kit_by_number_on_channel_ten_reaches_program_command();
+  test_program_unknown_voice_name_surfaces_clean_error();
+  test_program_unknown_port_surfaces_clean_error();
   test_stop_is_idempotent_and_safe_before_start();
   return sonotron::test::failures();
 }

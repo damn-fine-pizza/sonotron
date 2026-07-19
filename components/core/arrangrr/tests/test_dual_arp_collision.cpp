@@ -42,6 +42,20 @@ struct Band {
     e.push_midi_in(port, Span<const std::uint8_t>(bytes, 3),
                    [&](const OutEvent& o) { CHECK(ev.push_back(o)); });
   }
+  // "basic" (style index 0) is used here as a ZERO-JITTER probe: the exact
+  // shared collision tick (240) and note-on/note-off counts this file pins
+  // depend on both arps' 16th-note grids firing at an EXACT deterministic
+  // tick. Wave 1 of the style-depth program (9100) gave "basic" a non-zero
+  // deterministic humanize (Style::groove.humanize_timing=8,
+  // humanize_velocity=16) that would otherwise push the role-arp's own note
+  // off the shared grid. Zero the two humanize fields right after load via
+  // the existing Param::kGroove ABI (GrooveField-addressed setter,
+  // Arranger::set_groove_field) -- a live command, not a product change.
+  void load_basic_zero_groove() {
+    cmd(Param::kStyleLoad, 0, 0, 0, 0, Op::kDo);  // "basic"
+    cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kHumanizeTiming), 0);
+    cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kHumanizeVelocity), 0);
+  }
 };
 
 // Every kMidi event on `port`/`channel` carrying MIDI note `note_num`, in
@@ -74,7 +88,7 @@ StaticVector<std::pair<Tick, bool>, 32> events_for(const Events& ev, std::uint8_
 // from. Here there are TWO independent producers.
 void test_dual_arp_same_output_and_pitch_collision_at_shared_tick() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0, 0, 0, 0, Op::kDo);  // "basic": kVarABass step0 tone0 -> note 36
+  b.load_basic_zero_groove();  // "basic": kVarABass step0 tone0 -> note 36, humanize zeroed
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (0 << 8), 0, 0,
         Op::kSet);
 
@@ -148,7 +162,7 @@ void test_dual_arp_same_output_and_pitch_collision_at_shared_tick() {
 // panicking and proving neither producer emits another note-on afterward.
 void test_panic_clears_both_the_live_arp_and_every_role_arp_insert() {
   Band b;
-  b.cmd(Param::kStyleLoad, 0, 0, 0, 0, Op::kDo);
+  b.load_basic_zero_groove();
   b.cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (0 << 8), 0, 0,
         Op::kSet);
   const auto bass = static_cast<std::uint16_t>(TrackRole::kBass);

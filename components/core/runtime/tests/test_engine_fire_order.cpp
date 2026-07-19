@@ -42,6 +42,19 @@ struct Band {
   void setup_basic() {
     cmd(Param::kKeySet, 0, 0, 0, Op::kSet);  // C major
     cmd(Param::kStyleLoad, 0);               // "basic"
+    // "basic" is used here as a ZERO-JITTER probe for the chord-seq-before-
+    // arranger fire ORDER: the pin is an EXACT downbeat tick (kTicksPerBar)
+    // and an EXACT bass note (36 vs 43), which a nonzero timing_offset could
+    // shift and a nonzero velocity jitter would not affect but which still
+    // must not be allowed to mask a real ordering regression. Wave 1 of the
+    // style-depth program (9100) gave "basic" a non-zero deterministic
+    // humanize (Style::groove.humanize_timing=8, humanize_velocity=16); zero
+    // both fields right after load via the existing Param::kGroove ABI
+    // (GrooveField-addressed setter, Arranger::set_groove_field) -- a live
+    // command, not a product change -- restoring the flat clock this file's
+    // exact-tick assertions rely on.
+    cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kHumanizeTiming), 0);
+    cmd(Param::kGroove, static_cast<std::int32_t>(GrooveField::kHumanizeVelocity), 0);
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kBass), 0 | (1 << 8), 0, Op::kSet);
     cmd(Param::kStyleRoute, static_cast<std::int32_t>(TrackRole::kChord1), 0 | (2 << 8), 0,
         Op::kSet);

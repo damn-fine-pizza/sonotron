@@ -15,17 +15,23 @@
 // The framing logic mirrors components/platform/hostrt/uds_server.hpp's LineBuffer (a
 // deliberate OWN copy, not an #include of the host header -- the pure-client
 // boundary rule forbids reusing host-side code) and the decoder understands
-// the 8 JSONL event shapes the host currently emits (see gui-contract-map.md
+// the 9 JSONL event shapes the host currently emits (see gui-contract-map.md
 // §3 for the original 5, plus the additive "chord-followed" shape landed by
 // pipeline-p0-mechanical-plan.md P0-1, the additive "beat" shape landed by
-// P0-2, plus the additive "clip" shape, Phase-5 Item #2): midi-out, chord,
-// section, transport, warn, chord-followed, beat, clip, plus the per-client
-// {"error":...} line. `kBeat` (P0-2, the transport heartbeat) is decoded:
-// {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick} -- bar/beat/pulse are
-// purely numeric (core concern), a live playhead is a HOST/GUI rendering
-// choice built on top of them. `kClip` (Phase-5 Item #2) is decoded:
-// {"ev":"clip","id":N,"state":"stopped"|"armed"|"playing"|"queued_stop","@":
-// tick} -- which Repeat-Zone cell is armed/playing/stopped.
+// P0-2, the additive "clip" shape, Phase-5 Item #2, plus the additive "loop"
+// shape, Phase 7 node 6000 / looper-in-gui-contract.md §7 item 9): midi-out,
+// chord, section, transport, warn, chord-followed, beat, clip, loop, plus
+// the per-client {"error":...} line. `kBeat` (P0-2, the transport heartbeat)
+// is decoded: {"ev":"beat","bar":N,"beat":M,"pulse":P,"@":tick} --
+// bar/beat/pulse are purely numeric (core concern), a live playhead is a
+// HOST/GUI rendering choice built on top of them. `kClip` (Phase-5 Item #2)
+// is decoded: {"ev":"clip","id":N,"state":"stopped"|"armed"|"playing"|
+// "queued_stop","@":tick} -- which Repeat-Zone cell is armed/playing/
+// stopped. `kLoop` (Phase 7, node 6000) is decoded: {"ev":"loop","id":N,
+// "state":"record_started"|"record_stopped"|"erased"|"undone"|"grabbed","@":
+// tick} -- a LoopBuffer slot's OWN recording-side state change (mirrors
+// `kClip`'s shape exactly; a launch/stop of an already-captured loop still
+// rides `kClip`, not this).
 
 namespace sonotron {
 
@@ -93,6 +99,31 @@ struct BrainEvent {
     kChordFollowed,  // additive, gap P0-1 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-1)
     kBeat,           // additive, gap P0-2 (ux-workstation.md §11) -- decoded (pipeline-p0 P0-2)
     kClip,           // additive, Phase-5 Item #2 (docs/design/clip-primitive-design.md) -- decoded
+    // additive, Phase 7 (node 6000, the Looper -- docs/proposals/looper-in-
+    // gui-contract.md §7 item 9) -- decoded on BOTH the in-process path
+    // (brain_event_from_outevent.cpp) and the JSONL text path (jsonl.cpp's
+    // to_jsonl()/to_human(), and parse_brain_event() below).
+    kLoop,
+    // additive, Phase 7 (node T0, the variable time-signature engine --
+    // arrangrr::OutEvent::Kind::kTimeSig, abi.hpp:592) -- the CURRENT
+    // beats_per_bar, decoded on the in-process path (brain_event_from_
+    // outevent.cpp) only for now: components/platform/hostrt/jsonl.cpp has no
+    // dedicated "time-sig" wire serialization yet (a host-side gap, out of
+    // this slice's scope -- it falls through to a bogus "warn" line there
+    // today, same class of gap kLoop had before it was fixed here). A pure
+    // JSONL client (UdsBrainSession) therefore never sees this event yet and
+    // keeps AppState's default beats_per_bar until that host-side gap is
+    // closed.
+    kTimeSig,
+    // additive, Song-mode Phase 2 live-readback gap closure (docs/proposals/
+    // song-mode-scenechain-adoption.md): a GENERIC decode of the core's own
+    // OutEvent::Kind::kParamState echo (abi.hpp) -- style/groove/key/chord-
+    // mode/master-transpose/tempo all ride this ONE wire shape, tagged by a
+    // Param id. Deliberately kept as four plain integers (not one field per
+    // Param) since this header has no core include and must never reference
+    // arrangrr::Param or GrooveField directly -- a consumer that cares about
+    // a specific Param decodes param_id itself.
+    kParamState,
   };
 
   Kind kind = Kind::kUnknown;
@@ -146,6 +177,36 @@ struct BrainEvent {
   // no core enum crosses this boundary.
   int clip_id = 0;
   std::string clip_state;
+
+  // loop (additive, Phase 7, node 6000): a LoopBuffer slot's OWN recording-
+  // side state changed (record started/stopped, erased, undone, retro-
+  // capture grabbed) -- NOT a launch/stop of an already-captured loop, which
+  // still rides `kClip` above (abi.hpp's own kLoop OutEvent comment).
+  // `loop_slot_id` addresses the LoopBuffer slot (`ev.code`); `loop_event_
+  // kind` is the label text verbatim (event_labels.hpp's loop_event_kind_
+  // name on the host side, e.g. "record_started"/"erased"/"grabbed") -- a
+  // pure client renders it directly, no core enum crosses this boundary,
+  // same discipline as `clip_state` above.
+  int loop_slot_id = 0;
+  std::string loop_event_kind;
+
+  // time-sig (additive, Phase 7 node T0): the CURRENT beats_per_bar (1..
+  // arrangrr::kMaxBeatsPerBar), announced whenever it changes (a style load/
+  // switch or a Performance recall) -- see the kTimeSig comment above.
+  int time_sig_beats_per_bar = 0;
+
+  // param-state (additive, Song-mode Phase 2 live-readback gap closure): a
+  // generic decode of OutEvent::param_state's own packing -- `param_id` is
+  // the core's Param enum value verbatim (as a plain int, this header never
+  // names arrangrr::Param), `param_sub` is the per-Param role/field selector
+  // (`sub`/`port` in the core's own packing), `param_v0`/`param_v1` are the
+  // two value bytes (v1 is 0 for single-byte values; v0|v1<<8 forms a 16-bit
+  // value for wider fields, e.g. tempo_x100 or a builtin style index) --
+  // mirrors OutEvent::param_state's own comment in abi.hpp field-for-field.
+  int param_id = 0;
+  int param_sub = 0;
+  int param_v0 = 0;
+  int param_v1 = 0;
 
   // per-client error
   std::string error;

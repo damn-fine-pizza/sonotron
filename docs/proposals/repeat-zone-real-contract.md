@@ -1,7 +1,7 @@
 # Repeat Zone made REAL — as-built contract + gap analysis
 
 Status: SCOPE DOC (read-only architecture analysis, Corelli). No product code
-touched. This is a contract + gap map for Nazzareno to implement against, not
+touched. This is a contract + gap map for Giotto to implement against, not
 an implementation.
 
 Scope trigger: owner-approved workstream — bind Repeat-Zone launch cells to
@@ -321,7 +321,7 @@ serialized. **NEEDS-OWNER-DECISION**: this is really a question about
 whether the *whole* Repeat-Zone grid (not just scene names) is meant to
 survive a restart in this pass. If not, host-only + no persistence is the
 right, small SHIPPABLE-now scope; if yes, this workstream's true size is
-larger than "rename a column" and should say so explicitly before Nazzareno
+larger than "rename a column" and should say so explicitly before Giotto
 starts.
 
 ---
@@ -402,7 +402,7 @@ exactly the ambiguous way the ABI comments warn about.
 
 No item above requires a new host or core **dependency** — every piece is a
 bounded POD/verb addition in the exact style of the primitives already in
-the tree (`ClipMatrix`, `SceneChain`, `Performance::name`). If Nazzareno's
+the tree (`ClipMatrix`, `SceneChain`, `Performance::name`). If Giotto's
 implementation of any of these discovers a need for something heavier (e.g.
 a real JSON library for scene persistence beyond what `layout_json.hpp`
 already hand-rolls), that is a **new flag for the owner at that time**, not
@@ -472,7 +472,7 @@ exact same dispatch, not invent a second path).
    Repeat-Zone grid COLUMN is active (a new engine mechanism), or does it
    mean chaining whole `Performance` snapshots via the already-built
    `SceneChain` (almost free, wrong granularity for "which cells light up")
-   (§5)? This must be settled before Nazzareno estimates or starts item 5/6
+   (§5)? This must be settled before Giotto estimates or starts item 5/6
    of §6 — the two answers are not incremental refinements of each other,
    they are different features that happen to share a button label.
 
@@ -510,7 +510,7 @@ Separately noted for whoever owns doc upkeep (not this workstream): correct
 
 ---
 
-## 9. Ordered build plan (for Nazzareno, once owner decisions land)
+## 9. Ordered build plan (for Giotto, once owner decisions land)
 
 1. **Owner resolves §8's four decisions first** — items 2, 3, and especially
    4 change the shape of what gets built, not just its size.

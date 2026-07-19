@@ -74,6 +74,12 @@ else()
   # interactively AND for the `midi-source load` L1 verb). HOST-ONLY; never
   # on the arm-none-eabi branch above.
   add_subdirectory(components/platform/midisrc)
+  # Release VERSION + build-number mechanism: the `sonotron_version`
+  # INTERFACE target (generated version.hpp, MAJOR.MINOR from the
+  # repo-root VERSION file + a git-derived BUILD number/SHA). HOST-ONLY,
+  # apps-land only -- never linked from components/core/**; ordered here
+  # (before the apps below that link it) but has no dependency of its own.
+  add_subdirectory(components/platform/version)
   add_subdirectory(components/platform/orchestrator)
   add_subdirectory(components/platform/hostrt)
   add_subdirectory(apps/tools/cli-arrangrr)

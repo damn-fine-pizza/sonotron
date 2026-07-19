@@ -15,6 +15,14 @@ add_subdirectory(glfw)
 
 add_subdirectory(imgui)
 
+# stb_vorbis: single-file public-domain Ogg Vorbis decoder, vendored solely
+# to unlock TinySoundFont's already-present .sf3 (compressed SoundFont)
+# decode path (Phase-1 sound task #7, docs/proposals/
+# audio-engine-fluidsynth-build-vs-buy.md SS6 "B2", owner-approved
+# 2026-07-18). Must be entered BEFORE tinysoundfont: tinysoundfont's own
+# CMakeLists.txt links against the `stb_vorbis` target defined here.
+add_subdirectory(stb_vorbis)
+
 # TinySoundFont + miniaudio: melodd's first-slice audio dependency (D43/
 # `0800`, owner-approved 2026-07-13). Single-header, permissive license, see
 # each library's own ARRGRR_VENDOR.md.

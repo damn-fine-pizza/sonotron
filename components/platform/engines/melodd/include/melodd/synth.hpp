@@ -95,10 +95,10 @@ class Synth {
   // tsf_channel_get_pitchwheel), added solely so melodd::dispatch_midi_message
   // 's program_change routing and pitch_bend's exact 14-bit LSB/MSB assembly
   // can be pinned deterministically by a unit test without rendering/DSP
-  // heuristics. No production call site uses these; flagged to Nazzareno per
+  // heuristics. No production call site uses these; flagged to Giotto per
   // QA policy as a minimal, behavior-preserving accessor (request, not a
   // silent addition) -- see components/platform/engines/melodd/tests/test_dispatch.cpp.
-  // Blessed (Nazzareno): const, zero-logic, no side effect -- fits the
+  // Blessed (Giotto): const, zero-logic, no side effect -- fits the
   // accessor exception cleanly; kept as-is.
   int debug_program(int channel) const;
   int debug_pitch_wheel(int channel) const;

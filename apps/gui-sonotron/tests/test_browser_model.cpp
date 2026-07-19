@@ -6,8 +6,18 @@
 
 #include "test.hpp"
 
+#include <array>
+#include <optional>
+#include <string>
+
+using sonotron::browser_category_label;
+using sonotron::BrowserCategory;
 using sonotron::BrowserModel;
+using sonotron::kBrowserCategoryCount;
+using sonotron::kBuiltinStyleFamilies;
 using sonotron::kBuiltinStyleNames;
+using sonotron::style_family_label;
+using sonotron::StyleFamily;
 
 namespace {
 
@@ -56,6 +66,300 @@ void test_search_filter_no_match() {
   }
 }
 
+// task #30: style_family() returns the hand-classified family for a handful
+// of representative indices, spanning every branch of the fallback logic
+// (kOther for the generic "basic" default, real families for the rest).
+void test_style_family_returns_expected_family_for_representative_indices() {
+  BrowserModel model;
+  CHECK(model.style_family(0) == StyleFamily::kOther);           // basic
+  CHECK(model.style_family(4) == StyleFamily::kFunkGroove);      // funk
+  CHECK(model.style_family(8) == StyleFamily::kLatinClave);      // bossa
+  CHECK(model.style_family(11) == StyleFamily::kPopRockBallad);  // country
+}
+
+// task #30: every one of the 8 family enumerators has a real, non-empty
+// label -- kOther is not decorative, so it must label itself honestly too.
+void test_style_family_label_is_non_empty_for_every_enumerator() {
+  constexpr std::array<StyleFamily, 8> kAllFamilies = {
+      StyleFamily::kPopRockBallad, StyleFamily::kDanceFourOnFloor,
+      StyleFamily::kFunkGroove,    StyleFamily::kSwingShuffleJazz,
+      StyleFamily::kLatinClave,    StyleFamily::kBallroomTraditional,
+      StyleFamily::kWorldRegional, StyleFamily::kOther,
+  };
+  for (const StyleFamily family : kAllFamilies) {
+    CHECK(!style_family_label(family).empty());
+  }
+}
+
+// task #30: setting a family filter narrows style_matches_filter to exactly
+// that family's members -- enumerate all 16 built-ins and partition by
+// their hand-authored kBuiltinStyleFamilies membership (kBuiltinStyleFamilies
+// is read directly here, not re-derived, so this test breaks loudly if the
+// classification table above is ever edited without updating this check).
+void test_family_filter_narrows_to_exactly_that_family() {
+  BrowserModel model;
+  model.set_family_filter(StyleFamily::kLatinClave);
+  CHECK(model.family_filter().has_value());
+  CHECK(*model.family_filter() == StyleFamily::kLatinClave);
+  for (std::size_t i = 0; i < model.style_count(); ++i) {
+    const bool expected = kBuiltinStyleFamilies[i] == StyleFamily::kLatinClave;
+    CHECK(model.style_matches_filter(i) == expected);
+  }
+  // Explicit spot-check of the family's real members (bossa/samba/reggae/
+  // latin) vs a few non-members (pop/basic/funk), matching the doc's own
+  // family table (docs/proposals/style-browser-corpus-scale.md §2.1).
+  CHECK(model.style_matches_filter(8));   // bossa
+  CHECK(model.style_matches_filter(9));   // samba
+  CHECK(model.style_matches_filter(10));  // reggae
+  CHECK(model.style_matches_filter(14));  // latin
+  CHECK(!model.style_matches_filter(1));  // pop
+  CHECK(!model.style_matches_filter(0));  // basic
+  CHECK(!model.style_matches_filter(4));  // funk
+}
+
+// task #30: family filter AND text filter narrow FURTHER than either alone
+// -- the exact scenario browser_model.hpp's label-collision note exists to
+// keep correct. kPopRockBallad's siblings are pop/rock/ballad/country/
+// motown; text="roc" must match ONLY "rock", never any of its siblings,
+// which it would if the family's own label spelled out "Rock" (it doesn't --
+// "Pop / Ballad", not "Pop / Rock / Ballad").
+void test_family_filter_and_text_filter_combine_and_narrow_further() {
+  BrowserModel model;
+  model.set_family_filter(StyleFamily::kPopRockBallad);
+  model.set_search_filter("roc");
+  CHECK(model.style_matches_filter(2));    // rock
+  CHECK(!model.style_matches_filter(1));   // pop
+  CHECK(!model.style_matches_filter(3));   // ballad
+  CHECK(!model.style_matches_filter(11));  // country
+  CHECK(!model.style_matches_filter(15));  // motown
+  // A style matching the text but NOT the family is still excluded (family
+  // AND text, not OR): no other family happens to contain "roc" among the
+  // 16, so this only re-confirms the AND combination rather than adding a
+  // new positive case, but it is asserted explicitly for clarity.
+  for (std::size_t i = 0; i < model.style_count(); ++i) {
+    const bool in_family = kBuiltinStyleFamilies[i] == StyleFamily::kPopRockBallad;
+    const bool name_has_roc = std::string(model.style_name(i)).find("roc") != std::string::npos;
+    CHECK(model.style_matches_filter(i) == (in_family && name_has_roc));
+  }
+}
+
+// task #30: clearing the family filter back to nullopt restores full-family
+// visibility, still subject to whatever text filter remains active.
+void test_clearing_family_filter_restores_full_visibility_under_text_filter() {
+  BrowserModel model;
+  model.set_family_filter(StyleFamily::kLatinClave);
+  model.set_search_filter("bossa");
+  CHECK(model.style_matches_filter(8));   // bossa: in-family, text matches
+  CHECK(!model.style_matches_filter(9));  // samba: in-family, text doesn't match
+
+  model.set_family_filter(std::nullopt);
+  CHECK(!model.family_filter().has_value());
+  // Text filter "bossa" alone still narrows to just "bossa" -- family no
+  // longer restricts anything.
+  CHECK(model.style_matches_filter(8));   // bossa
+  CHECK(!model.style_matches_filter(9));  // samba
+  CHECK(!model.style_matches_filter(1));  // pop
+
+  model.set_search_filter("");
+  // Both filters cleared: every style visible again, exactly like the
+  // pre-existing "empty matches everything" behavior.
+  for (std::size_t i = 0; i < model.style_count(); ++i) {
+    CHECK(model.style_matches_filter(i));
+  }
+}
+
+// browser-redesign-taxonomy.md Phase 1: the outer category selector defaults
+// to Styles, and round-trips through set_category for at least two other
+// enumerators.
+void test_default_category_is_styles() {
+  BrowserModel model;
+  CHECK(model.category() == BrowserCategory::kStyles);
+}
+
+void test_set_category_round_trips() {
+  BrowserModel model;
+  model.set_category(BrowserCategory::kVoices);
+  CHECK(model.category() == BrowserCategory::kVoices);
+  model.set_category(BrowserCategory::kKits);
+  CHECK(model.category() == BrowserCategory::kKits);
+}
+
+// Toggle-label bar (browser-redesign-taxonomy.md Phase 1): only Styles is
+// visible by default, matching m_category_visible's own array literal.
+void test_default_visibility_only_styles_visible() {
+  BrowserModel model;
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+  CHECK(!model.category_visible(BrowserCategory::kVariations));
+  CHECK(!model.category_visible(BrowserCategory::kVoices));
+  CHECK(!model.category_visible(BrowserCategory::kKits));
+  CHECK(!model.category_visible(BrowserCategory::kClips));
+}
+
+void test_set_category_visible_toggles_independently() {
+  BrowserModel model;
+  model.set_category_visible(BrowserCategory::kVoices, true);
+  CHECK(model.category_visible(BrowserCategory::kVoices));
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+
+  model.set_category_visible(BrowserCategory::kVoices, false);
+  CHECK(!model.category_visible(BrowserCategory::kVoices));
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+}
+
+// Multiple categories can be toggled visible simultaneously (the whole point
+// of the toggle-bar redesign over the old single-select combo).
+void test_multiple_categories_can_be_visible_simultaneously() {
+  BrowserModel model;
+  model.set_category_visible(BrowserCategory::kKits, true);
+  CHECK(model.category_visible(BrowserCategory::kStyles));
+  CHECK(model.category_visible(BrowserCategory::kKits));
+}
+
+// filter_for() reads a SPECIFIC category's own slot regardless of which
+// category is currently "active" -- proves the isolation survives through
+// the new accessor, not just through search_filter().
+void test_filter_for_returns_independent_per_category_filter() {
+  BrowserModel model;
+  model.set_category(BrowserCategory::kStyles);
+  model.set_search_filter("abc");
+  model.set_category(BrowserCategory::kVoices);
+  model.set_search_filter("xyz");
+  CHECK(model.filter_for(BrowserCategory::kStyles) == "abc");
+  CHECK(model.filter_for(BrowserCategory::kVoices) == "xyz");
+}
+
+// browser_category_label: non-empty, distinct label for every enumerator
+// (mirroring test_style_family_label_is_non_empty_for_every_enumerator).
+void test_browser_category_label_is_non_empty_for_every_enumerator() {
+  constexpr std::array<BrowserCategory, kBrowserCategoryCount> kAllCategories = {
+      BrowserCategory::kStyles, BrowserCategory::kVariations, BrowserCategory::kVoices,
+      BrowserCategory::kKits,   BrowserCategory::kClips,
+  };
+  for (const BrowserCategory category : kAllCategories) {
+    CHECK(!browser_category_label(category).empty());
+  }
+}
+
+// The 128 canonical GM voice names, hand-copied from gm_program.cpp -- a
+// handful of representative indices, spanning the array's start/end/middle.
+void test_voice_count_and_names() {
+  BrowserModel model;
+  CHECK(model.voice_count() == 128);
+  CHECK(model.voice_name(0) == "Acoustic Grand Piano");
+  CHECK(model.voice_name(127) == "Gunshot");
+  CHECK(model.voice_name(56) == "Trumpet");
+}
+
+// browser-redesign-taxonomy.md §3: "search is per-active-tab, never a global
+// cross-family search" -- the single most important new test in this slice.
+void test_search_filter_is_isolated_per_category() {
+  BrowserModel model;
+  CHECK(model.category() == BrowserCategory::kStyles);
+  model.set_search_filter("fun");
+  CHECK(model.search_filter() == "fun");
+
+  model.set_category(BrowserCategory::kVoices);
+  // A fresh, separate slot: switching category must NOT carry over the
+  // Styles filter text.
+  CHECK(model.search_filter().empty());
+  model.set_search_filter("trumpet");
+  CHECK(model.search_filter() == "trumpet");
+
+  model.set_category(BrowserCategory::kStyles);
+  // The original Styles filter is still there, unchanged by the Voices
+  // filter that was set in between.
+  CHECK(model.search_filter() == "fun");
+}
+
+void test_voice_destination_defaults() {
+  BrowserModel model;
+  CHECK(model.voice_port() == "out0");
+  CHECK(model.voice_channel() == 1);
+}
+
+void test_set_voice_channel_clamps_to_one_sixteen() {
+  BrowserModel model;
+  model.set_voice_channel(0);
+  CHECK(model.voice_channel() == 1);
+  model.set_voice_channel(99);
+  CHECK(model.voice_channel() == 16);
+  model.set_voice_channel(7);
+  CHECK(model.voice_channel() == 7);
+}
+
+void test_set_voice_port_empty_resets_to_default() {
+  BrowserModel model;
+  model.set_voice_port("synth");
+  CHECK(model.voice_port() == "synth");
+  model.set_voice_port("");
+  CHECK(model.voice_port() == "out0");
+}
+
+void test_last_voice_sent_defaults_and_round_trips() {
+  BrowserModel model;
+  CHECK(model.last_voice_sent() == -1);
+  model.set_last_voice_sent(56);
+  CHECK(model.last_voice_sent() == 56);
+}
+
+void test_build_program_verb_uses_current_destination() {
+  BrowserModel model;
+  CHECK(model.build_program_verb("Trumpet") == "program out0:1 Trumpet");
+
+  model.set_voice_port("synth");
+  model.set_voice_channel(3);
+  CHECK(model.build_program_verb("Acoustic Grand Piano") == "program synth:3 Acoustic Grand Piano");
+}
+
+void test_kit_count_and_names() {
+  BrowserModel model;
+  CHECK(model.kit_count() == 9);
+  CHECK(model.kit_name(0) == "Standard Kit");
+  CHECK(model.kit_name(8) == "SFX Kit");
+  CHECK(model.kit_name(4) == "TR-808 Kit");
+}
+
+void test_kit_destination_defaults() {
+  BrowserModel model;
+  CHECK(model.kit_port() == "out0");
+  CHECK(model.kit_channel() == 10);
+}
+
+void test_set_kit_channel_clamps_to_one_sixteen() {
+  BrowserModel model;
+  model.set_kit_channel(0);
+  CHECK(model.kit_channel() == 1);
+  model.set_kit_channel(99);
+  CHECK(model.kit_channel() == 16);
+  model.set_kit_channel(7);
+  CHECK(model.kit_channel() == 7);
+}
+
+void test_set_kit_port_empty_resets_to_default() {
+  BrowserModel model;
+  model.set_kit_port("synth");
+  CHECK(model.kit_port() == "synth");
+  model.set_kit_port("");
+  CHECK(model.kit_port() == "out0");
+}
+
+void test_last_kit_sent_defaults_and_round_trips() {
+  BrowserModel model;
+  CHECK(model.last_kit_sent() == -1);
+  model.set_last_kit_sent(4);
+  CHECK(model.last_kit_sent() == 4);
+}
+
+void test_build_kit_verb_uses_current_destination() {
+  BrowserModel model;
+  CHECK(model.build_kit_verb(0) == "program out0:10 0");   // Standard Kit
+  CHECK(model.build_kit_verb(4) == "program out0:10 25");  // TR-808 Kit
+
+  model.set_kit_port("synth");
+  model.set_kit_channel(11);
+  CHECK(model.build_kit_verb(8) == "program synth:11 56");  // SFX Kit
+}
+
 }  // namespace
 
 int main() {
@@ -64,5 +368,30 @@ int main() {
   test_search_filter_empty_matches_everything();
   test_search_filter_is_case_insensitive_substring();
   test_search_filter_no_match();
+  test_style_family_returns_expected_family_for_representative_indices();
+  test_style_family_label_is_non_empty_for_every_enumerator();
+  test_family_filter_narrows_to_exactly_that_family();
+  test_family_filter_and_text_filter_combine_and_narrow_further();
+  test_clearing_family_filter_restores_full_visibility_under_text_filter();
+  test_default_category_is_styles();
+  test_set_category_round_trips();
+  test_default_visibility_only_styles_visible();
+  test_set_category_visible_toggles_independently();
+  test_multiple_categories_can_be_visible_simultaneously();
+  test_filter_for_returns_independent_per_category_filter();
+  test_browser_category_label_is_non_empty_for_every_enumerator();
+  test_voice_count_and_names();
+  test_search_filter_is_isolated_per_category();
+  test_voice_destination_defaults();
+  test_set_voice_channel_clamps_to_one_sixteen();
+  test_set_voice_port_empty_resets_to_default();
+  test_last_voice_sent_defaults_and_round_trips();
+  test_build_program_verb_uses_current_destination();
+  test_kit_count_and_names();
+  test_kit_destination_defaults();
+  test_set_kit_channel_clamps_to_one_sixteen();
+  test_set_kit_port_empty_resets_to_default();
+  test_last_kit_sent_defaults_and_round_trips();
+  test_build_kit_verb_uses_current_destination();
   return sonotron::test::failures();
 }

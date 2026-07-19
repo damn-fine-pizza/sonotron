@@ -26,10 +26,21 @@ namespace sonotron {
 // the equally-real content-registration path below.
 inline constexpr bool kGridLaunchWired = true;
 
-enum class GridCellKind : std::uint8_t { kEmpty, kStyleSection, kChordSequence, kStepTrack };
+// kLoopBuffer (Phase 7, node 6000, the Looper -- docs/proposals/looper-in-
+// gui-contract.md §7 item 7) mirrors the core's own arrangrr::ContentKind
+// (clip_matrix.hpp:31-41), which has this fifth value in the SAME position;
+// a fifth GridCellKind value gives a recorded loop somewhere to live in
+// GridModel's own type for the first time.
+enum class GridCellKind : std::uint8_t {
+  kEmpty,
+  kStyleSection,
+  kChordSequence,
+  kStepTrack,
+  kLoopBuffer,
+};
 
 // One cell of the matrix: a part row x scene column, holding one of the
-// three material kinds the browser offers (§5), or empty. `label` is display
+// four material kinds the browser offers (§5), or empty. `label` is display
 // text only (e.g. a style name) -- the GUI's own display copy, kept
 // independent of whatever the core's ClipMatrix stores for the same cell
 // (repeat-zone-real-contract.md §3: a browser-dropped style DOES now
@@ -40,6 +51,20 @@ enum class GridCellKind : std::uint8_t { kEmpty, kStyleSection, kChordSequence, 
 struct GridCell {
   GridCellKind kind = GridCellKind::kEmpty;
   std::string label;
+  // Meaningful only when `kind == GridCellKind::kLoopBuffer`: the LoopBuffer
+  // slot id (arrangrr/loop/loop_buffer.hpp) this cell's recorded loop lives
+  // in, core-side -- the note-level peer of what `label` already is for a
+  // style-section cell. -1 = none, mirroring LoopBuffer's own "-1 = no
+  // shadow" sentinel convention (loop_buffer.hpp's m_shadow_slot) for a
+  // consistent "no value" idiom across this boundary.
+  int loop_slot_id = -1;
+  // Meaningful only when `kind == GridCellKind::kStepTrack` (roadmap node
+  // 11600/11610, task #11 Phase 1): the index into SeqEditModel's own
+  // StepPatternStore (step_pattern_model.hpp) this cell's step-track pattern
+  // lives in -- the host-side mirror of what ClipMatrix::Clip::content_index
+  // means core-side for a ContentKind::kStepTrack clip. -1 = none, same
+  // sentinel convention as loop_slot_id above.
+  int step_track_index = -1;
 };
 
 // Rows are the 9 TrackRole parts (track_roles.hpp); columns are scenes. Real
@@ -62,8 +87,12 @@ class GridModel {
   std::string_view part_label(std::size_t part_index) const;
 
   const GridCell& cell(std::size_t part_index, std::size_t scene_index) const;
+  // `loop_slot_id` defaults to -1 (none); a caller registering a
+  // GridCellKind::kLoopBuffer cell passes the LoopBuffer slot id explicitly.
+  // Passing it for any other `kind` is harmless (it is simply ignored by
+  // every reader that checks `kind` first) but not meaningful.
   void set_cell(std::size_t part_index, std::size_t scene_index, GridCellKind kind,
-                std::string label);
+                std::string label, int loop_slot_id = -1, int step_track_index = -1);
   void clear_cell(std::size_t part_index, std::size_t scene_index);
 
   // Adds one more scene column (the "+" affordance in the §3 wireframe's
@@ -104,6 +133,154 @@ class GridModel {
   std::uint8_t scene_section(std::size_t scene_index) const;
   void set_scene_section(std::size_t scene_index, std::uint8_t section);
 
+  // Host-side per-scene LENGTH, in bars. Task #6 makes this the REAL,
+  // user-editable, authoritative per-scene length: the always-visible
+  // "- <bars> +" stepper in each scene-header column (grid_panel.cpp's
+  // render_scene_header_cell) reads and writes this field directly, and it
+  // now drives BOTH the auto-song advance decision AND the launch-cell
+  // playhead sweep (grid_panel.cpp's active_style_section_bars reads this
+  // field directly instead of the style's own section length -- see that
+  // function's own header comment for the full source-of-truth history).
+  // Every scene defaults to kDefaultSceneBars, so a fresh grid loops each
+  // column for a musically reasonable stretch before auto-song ever
+  // advances it, or before the user dials in their own length via the
+  // stepper. Bounds-checked exactly like scene_section above: an
+  // out-of-range `scene_index` is a no-op for the setter and returns
+  // kDefaultSceneBars from the getter. The setter clamps `bars` to
+  // [1, kMaxSceneBars]: a zero-or-negative scene length would make the
+  // auto-song "elapsed >= length" check trivially and permanently true (the
+  // same reasoning preview::section_bars' own header comment gives for why
+  // IT never returns <= 0 either); kMaxSceneBars is a sensible stepper
+  // ceiling for a compact header control, not a hard engine limit.
+  //
+  // Reserved for a future extension (memory: auto-song-playhead-and-
+  // repeats): a SEPARATE per-scene REPEAT COUNT (play K times, or infinite,
+  // before advancing) will hook in alongside this length, once that
+  // decision is made -- not implemented yet, and not to be conflated with
+  // the length stepper above.
+  static constexpr int kDefaultSceneBars = 8;
+  static constexpr int kMaxSceneBars = 8;
+  int scene_bars(std::size_t scene_index) const;
+  void set_scene_bars(std::size_t scene_index, int bars);
+
+  // Host-side per-scene REPEAT COUNT (task #5, docs/proposals/song-mode-
+  // scenechain-adoption.md's own "reserved for a future extension" note on
+  // scene_bars above -- this is that extension, Phase-1: host-only, ZERO ABI
+  // change). Every scene defaults to kDefaultSceneRepeat (1 -- "play once",
+  // the pre-existing behavior every populated column already had before this
+  // field existed), so a fresh grid behaves identically to before until the
+  // user dials in a repeat via the "- K +" stepper (grid_panel.cpp's
+  // render_scene_header_cell, below the existing bars stepper). Value
+  // semantics: 1 (kDefaultSceneRepeat) plays the scene once before auto-song
+  // advances past it; K in [2, kMaxSceneRepeat] repeats the scene K times;
+  // kSceneRepeatInfinite (one past kMaxSceneRepeat, a value no finite repeat
+  // count can ever collide with) holds the scene forever -- in_process_
+  // brain_session.cpp's apply_song_build reads this value (by way of the
+  // `song build` wire line's own repeat token, grid_panel.cpp's build_and_
+  // play_song) and truncates the rest of the built chain the instant it
+  // emits an infinite scene, since the core SceneChain's own "last step
+  // holds forever" semantic already gives the hold for free. Bounds-checked
+  // exactly like scene_bars above: an out-of-range `scene_index` is a no-op
+  // for the setter and returns kDefaultSceneRepeat from the getter. The
+  // setter clamps `repeat` to [1, kSceneRepeatInfinite] -- kSceneRepeatInfinite
+  // itself is a legal, settable value (stepping "+" past kMaxSceneRepeat
+  // lands there and shows "∞"; stepping "-" from there returns to
+  // kMaxSceneRepeat), matching kSceneRepeatInfinite's own "one past max"
+  // definition below.
+  static constexpr int kDefaultSceneRepeat = 1;
+  static constexpr int kMaxSceneRepeat = 8;
+  static constexpr int kSceneRepeatInfinite = kMaxSceneRepeat + 1;
+  // Cross-file capacity coupling (repeat-count Phase-2 hardening, docs/
+  // proposals/repeat-count-phase2-abi.md §1.4): kMaxSceneCount * kMaxSceneRepeat
+  // must never exceed the CORE's own kMaxScenes (components/core/arrangrr/
+  // include/arrangrr/config.hpp, currently 64) -- Phase-1's apply_song_build
+  // (in_process_brain_session.cpp) runs at exactly 100% of that budget by
+  // construction with zero headroom. This model class deliberately has no
+  // dependency on arrangrr/config.hpp (same GUI/core layering discipline
+  // in_process_brain_session.cpp's own kMaxSongScenes/kSongBuildRepeatInfinite
+  // comments already document for the wire-translation layer), so the core's
+  // value is mirrored here as a literal, commented constant rather than an
+  // #include -- config.hpp carries the matching static_assert on ITS side
+  // referencing THIS value by name/comment, so a bump to EITHER side's
+  // constants fails loudly at compile time instead of silently truncating
+  // songs.
+  static constexpr std::size_t kCoreMaxScenesMirror = 64;  // arrangrr::kMaxScenes
+  static_assert(kMaxSceneCount * static_cast<std::size_t>(kMaxSceneRepeat) <= kCoreMaxScenesMirror,
+                "GridModel::kMaxSceneCount * kMaxSceneRepeat must not exceed the core's "
+                "kMaxScenes (see arrangrr/config.hpp's own mirrored static_assert)");
+  int scene_repeat(std::size_t scene_index) const;
+  void set_scene_repeat(std::size_t scene_index, int repeat);
+
+  // Song-mode Phase 2 (docs/proposals/song-mode-scenechain-adoption.md): a
+  // scene column's own STYLE override. kNoStyleOverride (-1) means "inherit
+  // the base-captured Performance's style" (Phase 1's behavior, unchanged);
+  // any value >= 0 is a builtin style-table index the song-build seam will
+  // feed into that scene's own Performance::style_id. GridModel does not
+  // itself know the live style count (D38: no core/browser dependency), so
+  // the setter only floors at kNoStyleOverride -- it does not clamp an
+  // upper bound; an out-of-range index is the caller's own responsibility,
+  // same discipline scene_section's raw SectionType byte already keeps.
+  // Bounds-checked exactly like scene_bars/scene_repeat above: an
+  // out-of-range scene_index is a no-op for the setter and returns
+  // kNoStyleOverride from the getter.
+  static constexpr int kNoStyleOverride = -1;
+  int scene_style_id(std::size_t scene_index) const;
+  void set_scene_style_id(std::size_t scene_index, int style_id);
+
+  // Song-mode Phase 2: a scene column's own GROOVE override. Mirrors
+  // arrangrr::GrooveParams' six tunable fields as raw bytes (D38: GridModel
+  // has zero dependency on arrangrr/arranger/groove.hpp, same "hand-copied
+  // literal" discipline scene_section's SectionType byte already uses),
+  // defaulted to GrooveParams{}'s own defaults (all zero except swing_grid
+  // == 8). Gated by a SINGLE override flag rather than per-field sentinels:
+  // GrooveParams is one atomic block core-side (Arranger::set_groove takes
+  // the whole struct), and 0 is a musically valid value for swing/humanize/
+  // accent/quantize (0% == "no groove"), so no per-field value can serve as
+  // an unambiguous "inherit" sentinel the way kNoStyleOverride/-1 can for
+  // style_id. A scene either overrides ALL SIX fields together (has_override
+  // == true) or none (false, inherit the base rig's groove unchanged).
+  struct SceneGroove {
+    std::uint8_t swing = 0;
+    std::uint8_t humanize_timing = 0;
+    std::uint8_t humanize_velocity = 0;
+    std::uint8_t accent = 0;
+    std::uint8_t swing_grid = 8;
+    std::uint8_t quantize = 0;
+  };
+  bool scene_groove_override(std::size_t scene_index) const;
+  GridModel::SceneGroove scene_groove(std::size_t scene_index) const;
+  void set_scene_groove(std::size_t scene_index, bool has_override, SceneGroove groove);
+
+  // Song-mode Phase 2: a scene column's own KEY override (root pitch class
+  // 0..11 + arrangrr::Mode 0..6, mirrored here as raw bytes -- same D38
+  // discipline as SceneGroove above). Gated by a single override flag for
+  // the same reason as groove: 0 is a musically valid key_root (C) AND a
+  // valid key_mode (Major), so neither has an unambiguous "inherit" value;
+  // root and mode are always overridden together, never independently.
+  bool scene_key_override(std::size_t scene_index) const;
+  std::uint8_t scene_key_root(std::size_t scene_index) const;
+  std::uint8_t scene_key_mode(std::size_t scene_index) const;
+  void set_scene_key(std::size_t scene_index, bool has_override, std::uint8_t root,
+                     std::uint8_t mode);
+
+  // Song-mode Phase 2: a scene column's own TEMPO override, in the core's
+  // own tempo_x100 units (BPM * 100). kNoTempoOverride (0) means "inherit
+  // the base rig's tempo" -- 0 is never a real tempo (the core's own valid
+  // range starts at kMinBpmMirror below), so it is an unambiguous, always-
+  // out-of-domain sentinel, exactly like kNoStyleOverride is for style_id.
+  // The setter floors a non-positive value to kNoTempoOverride (clearing any
+  // override) and otherwise clamps to [kMinBpmMirror, kMaxBpmMirror] --
+  // these two constants mirror arrangrr's own kMinBpm/kMaxBpm
+  // (components/core/common/include/common/time.hpp) as literal values
+  // (D38: no core dependency here), so a bump to either side fails loudly
+  // only if someone remembers to grep for this comment -- there is no
+  // static_assert coupling possible across this deliberate boundary.
+  static constexpr int kNoTempoOverride = 0;
+  static constexpr int kMinBpmMirror = 2000;   // arrangrr::kMinBpm
+  static constexpr int kMaxBpmMirror = 40000;  // arrangrr::kMaxBpm
+  int scene_tempo_x100(std::size_t scene_index) const;
+  void set_scene_tempo_x100(std::size_t scene_index, int tempo_x100);
+
  private:
   std::size_t index_of(std::size_t part_index, std::size_t scene_index) const;
 
@@ -111,6 +288,15 @@ class GridModel {
   std::vector<GridCell> m_cells;  // row-major: part_index * m_scene_count + scene_index
   std::array<std::string, kMaxSceneCount> m_scene_names;
   std::array<std::uint8_t, kMaxSceneCount> m_scene_sections;
+  std::array<int, kMaxSceneCount> m_scene_bars;
+  std::array<int, kMaxSceneCount> m_scene_repeat;
+  std::array<int, kMaxSceneCount> m_scene_style_id;
+  std::array<bool, kMaxSceneCount> m_scene_groove_override;
+  std::array<SceneGroove, kMaxSceneCount> m_scene_groove;
+  std::array<bool, kMaxSceneCount> m_scene_key_override;
+  std::array<std::uint8_t, kMaxSceneCount> m_scene_key_root;
+  std::array<std::uint8_t, kMaxSceneCount> m_scene_key_mode;
+  std::array<int, kMaxSceneCount> m_scene_tempo_x100;
 };
 
 // Section-type wire-name table, numerically/spelling-IDENTICAL to
@@ -137,15 +323,32 @@ std::string_view section_wire_name(std::uint8_t section);
 // `auto_song` OFF or `playing` false means the active scene column just
 // loops in place (current, pre-auto-song behavior) -- nullopt (stay). ON +
 // playing, once `bars_elapsed_in_scene` reaches or passes
-// `active_scene_section_bars`, the next scene is
-// `(active_scene + 1) % scene_count` -- the song WRAPS around the scene
-// sequence rather than stopping at the last column. `active_scene` is
-// normalized modulo `scene_count` before advancing, so an out-of-range input
-// never indexes past the wrap. `scene_count <= 0` has no scene to wrap into,
-// so it is treated the same as "stay" (nullopt).
+// `active_scene_section_bars`, the next scene is `active_scene + 1` -- UNLESS
+// `active_scene` is already the LAST column, in which case the song HOLDS
+// there (nullopt) rather than wrapping back to 0 (song-form Option A, tasks
+// #27/#12: a non-wrapping song that ends on an Ending, matching SceneChain::
+// on_bar's own "last step holds, no implicit loop" precedent,
+// scene_chain.hpp:121-124/33-36). `active_scene` is normalized modulo
+// `scene_count` before advancing, so an out-of-range input never indexes out
+// of bounds. `scene_count <= 0` has no scene to advance into, so it is
+// treated the same as "stay" (nullopt).
 std::optional<int> next_scene_to_launch(bool auto_song, bool playing, int active_scene,
                                         int scene_count, int bars_elapsed_in_scene,
                                         int active_scene_section_bars);
+
+// Song-form Option A (tasks #27/#12): mirrors next_scene_to_launch's own
+// guard order EXACTLY (auto_song/playing/scene_count/bars_elapsed all
+// checked the same way), adding only the "and there is no next column"
+// refinement -- true precisely in the one case where next_scene_to_launch
+// would return nullopt because the ACTIVE section has genuinely finished
+// AND it is the last column (as opposed to nullopt for any of
+// next_scene_to_launch's OTHER reasons: auto_song off, not playing,
+// scene_count <= 0, or simply mid-scene/not yet at the boundary). The
+// caller (grid_panel.cpp's update_auto_song) uses this to decide whether to
+// cue the Ending instead of silently doing nothing when next_scene_to_
+// launch itself returns nullopt.
+bool auto_song_reached_song_end(bool auto_song, bool playing, int active_scene, int scene_count,
+                                int bars_elapsed_in_scene, int active_scene_section_bars);
 
 // Once-per-crossing guard for the auto-song advance check above: ImGui
 // re-evaluates every rendered frame, but the live bar (app_state.bar(),
@@ -156,5 +359,53 @@ std::optional<int> next_scene_to_launch(bool auto_song, bool playing, int active
 // distinct `current_bar` value; false on every other call until the bar
 // actually changes again.
 bool bar_just_advanced(int current_bar, int& last_checked_bar);
+
+// Beat-synchronized per-section PLAYHEAD phase (owner-locked: the launch-
+// cell sweep bar must fill 0->100% over the ACTIVE SCENE's own section
+// length, driven by the authoritative beat/bar/pulse -- NOT wall-clock time,
+// which is what the former neon::sweep_bar(..., fx.time, ...) call drove it
+// with, a fixed ~1.7s period with no relation to tempo or the section
+// boundary). Pure, side-effect-free, unit-testable -- mirrors next_scene_to_
+// launch()'s own "no ImGui, no I/O" discipline above.
+//
+// `current_bar`/`beat_num`/`pulse` mirror AppState::bar()/beat_num()/pulse()
+// exactly (`beat_num` 1-based, `pulse` 0..23 at 24 PPQN); `active_scene_
+// start_bar` mirrors UiState::active_scene_start_bar (the live bar the
+// active scene became active, grid_panel.cpp's update_auto_song); `beats_
+// per_bar` mirrors AppState::beats_per_bar(); `section_bars` mirrors
+// preview::section_bars(active_style, active_section).
+//
+// Returns a value in [0,1] once started, or the sentinel -1.0F ("no
+// playhead") when: not started (`current_bar <= 0`), `section_bars <= 0`,
+// `beats_per_bar <= 0`, or a bar REWIND (`current_bar < active_scene_start_
+// bar` -- a stop/restart cycle mid-scene, mirroring update_auto_song's own
+// bar-rewind guard: the anchor is stale until the caller re-arms/re-anchors
+// it, and a deeply negative phase would only read as a nonsensical playhead
+// jump, not an honest "no position yet").
+float section_playhead_phase(int current_bar, int active_scene_start_bar, int beat_num, int pulse,
+                             int beats_per_bar, int section_bars);
+
+// Repeat-local playhead anchor (owner task #3, docs/proposals/repeat-zone-
+// real-contract.md follow-up: auto-song now advances after a section has
+// played `kDefaultSectionRepeats` (grid_panel.cpp) whole times, not after one
+// pass -- but the owner locked "the playhead sweeps the SECTION" (see
+// section_playhead_phase's own header comment), and with multiple repeats
+// held per advance the honest reading of that lock is N separate 0->100%
+// sweeps, one per repeat, not a single slow sweep smeared across all of
+// them. This is the anchor half of that: given the bar the WHOLE hold began
+// (`scene_start_bar`) and the section's own real length in bars
+// (`repeat_length_bars`, preview::section_bars(style, section) -- the SAME
+// value the advance threshold is built from), returns the bar at which the
+// CURRENT repeat cycle began, so a caller can feed THAT (instead of
+// `scene_start_bar` itself) as section_playhead_phase's own `active_scene_
+// start_bar` argument and get a fresh sweep every repeat instead of one that
+// clamps to 1.0 partway through the hold and sits there.
+//
+// Degenerate inputs (a non-positive `repeat_length_bars`, or `current_bar`
+// already behind `scene_start_bar` -- a bar rewind mid-hold) fall back to
+// `scene_start_bar` verbatim: section_playhead_phase's own guards already
+// turn either case into the honest "no playhead" sentinel, so there is
+// nothing for this helper to usefully compute.
+int repeat_cycle_start_bar(int current_bar, int scene_start_bar, int repeat_length_bars);
 
 }  // namespace sonotron

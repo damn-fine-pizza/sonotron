@@ -80,7 +80,7 @@ bool migrate_performance_v1_to_v2(Span<const std::uint8_t> in, PerformanceStore&
                              static_cast<std::size_t>(count) * kPerformanceRecordWireSizeV1 +
                              sizeof(std::uint32_t);
   // EXACT length required (parity with arrangrr::perf::deserialize()'s own
-  // Nazzareno fix, Torquato QA finding): a strict `<` only rejected a
+  // Giotto fix, Torquato QA finding): a strict `<` only rejected a
   // too-SHORT buffer, silently accepting extra trailing bytes past a
   // perfectly valid v1 record (an interrupted resave or a file concatenation
   // would load as if nothing were wrong). Shell::perf_load hands this

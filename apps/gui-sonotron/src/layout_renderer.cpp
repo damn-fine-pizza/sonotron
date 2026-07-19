@@ -1,6 +1,7 @@
 #include "layout_renderer.hpp"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 
 #include "app_state.hpp"
@@ -14,13 +15,21 @@
 #include "theme.hpp"
 #include "transport_panel.hpp"
 
-// v02 workstation renderer (v02-workstation-spec.md). This replaces the old
-// JSON-fraction zone grid with the fixed 3-band v02 layout (transport rack
-// 58px / working row flex / sequence edit 172px). The `Layout` argument is
+// Neon workstation renderer (v02-workstation-spec.md). This replaces the old
+// JSON-fraction zone grid with a fixed 3-band layout (transport rack 58px /
+// working row flex / sequence edit, user-resizable). The `Layout` argument is
 // still accepted so main.cpp's call site, the JSON persistence, the window
-// title and the configurable font size are untouched -- but the v02 layout is
-// fixed by design, so the per-zone fractions are no longer consulted here.
-// layout_model.cpp / layout_json.cpp (and their tests) are unchanged.
+// title and the configurable font size are untouched -- but the band
+// arrangement itself is fixed by design, so the per-zone fractions are no
+// longer consulted here. layout_model.cpp / layout_json.cpp (and their
+// tests) are unchanged.
+//
+// Owner items #9/#10: the browser, rail and sequence-edit bands can each be
+// collapsed to a thin strip (freed space is reclaimed by their neighbor --
+// the hero grid for browser/rail, the working row for sequence edit), and
+// the sequence-edit band's height is user-draggable via a splitter instead
+// of a hard-pinned constant. See UiState's `*_collapsed` / `seqedit_height`
+// fields for the persisted-in-memory state.
 
 namespace sonotron {
 
@@ -28,20 +37,66 @@ namespace {
 
 constexpr float kBandGap = 8.0F;
 constexpr float kTransportH = 58.0F;
-constexpr float kSeqEditH = 172.0F;
 constexpr float kBrowserW = 210.0F;
 constexpr float kRailW = 288.0F;
+constexpr float kCollapsedStripW = 28.0F;
+constexpr float kCollapsedStripH = 28.0F;
+constexpr float kSplitterThickness = 6.0F;
+// Raised from 100 (owner bug: "Sequence Edit still doesn't show all
+// tracks") -- seqedit_panel.cpp now draws one lane per visible role instead
+// of overlaying every role into one shared rect, so a floor that only fit
+// ~1 lane made most roles invisible even though the model marked them
+// visible. 240 leaves room for a few lanes at the collapsed-to-min size;
+// the band is user-resizable (#10) and scrollable (seqedit_panel.cpp), so
+// this is a comfortable floor, not an attempt to fit every lane unscrolled.
+constexpr float kSeqEditMinH = 240.0F;
+constexpr float kMinWorkH = 120.0F;
 
 // Opens one rounded neon zone panel child; `scrolls` false pins it (fixed
 // content must not wheel-scroll the few pixels its padding overflows).
 void begin_zone(const char* id, const ImVec2& size, bool scrolls) {
-  ImGuiWindowFlags flags = scrolls ? ImGuiWindowFlags_None
-                                   : (ImGuiWindowFlags_NoScrollbar |
-                                      ImGuiWindowFlags_NoScrollWithMouse);
+  ImGuiWindowFlags flags =
+      scrolls ? ImGuiWindowFlags_None
+              : (ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::BeginChild(id, size, ImGuiChildFlags_Borders, flags);
 }
 
-void render_master_vu(const AppState& app_state, V02State& fx) {
+// Small caret toggle button ("collapse"/"expand" affordance, owner item #9)
+// drawn at the current cursor position; flips `collapsed` in place on click.
+// Shared by all three collapsible bands below. ASCII glyphs ("+"/"-") rather
+// than a Unicode caret, deliberately, to keep this a plain, low-risk affordance
+// for a first pass (owner: "don't over-engineer").
+void render_collapse_toggle(bool& collapsed, const char* id) {
+  ImGui::PushID(id);
+  if (ImGui::SmallButton(collapsed ? "+" : "-")) {
+    collapsed = !collapsed;
+  }
+  ImGui::PopID();
+}
+
+// Drag splitter for the Sequence Edit band (owner item #10): a thin,
+// full-width invisible-until-hovered strip directly above the band. Dragging
+// it adjusts fx.seqedit_height by the INVERSE of the vertical mouse delta,
+// because Sequence Edit sits at the BOTTOM of the layout -- dragging the
+// splitter UP (negative mouse delta.y) must GROW the band, dragging it DOWN
+// must SHRINK it. Clamped to [min_h, max_h] on every dragged frame so a fast
+// drag can never leave the band, or the working row above it, smaller than
+// their own floors.
+void render_seqedit_splitter(UiState& fx, float min_h, float max_h) {
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme::kBorderCyan);
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, theme::kCyan);
+  ImGui::Button("##seqedit_splitter", ImVec2(-FLT_MIN, kSplitterThickness));
+  if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+    fx.seqedit_height = std::clamp(fx.seqedit_height - ImGui::GetIO().MouseDelta.y, min_h, max_h);
+  }
+  if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+  }
+  ImGui::PopStyleColor(3);
+}
+
+void render_master_vu(const AppState& app_state, UiState& fx) {
   ImGui::Spacing();
   ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kInsetBg);
   ImGui::PushStyleColor(ImGuiCol_Border, theme::kBorderCyan);
@@ -58,8 +113,7 @@ void render_master_vu(const AppState& app_state, V02State& fx) {
     ImGui::TextColored(theme::kTextMuted, "  \xE2\x80\x94");
   }
   ImGui::Spacing();
-  neon::master_vu("vu", ImVec2(ImGui::GetContentRegionAvail().x, 22.0F), playing, fx.time,
-                  fx.glow);
+  neon::master_vu("vu", ImVec2(ImGui::GetContentRegionAvail().x, 22.0F), playing, fx.time, fx.glow);
   ImGui::EndChild();
   ImGui::PopStyleColor(2);
 }
@@ -76,8 +130,8 @@ void render_rail(WorkstationState& state) {
 }  // namespace
 
 void render_layout(const Layout& layout, WorkstationState& state) {
-  (void)layout;  // v02 layout is fixed by design; see the file header comment.
-  V02State& fx = state.fx;
+  (void)layout;  // layout is fixed by design; see the file header comment.
+  UiState& fx = state.fx;
   fx.time = static_cast<float>(ImGui::GetTime());
   fx.playing = state.app_state.transport() == AppState::Transport::kPlaying;
 
@@ -89,17 +143,49 @@ void render_layout(const Layout& layout, WorkstationState& state) {
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kBandGap, kBandGap));
 
   const ImVec2 avail = ImGui::GetContentRegionAvail();
-  const float work_h = std::max(120.0F, avail.y - kTransportH - kSeqEditH - 2.0F * kBandGap);
+
+  // Sequence Edit resizable height (item #10): re-clamp every frame in case
+  // the window shrank since the last drag, so a stale fx.seqedit_height can
+  // never starve the working row below kMinWorkH.
+  //
+  // Bug fix (owner-reported "scrolling scrolls the whole page"): the drag
+  // splitter (render_seqedit_splitter below) renders as a REAL stacked item
+  // -- kSplitterThickness of its own plus one more kBandGap ItemSpacing --
+  // whenever the band is not collapsed. The budget below used to only ever
+  // subtract 2 gaps (transport->row, row->seqedit), silently omitting the
+  // splitter's own footprint from both the max-height ceiling and work_h, so
+  // the three-plus stacked bands summed to ~14px MORE than `avail.y` and
+  // overflowed the root window -- which main.cpp's Begin("sonotron") flags
+  // then let the mouse wheel scroll into. `splitter_footprint` is reserved
+  // in BOTH `max_seqedit_h` (so a dragged-to-max band still leaves exactly
+  // kMinWorkH for the row above) and `work_h` (so the row's own share
+  // shrinks by the same amount), whichever branch is active, so the visible
+  // bands always sum to EXACTLY `avail.y`.
+  const float splitter_footprint = fx.seqedit_collapsed ? 0.0F : (kSplitterThickness + kBandGap);
+  const float max_seqedit_h = std::max(
+      kSeqEditMinH, avail.y - kTransportH - 3.0F * kBandGap - kSplitterThickness - kMinWorkH);
+  fx.seqedit_height = std::clamp(fx.seqedit_height, kSeqEditMinH, max_seqedit_h);
+  const float seqedit_h = fx.seqedit_collapsed ? kCollapsedStripH : fx.seqedit_height;
+
+  const float work_h =
+      std::max(kMinWorkH, avail.y - kTransportH - seqedit_h - 2.0F * kBandGap - splitter_footprint);
 
   // Band 1: transport rack.
   begin_zone("band_transport", ImVec2(0.0F, kTransportH), /*scrolls=*/false);
   render_transport_panel(state.app_state, state.brain_session, fx);
   ImGui::EndChild();
 
-  // Band 2: working row -- browser | hero | rail.
-  const float hero_w = std::max(200.0F, avail.x - kBrowserW - kRailW - 2.0F * kBandGap);
-  begin_zone("band_browser", ImVec2(kBrowserW, work_h), /*scrolls=*/false);
-  render_browser_panel(state.browser, state.brain_session, fx);
+  // Band 2: working row -- browser | hero | rail. Item #9: a collapsed side
+  // band shrinks to a thin strip and the hero grid reclaims the freed width.
+  const float browser_w = fx.browser_collapsed ? kCollapsedStripW : kBrowserW;
+  const float rail_w = fx.intention_collapsed ? kCollapsedStripW : kRailW;
+  const float hero_w = std::max(200.0F, avail.x - browser_w - rail_w - 2.0F * kBandGap);
+
+  begin_zone("band_browser", ImVec2(browser_w, work_h), /*scrolls=*/false);
+  render_collapse_toggle(fx.browser_collapsed, "browser_collapse");
+  if (!fx.browser_collapsed) {
+    render_browser_panel(state.browser, state.brain_session, state.app_state, fx);
+  }
   ImGui::EndChild();
 
   ImGui::SameLine(0.0F, kBandGap);
@@ -109,13 +195,24 @@ void render_layout(const Layout& layout, WorkstationState& state) {
   ImGui::EndChild();
 
   ImGui::SameLine(0.0F, kBandGap);
-  begin_zone("band_rail", ImVec2(kRailW, work_h), /*scrolls=*/true);
-  render_rail(state);
+  begin_zone("band_rail", ImVec2(rail_w, work_h), /*scrolls=*/!fx.intention_collapsed);
+  render_collapse_toggle(fx.intention_collapsed, "intention_collapse");
+  if (!fx.intention_collapsed) {
+    render_rail(state);
+  }
   ImGui::EndChild();
 
-  // Band 3: sequence edit.
-  begin_zone("band_seqedit", ImVec2(0.0F, kSeqEditH), /*scrolls=*/false);
-  render_seqedit_panel(state.seqedit, fx);
+  // Band 3: sequence edit. Item #10: a drag splitter atop the band adjusts
+  // fx.seqedit_height directly; item #9: collapsing shrinks it to a thin
+  // strip and the working row above reclaims the freed height.
+  if (!fx.seqedit_collapsed) {
+    render_seqedit_splitter(fx, kSeqEditMinH, max_seqedit_h);
+  }
+  begin_zone("band_seqedit", ImVec2(0.0F, seqedit_h), /*scrolls=*/false);
+  render_collapse_toggle(fx.seqedit_collapsed, "seqedit_collapse");
+  if (!fx.seqedit_collapsed) {
+    render_seqedit_panel(state.seqedit, fx, state.grid);
+  }
   ImGui::EndChild();
 
   ImGui::PopStyleVar();

@@ -290,7 +290,7 @@ void test_perf_capture_recall_round_trip_restores_everything() {
   b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
   CHECK(b.warns() == 0);
 
-  // style_id() now round-trips too (Nazzareno's fix, see the header comment
+  // style_id() now round-trips too (Giotto's fix, see the header comment
   // of Engine::apply_performance and the dedicated regression lock in
   // test_performance_style_id_regression.cpp -- was RED, now green).
   CHECK(b.e.arranger().style_id() == 0);
@@ -682,7 +682,7 @@ void test_perf_recall_bar_gate_lands_after_clip_promotion() {
   // The new rig (from the recall) is what's ACTUALLY in force for the
   // arranger from this bar on -- not left on "basic"/varB (what the clip
   // itself resolved against). style_id() is now safe to assert too
-  // (Nazzareno's fix, see test_performance_style_id_regression.cpp).
+  // (Giotto's fix, see test_performance_style_id_regression.cpp).
   CHECK(b.e.arranger().style_id() == 1);
   CHECK(b.e.arranger().current() == SectionType::kVarC);
 }
@@ -764,6 +764,33 @@ void test_perf_recall_confirmation_emits_time_sig_unconditionally_even_when_unch
   b.ev.clear();
   b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);  // a SECOND, identical recall
   CHECK(count_time_sig_events(b.ev) == 1);               // re-confirms again, every time
+}
+
+// The core-side counterpart of the GUI Song-mode Phase 2 end-to-end gap fix:
+// emit_performance_confirmation's tempo echo (engine.cpp) -- a Performance
+// recall must emit exactly one kParamState/kTransportTempo event carrying the
+// recalled tempo_x100 value, reassembled from the two payload bytes exactly
+// like every other 16-bit kParamState field (kStyleLoad's own split, this
+// file's helper above).
+void test_perf_recall_emits_transport_tempo_confirmation() {
+  Band b;
+  b.setup_basic();
+  Performance p = valid_performance();
+  p.tempo_x100 = 14075;  // distinctive: differs from valid_performance()'s own default (12000)
+  CHECK(b.e.performances().store(0, p));
+  b.ev.clear();
+  b.cmd(Param::kPerformanceRecall, 0, 0, 0, /*idx=*/0);
+  int n = 0;
+  std::uint16_t tempo_seen = 0;
+  for (const OutEvent& o : b.ev) {
+    if (o.kind == OutEvent::Kind::kParamState &&
+        o.code == static_cast<std::uint16_t>(Param::kTransportTempo)) {
+      ++n;
+      tempo_seen = static_cast<std::uint16_t>(o.msg.status | (o.msg.d1 << 8));
+    }
+  }
+  CHECK(n == 1);
+  CHECK(tempo_seen == 14075);
 }
 
 // kTimeSig is a change-announce, not a per-tick heartbeat (unlike kBeat) --
@@ -861,6 +888,7 @@ int main() {
   test_time_sig_event_not_emitted_on_style_reload_with_unchanged_meter();
   test_perf_recall_immediate_changes_time_sig_and_emits_event();
   test_perf_recall_confirmation_emits_time_sig_unconditionally_even_when_unchanged();
+  test_perf_recall_emits_transport_tempo_confirmation();
   test_time_sig_event_never_fires_on_ordinary_ticks();
   test_clip_launch_next_bar_quantizes_to_the_new_meter_after_recall();
   test_capture_performance_round_trips_live_beats_per_bar();

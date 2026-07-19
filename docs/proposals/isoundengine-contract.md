@@ -282,7 +282,7 @@ compiled (not necessarily linked into a running firmware image) on the
 turns "the seam is shaped so it can be promoted later" from a design intent
 into a CI-enforced fact from day one — consistent with how the rest of the
 core tree already operates. **SHIPPABLE, no dependency, small enough to be
-Nazzareno's, not a redesign.**
+Giotto's, not a redesign.**
 
 ---
 
@@ -430,7 +430,7 @@ What would ACTUALLY have to change, itemized:
 - Add the arm-smoke compile-only check for the interface header (§4) —
   small, cheap, makes "dual-target-ready" a CI fact instead of a promise.
 
-**Owner sign-off needed before Nazzareno executes:**
+**Owner sign-off needed before Giotto executes:**
 1. Reconcile this document's directory names against Palladio's
    `audio-engines-family-layout.md` (§7) — one naming scheme, not two.
 2. Resolve §6 item 6 (float-on-STM32-realtime-path vs. rule #6) — narrow the
@@ -439,7 +439,7 @@ What would ACTUALLY have to change, itemized:
 3. Confirm hot-swap-at-runtime (soundfont ↔ analog without restart) is
    explicitly OUT of scope for the first slice (§2) — if wanted, the
    ownership model changes (`unique_ptr<ISoundEngine>` + swap protocol)
-   and should be scoped before Nazzareno starts, not discovered mid-build.
+   and should be scoped before Giotto starts, not discovered mid-build.
 4. Confirm the `render_mutex()` exposure pattern (§2) as the sanctioned way
    a concrete engine's own config API serializes against `render()` —
    this is the one place `AudioBackend`'s surface grows beyond "device

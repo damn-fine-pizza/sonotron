@@ -3,7 +3,7 @@
 // COMBINED fan-out across MULTIPLE pending input notes (an earlier stage's
 // own fan-out) exceeds kMaxChainFan.
 //
-// FIXED by Nazzareno: the guard used to be an unconditionally-true assert
+// FIXED by Giotto: the guard used to be an unconditionally-true assert
 // condition (ARR_ASSERT(next_count < kMaxChainFan) reached only when
 // next_count == kMaxChainFan already, i.e. an unconditional trap/SIGILL --
 // this file originally pinned that crash and was EXPECTED to abort the

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 #include "imgui.h"
@@ -12,15 +13,19 @@ namespace sonotron {
 
 namespace {
 
-// A dark rounded inset "cluster" box (the v02 tempo / bar:beat readout
+// A dark rounded inset "cluster" box (the tempo / bar:beat readout
 // housings, spec §1) as an inline child so several sit side by side on the
 // rack's single row. Caller fills it with content, then calls end_inset().
-void begin_inset(const char* id, float width, float height) {
+// `content_width`, when >= 0, horizontally centers the upcoming content
+// (its rendered width, as measured by the caller via ImGui::CalcTextSize)
+// inside the inset instead of the default fixed 8px left inset padding.
+void begin_inset(const char* id, float width, float height, float content_width = -1.0F) {
   ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kInsetBg);
   ImGui::PushStyleColor(ImGuiCol_Border, theme::kBorderCyan);
   ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_Borders,
                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-  ImGui::SetCursorPos(ImVec2(8.0F, (height - ImGui::GetTextLineHeight()) * 0.5F));
+  const float x = content_width >= 0.0F ? std::max(0.0F, (width - content_width) * 0.5F) : 8.0F;
+  ImGui::SetCursorPos(ImVec2(x, (height - ImGui::GetTextLineHeight()) * 0.5F));
 }
 
 void end_inset() {
@@ -35,9 +40,43 @@ void divider() {
   ImGui::SameLine(0.0F, 8.0F);
 }
 
+// ENDING pad (roadmap task #37, docs/proposals/song-form-option-a-wiring-
+// plan.md §3/§4): a dedicated cue-then-stop control, matching the Yamaha/Korg
+// convention of a SEPARATE Ending button next to Stop (not a second Stop
+// press). While playing, clicking it sends the bare, bar-quantized `style
+// section ending1` verb ALONE -- never paired with `launch scene`, which
+// would force an immediate (non-quantized) switch and defeat the "next
+// measure" convention this button exists to match. The core's own one-shot
+// rule (Arranger::on_tick's section_is_ending branch) then stops the
+// transport once Ending1's own authored bars run out -- no new verb, no ABI
+// change. `fx.ending_cued` is set here so grid_panel.cpp's update_auto_song
+// can suppress its own advance until the transport is actually observed
+// stopped (see UiState::ending_cued's own comment). While stopped, the cue
+// is meaningless (nothing playing to end) -- the button is a no-op and
+// visually dimmed (muted accent instead of amber) rather than sending
+// anything. "END" is a plain ASCII label, not a glyph, since the vendored
+// mono font has no dedicated ending/flag glyph. Kept as its own small
+// function (mirroring begin_inset/end_inset/divider above) so the button's
+// own gating logic does not add to render_transport_panel's own cognitive
+// complexity.
+void render_ending_pad(BrainSession& brain_session, UiState& fx, bool playing) {
+  ImGui::SameLine(0.0F, 6.0F);
+  const ImVec2 ending_pad(46.0F, 34.0F);
+  const ImVec4& ending_accent = playing ? theme::kAmber : theme::kTextMuted;
+  if (neon::pad_button("ending", "END", ending_pad, ending_accent, /*filled=*/false, fx.glow) &&
+      playing) {
+    brain_session.send("style section ending1");
+    fx.ending_cued = true;
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip(playing ? "Ending -- cue Ending 1 at the next bar, then stop"
+                              : "Ending -- only meaningful while playing");
+  }
+}
+
 }  // namespace
 
-void render_transport_panel(AppState& app_state, BrainSession& brain_session, V02State& fx) {
+void render_transport_panel(AppState& app_state, BrainSession& brain_session, UiState& fx) {
   const bool playing = app_state.transport() == AppState::Transport::kPlaying;
   const float row_h = 40.0F;
   ImGui::SetCursorPosY(std::max(6.0F, (ImGui::GetContentRegionAvail().y - row_h) * 0.5F));
@@ -65,6 +104,7 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session, V0
   if (neon::pad_button("panic", "\xE2\x97\x89", pad, theme::kPink, /*filled=*/false, fx.glow)) {
     brain_session.send("panic");
   }
+  render_ending_pad(brain_session, fx, playing);
 
   // Tempo / meter / key / transpose inset. BPM + transpose are real sends on
   // nudge; the DISPLAYED bpm/transpose are local intent (no readback), and
@@ -124,29 +164,43 @@ void render_transport_panel(AppState& app_state, BrainSession& brain_session, V0
   }
 
   // bar:beat:pulse readout (REAL, from the kBeat heartbeat). "— : — : ··" when
-  // stopped / never positioned.
+  // stopped / never positioned. Horizontally centered in the inset: the
+  // content width is measured up front (same glyphs about to be drawn) so
+  // the SetCursorPos offset in begin_inset() lands the whole string in the
+  // middle of the pill instead of flush against the 8px left padding.
   ImGui::SameLine(0.0F, 10.0F);
-  begin_inset("beat_inset", 150.0F, row_h);
   if (app_state.bar() == 0) {
-    ImGui::TextColored(theme::kTextMuted, "\xE2\x80\x94 : \xE2\x80\x94 : \xC2\xB7\xC2\xB7");
+    static constexpr const char* kStoppedReadout = "\xE2\x80\x94 : \xE2\x80\x94 : \xC2\xB7\xC2\xB7";
+    begin_inset("beat_inset", 150.0F, row_h, ImGui::CalcTextSize(kStoppedReadout).x);
+    ImGui::TextColored(theme::kTextMuted, "%s", kStoppedReadout);
   } else {
-    theme::text_bold_colored(theme::kPink, "%03d", app_state.bar());
+    char bar_buf[8];
+    char beat_buf[8];
+    char pulse_buf[8];
+    std::snprintf(bar_buf, sizeof(bar_buf), "%03d", app_state.bar());
+    std::snprintf(beat_buf, sizeof(beat_buf), "%d", app_state.beat_num());
+    std::snprintf(pulse_buf, sizeof(pulse_buf), "%02d", app_state.pulse());
+    const float sep_w = ImGui::CalcTextSize(":").x;
+    const float content_width = ImGui::CalcTextSize(bar_buf).x + 3.0F + sep_w + 3.0F +
+                                ImGui::CalcTextSize(beat_buf).x + 3.0F + sep_w + 3.0F +
+                                ImGui::CalcTextSize(pulse_buf).x;
+    begin_inset("beat_inset", 150.0F, row_h, content_width);
+    theme::text_bold_colored(theme::kPink, "%s", bar_buf);
     ImGui::SameLine(0.0F, 3.0F);
     ImGui::TextColored(theme::kTextDim, ":");
     ImGui::SameLine(0.0F, 3.0F);
-    theme::text_bold_colored(theme::kText, "%d", app_state.beat_num());
+    theme::text_bold_colored(theme::kText, "%s", beat_buf);
     ImGui::SameLine(0.0F, 3.0F);
     ImGui::TextColored(theme::kTextDim, ":");
     ImGui::SameLine(0.0F, 3.0F);
-    ImGui::TextColored(theme::kTextMuted, "%02d", app_state.pulse());
+    ImGui::TextColored(theme::kTextMuted, "%s", pulse_buf);
   }
   end_inset();
 
   // Right-aligned: status dot + label, then the glow ⚙ toggle.
   const float right_w = 150.0F;
   ImGui::SameLine();
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),
-                                ImGui::GetContentRegionMax().x - right_w));
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - right_w));
 
   // Blinking status dot (blink gated on playing + glow), colored by transport.
   const ImVec4 dot_col = playing ? theme::kGreen : theme::kTextMuted;

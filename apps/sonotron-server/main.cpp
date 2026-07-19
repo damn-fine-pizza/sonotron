@@ -32,15 +32,17 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 
-#include "alsa_midi.hpp"
 #include "arrangrr/arranger/style.hpp"
 #include "common/time.hpp"
 #include "jsonl.hpp"
+#include "midi_hal.hpp"
 #include "param_state_wire.hpp"
 #include "shell.hpp"
 #include "uds_server.hpp"
+#include "version/version.hpp"
 
 namespace {
 
@@ -186,14 +188,15 @@ void send_state_dump(UdsServer& control, int client_fd, Shell& shell) {
 }
 
 // The live/headless loop: owns exactly what the Phase 2 brief keeps out of
-// the server library — AlsaMidi, the UdsServer control socket + wiring, the
-// tick-timer clock drive, and the poll() fan-in across ALSA + control fds.
+// the server library — the IMidiHal platform MIDI backend, the UdsServer
+// control socket + wiring, the tick-timer clock drive, and the poll() fan-in
+// across the MIDI backend's + control fds.
 // No stdin/REPL/TUI at all: this binary is driven ONLY by the control socket
 // (and by whatever MIDI arrives on its ALSA ports).
 int run_server(bool human, const char* control_path) {
-  AlsaMidi alsa;
+  const std::unique_ptr<IMidiHal> midi = make_midi_hal();
   std::string error;
-  if (!alsa.open(kAlsaClientName, error)) {
+  if (!midi->open(kAlsaClientName, error)) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 2;
   }
@@ -210,7 +213,7 @@ int run_server(bool human, const char* control_path) {
   Shell* shell_ref = nullptr;
   Shell shell([&](const OutEvent& ev) {
     if (ev.kind == OutEvent::Kind::kMidi) {
-      alsa.send(ev.port, ev.msg);
+      midi->send(ev.port, ev.msg);
     }
     const bool flats = shell_ref != nullptr && shell_ref->prefer_flats();
     const std::string line = human ? to_human(ev, flats) : to_jsonl(ev, flats);
@@ -244,7 +247,7 @@ int run_server(bool human, const char* control_path) {
   control.set_connect_handler([&](int client_fd) { send_state_dump(control, client_fd, shell); });
   shell.set_port_hook([&](const PortDef& def) {
     std::string port_error;
-    if (!alsa.create_port(def, port_error)) {
+    if (!midi->create_port(def, port_error)) {
       std::fprintf(stderr, "%s\n", port_error.c_str());
     }
   });
@@ -281,7 +284,17 @@ int run_server(bool human, const char* control_path) {
     fds[n].fd = tfd;
     fds[n].events = POLLIN;
     ++n;
-    n += alsa.fill_poll_fds(&fds[n], kMaxPollFds - n);
+    // IMidiHal reports its own descriptors through a portable MidiPollFd
+    // buffer (see midi_hal.hpp), never assuming `struct pollfd` layout --
+    // copy the entries it fills in into this function's own native array.
+    MidiPollFd midi_fds[kMaxPollFds];
+    const int midi_n = midi->fill_poll_fds(midi_fds, kMaxPollFds - n);
+    for (int i = 0; i < midi_n; ++i) {
+      fds[n + i].fd = midi_fds[i].fd;
+      fds[n + i].events = midi_fds[i].events;
+      fds[n + i].revents = 0;
+    }
+    n += midi_n;
 
     int control_start = -1;
     int control_client_count = 0;
@@ -309,19 +322,24 @@ int run_server(bool human, const char* control_path) {
     // Clock: harvest elapsed time into whole ticks.
     if (fds[0].revents & POLLIN) {
       std::uint64_t expirations = 0;
-      (void)read(tfd, &expirations, sizeof(expirations));
-      const std::uint64_t now_us = monotonic_us();
-      acc.set_bpm(shell.engine().transport().bpm());
-      const std::uint32_t ticks = acc.advance_us(now_us - last_us);
-      last_us = now_us;
-      if (ticks > 0) {
-        std::string tick_error;
-        shell.advance_by(ticks, tick_error);
+      const ssize_t n_read = read(tfd, &expirations, sizeof(expirations));
+      // timerfd is level-triggered: on a short read, -1 (EINTR/EAGAIN), or a
+      // spurious wakeup, just skip this iteration -- POLLIN will be set
+      // again on the next poll() as long as the timer has really expired.
+      if (n_read == static_cast<ssize_t>(sizeof(expirations))) {
+        const std::uint64_t now_us = monotonic_us();
+        acc.set_bpm(shell.engine().transport().bpm());
+        const std::uint32_t ticks = acc.advance_us(now_us - last_us);
+        last_us = now_us;
+        if (ticks > 0) {
+          std::string tick_error;
+          shell.advance_by(ticks, tick_error);
+        }
       }
     }
 
-    // MIDI input from ALSA.
-    alsa.drain_input([&](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
+    // MIDI input from the platform backend.
+    midi->drain_input([&](std::uint8_t port, const std::uint8_t* bytes, std::size_t len) {
       shell.feed_midi(port, Span<const std::uint8_t>(bytes, len));
     });
 
@@ -367,6 +385,10 @@ int main(int argc, char** argv) {
           "  headless backend: no TUI, no REPL -- driven by MIDI input and\n"
           "  the --control UDS socket only. See\n"
           "  docs/design/sonotron-server-phase2-brief.md.\n");
+      return 0;
+    } else if (std::strcmp(argv[i], "--version") == 0) {
+      std::printf("sonotron-server %s (%s)\n", sonotron::version::kVersionString,
+                  sonotron::version::kVersionFull);
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);

@@ -30,6 +30,14 @@ std::string format_log_line(const BrainEvent& ev) {
              std::to_string(ev.beat_pulse);
     case BrainEvent::Kind::kClip:
       return "clip " + std::to_string(ev.clip_id) + " " + ev.clip_state;
+    case BrainEvent::Kind::kLoop:
+      return "loop " + std::to_string(ev.loop_slot_id) + " " + ev.loop_event_kind;
+    case BrainEvent::Kind::kTimeSig:
+      return "time-sig " + std::to_string(ev.time_sig_beats_per_bar) + "/4";
+    case BrainEvent::Kind::kParamState:
+      return "param-state id=" + std::to_string(ev.param_id) +
+             " sub=" + std::to_string(ev.param_sub) + " v0=" + std::to_string(ev.param_v0) +
+             " v1=" + std::to_string(ev.param_v1);
     case BrainEvent::Kind::kUnknown:
     default:
       return "unknown/malformed event";
@@ -117,13 +125,33 @@ void AppState::apply(const BrainEvent& ev) {
       // Real per-cell readback (repeat-zone-real-contract.md §3): the ONLY
       // consumer of this event was a log line before this fix -- grid_panel.cpp
       // now reads playing/armed/queued-stop state off this map instead of a
-      // local click-time echo (V02State's former row_playing).
+      // local click-time echo (UiState's former row_playing).
       m_clip_states[ev.clip_id] = parse_clip_launch_state(ev.clip_state);
+      break;
+    case BrainEvent::Kind::kTimeSig:
+      // The Repeat-Zone beat-synchronized playhead (grid_model.hpp's
+      // section_playhead_phase) needs the REAL beats_per_bar, not the
+      // hand-copied 4/4 default -- guarded > 0 so a malformed/zero announce
+      // can never leave the playhead dividing by zero downstream.
+      if (ev.time_sig_beats_per_bar > 0) {
+        m_beats_per_bar = ev.time_sig_beats_per_bar;
+      }
       break;
     case BrainEvent::Kind::kMidiOut:
     case BrainEvent::Kind::kWarn:
     case BrainEvent::Kind::kError:
     case BrainEvent::Kind::kUnknown:
+    // Phase 7 (node 6000, the Looper -- item 9): decoded honestly above
+    // (no longer misread as a warning), but AppState has no per-slot loop
+    // recording-state view yet -- that is item 10/11's GUI panel work, a
+    // later slice. Logged above; no view-state change here yet.
+    case BrainEvent::Kind::kLoop:
+    // Song-mode Phase 2 live-readback gap closure: decoded generically above
+    // (brain_event_from_outevent.cpp), but AppState has no per-Param view-
+    // state mirror yet -- rendering a decoded value in a live panel is
+    // explicitly out of this slice's scope (a consumer that cares reads the
+    // BrainEvent's own param_id/param_sub/param_v0/param_v1 fields directly).
+    case BrainEvent::Kind::kParamState:
       break;  // logged above, no other view-state change
   }
 }

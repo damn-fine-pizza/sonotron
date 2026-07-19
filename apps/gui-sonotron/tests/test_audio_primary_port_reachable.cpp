@@ -1,4 +1,4 @@
-// Reachability test (Nazzareno, closing Torquato's RED-by-design QA pin --
+// Reachability test (Giotto, closing Torquato's RED-by-design QA pin --
 // docs/phase6-design-reviews.md "Audio in the standalone GUI"). Formerly
 // test_audio_primary_port_unreachable.cpp / EXPECTED TO FAIL: Torquato's QA
 // pass found that a fresh InProcessBrainSession had NO reachable way to make

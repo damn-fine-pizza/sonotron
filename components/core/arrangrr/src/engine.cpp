@@ -966,7 +966,15 @@ void Engine::cmd_scene(const Command& cmd, EventSink sink) {
 // Host/script-only registration (mirrors kLoopNew/kClipAdd's own convention:
 // no return-value echo, the host tracks the sequential id). a =
 // performance_slot; b = n_bars (low byte, 0 clamps to 1) | (beats_per_bar <<
-// 8) (high byte, 0 = default 4/4); c = SceneTransitionKind.
+// 8) (high byte, 0 = default 4/4); c = SceneTransitionKind; idx = repeat_count
+// (repeat-count Phase-2, docs/proposals/repeat-count-phase2-abi.md §4) --
+// `cmd.idx` was genuinely unread by this function before (confirmed by
+// direct inspection, §1.3), so this rides the EXISTING Command shape with
+// zero struct growth. 0 (unset, every pre-existing scene_add call) clamps to
+// 1 -- byte-identical default: play once, no repeat lap ever fires. Values
+// above 255 clamp down to 255, which happens to coincide with
+// kSceneRepeatInfinite -- "hold forever" is exactly what an unbounded repeat
+// request degrades to.
 void Engine::scene_add(const Command& cmd, EventSink sink) {
   if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPerformances) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
@@ -989,6 +997,13 @@ void Engine::scene_add(const Command& cmd, EventSink sink) {
   step.n_bars = n_bars == 0 ? std::uint8_t{1} : n_bars;
   step.time_sig.beats_per_bar = beats_per_bar;
   step.transition = static_cast<SceneTransitionKind>(cmd.c);
+  if (cmd.idx == 0) {
+    step.repeat_count = 1;
+  } else if (cmd.idx > 255) {
+    step.repeat_count = 255;
+  } else {
+    step.repeat_count = static_cast<std::uint8_t>(cmd.idx);
+  }
   if (!m_scene_chain.add_scene(step)) {
     sink(OutEvent::warn(WarnCode::kSceneTableFull, m_now));
   }
@@ -1034,7 +1049,12 @@ void Engine::scene_stop(const Command& cmd, EventSink sink) {
 void Engine::apply_scene_transition(std::size_t step_index, const SceneStep& step, EventSink sink) {
   (void)step_index;
   if (const Performance* perf = m_perfs.get(step.performance_slot); perf != nullptr) {
-    apply_performance(*perf, sink);
+    // Phase 7 (SceneChain live-transition fix): thread the step's own
+    // n_bars through as apply_performance's `scene_hold_bars` -- the ONE
+    // signal that tells it this section switch is SceneChain-driven, so the
+    // scene's own committed hold length (not the style's authored bars)
+    // governs the section's phase/length (Arranger::request_scene).
+    apply_performance(*perf, sink, step.n_bars);
   }
   const std::uint8_t before = m_transport.time_sig().beats_per_bar;
   if (step.time_sig.beats_per_bar != before &&
@@ -1050,7 +1070,10 @@ void Engine::apply_scene_transition(std::size_t step_index, const SceneStep& ste
 // !m_playing).
 void Engine::fire_scene(EventSink sink) {
   m_scene_chain.on_bar(
-      [&](std::size_t idx, const SceneStep& step) { apply_scene_transition(idx, step, sink); });
+      [&](std::size_t idx, const SceneStep& step) { apply_scene_transition(idx, step, sink); },
+      [&](std::size_t idx, std::uint8_t lap, std::uint8_t repeat_count) {
+        sink(OutEvent::scene_lap(static_cast<std::uint16_t>(idx), lap, repeat_count, m_now));
+      });
 }
 
 // Feeds a captured live note-on/off into the LoopBuffer (Engine::
@@ -1747,8 +1770,13 @@ bool Engine::validate_performance(const Performance& perf) const noexcept {
 // apply_pending_performance_recall exactly at the bar boundary the
 // BoundaryLatch armed for -- either way `true` (immediate, Arranger-side) is
 // always correct here: by the time this runs, the caller is already AT the
-// boundary that matters.
-bool Engine::apply_performance(const Performance& perf, EventSink sink) {
+// boundary that matters. A THIRD caller, apply_scene_transition (a live
+// SceneChain step), also lands here -- `scene_hold_bars` (see this method's
+// own declaration comment in engine.hpp) is how it tells this function apart
+// from the other two, so the section switch below can go through
+// Arranger::request_scene instead of the plain immediate request().
+bool Engine::apply_performance(const Performance& perf, EventSink sink,
+                               std::uint8_t scene_hold_bars) {
   if (!validate_performance(perf)) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
     return false;
@@ -1769,17 +1797,42 @@ bool Engine::apply_performance(const Performance& perf, EventSink sink) {
     // request()/set_groove() calls -- byte-identical musical effect to the
     // old request_style() path, with the style_id metadata now preserved.
     m_arranger.load(static_cast<std::uint8_t>(perf.style_id));
-    m_arranger.request(static_cast<SectionType>(perf.variation), /*immediate=*/true);
+  }
+  const auto section = static_cast<SectionType>(perf.variation);
+  // Phase 7 (SceneChain live-transition fix, owner-reported symptoms #3/#6):
+  // a live SceneChain step (scene_hold_bars != 0) re-anchors the section's
+  // own phase at the CURRENT transport tick and records the scene's own
+  // committed hold length, INSTEAD of the plain immediate request() every
+  // other caller keeps using unchanged -- see Arranger::request_scene's own
+  // comment for the full rationale.
+  if (scene_hold_bars != 0) {
+    m_arranger.request_scene(section, m_transport.tick(), scene_hold_bars);
   } else {
-    m_arranger.request(static_cast<SectionType>(perf.variation), /*immediate=*/true);
+    m_arranger.request(section, /*immediate=*/true);
   }
   for (std::uint8_t r = 0; r < kRoles; ++r) {
     const auto role = static_cast<TrackRole>(r);
     const PerfRoute& route = perf.routes[r];
     m_arranger.set_route(role, route.port, route.channel);
     m_arranger.set_route_enabled(role, route.enabled != 0);
-    m_arranger.set_mute(role, (perf.track_mute_mask & (1u << r)) != 0);
-    m_arranger.set_solo(role, (perf.track_solo_mask & (1u << r)) != 0);
+    // Owner-reported symptom: pressing SOLO on a track during a live
+    // SceneChain run did not isolate it. Root cause: a scene step's own
+    // Performance is captured at `song build` time, BEFORE any live mute/
+    // solo gesture -- track_mute_mask/track_solo_mask are the base rig's
+    // stale snapshot, not the current live state. A genuine Performance/pad
+    // recall (scene_hold_bars == 0) must still restore these masks
+    // byte-exact (that IS the recall contract, test_perf_capture_recall_
+    // round_trip_restores_everything.cpp), but a live SceneChain transition
+    // (scene_hold_bars != 0, see this method's own header comment on that
+    // parameter) must NOT clobber a live mute/solo gesture with the stale
+    // captured mask on every bar-boundary step change -- mirrors the
+    // chord_sequence_id == 0xFFFF sentinel apply_song_build already forces
+    // for the same reason (a scene transition must not restart a harmony
+    // loop it never armed).
+    if (scene_hold_bars == 0) {
+      m_arranger.set_mute(role, (perf.track_mute_mask & (1u << r)) != 0);
+      m_arranger.set_solo(role, (perf.track_solo_mask & (1u << r)) != 0);
+    }
     // Phase-6 Theme 3 Item #3 (P1): restore the role's FX chain slot-for-slot,
     // byte-exact -- validate_performance() above already bounded every
     // insert_chains[r][slot].type to a real InsertType, so this is a plain
@@ -1882,6 +1935,14 @@ void Engine::emit_performance_confirmation(const Performance& perf, EventSink si
   const auto transpose_u16 = static_cast<std::uint16_t>(perf.master_transpose);
   sink(OutEvent::param_state(Param::kMasterTranspose, 0,
                              static_cast<std::uint8_t>(transpose_u16 & 0xFFu), 0, m_now));
+  // Phase 7 (song-mode-scenechain-adoption.md Phase 2 gap closure): tempo,
+  // recalled by apply_performance's own m_transport.set_bpm(perf.tempo_x100)
+  // above, had no confirmation echo, unlike every other recalled field in
+  // this function -- split low/high byte exactly like kStyleLoad's own
+  // 16-bit split above.
+  sink(OutEvent::param_state(Param::kTransportTempo, 0,
+                             static_cast<std::uint8_t>(perf.tempo_x100 & 0xFF),
+                             static_cast<std::uint8_t>((perf.tempo_x100 >> 8) & 0xFF), m_now));
 }
 
 void Engine::apply_pending_performance_recall(EventSink sink) {

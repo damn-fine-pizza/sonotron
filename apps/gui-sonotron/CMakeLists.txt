@@ -35,11 +35,25 @@ find_package(Threads REQUIRED)
 # names. Sits in this library (not gui_sonotron_layout, alongside
 # layout_json.cpp) because it only needs GridModel + STL file I/O, no ImGui
 # -- same host-only, GPU-free unit-testability as grid_model.cpp itself.
+# piano_roll_edit_ops.cpp/piano_roll_velocity_ops.cpp (Sequence Edit Phase-2,
+# docs/proposals/seqedit-piano-roll-phase2-design.md §3/§7): the pure step-
+# array algebra + full-restate `track step ...` wire composition every
+# gesture in seqedit_panel.cpp's interactive piano-roll canvas ends in.
+# Deliberately UI-free (no ImGui type named) so the trickiest piece
+# (tie-chain resize correctness) is unit-testable directly against
+# StepPatternModel, without a headless ImGui context -- see piano_roll_edit_
+# ops.hpp's own header comment. Split into two .cpp files on ONE shared
+# header (piano_roll_edit_ops.hpp) purely for disjoint-file parallel
+# authorship (add/delete/move/re-pitch/resize in one, the small velocity-
+# nudge op in the other); both compile into this same library.
 add_library(gui_sonotron_models STATIC
   src/browser_model.cpp
   src/grid_model.cpp
   src/scenes_json.cpp
   src/seqedit_model.cpp
+  src/step_pattern_model.cpp
+  src/piano_roll_edit_ops.cpp
+  src/piano_roll_velocity_ops.cpp
 )
 target_include_directories(gui_sonotron_models PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(gui_sonotron_models PRIVATE -Wall -Wextra -Werror)
@@ -75,6 +89,12 @@ target_compile_options(gui_sonotron_brain PRIVATE -Wall -Wextra -Werror)
 add_library(gui_sonotron_preview STATIC src/preview.cpp)
 target_include_directories(gui_sonotron_preview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gui_sonotron_preview PRIVATE arrangrr)
+# Task #11 Phase 1: preview_for_track() (preview.hpp) resolves a live
+# StepPatternModel (step_pattern_model.hpp, gui_sonotron_models) -- its
+# non-inline StepPatternModel::step() accessor is defined in step_pattern_
+# model.cpp, so this static-library boundary needs the same real link edge
+# gui_sonotron_layout already carries for the model types its own panels use.
+target_link_libraries(gui_sonotron_preview PRIVATE gui_sonotron_models)
 target_compile_options(gui_sonotron_preview PRIVATE -Wall -Wextra -Werror)
 
 # Layout engine + zone panels + the sonotron theme. The zone panels (G3) are
@@ -96,16 +116,28 @@ target_compile_options(gui_sonotron_preview PRIVATE -Wall -Wextra -Werror)
 # this stays a pure library-boundary dependency, not a core-free violation --
 # see preview.hpp's own header comment and gui_sonotron_preview's target
 # comment above.
+# input_trace.cpp (INPUT RECORD/REPLAY, owner ask: close the "green tests,
+# broken app" gap -- see src/input_trace.hpp) sits here rather than being
+# compiled straight into the gui_sonotron executable: it only needs ImGuiIO
+# + STL, but main.cpp's OWN translation unit inherits -fno-exceptions
+# transitively (through gui_sonotron_engine -> hostrt, the core's
+# no-exceptions discipline), which would forbid the try/catch its
+# hand-rolled JSONL number parser uses. Living in this core-free library
+# instead (same discipline as theme.cpp/neon_widgets.cpp above) keeps that
+# parser free to use ordinary exception-based std::stod.
 add_library(gui_sonotron_layout STATIC
   src/theme.cpp
   src/neon_widgets.cpp
+  src/input_trace.cpp
   src/layout_model.cpp
   src/layout_json.cpp
   src/layout_renderer.cpp
   src/transport_panel.cpp
   src/browser_panel.cpp
+  src/launch_rows.cpp
   src/grid_panel.cpp
   src/seqedit_panel.cpp
+  src/piano_roll_gutter.cpp
   src/parts_panel.cpp
   src/intention_panel.cpp
 )
@@ -158,7 +190,7 @@ add_executable(gui_sonotron main.cpp)
 set_target_properties(gui_sonotron PROPERTIES OUTPUT_NAME gui-sonotron)
 target_link_libraries(gui_sonotron PRIVATE
   gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine audio
-  gui_sonotron_screenshot imgui)
+  gui_sonotron_screenshot imgui sonotron_version)
 target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # Bakes the source-tree assets/ path into the binary so the vendored TTF
 # (see assets/fonts/ARRGRR_VENDOR.md) is found when running straight out of
@@ -166,7 +198,12 @@ target_compile_options(gui_sonotron PRIVATE -Wall -Wextra -Werror)
 # at runtime — same escape hatch used for SONOTRON_LAYOUT_PATH. Packaging a
 # real install layout is a later milestone, not part of this font/DPI pass.
 target_compile_definitions(gui_sonotron PRIVATE
-  SONOTRON_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+  SONOTRON_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+  # Apple's own sanctioned escape hatch for the OpenGL-deprecated-since-10.14
+  # -Wdeprecated-declarations error (Apple clang, -Werror): main.cpp calls
+  # glPixelStorei/glReadPixels/glViewport/glClearColor/glClear/glGetString
+  # directly. APPLE-only; no effect on Linux/Windows.
+  $<$<PLATFORM_ID:Darwin>:GL_SILENCE_DEPRECATION>)
 
 # Layout-model/JSON unit tests (host-only; this whole subtree is added only
 # in the non-firmware branch of the top-level CMakeLists, where

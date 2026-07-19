@@ -98,6 +98,18 @@ class AppState {
   int pulse() const { return m_pulse; }
   float beat_phase() const { return static_cast<float>(m_pulse) / 24.0F; }
 
+  // The CURRENT time signature's beats_per_bar (Phase 7 node T0, the
+  // variable time-signature engine), reduced from the "time-sig" OutEvent
+  // (arrangrr::OutEvent::Kind::kTimeSig, abi.hpp:592). Defaults to
+  // kDefaultBeatsPerBar (a hand-copied mirror of arrangrr::kBeatsPerBar,
+  // components/core/common/include/common/time.hpp -- this file stays
+  // core-free, same discipline every other hand-copied literal at this
+  // boundary already uses, e.g. grid_model.hpp's kDefaultSectionType) until a
+  // real announce arrives, so a session that never touches a non-4/4 style
+  // still reads the honest, ordinary 4/4 default.
+  static constexpr int kDefaultBeatsPerBar = 4;
+  int beats_per_bar() const { return m_beats_per_bar; }
+
   // Real per-cell launch-state readback (repeat-zone-real-contract.md §3):
   // reduced from the "clip" OutEvent (already on the wire, Phase-5 Item #2).
   // A clip id never seen yet on the wire reads as kStopped -- the same "off"
@@ -123,6 +135,7 @@ class AppState {
   int m_bar = 0;
   int m_beat = 0;
   int m_pulse = 0;
+  int m_beats_per_bar = kDefaultBeatsPerBar;
   std::unordered_map<int, ClipLaunchState> m_clip_states;
   std::deque<std::string> m_log;
 };

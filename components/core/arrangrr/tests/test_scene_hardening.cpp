@@ -296,9 +296,12 @@ void test_scene_abi_verbs_round_trip_via_raw_wire_ids() {
   add_cmd.a = 0;
   add_cmd.b = 1;  // n_bars=1, beats_per_bar wire 0 -> default 4/4
   add_cmd.c = 0;
+  add_cmd.idx = 3;  // repeat-count Phase-2: raw kSceneAdd's cmd.idx operand
   b.e.push_command(add_cmd, [&](const OutEvent& o) { CHECK(b.ev.push_back(o)); });
   CHECK(b.warns() == 0);
   CHECK(b.e.scenes().count() == 1);
+  CHECK(b.e.scenes().get(0) != nullptr);
+  CHECK(b.e.scenes().get(0)->repeat_count == 3);  // cmd.idx round-tripped into SceneStep
 
   b.cmd(Param::kTransportStart);
 

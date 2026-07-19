@@ -5,8 +5,10 @@
 #include <cfloat>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "imgui.h"
 #include "neon_widgets.hpp"
@@ -18,13 +20,38 @@ namespace {
 
 constexpr int kFilterBufferSize = 64;
 
-// The v02 non-style sections (spec §2a). "variations" is now a REAL drag
+// Below this many total styles, render one flat, ungrouped list (the
+// pre-task-#30 behavior) instead of family headers + the family-filter
+// combo -- owner correction 2026-07-17: 16 built-in styles buried under 8
+// genre headers (two of them ALWAYS empty, kBallroomTraditional/
+// kWorldRegional -- see browser_model.hpp's kBuiltinStyleFamilies, neither
+// family has any of today's 16 members) was strictly worse than the old
+// flat list for a corpus this small. 24 sits comfortably above today's 16
+// (room to grow the built-in set a bit without flipping modes) and well
+// below the point a flat list stops fitting a 210px rail. The family/
+// genre taxonomy (task #30, docs/proposals/style-browser-corpus-scale.md)
+// stays wired for the day the ~1010-style import lands (memory:
+// browser-scale-many-styles) -- it is simply gated off until the corpus
+// actually needs it.
+constexpr std::size_t kFlatListThreshold = 24;
+
+// Family section render order (task #30, docs/proposals/style-browser-
+// corpus-scale.md §3.2): declaration order of StyleFamily, kOther last (true
+// by construction -- kOther IS declared last in browser_model.hpp).
+constexpr std::array<StyleFamily, 8> kFamilyRenderOrder = {
+    StyleFamily::kPopRockBallad, StyleFamily::kDanceFourOnFloor,
+    StyleFamily::kFunkGroove,    StyleFamily::kSwingShuffleJazz,
+    StyleFamily::kLatinClave,    StyleFamily::kBallroomTraditional,
+    StyleFamily::kWorldRegional, StyleFamily::kOther,
+};
+
+// The non-style sections (spec §2a). "variations" is now a REAL drag
 // source (repeat-zone-real-contract.md SLICE 4a): each row carries a
 // SectionType byte a scene header (grid_panel.cpp) accepts as a drop target
-// to set that column's section. "kits" stays a design-intent, local-only list
-// (see docs/v02-feature-list) -- no kit-load verb is wired from here.
-constexpr std::array<std::string_view, 8> kVariations = {
-    "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro",
+// to set that column's section. "kits" now sends the real GM percussion-kit
+// program-change verb (render_kits below), the same way "voices" already does.
+constexpr std::array<std::string_view, 9> kVariations = {
+    "intro", "verse A", "verse B", "chorus", "bridge", "break", "fill", "outro", "outro 2",
 };
 // SectionType byte each kVariations row drags onto a scene header --
 // numerically mirrors arrangrr::SectionType (components/core/arrangrr/
@@ -32,7 +59,7 @@ constexpr std::array<std::string_view, 8> kVariations = {
 // discipline grid_model.hpp's own kDefaultSectionType/section_wire_name
 // already use (D38: this file never includes arrangrr/). Index-parallel
 // with kVariations above -- entry i's payload is kVariationSections[i].
-constexpr std::array<std::uint8_t, 8> kVariationSections = {
+constexpr std::array<std::uint8_t, 9> kVariationSections = {
     0,   // intro   -> kIntro1
     2,   // verse A -> kVarA
     3,   // verse B -> kVarB
@@ -41,10 +68,15 @@ constexpr std::array<std::uint8_t, 8> kVariationSections = {
     10,  // break   -> kBreak
     6,   // fill    -> kFillA
     11,  // outro   -> kEnding1
+    12,  // outro 2 -> kEnding2
 };
-constexpr std::array<std::string_view, 10> kKits = {
-    "acoustic kit", "808",     "909",      "jazz kit", "fingered bass",
-    "picked bass",  "rhodes",  "dx piano", "warm pad", "saw lead",
+// Wire name each kVariations row sends via `style section <name>` on click --
+// index-parallel with kVariations/kVariationSections above, mirroring
+// grid_model.cpp's own section_wire_name() table at these same numeric
+// SectionType indices (0=intro1, 2=varA, 3=varB, 4=varC, 5=varD, 10=break,
+// 6=fillA, 11=ending1, 12=ending2).
+constexpr std::array<std::string_view, 9> kVariationWireNames = {
+    "intro1", "varA", "varB", "varC", "varD", "break", "fillA", "ending1", "ending2",
 };
 
 bool matches(std::string_view item, const std::string& filter) {
@@ -66,15 +98,20 @@ bool matches(std::string_view item, const std::string& filter) {
 // in the design (no per-section tint; only the active style leaf goes cyan).
 bool section_header(const char* title) {
   ImGui::PushStyleColor(ImGuiCol_Text, theme::kText);
-  const bool open = ImGui::TreeNodeEx(title, ImGuiTreeNodeFlags_DefaultOpen |
-                                                 ImGuiTreeNodeFlags_SpanAvailWidth);
+  const bool open =
+      ImGui::TreeNodeEx(title, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
   ImGui::PopStyleColor();
   return open;
 }
 
 // One leaf row "· item"; `active` gives it the cyan text + left cyan border +
-// faint wash of the selected style. Returns true on click.
-bool leaf_row(std::string_view item, bool active) {
+// faint wash of the selected style. `size` defaults to (0,0), i.e. ImGui's
+// own "fill remaining width, one row" behavior -- callers that never pass it
+// (variations/voices/kits below) are completely unaffected by this
+// parameter's existence. A caller that wants the row to flow-wrap alongside
+// its neighbors (render_style_leaf's wrap_layout mode) passes an explicit
+// text-sized width instead. Returns true on click.
+bool leaf_row(std::string_view item, bool active, ImVec2 size = ImVec2(0.0F, 0.0F)) {
   const std::string label = "\xC2\xB7 " + std::string(item);
   ImGui::PushStyleColor(ImGuiCol_Text, active ? theme::kCyan : theme::kTextSecondary);
   ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
@@ -82,7 +119,7 @@ bool leaf_row(std::string_view item, bool active) {
   ImGui::PushStyleColor(ImGuiCol_HeaderActive,
                         ImVec4(theme::kCyan.x, theme::kCyan.y, theme::kCyan.z, 0.22F));
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
-  const bool clicked = ImGui::Selectable(label.c_str(), active);
+  const bool clicked = ImGui::Selectable(label.c_str(), active, ImGuiSelectableFlags_None, size);
   ImGui::PopStyleColor(3);
   if (active) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -92,50 +129,170 @@ bool leaf_row(std::string_view item, bool active) {
   return clicked;
 }
 
-void render_styles(BrowserModel& model, BrainSession& brain_session, V02State& fx,
-                   const std::string& filter, int& shown) {
+// Width of a style leaf's label for wrap-flow layout, mirroring the exact
+// formula render_category_toggles uses for its own labels below -- must
+// match leaf_row's own "· " + name label construction so the computed width
+// is the row ImGui actually draws.
+float style_leaf_width(std::string_view name) {
+  const std::string label = "\xC2\xB7 " + std::string(name);
+  const ImGuiStyle& style = ImGui::GetStyle();
+  return ImGui::CalcTextSize(label.c_str()).x + style.FramePadding.x * 2.0F;
+}
+
+// One style leaf row: the SAME click-to-load/switch and drag-drop-source
+// behavior render_styles always had, factored out so both the family-
+// grouped loop below and its ImGuiListClipper wrapper can call it per row.
+// `wrap_layout` (no default -- every call site must say explicitly which
+// mode it wants) selects between today's one-per-line Selectable (false,
+// used by the ImGuiListClipper-virtualized family-section path, where a
+// variable-width wrapped row would break the clipper's fixed-row-height
+// assumption) and the flow-wrapped, text-width Selectable used by the flat,
+// small-corpus path (true, render_styles_flat below).
+void render_style_leaf(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                       UiState& fx, std::size_t i, bool wrap_layout) {
+  const std::string name(model.style_name(i));
+  ImGui::PushID(static_cast<int>(i));
+  const ImVec2 size = wrap_layout ? ImVec2(style_leaf_width(name), 0.0F) : ImVec2(0.0F, 0.0F);
+  if (leaf_row(name, fx.active_style == static_cast<int>(i), size)) {
+    // While playing, morph live (quantized to the next bar) instead of
+    // hard-resetting the arranger -- `style load` still stops-and-reloads
+    // for the not-yet-playing case (in_process_brain_session.cpp's
+    // command_line_to_command).
+    //
+    // Owner task #2: the switch used to silently default to varA (the
+    // translator's own fallback, in_process_brain_session.cpp). Pass the
+    // engine's OWN current section (app_state.section(), the authoritative
+    // kSection echo -- never a guess) as an explicit suffix so the switch
+    // preserves it. An empty or "-" reading (no section committed yet)
+    // falls back to the translator's own 3-token/varA default rather than
+    // sending a malformed suffix.
+    const std::string_view current_section = app_state.section();
+    std::string verb = fx.playing ? "style switch " + name : "style load " + name;
+    if (fx.playing && !current_section.empty() && current_section != "-") {
+      verb += " section " + std::string(current_section);
+    }
+    brain_session.send(verb);
+    fx.active_style = static_cast<int>(i);
+  }
+  if (ImGui::BeginDragDropSource()) {
+    ImGui::SetDragDropPayload(kStyleDragPayloadId, &i, sizeof(i));
+    ImGui::TextUnformatted(name.c_str());
+    ImGui::EndDragDropSource();
+  }
+  ImGui::PopID();
+}
+
+// Below kFlatListThreshold, skip family grouping entirely and render one
+// flat "styles" header + list -- the same shape browser_panel.cpp had
+// before task #30 (see git commit f722000^'s own render_styles), factored
+// here to share render_style_leaf with the grouped path above/below. No
+// ImGuiListClipper -- a corpus this small never needs virtualizing.
+//
+// Owner item #8: entries flow-wrap horizontally instead of one-per-line,
+// mirroring render_category_toggles' own wrapping-label idiom below (same
+// window_visible_x2 bound, same "look one label ahead" SameLine() decision).
+// This IS the only reachable style-list path for today's 16 built-in
+// styles (kFlatListThreshold below), so this is where the flow-wrap matters.
+void render_styles_flat(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                        UiState& fx, int& shown) {
   if (!section_header("styles")) {
     return;
   }
-  int local_shown = 0;
+  std::vector<std::size_t> indices;
   for (std::size_t i = 0; i < model.style_count(); ++i) {
-    const std::string name(model.style_name(i));
-    if (!matches(name, filter)) {
-      continue;
+    if (model.style_matches_filter(i)) {
+      indices.push_back(i);
     }
-    ++local_shown;
-    ++shown;
-    ImGui::PushID(static_cast<int>(i));
-    if (leaf_row(name, fx.active_style == static_cast<int>(i))) {
-      // While playing, morph live (quantized to the next bar) instead of
-      // hard-resetting the arranger -- `style load` still stops-and-reloads
-      // for the not-yet-playing case (in_process_brain_session.cpp's
-      // command_line_to_command).
-      brain_session.send(fx.playing ? "style switch " + name : "style load " + name);
-      fx.active_style = static_cast<int>(i);
-    }
-    if (ImGui::BeginDragDropSource()) {
-      ImGui::SetDragDropPayload(kStyleDragPayloadId, &i, sizeof(i));
-      ImGui::TextUnformatted(name.c_str());
-      ImGui::EndDragDropSource();
-    }
-    ImGui::PopID();
   }
-  if (local_shown == 0) {
+
+  if (indices.empty()) {
     ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float window_visible_x2 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+  for (std::size_t k = 0; k < indices.size(); ++k) {
+    ++shown;
+    render_style_leaf(model, brain_session, app_state, fx, indices[k], /*wrap_layout=*/true);
+    if (k + 1 < indices.size()) {
+      const float next_w = style_leaf_width(model.style_name(indices[k + 1]));
+      const float next_x2 = ImGui::GetItemRectMax().x + style.ItemSpacing.x + next_w;
+      if (next_x2 < window_visible_x2) {
+        ImGui::SameLine();
+      }
+    }
   }
   ImGui::TreePop();
 }
 
-// "variations" (kVariations/kVariationSections above): a real drag SOURCE
-// (repeat-zone-real-contract.md SLICE 4a), each row carrying its own
-// SectionType byte under kVariationDragPayloadId -- distinct from
+// One family bucket: a flat, ImGuiListClipper-virtualized list of leaves
+// (task #30, docs/proposals/style-browser-corpus-scale.md §3.2) -- NOT a
+// nested tree per family, since the vendored ImGui's own demo notes
+// clipping composes awkwardly with tree nodes (imgui_demo.cpp:4200). Each
+// family gets one always-visible section_header (reusing the existing
+// helper unchanged) followed by its own flat, clipped leaf list; an empty
+// bucket (no members, or nothing matching the current filter) now renders
+// nothing at all -- see kFlatListThreshold above for why.
+//
+// Deliberately NOT flow-wrapped (owner item #8 only targets render_styles_
+// flat above): ImGuiListClipper virtualizes on a fixed per-row height, and a
+// wrapped row's item count varies, so there is no fixed "row N" left to
+// virtualize against. This path stays one-per-line, exactly as before.
+void render_style_family_section(BrowserModel& model, BrainSession& brain_session,
+                                 const AppState& app_state, UiState& fx, StyleFamily family,
+                                 int& shown) {
+  std::vector<std::size_t> indices;
+  for (std::size_t i = 0; i < model.style_count(); ++i) {
+    if (model.style_family(i) == family && model.style_matches_filter(i)) {
+      indices.push_back(i);
+    }
+  }
+  if (indices.empty()) {
+    // A family bucket with nothing in it (or nothing matching the current
+    // filter) renders NOTHING -- not a header plus "(no match)". A player
+    // should never see a bucket that can never hold anything for the
+    // current corpus (owner correction 2026-07-17).
+    return;
+  }
+  const std::string title(style_family_label(family));
+  if (!section_header(title.c_str())) {
+    return;
+  }
+  ImGuiListClipper clipper;
+  clipper.Begin(static_cast<int>(indices.size()));
+  while (clipper.Step()) {
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+      const std::size_t i = indices[static_cast<std::size_t>(row)];
+      ++shown;
+      render_style_leaf(model, brain_session, app_state, fx, i, /*wrap_layout=*/false);
+    }
+  }
+  ImGui::TreePop();
+}
+
+void render_styles(BrowserModel& model, BrainSession& brain_session, const AppState& app_state,
+                   UiState& fx, int& shown) {
+  if (model.style_count() <= kFlatListThreshold) {
+    render_styles_flat(model, brain_session, app_state, fx, shown);
+    return;
+  }
+  for (const StyleFamily family : kFamilyRenderOrder) {
+    render_style_family_section(model, brain_session, app_state, fx, family, shown);
+  }
+}
+
+// "variations" (kVariations/kVariationSections/kVariationWireNames above): a
+// real drag SOURCE (repeat-zone-real-contract.md SLICE 4a), each row carrying
+// its own SectionType byte under kVariationDragPayloadId -- distinct from
 // kStyleDragPayloadId so grid_panel.cpp's scene-header drop target never
 // confuses the two payload shapes. Clicking a row (leaf_row's own return
-// value) does nothing yet -- there is still no `style section` verb wired
-// from a plain click here, only from the drag; the scene HEADER's own ▶
-// button is what sends `style section <name>` (grid_panel.cpp).
-void render_variations(const std::string& filter, int& shown) {
+// value) now sends `style section <wire_name>` directly (Shell::cmd_style,
+// "quantized to next bar while playing, immediate otherwise") -- a simpler,
+// standalone "switch section now" action, independent of grid_panel.cpp's own
+// scene-header mechanism. Click and drag are not mutually exclusive: click
+// applies the section now, drag still targets a grid scene-header column.
+void render_variations(BrainSession& brain_session, const std::string& filter, int& shown) {
   if (!section_header("variations")) {
     return;
   }
@@ -148,7 +305,9 @@ void render_variations(const std::string& filter, int& shown) {
     ++local_shown;
     ++shown;
     ImGui::PushID(static_cast<int>(i));
-    leaf_row(item, /*active=*/false);
+    if (leaf_row(item, /*active=*/false)) {
+      brain_session.send("style section " + std::string(kVariationWireNames[i]));
+    }
     if (ImGui::BeginDragDropSource()) {
       const std::uint8_t section = kVariationSections[i];
       ImGui::SetDragDropPayload(kVariationDragPayloadId, &section, sizeof(section));
@@ -163,50 +322,268 @@ void render_variations(const std::string& filter, int& shown) {
   ImGui::TreePop();
 }
 
-template <std::size_t N>
-void render_list(const char* title, const std::array<std::string_view, N>& items,
-                 const std::string& filter, int& shown) {
-  if (!section_header(title)) {
+// Destination picker for the Voices tab (browser-redesign-taxonomy.md Phase
+// 1's own note: "genuinely new surface needed"). Port name + 1-based channel,
+// persisted on the model (not UiState -- out of scope for this slice), so it
+// survives switching categories and scrolling the voice list.
+void render_voice_destination_picker(BrowserModel& model) {
+  constexpr int kPortBufSize = 32;
+  char port_buf[kPortBufSize];
+  const std::string current_port(model.voice_port());
+  std::strncpy(port_buf, current_port.c_str(), sizeof(port_buf) - 1);
+  port_buf[sizeof(port_buf) - 1] = '\0';
+
+  ImGui::TextColored(theme::kTextMuted, "destination (port:ch)");
+  const float half = (ImGui::GetContentRegionAvail().x - 6.0F) * 0.5F;
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputTextWithHint("##voice_port", "out0", port_buf, sizeof(port_buf))) {
+    model.set_voice_port(std::string(port_buf));
+  }
+  ImGui::SameLine(0.0F, 6.0F);
+  int channel = model.voice_channel();
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputInt("##voice_channel", &channel)) {
+    model.set_voice_channel(channel);
+  }
+}
+
+// Destination picker for the Kits tab -- mirrors render_voice_destination_picker
+// exactly, but reads/writes the model's INDEPENDENT kit_port/kit_channel state
+// (defaults to channel 10, the GM percussion channel, not channel 1).
+void render_kit_destination_picker(BrowserModel& model) {
+  constexpr int kPortBufSize = 32;
+  char port_buf[kPortBufSize];
+  const std::string current_port(model.kit_port());
+  std::strncpy(port_buf, current_port.c_str(), sizeof(port_buf) - 1);
+  port_buf[sizeof(port_buf) - 1] = '\0';
+
+  ImGui::TextColored(theme::kTextMuted, "destination (port:ch)");
+  const float half = (ImGui::GetContentRegionAvail().x - 6.0F) * 0.5F;
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputTextWithHint("##kit_port", "out0", port_buf, sizeof(port_buf))) {
+    model.set_kit_port(std::string(port_buf));
+  }
+  ImGui::SameLine(0.0F, 6.0F);
+  int channel = model.kit_channel();
+  ImGui::SetNextItemWidth(half);
+  if (ImGui::InputInt("##kit_channel", &channel)) {
+    model.set_kit_channel(channel);
+  }
+}
+
+// "voices · sounds": the 128 GM program names (kGmVoiceNames, browser_model.
+// hpp), ImGuiListClipper-virtualized like the style-family buckets (§3.2 --
+// 128 rows is well past kFlatListThreshold). Click sends `program <port>[:ch]
+// <voice>` to the CURRENT destination picker state and marks the row as the
+// local "last sent" echo (NOT wire-confirmed -- no per-part program readback
+// exists, parts_model.hpp).
+void render_voices(BrowserModel& model, BrainSession& brain_session, const std::string& filter,
+                   int& shown) {
+  if (!section_header("voices \xC2\xB7 sounds")) {
     return;
   }
-  int local_shown = 0;
-  for (const std::string_view item : items) {
-    if (!matches(item, filter)) {
-      continue;
+  std::vector<std::size_t> indices;
+  for (std::size_t i = 0; i < model.voice_count(); ++i) {
+    if (matches(model.voice_name(i), filter)) {
+      indices.push_back(i);
     }
-    ++local_shown;
-    ++shown;
-    leaf_row(item, /*active=*/false);
   }
-  if (local_shown == 0) {
+  if (indices.empty()) {
     ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  ImGuiListClipper clipper;
+  clipper.Begin(static_cast<int>(indices.size()));
+  while (clipper.Step()) {
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+      const std::size_t i = indices[static_cast<std::size_t>(row)];
+      ++shown;
+      const std::string name(model.voice_name(i));
+      ImGui::PushID(static_cast<int>(i));
+      if (leaf_row(name, model.last_voice_sent() == static_cast<int>(i))) {
+        brain_session.send(model.build_program_verb(name));
+        model.set_last_voice_sent(static_cast<int>(i));
+      }
+      ImGui::PopID();
+    }
   }
   ImGui::TreePop();
 }
 
+// "kits · GM": the 9 canonical GM Level 2 percussion-kit names
+// (kGmDrumKitNames, browser_model.hpp). Click sends `program <port>[:ch]
+// <program-number>` to the CURRENT kit destination picker state (defaults to
+// channel 10, the GM percussion channel) and marks the row as the local
+// "last sent" echo (NOT wire-confirmed -- no per-part program readback
+// exists, parts_model.hpp -- same caveat render_voices's own comment
+// documents).
+void render_kits(BrowserModel& model, BrainSession& brain_session, const std::string& filter,
+                 int& shown) {
+  if (!section_header("kits \xC2\xB7 GM")) {
+    return;
+  }
+  std::vector<std::size_t> indices;
+  for (std::size_t i = 0; i < model.kit_count(); ++i) {
+    if (matches(model.kit_name(i), filter)) {
+      indices.push_back(i);
+    }
+  }
+  if (indices.empty()) {
+    ImGui::TextDisabled("  (no match)");
+    ImGui::TreePop();
+    return;
+  }
+  for (const std::size_t i : indices) {
+    ++shown;
+    const std::string name(model.kit_name(i));
+    ImGui::PushID(static_cast<int>(i));
+    if (leaf_row(name, model.last_kit_sent() == static_cast<int>(i))) {
+      brain_session.send(model.build_kit_verb(i));
+      model.set_last_kit_sent(static_cast<int>(i));
+    }
+    ImGui::PopID();
+  }
+  ImGui::TreePop();
+}
+
+// Family filter combo (task #30): "All families" (nullopt) plus one entry
+// per StyleFamily, in the SAME kFamilyRenderOrder the sections below render
+// in, so the combo's own listed order matches what a player sees scrolling
+// the tree. ANDed with the text search below via BrowserModel::
+// style_matches_filter -- selecting one never clears/replaces the text
+// field's own filter.
+void render_family_filter_combo(BrowserModel& model) {
+  const std::optional<StyleFamily> current = model.family_filter();
+  const std::string preview =
+      current.has_value() ? std::string(style_family_label(*current)) : std::string("All families");
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  if (ImGui::BeginCombo("##browser_family_filter", preview.c_str())) {
+    if (ImGui::Selectable("All families", !current.has_value())) {
+      model.set_family_filter(std::nullopt);
+    }
+    for (const StyleFamily family : kFamilyRenderOrder) {
+      const bool selected = current.has_value() && *current == family;
+      const std::string label(style_family_label(family));
+      ImGui::PushID(static_cast<int>(family));
+      if (ImGui::Selectable(label.c_str(), selected)) {
+        model.set_family_filter(family);
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndCombo();
+  }
+}
+
+constexpr std::array<BrowserCategory, kBrowserCategoryCount> kCategoryOrder = {
+    BrowserCategory::kStyles, BrowserCategory::kVariations, BrowserCategory::kVoices,
+    BrowserCategory::kKits,   BrowserCategory::kClips,
+};
+
+// Outer category selector (decision fork 1): a wrapping toggle-label bar
+// (the canonical ImGui "wrapping buttons" idiom, adapted from ImGui's own
+// demo) rather than a literal ImGui tab bar or a single-select combo -- see
+// docs/proposals/browser-redesign-taxonomy.md §3 for why a tab bar does not
+// fit 210px. Any number of categories can be toggled visible at once; every
+// click also marks that category the "active" one (model.set_category) so
+// the bottom search field always edits whichever label the user last
+// touched, whether turning a section ON or OFF.
+void render_category_toggles(BrowserModel& model) {
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float window_visible_x2 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+  for (std::size_t i = 0; i < kCategoryOrder.size(); ++i) {
+    const BrowserCategory category = kCategoryOrder[i];
+    const std::string label(browser_category_label(category));
+    const bool visible = model.category_visible(category);
+    ImGui::PushID(static_cast<int>(category));
+    ImGui::PushStyleColor(ImGuiCol_Text, visible ? theme::kCyan : theme::kTextSecondary);
+    const ImVec2 size(ImGui::CalcTextSize(label.c_str()).x + style.FramePadding.x * 2.0F, 0.0F);
+    const bool clicked = ImGui::Selectable(label.c_str(), visible, ImGuiSelectableFlags_None, size);
+    ImGui::PopStyleColor();
+    ImGui::PopID();
+    if (clicked) {
+      model.set_category_visible(category, !visible);
+      model.set_category(category);
+    }
+    if (i + 1 < kCategoryOrder.size()) {
+      const float last_x2 = ImGui::GetItemRectMax().x;
+      const std::string next_label(browser_category_label(kCategoryOrder[i + 1]));
+      const float next_w = ImGui::CalcTextSize(next_label.c_str()).x + style.FramePadding.x * 2.0F;
+      const float next_x2 = last_x2 + style.ItemSpacing.x + next_w;
+      if (next_x2 < window_visible_x2) {
+        ImGui::SameLine();
+      }
+    }
+  }
+}
+
 }  // namespace
 
-void render_browser_panel(BrowserModel& model, BrainSession& brain_session, V02State& fx) {
+void render_browser_panel(BrowserModel& model, BrainSession& brain_session,
+                          const AppState& app_state, UiState& fx) {
   ImGui::TextColored(theme::kPink, "BROWSER");
   ImGui::Spacing();
+  render_category_toggles(model);
+  ImGui::Spacing();
+
+  const bool flat_style_mode = model.style_count() <= kFlatListThreshold;
 
   const float search_h = ImGui::GetFrameHeightWithSpacing() + 4.0F;
   ImGui::BeginChild("browser_tree", ImVec2(0.0F, ImGui::GetContentRegionAvail().y - search_h),
                     ImGuiChildFlags_None, ImGuiWindowFlags_None);
-  const std::string filter = model.search_filter();
   int shown = 0;
-  render_styles(model, brain_session, fx, filter, shown);
-  render_variations(filter, shown);
-  render_list("kits \xC2\xB7 GM", kKits, filter, shown);
-  if (section_header("clips")) {
-    ImGui::TextDisabled("  (none authored yet)");
-    ImGui::TreePop();
+  bool first_section = true;
+  for (const BrowserCategory category : kCategoryOrder) {
+    if (!model.category_visible(category)) {
+      continue;
+    }
+    if (!first_section) {
+      ImGui::Separator();
+    }
+    first_section = false;
+    switch (category) {
+      case BrowserCategory::kStyles:
+        // The family-filter combo only earns its vertical space once the
+        // corpus is big enough to need family grouping in the first place
+        // (see kFlatListThreshold above) -- for today's 16 built-ins it
+        // would just be dead space over a flat list.
+        if (!flat_style_mode) {
+          render_family_filter_combo(model);
+          ImGui::Spacing();
+        }
+        render_styles(model, brain_session, app_state, fx, shown);
+        break;
+      case BrowserCategory::kVariations:
+        render_variations(brain_session, model.filter_for(category), shown);
+        break;
+      case BrowserCategory::kVoices:
+        render_voice_destination_picker(model);
+        ImGui::Spacing();
+        render_voices(model, brain_session, model.filter_for(category), shown);
+        break;
+      case BrowserCategory::kKits:
+        render_kit_destination_picker(model);
+        ImGui::Spacing();
+        render_kits(model, brain_session, model.filter_for(category), shown);
+        break;
+      case BrowserCategory::kClips:
+        if (section_header("clips")) {
+          ImGui::TextDisabled("  (none authored yet)");
+          ImGui::TreePop();
+        }
+        break;
+    }
   }
   ImGui::EndChild();
 
-  // Search field pinned at the bottom (filters all sections live).
+  // Search field pinned at the bottom -- edits whichever category was most
+  // recently toggled (model.category(), touched on every toggle click in
+  // render_category_toggles), NOT necessarily every visible section's own
+  // filter (each section reads its OWN slot via filter_for() above, so
+  // toggling a second section visible never clobbers the first one's text).
+  const std::string current_filter = model.search_filter();
   char buffer[kFilterBufferSize];
-  std::strncpy(buffer, filter.c_str(), sizeof(buffer) - 1);
+  std::strncpy(buffer, current_filter.c_str(), sizeof(buffer) - 1);
   buffer[sizeof(buffer) - 1] = '\0';
   ImGui::SetNextItemWidth(-FLT_MIN);
   if (ImGui::InputTextWithHint("##browser_search", "search\xE2\x80\xA6", buffer, sizeof(buffer))) {

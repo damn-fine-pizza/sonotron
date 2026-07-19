@@ -24,3 +24,14 @@ add_test(NAME test_audio_engine_smoke COMMAND test_audio_engine_smoke)
 # checks always run for real, so a missing SoundFont degrades this to a
 # partial (still meaningful) pass rather than a full skip.
 set_tests_properties(test_audio_engine_smoke PROPERTIES LABELS functional)
+
+# Anti-NO-OP proof for ReverbSoundEngine (Phase-1 sound task #7, deliverable
+# A): dispatch()/all_notes_off() must really forward to the inner engine,
+# and render() must really change the signal (wet != dry), not silently
+# regress to a passthrough. Same device-independent, SKIP-partial-if-no-
+# system-SoundFont convention as test_audio_engine_smoke.cpp above.
+add_executable(test_reverb_sound_engine test_reverb_sound_engine.cpp)
+target_link_libraries(test_reverb_sound_engine PRIVATE audio)
+target_compile_options(test_reverb_sound_engine PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_reverb_sound_engine COMMAND test_reverb_sound_engine)
+set_tests_properties(test_reverb_sound_engine PROPERTIES LABELS functional)
