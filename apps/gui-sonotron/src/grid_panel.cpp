@@ -653,6 +653,61 @@ std::string scene_repeat_wire_token(const GridModel& model, std::size_t scene_in
   return std::to_string(repeat);
 }
 
+// Song-mode Phase 2 (docs/proposals/song-mode-scenechain-adoption.md's own
+// Phasing section): translate GridModel's four Phase-2 override groups
+// (style/groove/key/tempo, per-scene) into the `song build` wire line's own
+// trailing per-scene tokens -- mirrors scene_repeat_wire_token's own "no
+// shared constant across the D38 boundary, just the wire token grammar
+// itself" discipline. Every one of the four emits the literal `-` for "no
+// override" (in_process_brain_session.cpp's parse_song_build_scene_overrides
+// decodes `-` back into that scene's own default-constructed sentinel,
+// leaving the base-captured Performance field untouched).
+std::string scene_style_wire_token(const GridModel& model, std::size_t scene_index) {
+  const int style_id = model.scene_style_id(scene_index);
+  if (style_id == GridModel::kNoStyleOverride) {
+    return "-";
+  }
+  return std::to_string(style_id);
+}
+
+std::string scene_groove_wire_token(const GridModel& model, std::size_t scene_index) {
+  if (!model.scene_groove_override(scene_index)) {
+    return "-";
+  }
+  const GridModel::SceneGroove groove = model.scene_groove(scene_index);
+  return std::to_string(groove.swing) + "," + std::to_string(groove.humanize_timing) + "," +
+         std::to_string(groove.humanize_velocity) + "," + std::to_string(groove.accent) + "," +
+         std::to_string(groove.swing_grid) + "," + std::to_string(groove.quantize);
+}
+
+std::string scene_key_wire_token(const GridModel& model, std::size_t scene_index) {
+  if (!model.scene_key_override(scene_index)) {
+    return "-";
+  }
+  return std::to_string(model.scene_key_root(scene_index)) + ":" +
+         std::to_string(model.scene_key_mode(scene_index));
+}
+
+std::string scene_tempo_wire_token(const GridModel& model, std::size_t scene_index) {
+  const int tempo_x100 = model.scene_tempo_x100(scene_index);
+  if (tempo_x100 == GridModel::kNoTempoOverride) {
+    return "-";
+  }
+  return std::to_string(tempo_x100);
+}
+
+// The four Phase-2 override tokens, space-joined in the wire's own fixed
+// order (`<style> <groove> <key> <tempo>`) -- both send() call sites below
+// append this same suffix after their own `<section> <bars> <repeat>`
+// tokens, so the grammar never drifts between the one-column (activate_
+// scene_column) and multi-column (build_and_play_song) paths.
+std::string scene_override_wire_suffix(const GridModel& model, std::size_t scene_index) {
+  return " " + scene_style_wire_token(model, scene_index) + " " +
+         scene_groove_wire_token(model, scene_index) + " " +
+         scene_key_wire_token(model, scene_index) + " " +
+         scene_tempo_wire_token(model, scene_index);
+}
+
 // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md, design
 // decision 4): the double section-trigger this function used to send
 // (`style section <name>` + `launch scene <n> quantize 1`, fighting each
@@ -678,7 +733,8 @@ void activate_scene_column(const GridModel& model, BrainSession& brain_session, 
   const std::string_view section_name = section_wire_name(model.scene_section(scene_index));
   const std::string section_arg = section_name.empty() ? "varA" : std::string(section_name);
   brain_session.send("song build 1 " + section_arg + " " +
-                     std::to_string(model.scene_bars(scene_index)) + " 1");
+                     std::to_string(model.scene_bars(scene_index)) + " 1" +
+                     scene_override_wire_suffix(model, scene_index));
   // Shared bookkeeping every call site already needed afterward: the active
   // scene's own beat-synced playhead sweep (render_grid_panel's active_
   // section_phase) anchors from THIS bar, not a stale one.
@@ -717,6 +773,7 @@ void build_and_play_song(const GridModel& model, BrainSession& brain_session,
     line += " " + (section_name.empty() ? std::string("varA") : std::string(section_name));
     line += " " + std::to_string(model.scene_bars(s));
     line += " " + scene_repeat_wire_token(model, s);
+    line += scene_override_wire_suffix(model, s);
   }
   brain_session.send(line);
 }
@@ -836,6 +893,142 @@ bool any_part_soloed(const PartsModel& parts) {
   return false;
 }
 
+// Song-mode Phase 2 per-scene editor (docs/proposals/song-mode-scenechain-
+// adoption.md): right-click the scene header to open this popup and set
+// this ONE scene's own style/groove/key/tempo override -- these values are
+// picked up automatically the next time `song build` runs (Play, or a
+// manual scene-header click), exactly like the bars/repeat steppers
+// already are; this popup writes ONLY to GridModel, it never sends
+// anything to BrainSession directly.
+void render_scene_editor_popup(GridModel& model, std::size_t scene_index) {
+  if (!ImGui::BeginPopup("scene_editor_popup")) {
+    return;
+  }
+  ImGui::TextDisabled("Scene %zu overrides", scene_index + 1);
+  ImGui::Separator();
+
+  // Style: a plain index stepper (no name lookup here -- GridModel has no
+  // browser/style-table dependency, D38), "(inherit)" at kNoStyleOverride.
+  int style_id = model.scene_style_id(scene_index);
+  ImGui::Text("Style");
+  ImGui::SameLine();
+  if (ImGui::SmallButton("-##style")) {
+    model.set_scene_style_id(scene_index, style_id <= GridModel::kNoStyleOverride
+                                              ? GridModel::kNoStyleOverride
+                                              : style_id - 1);
+  }
+  ImGui::SameLine();
+  if (style_id == GridModel::kNoStyleOverride) {
+    ImGui::TextUnformatted("(inherit)");
+  } else {
+    ImGui::Text("%d", style_id);
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("+##style")) {
+    model.set_scene_style_id(scene_index, style_id + 1);
+  }
+
+  ImGui::Separator();
+
+  // Groove: one checkbox gates all six fields together (GridModel's own
+  // contract -- there is no per-field "inherit" value).
+  bool groove_override = model.scene_groove_override(scene_index);
+  GridModel::SceneGroove groove = model.scene_groove(scene_index);
+  if (ImGui::Checkbox("Override groove", &groove_override)) {
+    model.set_scene_groove(scene_index, groove_override, groove);
+  }
+  ImGui::BeginDisabled(!groove_override);
+  bool groove_changed = false;
+  int swing = groove.swing;
+  if (ImGui::SliderInt("swing", &swing, 0, 100)) {
+    groove.swing = static_cast<std::uint8_t>(swing);
+    groove_changed = true;
+  }
+  int humanize_timing = groove.humanize_timing;
+  if (ImGui::SliderInt("humanize t", &humanize_timing, 0, 100)) {
+    groove.humanize_timing = static_cast<std::uint8_t>(humanize_timing);
+    groove_changed = true;
+  }
+  int humanize_velocity = groove.humanize_velocity;
+  if (ImGui::SliderInt("humanize v", &humanize_velocity, 0, 100)) {
+    groove.humanize_velocity = static_cast<std::uint8_t>(humanize_velocity);
+    groove_changed = true;
+  }
+  int accent = groove.accent;
+  if (ImGui::SliderInt("accent", &accent, 0, 100)) {
+    groove.accent = static_cast<std::uint8_t>(accent);
+    groove_changed = true;
+  }
+  bool swing_grid_16 = groove.swing_grid == 16;
+  if (ImGui::Checkbox("swing grid = 16th (off = 8th)", &swing_grid_16)) {
+    groove.swing_grid = swing_grid_16 ? 16 : 8;
+    groove_changed = true;
+  }
+  int quantize = groove.quantize;
+  if (ImGui::SliderInt("quantize", &quantize, 0, 100)) {
+    groove.quantize = static_cast<std::uint8_t>(quantize);
+    groove_changed = true;
+  }
+  if (groove_changed) {
+    model.set_scene_groove(scene_index, groove_override, groove);
+  }
+  ImGui::EndDisabled();
+
+  ImGui::Separator();
+
+  // Key: one checkbox gates root+mode together (same reasoning as groove).
+  static constexpr std::array<const char*, 12> kKeyRootNames = {"C",  "C#", "D",  "D#", "E",  "F",
+                                                                "F#", "G",  "G#", "A",  "A#", "B"};
+  static constexpr std::array<const char*, 7> kKeyModeNames = {
+      "Major", "Minor", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Locrian"};
+  bool key_override = model.scene_key_override(scene_index);
+  int key_root = model.scene_key_root(scene_index);
+  int key_mode = model.scene_key_mode(scene_index);
+  if (ImGui::Checkbox("Override key", &key_override)) {
+    model.set_scene_key(scene_index, key_override, static_cast<std::uint8_t>(key_root),
+                        static_cast<std::uint8_t>(key_mode));
+  }
+  ImGui::BeginDisabled(!key_override);
+  if (ImGui::Combo("root", &key_root, kKeyRootNames.data(),
+                   static_cast<int>(kKeyRootNames.size()))) {
+    model.set_scene_key(scene_index, key_override, static_cast<std::uint8_t>(key_root),
+                        static_cast<std::uint8_t>(key_mode));
+  }
+  if (ImGui::Combo("mode", &key_mode, kKeyModeNames.data(),
+                   static_cast<int>(kKeyModeNames.size()))) {
+    model.set_scene_key(scene_index, key_override, static_cast<std::uint8_t>(key_root),
+                        static_cast<std::uint8_t>(key_mode));
+  }
+  ImGui::EndDisabled();
+
+  ImGui::Separator();
+
+  // Tempo: a BPM stepper (tempo_x100 / 100 for display), kNoTempoOverride
+  // (0) shown as "(inherit)".
+  int tempo_x100 = model.scene_tempo_x100(scene_index);
+  ImGui::Text("Tempo");
+  ImGui::SameLine();
+  if (tempo_x100 == GridModel::kNoTempoOverride) {
+    ImGui::TextUnformatted("(inherit)");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("set 120")) {
+      model.set_scene_tempo_x100(scene_index, 12000);
+    }
+  } else {
+    int bpm = tempo_x100 / 100;
+    if (ImGui::SliderInt("BPM", &bpm, GridModel::kMinBpmMirror / 100,
+                         GridModel::kMaxBpmMirror / 100)) {
+      model.set_scene_tempo_x100(scene_index, bpm * 100);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("clear##tempo")) {
+      model.set_scene_tempo_x100(scene_index, GridModel::kNoTempoOverride);
+    }
+  }
+
+  ImGui::EndPopup();
+}
+
 // One scene-header column: the plain-text "name ▶" launch head + cyan
 // underline (design has no button pill), OR -- while renaming -- an inline
 // ImGui InputText (repeat-zone-real-contract.md §4/§8b decision 3, OWNER
@@ -897,6 +1090,7 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
       }
       ImGui::EndDragDropTarget();
     }
+    ImGui::OpenPopupOnItemClick("scene_editor_popup", ImGuiPopupFlags_MouseButtonRight);
     const bool double_clicked =
         ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     const std::string name(model.scene_name(s));
@@ -996,6 +1190,8 @@ void render_scene_header_cell(GridModel& model, BrainSession& brain_session,
       // column's own bookkeeping covers this).
       activate_scene_column(model, brain_session, fx, s, app_state.bar());
     }
+
+    render_scene_editor_popup(model, s);
 
     // Restore the row's Y anchor (the same trick render_track_label already
     // uses for its own M/S latches): the stepper buttons above repositioned

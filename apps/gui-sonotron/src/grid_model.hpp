@@ -211,6 +211,76 @@ class GridModel {
   int scene_repeat(std::size_t scene_index) const;
   void set_scene_repeat(std::size_t scene_index, int repeat);
 
+  // Song-mode Phase 2 (docs/proposals/song-mode-scenechain-adoption.md): a
+  // scene column's own STYLE override. kNoStyleOverride (-1) means "inherit
+  // the base-captured Performance's style" (Phase 1's behavior, unchanged);
+  // any value >= 0 is a builtin style-table index the song-build seam will
+  // feed into that scene's own Performance::style_id. GridModel does not
+  // itself know the live style count (D38: no core/browser dependency), so
+  // the setter only floors at kNoStyleOverride -- it does not clamp an
+  // upper bound; an out-of-range index is the caller's own responsibility,
+  // same discipline scene_section's raw SectionType byte already keeps.
+  // Bounds-checked exactly like scene_bars/scene_repeat above: an
+  // out-of-range scene_index is a no-op for the setter and returns
+  // kNoStyleOverride from the getter.
+  static constexpr int kNoStyleOverride = -1;
+  int scene_style_id(std::size_t scene_index) const;
+  void set_scene_style_id(std::size_t scene_index, int style_id);
+
+  // Song-mode Phase 2: a scene column's own GROOVE override. Mirrors
+  // arrangrr::GrooveParams' six tunable fields as raw bytes (D38: GridModel
+  // has zero dependency on arrangrr/arranger/groove.hpp, same "hand-copied
+  // literal" discipline scene_section's SectionType byte already uses),
+  // defaulted to GrooveParams{}'s own defaults (all zero except swing_grid
+  // == 8). Gated by a SINGLE override flag rather than per-field sentinels:
+  // GrooveParams is one atomic block core-side (Arranger::set_groove takes
+  // the whole struct), and 0 is a musically valid value for swing/humanize/
+  // accent/quantize (0% == "no groove"), so no per-field value can serve as
+  // an unambiguous "inherit" sentinel the way kNoStyleOverride/-1 can for
+  // style_id. A scene either overrides ALL SIX fields together (has_override
+  // == true) or none (false, inherit the base rig's groove unchanged).
+  struct SceneGroove {
+    std::uint8_t swing = 0;
+    std::uint8_t humanize_timing = 0;
+    std::uint8_t humanize_velocity = 0;
+    std::uint8_t accent = 0;
+    std::uint8_t swing_grid = 8;
+    std::uint8_t quantize = 0;
+  };
+  bool scene_groove_override(std::size_t scene_index) const;
+  GridModel::SceneGroove scene_groove(std::size_t scene_index) const;
+  void set_scene_groove(std::size_t scene_index, bool has_override, SceneGroove groove);
+
+  // Song-mode Phase 2: a scene column's own KEY override (root pitch class
+  // 0..11 + arrangrr::Mode 0..6, mirrored here as raw bytes -- same D38
+  // discipline as SceneGroove above). Gated by a single override flag for
+  // the same reason as groove: 0 is a musically valid key_root (C) AND a
+  // valid key_mode (Major), so neither has an unambiguous "inherit" value;
+  // root and mode are always overridden together, never independently.
+  bool scene_key_override(std::size_t scene_index) const;
+  std::uint8_t scene_key_root(std::size_t scene_index) const;
+  std::uint8_t scene_key_mode(std::size_t scene_index) const;
+  void set_scene_key(std::size_t scene_index, bool has_override, std::uint8_t root,
+                     std::uint8_t mode);
+
+  // Song-mode Phase 2: a scene column's own TEMPO override, in the core's
+  // own tempo_x100 units (BPM * 100). kNoTempoOverride (0) means "inherit
+  // the base rig's tempo" -- 0 is never a real tempo (the core's own valid
+  // range starts at kMinBpmMirror below), so it is an unambiguous, always-
+  // out-of-domain sentinel, exactly like kNoStyleOverride is for style_id.
+  // The setter floors a non-positive value to kNoTempoOverride (clearing any
+  // override) and otherwise clamps to [kMinBpmMirror, kMaxBpmMirror] --
+  // these two constants mirror arrangrr's own kMinBpm/kMaxBpm
+  // (components/core/common/include/common/time.hpp) as literal values
+  // (D38: no core dependency here), so a bump to either side fails loudly
+  // only if someone remembers to grep for this comment -- there is no
+  // static_assert coupling possible across this deliberate boundary.
+  static constexpr int kNoTempoOverride = 0;
+  static constexpr int kMinBpmMirror = 2000;   // arrangrr::kMinBpm
+  static constexpr int kMaxBpmMirror = 40000;  // arrangrr::kMaxBpm
+  int scene_tempo_x100(std::size_t scene_index) const;
+  void set_scene_tempo_x100(std::size_t scene_index, int tempo_x100);
+
  private:
   std::size_t index_of(std::size_t part_index, std::size_t scene_index) const;
 
@@ -220,6 +290,13 @@ class GridModel {
   std::array<std::uint8_t, kMaxSceneCount> m_scene_sections;
   std::array<int, kMaxSceneCount> m_scene_bars;
   std::array<int, kMaxSceneCount> m_scene_repeat;
+  std::array<int, kMaxSceneCount> m_scene_style_id;
+  std::array<bool, kMaxSceneCount> m_scene_groove_override;
+  std::array<SceneGroove, kMaxSceneCount> m_scene_groove;
+  std::array<bool, kMaxSceneCount> m_scene_key_override;
+  std::array<std::uint8_t, kMaxSceneCount> m_scene_key_root;
+  std::array<std::uint8_t, kMaxSceneCount> m_scene_key_mode;
+  std::array<int, kMaxSceneCount> m_scene_tempo_x100;
 };
 
 // Section-type wire-name table, numerically/spelling-IDENTICAL to

@@ -154,7 +154,11 @@ void test_song_build_wire_line_carries_repeat_tokens() {
       break;
     }
   }
-  CHECK(song_build_line == "song build 3 intro1 1 1 varA 1 3 varB 1 inf");
+  // Song-mode Phase 2 appended four trailing per-scene override tokens
+  // (style/groove/key/tempo) after each scene's own <section> <bars>
+  // <repeat> triple; `-` on all four means "no override" -- exactly what a
+  // grid with no Phase-2 overrides set (this test's own model) sends.
+  CHECK(song_build_line == "song build 3 intro1 1 1 - - - - varA 1 3 - - - - varB 1 inf - - - -");
 
   ImGui::DestroyContext();
 }
@@ -287,9 +291,12 @@ void test_infinite_repeat_truncates_chain_until_explicit_resume() {
 
   // THE RESUME PIN: the exact wire shape a manual scene-header click sends
   // (activate_scene_column, grid_panel.cpp) -- `song build 1 <section>
-  // <bars> 1` -- rebuilds the chain from scratch and genuinely lands on the
-  // target section, proving the infinite hold is not a permanent dead end.
-  session.send("song build 1 varB 1 1");
+  // <bars> 1 - - - -` (Song-mode Phase 2 appended the trailing four
+  // style/groove/key/tempo override tokens; `-` on each means "no override",
+  // exactly what a scene with no Phase-2 overrides set sends) -- rebuilds
+  // the chain from scratch and genuinely lands on the target section,
+  // proving the infinite hold is not a permanent dead end.
+  session.send("song build 1 varB 1 1 - - - -");
   bool resumed = false;
   const auto resume_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(8000);
   while (std::chrono::steady_clock::now() < resume_deadline) {

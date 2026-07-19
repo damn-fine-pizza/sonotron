@@ -497,6 +497,23 @@ add_test(NAME test_song_mode_repeat_count_contract
 set_tests_properties(test_song_mode_repeat_count_contract PROPERTIES
   LABELS functional)
 
+# Song-mode Phase 2 (docs/proposals/song-mode-scenechain-adoption.md's own
+# Phasing section, per-scene editors) OBSERVABLE-CONTRACT hardening: the
+# `song build` wire line really carries the four Phase-2 override tokens
+# (style/groove/key/tempo) per scene, a malformed token on any of the four
+# is rejected with a clear per-field error, and a well-formed line with real
+# override values on every group parses without error.
+add_executable(test_song_mode_scene_performance_overrides_contract
+  test_song_mode_scene_performance_overrides_contract.cpp)
+target_link_libraries(test_song_mode_scene_performance_overrides_contract PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_song_mode_scene_performance_overrides_contract PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_song_mode_scene_performance_overrides_contract
+  COMMAND test_song_mode_scene_performance_overrides_contract)
+set_tests_properties(test_song_mode_scene_performance_overrides_contract PROPERTIES
+  LABELS functional)
+
 # Task #6 ACCEPTANCE TEST: the always-visible per-scene LENGTH stepper in
 # every scene-header column -- real click injection changes GridModel::
 # scene_bars, and (via a real InProcessBrainSession) a dialed-down scene

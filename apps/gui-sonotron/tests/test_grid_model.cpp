@@ -260,6 +260,201 @@ void test_add_scene_preserves_scene_repeat() {
   CHECK(grid.scene_count() == before + 1);
 }
 
+// Song-mode Phase 2: scene_style_id/set_scene_style_id is the per-scene
+// style override (kNoStyleOverride means inherit the base rig's style).
+void test_scene_style_id_defaults_to_no_override() {
+  GridModel grid;
+  CHECK(grid.scene_style_id(0) == GridModel::kNoStyleOverride);
+  CHECK(grid.scene_style_id(2) == GridModel::kNoStyleOverride);
+  CHECK(grid.scene_style_id(GridModel::kMaxSceneCount - 1) == GridModel::kNoStyleOverride);
+}
+
+void test_set_scene_style_id_and_bounds() {
+  GridModel grid;
+  grid.set_scene_style_id(1, 5);
+  CHECK(grid.scene_style_id(1) == 5);
+  // A neighbour is untouched.
+  CHECK(grid.scene_style_id(0) == GridModel::kNoStyleOverride);
+  CHECK(grid.scene_style_id(2) == GridModel::kNoStyleOverride);
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_style_id(GridModel::kMaxSceneCount, 10);
+  grid.set_scene_style_id(GridModel::kMaxSceneCount + 10, 10);
+
+  // Out-of-range get returns kNoStyleOverride, not garbage.
+  CHECK(grid.scene_style_id(GridModel::kMaxSceneCount) == GridModel::kNoStyleOverride);
+  CHECK(grid.scene_style_id(GridModel::kMaxSceneCount + 10) == GridModel::kNoStyleOverride);
+}
+
+void test_set_scene_style_id_negative_clears_to_no_override() {
+  GridModel grid;
+  grid.set_scene_style_id(0, 5);
+  CHECK(grid.scene_style_id(0) == 5);
+  grid.set_scene_style_id(0, -1);
+  CHECK(grid.scene_style_id(0) == GridModel::kNoStyleOverride);
+  // Try a more negative value too.
+  grid.set_scene_style_id(0, 5);
+  grid.set_scene_style_id(0, -99);
+  CHECK(grid.scene_style_id(0) == GridModel::kNoStyleOverride);
+}
+
+// Song-mode Phase 2: scene_groove_override/scene_groove/set_scene_groove
+// is the per-scene groove override, with a single atomic flag gating all
+// six fields together.
+void test_scene_groove_defaults_to_no_override() {
+  GridModel grid;
+  CHECK(grid.scene_groove_override(0) == false);
+  CHECK(grid.scene_groove_override(2) == false);
+  CHECK(grid.scene_groove_override(GridModel::kMaxSceneCount - 1) == false);
+  // Defaults match SceneGroove{}'s own initializers.
+  CHECK(grid.scene_groove(0).swing == 0);
+  CHECK(grid.scene_groove(0).humanize_timing == 0);
+  CHECK(grid.scene_groove(0).humanize_velocity == 0);
+  CHECK(grid.scene_groove(0).accent == 0);
+  CHECK(grid.scene_groove(0).swing_grid == 8);
+  CHECK(grid.scene_groove(0).quantize == 0);
+}
+
+void test_set_scene_groove_and_bounds() {
+  GridModel grid;
+  GridModel::SceneGroove g{.swing = 40,
+                           .humanize_timing = 10,
+                           .humanize_velocity = 20,
+                           .accent = 30,
+                           .swing_grid = 16,
+                           .quantize = 50};
+  grid.set_scene_groove(1, true, g);
+  CHECK(grid.scene_groove_override(1) == true);
+  CHECK(grid.scene_groove(1).swing == 40);
+  CHECK(grid.scene_groove(1).humanize_timing == 10);
+  CHECK(grid.scene_groove(1).humanize_velocity == 20);
+  CHECK(grid.scene_groove(1).accent == 30);
+  CHECK(grid.scene_groove(1).swing_grid == 16);
+  CHECK(grid.scene_groove(1).quantize == 50);
+  // A neighbour is untouched.
+  CHECK(grid.scene_groove_override(0) == false);
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_groove(GridModel::kMaxSceneCount, true, g);
+  grid.set_scene_groove(GridModel::kMaxSceneCount + 10, true, g);
+
+  // Out-of-range get returns defaults, not garbage.
+  CHECK(grid.scene_groove_override(GridModel::kMaxSceneCount) == false);
+  CHECK(grid.scene_groove(GridModel::kMaxSceneCount).swing == 0);
+  CHECK(grid.scene_groove(GridModel::kMaxSceneCount).swing_grid == 8);
+}
+
+// Song-mode Phase 2: scene_key_override/scene_key_root/scene_key_mode/
+// set_scene_key is the per-scene key override (root pitch class + mode),
+// with a single atomic override flag gating both fields together.
+void test_scene_key_defaults_to_no_override() {
+  GridModel grid;
+  CHECK(grid.scene_key_override(0) == false);
+  CHECK(grid.scene_key_override(2) == false);
+  CHECK(grid.scene_key_override(GridModel::kMaxSceneCount - 1) == false);
+  CHECK(grid.scene_key_root(0) == 0);
+  CHECK(grid.scene_key_mode(0) == 0);
+  CHECK(grid.scene_key_root(2) == 0);
+  CHECK(grid.scene_key_mode(2) == 0);
+}
+
+void test_set_scene_key_and_bounds() {
+  GridModel grid;
+  grid.set_scene_key(1, true, 7, 2);
+  CHECK(grid.scene_key_override(1) == true);
+  CHECK(grid.scene_key_root(1) == 7);
+  CHECK(grid.scene_key_mode(1) == 2);
+  // A neighbour is untouched.
+  CHECK(grid.scene_key_override(0) == false);
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_key(GridModel::kMaxSceneCount, true, 5, 1);
+  grid.set_scene_key(GridModel::kMaxSceneCount + 10, true, 5, 1);
+
+  // Out-of-range get returns defaults, not garbage.
+  CHECK(grid.scene_key_override(GridModel::kMaxSceneCount) == false);
+  CHECK(grid.scene_key_root(GridModel::kMaxSceneCount) == 0);
+  CHECK(grid.scene_key_mode(GridModel::kMaxSceneCount) == 0);
+}
+
+// Song-mode Phase 2: scene_tempo_x100/set_scene_tempo_x100 is the per-scene
+// tempo override in tempo_x100 units (BPM * 100). kNoTempoOverride (0)
+// means inherit the base rig's tempo.
+void test_scene_tempo_defaults_to_no_override() {
+  GridModel grid;
+  CHECK(grid.scene_tempo_x100(0) == GridModel::kNoTempoOverride);
+  CHECK(grid.scene_tempo_x100(2) == GridModel::kNoTempoOverride);
+  CHECK(grid.scene_tempo_x100(GridModel::kMaxSceneCount - 1) == GridModel::kNoTempoOverride);
+}
+
+void test_set_scene_tempo_and_bounds() {
+  GridModel grid;
+  grid.set_scene_tempo_x100(1, 14000);
+  CHECK(grid.scene_tempo_x100(1) == 14000);
+  // A neighbour is untouched.
+  CHECK(grid.scene_tempo_x100(0) == GridModel::kNoTempoOverride);
+  CHECK(grid.scene_tempo_x100(2) == GridModel::kNoTempoOverride);
+
+  // Out-of-range set is a no-op, not a crash or UB.
+  grid.set_scene_tempo_x100(GridModel::kMaxSceneCount, 14000);
+  grid.set_scene_tempo_x100(GridModel::kMaxSceneCount + 10, 14000);
+
+  // Out-of-range get returns kNoTempoOverride, not garbage.
+  CHECK(grid.scene_tempo_x100(GridModel::kMaxSceneCount) == GridModel::kNoTempoOverride);
+  CHECK(grid.scene_tempo_x100(GridModel::kMaxSceneCount + 10) == GridModel::kNoTempoOverride);
+}
+
+void test_set_scene_tempo_clamps_to_valid_bpm_range() {
+  GridModel grid;
+  // Below floor clamps up.
+  grid.set_scene_tempo_x100(0, 100);
+  CHECK(grid.scene_tempo_x100(0) == GridModel::kMinBpmMirror);
+  // Above ceiling clamps down.
+  grid.set_scene_tempo_x100(0, 999999);
+  CHECK(grid.scene_tempo_x100(0) == GridModel::kMaxBpmMirror);
+  // Zero clears.
+  grid.set_scene_tempo_x100(0, 14000);
+  grid.set_scene_tempo_x100(0, 0);
+  CHECK(grid.scene_tempo_x100(0) == GridModel::kNoTempoOverride);
+  // Negative clears.
+  grid.set_scene_tempo_x100(0, 14000);
+  grid.set_scene_tempo_x100(0, -50);
+  CHECK(grid.scene_tempo_x100(0) == GridModel::kNoTempoOverride);
+}
+
+void test_add_scene_preserves_scene_style_groove_key_tempo() {
+  GridModel grid;
+  // Set non-default values for each of the four new groups on scene 0.
+  grid.set_scene_style_id(0, 3);
+  GridModel::SceneGroove g{.swing = 25,
+                           .humanize_timing = 15,
+                           .humanize_velocity = 10,
+                           .accent = 20,
+                           .swing_grid = 12,
+                           .quantize = 35};
+  grid.set_scene_groove(0, true, g);
+  grid.set_scene_key(0, true, 5, 1);
+  grid.set_scene_tempo_x100(0, 12000);
+
+  const std::size_t before = grid.scene_count();
+  grid.add_scene();
+
+  // All four values on scene 0 survive the grow unchanged.
+  CHECK(grid.scene_style_id(0) == 3);
+  CHECK(grid.scene_groove_override(0) == true);
+  CHECK(grid.scene_groove(0).swing == 25);
+  CHECK(grid.scene_groove(0).humanize_timing == 15);
+  CHECK(grid.scene_groove(0).humanize_velocity == 10);
+  CHECK(grid.scene_groove(0).accent == 20);
+  CHECK(grid.scene_groove(0).swing_grid == 12);
+  CHECK(grid.scene_groove(0).quantize == 35);
+  CHECK(grid.scene_key_override(0) == true);
+  CHECK(grid.scene_key_root(0) == 5);
+  CHECK(grid.scene_key_mode(0) == 1);
+  CHECK(grid.scene_tempo_x100(0) == 12000);
+  CHECK(grid.scene_count() == before + 1);
+}
+
 // section_wire_name mirrors in_process_brain_session.cpp's own
 // parse_section_name spellings exactly (both directions of the same table).
 void test_section_wire_name_matches_known_spellings() {
@@ -585,6 +780,17 @@ int main() {
   test_set_scene_repeat_clamps_floor_at_one();
   test_set_scene_repeat_clamps_ceiling_at_infinite_sentinel();
   test_add_scene_preserves_scene_repeat();
+  test_scene_style_id_defaults_to_no_override();
+  test_set_scene_style_id_and_bounds();
+  test_set_scene_style_id_negative_clears_to_no_override();
+  test_scene_groove_defaults_to_no_override();
+  test_set_scene_groove_and_bounds();
+  test_scene_key_defaults_to_no_override();
+  test_set_scene_key_and_bounds();
+  test_scene_tempo_defaults_to_no_override();
+  test_set_scene_tempo_and_bounds();
+  test_set_scene_tempo_clamps_to_valid_bpm_range();
+  test_add_scene_preserves_scene_style_groove_key_tempo();
   test_section_wire_name_matches_known_spellings();
   test_launch_wired_is_lit();
   test_next_scene_auto_song_off_stays();

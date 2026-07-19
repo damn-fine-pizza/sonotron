@@ -182,6 +182,31 @@ constexpr std::size_t kSongBuildRingCapacity = 4;
 // ("inf", not a magic number) is what actually crosses that boundary.
 constexpr std::uint8_t kSongBuildRepeatInfinite = 0;
 
+// Song-mode Phase 2 (docs/proposals/song-mode-scenechain-adoption.md's own
+// Phasing section): a scene's own STYLE/GROOVE/KEY/TEMPO overrides, carried
+// on the wire right alongside section/n_bars/repeat -- one more `Performance`
+// field group apply_song_build's existing base-capture-and-override loop
+// (below) now copies onto each scene's own `Performance` before it is
+// stored, exactly the same mechanism Phase 1 already uses for `variation`.
+// No new engine-side event/watcher is needed: the core's own SceneChain ->
+// apply_scene_transition -> apply_performance chain (engine.cpp) already
+// applies whatever is baked into a step's stored Performance the instant
+// that step becomes active -- this struct only widens what gets baked in.
+//
+// Sentinels mirror the exact conventions GridModel::SceneGroove/kNoStyle
+// Override/kNoTempoOverride already use one layer up (D38: this file still
+// has no dependency on grid_model.hpp, same wire-token-not-shared-constant
+// discipline as kSongBuildRepeatInfinite above): style_id 0xFFFF is the
+// SAME sentinel core Performance::style_id already uses for "keep current"
+// (Engine::apply_performance skips Arranger::load() outright when it sees
+// it), so it needs no translation at all, unlike kSongBuildRepeatInfinite's
+// deliberately-distinct numeric encoding. tempo_x100 0 is never a real tempo
+// (arrangrr::kMinBpm is 2000), so it is an unambiguous "inherit" value the
+// same way GridModel's own kNoTempoOverride is. Groove and key are each
+// gated by their own explicit override flag (has_groove_override/
+// has_key_override), matching GridModel's own reasoning: 0 is a musically
+// valid value for every one of those fields, so no numeric sentinel could
+// serve as "inherit" there.
 struct SongBuildScene {
   SectionType section = SectionType::kVarA;
   std::uint8_t n_bars = 1;
@@ -193,6 +218,15 @@ struct SongBuildScene {
   // song_build's own header comment for why that costs only ONE kSceneAdd
   // step, not an unbounded one.
   std::uint8_t repeat = 1;
+  std::uint16_t style_id = 0xFFFF;  // 0xFFFF == core's own "keep current" sentinel
+  bool has_groove_override = false;
+  // swing, humanize_timing, humanize_velocity, accent, swing_grid, quantize --
+  // index-parallel with arrangrr::GrooveParams' own field order.
+  std::array<std::uint8_t, 6> groove{0, 0, 0, 0, 8, 0};
+  bool has_key_override = false;
+  std::uint8_t key_root = 0;     // pitch class 0..11
+  std::uint8_t key_mode = 0;     // arrangrr::Mode
+  std::uint16_t tempo_x100 = 0;  // 0 == inherit (arrangrr::kMinBpm is 2000, never a real tempo)
 };
 
 struct SongBuildCommand {
@@ -304,6 +338,94 @@ bool parse_section_name(std::string_view s, SectionType& out) {
     }
   }
   return false;
+}
+
+// Splits `s` on every occurrence of `sep` (no quoting, no escaping) -- the
+// SongBuildScene's own groove/key sub-tokens (comma/colon-joined decimals)
+// are the only callers; mirrors split_ws's own "no delimiter merging needed"
+// simplicity, just with a caller-chosen separator instead of a fixed set of
+// whitespace bytes.
+std::vector<std::string_view> split_on(std::string_view s, char sep) {
+  std::vector<std::string_view> tokens;
+  std::size_t start = 0;
+  while (start <= s.size()) {
+    const std::size_t pos = s.find(sep, start);
+    const std::size_t end = pos == std::string_view::npos ? s.size() : pos;
+    tokens.push_back(s.substr(start, end - start));
+    if (pos == std::string_view::npos) {
+      break;
+    }
+    start = pos + 1;
+  }
+  return tokens;
+}
+
+// Song-mode Phase 2 (docs/proposals/song-mode-scenechain-adoption.md's own
+// Phasing section): decodes the FOUR trailing per-scene tokens `song build`
+// grew alongside `<section> <bars> <repeat>` -- `<style> <groove> <key>
+// <tempo>`. Every one of the four accepts the literal `-` for "no override"
+// (SongBuildScene's own default-constructed sentinels already ARE "no
+// override", so a `-` token simply leaves `scene` untouched field-by-field).
+// `style_token`: `-` or a decimal builtin style-table index.
+// `groove_token`: `-` or six comma-joined decimals `swing,humanize_timing,
+// humanize_velocity,accent,swing_grid,quantize` (SongBuildScene::groove's own
+// field order).
+// `key_token`: `-` or `root:mode` (two colon-joined decimals).
+// `tempo_token`: `-` or a decimal tempo_x100 (BPM * 100).
+// Returns false (with `detail` set) on any malformed non-`-` token; `scene`
+// is only ever partially written on failure (the caller discards the whole
+// SongBuildCommand on any parse failure anyway, mirroring every other
+// per-scene parse failure in this line's own handler below).
+bool parse_song_build_scene_overrides(std::string_view style_token, std::string_view groove_token,
+                                      std::string_view key_token, std::string_view tempo_token,
+                                      SongBuildScene& scene, std::string& detail) {
+  if (style_token != "-") {
+    std::uint64_t style_id = 0;
+    if (!parse_uint(style_token, style_id) || style_id > 0xFFFE) {
+      detail = "bad style override: " + std::string(style_token);
+      return false;
+    }
+    scene.style_id = static_cast<std::uint16_t>(style_id);
+  }
+  if (groove_token != "-") {
+    const std::vector<std::string_view> fields = split_on(groove_token, ',');
+    if (fields.size() != scene.groove.size()) {
+      detail = "bad groove override (need 6 comma-joined values): " + std::string(groove_token);
+      return false;
+    }
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+      std::uint64_t value = 0;
+      if (!parse_uint(fields[i], value) || value > 255) {
+        detail = "bad groove override field: " + std::string(fields[i]);
+        return false;
+      }
+      scene.groove[i] = static_cast<std::uint8_t>(value);
+    }
+    scene.has_groove_override = true;
+  }
+  if (key_token != "-") {
+    const std::vector<std::string_view> fields = split_on(key_token, ':');
+    std::uint64_t root = 0;
+    std::uint64_t mode = 0;
+    if (fields.size() != 2 || !parse_uint(fields[0], root) || root > 11 ||
+        !parse_uint(fields[1], mode) || mode > 6) {
+      detail =
+          "bad key override (need root:mode, root 0..11, mode 0..6): " + std::string(key_token);
+      return false;
+    }
+    scene.key_root = static_cast<std::uint8_t>(root);
+    scene.key_mode = static_cast<std::uint8_t>(mode);
+    scene.has_key_override = true;
+  }
+  if (tempo_token != "-") {
+    std::uint64_t tempo = 0;
+    if (!parse_uint(tempo_token, tempo) || tempo == 0 || tempo > 0xFFFF) {
+      detail = "bad tempo override: " + std::string(tempo_token);
+      return false;
+    }
+    scene.tempo_x100 = static_cast<std::uint16_t>(tempo);
+  }
+  return true;
 }
 
 std::vector<std::string_view> split_ws(std::string_view s) {
@@ -1528,6 +1650,30 @@ bool apply_song_build(Shell& shell, const SongBuildCommand& build) {
     Performance perf = base;
     perf.variation = static_cast<std::uint8_t>(build.scenes[i].section);
     perf.chord_sequence_id = 0xFFFF;
+    // Song-mode Phase 2: layer this scene's own style/groove/key/tempo
+    // overrides onto the base capture, exactly like `variation` right above
+    // -- an unset override (this struct's own sentinel/flag) leaves the
+    // base-captured field untouched, so a scene with no Phase-2 overrides at
+    // all behaves byte-identically to Phase 1's own `perf = base` copy.
+    const SongBuildScene& scene = build.scenes[i];
+    if (scene.style_id != 0xFFFF) {
+      perf.style_id = scene.style_id;
+    }
+    if (scene.has_groove_override) {
+      perf.groove.swing = scene.groove[0];
+      perf.groove.humanize_timing = scene.groove[1];
+      perf.groove.humanize_velocity = scene.groove[2];
+      perf.groove.accent = scene.groove[3];
+      perf.groove.swing_grid = scene.groove[4];
+      perf.groove.quantize = scene.groove[5];
+    }
+    if (scene.has_key_override) {
+      perf.key_root = scene.key_root;
+      perf.key_mode = scene.key_mode;
+    }
+    if (scene.tempo_x100 != 0) {
+      perf.tempo_x100 = scene.tempo_x100;
+    }
     if (!shell.engine().performances().store(i, perf)) {
       break;  // pool exhausted -- play the steps already built rather than none.
     }
@@ -2035,18 +2181,23 @@ void InProcessBrainSession::send(std::string_view command_line) {
   }
 
   // Song-mode Phase 1 (docs/proposals/song-mode-scenechain-adoption.md) +
-  // task #5 (per-section REPEAT COUNT, host-only, ZERO ABI/core change):
-  // `song build <count> <section0> <bars0> <repeat0> <section1> <bars1>
-  // <repeat1> ...` -- grid_panel.cpp's own build_and_play_song()/
-  // activate_scene_column() send this instead of the retired `style section`
-  // + `launch scene` pair. Each scene's own `repeatN` token is either a
-  // decimal `1`..`255` (play this scene that many times before advancing) or
-  // the literal `inf` (hold this scene forever -- decoded to
-  // kSongBuildRepeatInfinite, apply_song_build's own header comment covers
-  // what that does to the built chain). Like `midi-source load` above, the
-  // payload (a variable-length scene list) does not fit the fixed-size ABI
-  // `Command` POD, so it rides its own ring rather than command_line_to_
-  // command()'s translation, and is handled here, before that call.
+  // task #5 (per-section REPEAT COUNT, host-only, ZERO ABI/core change) +
+  // Phase 2 (per-scene style/groove/key/tempo overrides, same doc's own
+  // Phasing section): `song build <count> <section0> <bars0> <repeat0>
+  // <style0> <groove0> <key0> <tempo0> <section1> ...` -- grid_panel.cpp's
+  // own build_and_play_song()/activate_scene_column() send this instead of
+  // the retired `style section` + `launch scene` pair. Each scene's own
+  // `repeatN` token is either a decimal `1`..`255` (play this scene that
+  // many times before advancing) or the literal `inf` (hold this scene
+  // forever -- decoded to kSongBuildRepeatInfinite, apply_song_build's own
+  // header comment covers what that does to the built chain). The four
+  // Phase-2 tokens (`styleN`/`grooveN`/`keyN`/`tempoN`) each accept the
+  // literal `-` for "no override" -- parse_song_build_scene_overrides above
+  // decodes their real grammar. Like `midi-source load` above, the payload
+  // (a variable-length scene list) does not fit the fixed-size ABI `Command`
+  // POD, so it rides its own ring rather than command_line_to_command()'s
+  // translation, and is handled here, before that call.
+  constexpr std::size_t kSongBuildSceneStride = 7;
   const std::vector<std::string_view> song_tokens = split_ws(command_line);
   if (song_tokens.size() >= 2 && song_tokens[0] == "song" && song_tokens[1] == "build") {
     BrainEvent note;
@@ -2055,27 +2206,29 @@ void InProcessBrainSession::send(std::string_view command_line) {
     note.cmd = std::string(command_line);
     std::uint64_t count = 0;
     if (song_tokens.size() < 3 || !parse_uint(song_tokens[2], count) || count == 0 ||
-        count > kMaxSongScenes || song_tokens.size() != 3 + count * 3) {
-      note.error = "usage: song build <count> <section> <bars> <repeat> ...";
+        count > kMaxSongScenes || song_tokens.size() != 3 + count * kSongBuildSceneStride) {
+      note.error =
+          "usage: song build <count> <section> <bars> <repeat> <style> <groove> <key> <tempo> ...";
       m_impl->local_warnings.push_back(std::move(note));
       return;
     }
     SongBuildCommand build;
     build.scene_count = static_cast<std::uint8_t>(count);
     for (std::uint64_t i = 0; i < count; ++i) {
+      const std::size_t base_idx = 3 + (i * kSongBuildSceneStride);
       SectionType section{};
-      if (!parse_section_name(song_tokens[3 + (i * 3)], section)) {
-        note.error = "unknown section: " + std::string(song_tokens[3 + (i * 3)]);
+      if (!parse_section_name(song_tokens[base_idx], section)) {
+        note.error = "unknown section: " + std::string(song_tokens[base_idx]);
         m_impl->local_warnings.push_back(std::move(note));
         return;
       }
       std::uint64_t bars = 0;
-      if (!parse_uint(song_tokens[4 + (i * 3)], bars) || bars == 0 || bars > 255) {
-        note.error = "bad bar count: " + std::string(song_tokens[4 + (i * 3)]);
+      if (!parse_uint(song_tokens[base_idx + 1], bars) || bars == 0 || bars > 255) {
+        note.error = "bad bar count: " + std::string(song_tokens[base_idx + 1]);
         m_impl->local_warnings.push_back(std::move(note));
         return;
       }
-      const std::string_view repeat_token = song_tokens[5 + (i * 3)];
+      const std::string_view repeat_token = song_tokens[base_idx + 2];
       std::uint8_t repeat = 1;
       if (repeat_token == "inf") {
         repeat = kSongBuildRepeatInfinite;
@@ -2088,8 +2241,17 @@ void InProcessBrainSession::send(std::string_view command_line) {
         }
         repeat = static_cast<std::uint8_t>(repeat_value);
       }
-      build.scenes[i] = SongBuildScene{
+      SongBuildScene scene{
           .section = section, .n_bars = static_cast<std::uint8_t>(bars), .repeat = repeat};
+      std::string override_detail;
+      if (!parse_song_build_scene_overrides(song_tokens[base_idx + 3], song_tokens[base_idx + 4],
+                                            song_tokens[base_idx + 5], song_tokens[base_idx + 6],
+                                            scene, override_detail)) {
+        note.error = override_detail;
+        m_impl->local_warnings.push_back(std::move(note));
+        return;
+      }
+      build.scenes[i] = scene;
     }
     if (!m_impl->song_build_ring.try_push(build)) {
       BrainEvent warn;

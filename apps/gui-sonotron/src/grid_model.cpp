@@ -13,6 +13,13 @@ GridModel::GridModel(std::size_t scene_count)
   m_scene_sections.fill(kDefaultSectionType);
   m_scene_bars.fill(kDefaultSceneBars);
   m_scene_repeat.fill(kDefaultSceneRepeat);
+  m_scene_style_id.fill(kNoStyleOverride);
+  m_scene_groove_override.fill(false);
+  m_scene_groove.fill(SceneGroove{});
+  m_scene_key_override.fill(false);
+  m_scene_key_root.fill(0);
+  m_scene_key_mode.fill(0);
+  m_scene_tempo_x100.fill(kNoTempoOverride);
 }
 
 std::string_view GridModel::part_label(std::size_t part_index) const {
@@ -110,6 +117,91 @@ void GridModel::set_scene_repeat(std::size_t scene_index, int repeat) {
     return;
   }
   m_scene_repeat[scene_index] = std::clamp(repeat, 1, kSceneRepeatInfinite);
+}
+
+int GridModel::scene_style_id(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return kNoStyleOverride;
+  }
+  return m_scene_style_id[scene_index];
+}
+
+void GridModel::set_scene_style_id(std::size_t scene_index, int style_id) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  m_scene_style_id[scene_index] = style_id < 0 ? kNoStyleOverride : style_id;
+}
+
+bool GridModel::scene_groove_override(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return false;
+  }
+  return m_scene_groove_override[scene_index];
+}
+
+GridModel::SceneGroove GridModel::scene_groove(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return SceneGroove{};
+  }
+  return m_scene_groove[scene_index];
+}
+
+void GridModel::set_scene_groove(std::size_t scene_index, bool has_override, SceneGroove groove) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  m_scene_groove_override[scene_index] = has_override;
+  m_scene_groove[scene_index] = groove;
+}
+
+bool GridModel::scene_key_override(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return false;
+  }
+  return m_scene_key_override[scene_index];
+}
+
+std::uint8_t GridModel::scene_key_root(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return 0;
+  }
+  return m_scene_key_root[scene_index];
+}
+
+std::uint8_t GridModel::scene_key_mode(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return 0;
+  }
+  return m_scene_key_mode[scene_index];
+}
+
+void GridModel::set_scene_key(std::size_t scene_index, bool has_override, std::uint8_t root,
+                              std::uint8_t mode) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  m_scene_key_override[scene_index] = has_override;
+  m_scene_key_root[scene_index] = root;
+  m_scene_key_mode[scene_index] = mode;
+}
+
+int GridModel::scene_tempo_x100(std::size_t scene_index) const {
+  if (scene_index >= kMaxSceneCount) {
+    return kNoTempoOverride;
+  }
+  return m_scene_tempo_x100[scene_index];
+}
+
+void GridModel::set_scene_tempo_x100(std::size_t scene_index, int tempo_x100) {
+  if (scene_index >= kMaxSceneCount) {
+    return;
+  }
+  if (tempo_x100 <= 0) {
+    m_scene_tempo_x100[scene_index] = kNoTempoOverride;
+    return;
+  }
+  m_scene_tempo_x100[scene_index] = std::clamp(tempo_x100, kMinBpmMirror, kMaxBpmMirror);
 }
 
 std::string_view section_wire_name(std::uint8_t section) {
