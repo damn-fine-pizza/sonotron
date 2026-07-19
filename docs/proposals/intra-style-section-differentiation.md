@@ -392,7 +392,7 @@ This is a real open question, flagged, not asserted either way.
    stopped, rather than relying on bar-count alone. This is the one item in
    this section that is a real code question, not just a content/labeling
    one — flagged for whoever picks this up to confirm against a live build
-   (Nazzareno/Torquato territory, not a static-analysis verdict I can make
+   (Giotto/Torquato territory, not a static-analysis verdict I can make
    honestly from headers alone).
 4. **`Ending2` is currently reachable only manually** (no `kVariationSections`
    entry maps to it, `browser_panel.cpp:35-44` only has one `"outro"` row
@@ -476,7 +476,7 @@ the owner's, not mine to grant here.
   scoping pass.
 - **§4.4 item 3** (auto-song's handling of `stop_transport`) is a real
   functional question I could not verify statically — it needs a live-build
-  check (Nazzareno/Torquato), not a static-analysis verdict.
+  check (Giotto/Torquato), not a static-analysis verdict.
 - **The `MotifTransform` vocabulary gap** (§2: no "walking bass"/"chromatic
   approach" transform exists) is a real, already-once-flagged model
   limitation (`phase7-scope-9210-9320-antisameness.md` §2) that Wave-2.5's

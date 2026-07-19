@@ -2,7 +2,7 @@
 // LoopBuffer::on_tick's PLAYBACK-side polyphony bookkeeping
 // (LoopBufferPlayState::sounding[kMaxLoopHeldNotes]) is bounded at
 // kMaxLoopHeldNotes (16) concurrently-sounding voices per slot -- the SAME
-// budget the RECORDING-side table (m_held) already documents. Nazzareno's
+// budget the RECORDING-side table (m_held) already documents. Giotto's
 // fix gates the note-ON itself on store_sounding() actually claiming a
 // tracking slot (on_tick's own header comment: "Only sound the note-ON if
 // the sounding table can actually track its release"): past the 16th
@@ -29,7 +29,7 @@
 // entirely inside LoopBuffer's own per-slot sounding-table bookkeeping) --
 // unit-level regression pin.
 //
-// GREEN today (Nazzareno's fix is in the tree): exactly kMaxLoopHeldNotes
+// GREEN today (Giotto's fix is in the tree): exactly kMaxLoopHeldNotes
 // (16) note-ons fire at tick 0 -- the 17th voice is capped, never sounds --
 // and exactly that many note-offs fire at the clip's natural end: every
 // voice that sounded is released, none orphaned. Kept in its own file/CTest

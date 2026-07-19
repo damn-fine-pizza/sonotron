@@ -364,7 +364,7 @@ phase-align to the harmony loop, unlike the style-switch case §3.0 covers)
 default.
 
 Three considered options, none of which I am implementing (host plumbing is
-Corelli/Nazzareno's domain per my own remit — this is the musical intent
+Corelli/Giotto's domain per my own remit — this is the musical intent
 each option buys, and its rough feasibility):
 
 **Option A — status quo, no interaction.** Ending's own `StylePattern`
@@ -395,7 +395,7 @@ bounded 16-sequence pool (`kMaxChordSequences = 16`,
 24KB") per style, and I did NOT verify whether `ChordSequencer::on_tick`'s
 phase/`m_base` handling supports a clean handoff back to the main
 progression's own original tick phase after the swap (a genuine open
-engineering question, not something I resolved — flag for Nazzareno/
+engineering question, not something I resolved — flag for Giotto/
 Corelli). **Feasibility: HOST-ONLY, with an unverified core-behavior
 dependency that needs an engineering spike before it is safe to build.**
 
@@ -471,7 +471,7 @@ named; still unresolved; still not mine to decide.
 
 1. **Ending's harmonic resolution (§3.4)** — Option A (status quo, shipped)
    vs. Option B (dedicated cadence sequence, musically correct, needs an
-   engineering spike on `ChordSequencer` phase handoff before Nazzareno can
+   engineering spike on `ChordSequencer` phase handoff before Giotto can
    safely scope it) vs. Option C (rejected). I recommend targeting B but
    this is a genuine priority call: is an occasionally-unresolved Ending
    worth fixing now, or is it a fine deferred polish item behind other

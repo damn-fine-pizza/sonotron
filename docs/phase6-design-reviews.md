@@ -192,7 +192,7 @@ glue call ONE authoritative decode instead of maintaining two independently
 hand-written switches — the same "shared label helpers, not two drifting
 tables" discipline `brain_event_from_outevent.cpp`/`components/hostrt/
 jsonl.cpp` already apply via `event_labels.hpp`. This is a structural
-seam-to-cut, not a line edit; Nazzareno decides the exact function shape.
+seam-to-cut, not a line edit; Giotto decides the exact function shape.
 
 **Flagged, not resolved here (product scope, not architecture):**
 `OutEvent.port` is the arrangrr output-port index used for ALSA routing

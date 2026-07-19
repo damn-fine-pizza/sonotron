@@ -490,7 +490,7 @@ void render_piano_roll_canvas(SeqEditModel& model, StepPatternModel& track, int 
 // place, reversibly -- SeqEditModel::role_visible's own header comment
 // documents this semantics change (was "lane exists", now "bars draw").
 //
-// Fabrizio review (2026-07-18, track-set + content divergence from the
+// Aretino review (2026-07-18, track-set + content divergence from the
 // Repeat Zone): each lane's own `total_steps` and note content are now
 // resolved from `grid`'s REAL cell content at (row.role_index, `scene`) via
 // launch_rows.hpp's shared resolve_track_cell_preview() -- the SAME resolver
@@ -715,7 +715,7 @@ bool try_render_step_canvas(SeqEditModel& model, ImDrawList* dl, const ImVec2& p
 // (not raw TrackRole indices) -- draw_piano_roll_lanes needs the whole
 // GridRow (role_index AND name) to resolve each lane's real content.
 //
-// Fabrizio review (2026-07-18): walks kRows (the Repeat Zone's own real
+// Aretino review (2026-07-18): walks kRows (the Repeat Zone's own real
 // rows), not every kTrackRoleCount role -- roles with no Repeat-Zone row at
 // all used to render a lane that was a phantom with no corresponding launch
 // cell. Mixer-roles fix (2026-07-18): kRows now has 7 rows (Perc/Chord2
@@ -768,7 +768,7 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx, const GridMode
           : theme::kCyan;
   const std::size_t scene = static_cast<std::size_t>(std::max(fx.open_scene, 0));
 
-  // Fabrizio review (2026-07-18): the OPENED role's own content -- used only
+  // Aretino review (2026-07-18): the OPENED role's own content -- used only
   // for the header's "~approx" marker and the canvas-wide bar-guide division
   // count below -- is now resolved through the SAME launch_rows.hpp
   // resolve_track_cell_preview() every lane (draw_piano_roll_lanes) and the

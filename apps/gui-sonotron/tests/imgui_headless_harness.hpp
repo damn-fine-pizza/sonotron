@@ -60,7 +60,7 @@
 //      screenshot (which would need a live GL context -- see main.cpp's
 //      SONOTRON_GUI_SCREENSHOT path -- unavailable in a headless CI host).
 //
-//   4. Input-trace JSONL replay (coordinated with Nazzareno's product-side
+//   4. Input-trace JSONL replay (coordinated with Giotto's product-side
 //      --trace-input/--replay-input recorder, main.cpp): load_input_trace()
 //      parses the SAME line format the real app's recorder emits (one event
 //      per line: {"f":<frame>,"t":"mp","x":..,"y":..} mouse-move,
@@ -356,7 +356,7 @@ inline int count_occupied_columns_in_band(const ImDrawData* draw_data, ImU32 col
 }
 
 // ---------------------------------------------------------------------------
-// Input-trace JSONL replay (owner steer: consume the SAME format Nazzareno's
+// Input-trace JSONL replay (owner steer: consume the SAME format Giotto's
 // product-side --trace-input/--replay-input recorder emits, main.cpp). This
 // is a hand-rolled parser (no new JSON dependency), legitimate here because
 // the format is flat and line-oriented -- one scalar-only object per line,

@@ -19,7 +19,7 @@ namespace sonotron {
 // every lane's content is resolved through launch_rows.hpp's shared
 // resolve_track_cell_preview() against `grid`'s cell at (role, UiState::
 // open_scene), so a given cell's real content (blank/live-step/style-section)
-// reads identically in both panels by construction (Fabrizio review,
+// reads identically in both panels by construction (Aretino review,
 // 2026-07-18: this closes a track-set AND content divergence the two panels
 // used to have).
 void render_seqedit_panel(SeqEditModel& model, const UiState& fx, const GridModel& grid);

@@ -1,6 +1,6 @@
 # "basic" style redesign — Intro1/VarA sameness + intro hiccup
 
-Status: PROPOSAL (design + diagnosis), ready for Nazzareno to implement mechanically.
+Status: PROPOSAL (design + diagnosis), ready for Giotto to implement mechanically.
 Author: Ottorino (style analyst). Read-only on product code; this document is
 the only write.
 
@@ -118,7 +118,7 @@ for every style equally, and — checked via
 calls it**. The GUI seeds a static default key and never runs `seq play`
 (confirmed against the CLI-vs-GUI divergence note in
 `docs/reflections/`), so this exact collision is not confirmed to be what
-plays in today's GUI. I flag it for the owner/Nazzareno as a real, separate
+plays in today's GUI. I flag it for the owner/Giotto as a real, separate
 architecture issue (§4) — not something this style redesign can or should
 paper over — but I did design Intro1's new content so that it never puts an
 arranger onset exactly on tick 0 (§2.1), which removes `basic.hpp`'s own
@@ -208,7 +208,7 @@ against all four `basic`-using goldens).
 ### 3.2 New Intro1 (`SectionType::kIntro1`, `bars=2`, replaces lines ~90–189)
 
 Illustrative C++ spec, in the exact shape `basic.hpp` already uses —
-Nazzareno translates this directly, no invention required. Verified by hand
+Giotto translates this directly, no invention required. Verified by hand
 against `kTicksPerStep=240`: every gate ends before the next same-role
 onset (no overlaps), and nothing fires at step 0.
 
@@ -358,7 +358,7 @@ the band — which is exactly the pattern most of the project's own golden
 `.acmd` scripts use (`arranger_band.acmd`, `lead_funk.acmd`, etc.). If the
 owner wants that hardened (e.g., scale the chord-echo's velocity down, gate
 it off during `section_is_intro()`, or default `chord_out` to "none" instead
-of port 0), that is engine-level work for Nazzareno, not something this
+of port 0), that is engine-level work for Giotto, not something this
 style file can express or that I should silently paper over.
 
 ## 5. Impact — what breaks at land, what does not
@@ -386,7 +386,7 @@ style file can express or that I should silently paper over.
 
 **Coverage gap this surfaces (not a break, a recommendation):** *no* existing
 golden currently exercises `basic`'s Intro1 or Intro2 content at all, for
-either the old or the new arrays. Torquato/Nazzareno should consider adding
+either the old or the new arrays. Torquato/Giotto should consider adding
 one new golden that does `style load basic` + `style section intro1` (and
 ideally `intro2`) explicitly, both to lock in this redesign and to close the
 gap that let Intro1≈VarA ship unnoticed by any regression fixture. That is a

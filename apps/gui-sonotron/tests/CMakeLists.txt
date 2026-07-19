@@ -85,7 +85,7 @@ gui_sonotron_engine_test(test_audio_port_gate functional)
 target_compile_definitions(test_audio_port_gate PRIVATE
   GUI_SONOTRON_TEST_MIDI_FIXTURE="${CMAKE_SOURCE_DIR}/components/platform/midisrc/tests/fixtures/tiny.mid")
 
-# Flips Torquato's RED-by-design QA pin to GREEN (Nazzareno, closing the
+# Flips Torquato's RED-by-design QA pin to GREEN (Giotto, closing the
 # Theme-2 reachability gap): InProcessBrainSession::send() now auto-routes
 # the default band on `style load` (kDefaultStyleRoutes,
 # in_process_brain_session.cpp), so primary-port kMidi traffic IS reachable
@@ -200,7 +200,7 @@ endfunction()
 # approximation (bug #2, both the underlying motif-kernel ground truth on
 # basic/kVarD/kChord1 and its actual reachability on pop/kVarA/kChord2, a
 # genuinely two-bar motif-driven pattern). Originally authored RED-before-
-# green against the pre-fix preview_for(); Nazzareno's SLICE 1 (multi-bar
+# green against the pre-fix preview_for(); Giotto's SLICE 1 (multi-bar
 # window + per-bar real progression harmony + repeat=bar motif approximation)
 # has since landed, so this is now the GREEN acceptance gate for that fix --
 # see the test file's own header comment for the full design and the one
@@ -416,7 +416,7 @@ set_tests_properties(test_grid_panel_auto_song_stop_restart_ui_automation PROPER
 # Roadmap task #36 FIX PIN (Torquato QA pass, owner-observed LIVE bug):
 # master Play pressed a second time (real Stop then real Play again) while
 # the song sits mid-way must restart from scene 0, not re-launch the stale
-# active_scene. Authored RED-first against the pre-fix tree; Nazzareno's fix
+# active_scene. Authored RED-first against the pre-fix tree; Giotto's fix
 # (grid_panel.cpp, gated on fx.auto_song) landed concurrently while this test
 # was being written -- both tests in this file are now the GREEN standing
 # regression proof (root cause, RED trail, and the auto_song-OFF scope-lock
@@ -435,7 +435,7 @@ set_tests_properties(test_grid_panel_master_play_restart_rewind_ui_automation PR
 # Roadmap task #37 ACCEPTANCE TEST (Torquato QA pass, docs/proposals/song-
 # form-option-a-wiring-plan.md §3/§4): a dedicated ENDING transport button.
 # RED-first, per this file's own header comment -- the button does not exist
-# in transport_panel.cpp yet at authoring time (Nazzareno implementing it in
+# in transport_panel.cpp yet at authoring time (Giotto implementing it in
 # parallel, in the same shared tree); this suite's own locate step is the RED
 # pin until his code lands.
 add_executable(test_transport_ending_button_ui_automation

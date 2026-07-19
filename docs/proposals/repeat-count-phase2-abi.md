@@ -281,5 +281,5 @@ is:
 Independent of the repeat-count decision: the silent `kMaxSongScenes * kMaxSceneRepeat ==
 kMaxScenes` coupling (§1.4) is worth a defensive `static_assert` or at minimum an explicit
 cross-file comment anchor, so a future bump to either GUI-side constant fails loudly at
-compile time instead of silently starting to truncate songs. That is a small, Nazzareno-
+compile time instead of silently starting to truncate songs. That is a small, Giotto-
 sized hardening item, not an architecture decision, and not contingent on Phase-2.

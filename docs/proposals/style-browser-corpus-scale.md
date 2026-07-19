@@ -354,7 +354,7 @@ orthogonal to harmony and stay that way.
 1. **Metadata transport: wire query vs local manifest.** The browser's population
    code depends on whether imported-style metadata arrives over L0/L1 (a new bulk
    verb) or is read from a host-side corpus manifest file. Neither exists; this is
-   an owner/Nazzareno-lane decision, not something I resolve here.
+   an owner/Giotto-lane decision, not something I resolve here.
 2. **Grouped-flat-list vs sortable-table UX** (§3.2, "alternative shape") — a real
    product fork (browse-by-family vs sort-by-any-column), not a technical one.
 3. **Genre classifier scope**: is widening `genre.cpp`'s cascade (adding reggae/

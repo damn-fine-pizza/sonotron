@@ -9,7 +9,7 @@
 
 // The 7 REAL launch-grid rows (v02-workstation-spec.md §2b) shared by
 // grid_panel.cpp (the Repeat Zone) and seqedit_panel.cpp (Sequence Edit) --
-// lifted out of grid_panel.cpp (Fabrizio review, 2026-07-18: seqedit's own
+// lifted out of grid_panel.cpp (Aretino review, 2026-07-18: seqedit's own
 // lane/track-set used to walk all 9 kTrackRoleCount roles from a STATIC
 // style table, while the Repeat Zone only ever surfaces these real rows
 // resolved from REAL per-cell content -- phantom lanes with no matching

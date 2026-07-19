@@ -1230,7 +1230,7 @@ slice.
 
 ## Style corpus import (#C, nodes `9400`/`9420`/`9430`)
 
-Ottorino, scoping analysis (read-only). Feeds Nazzareno's `9420`/`9430`
+Ottorino, scoping analysis (read-only). Feeds Giotto's `9420`/`9430`
 implementation slot.
 
 ### Headline correction — the roadmap premise is stale
@@ -1263,7 +1263,7 @@ decode is not implemented. Measured against the tree, that is no longer true:
 files to `inspect_sff()`, which prints the stale "SFF: unsupported subset —
 inspect-only" / "casm: present (not decoded)" even though `import-sff` on the
 same file now decodes it fully — `inspect` was never updated when `import_sff`
-grew CASM decoding. A one-line fix for Nazzareno.
+grew CASM decoding. A one-line fix for Giotto.
 
 **Net effect on scope:** the least-predictable reverse-engineering slice —
 byte-level CASM/CSEG parsing — is already done and tested for SFF1 (partially

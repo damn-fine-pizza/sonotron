@@ -23,7 +23,7 @@ note (written mid-session, now stale on this point) suggested. Confirmed by re-g
 files** — always `Intro1` and `VarA`, `.bars=1` everywhere else (`grep -o
 '\.bars=[0-9]*' styles/*.hpp`). Wave-2.5 must build on top of this, not repeat it.
 
-**Live harmony is landing separately (Nazzareno, `apps/gui-sonotron/`, a different
+**Live harmony is landing separately (Giotto, `apps/gui-sonotron/`, a different
 lane, no conflict with this read-only pass).** `docs/reflections/cli-vs-gui-ab-2026-07.md`
 measured the concrete effect: with live harmony driving a real ii–V–I–vi turnaround,
 the same 8-bar capture visits **7 of 12 pitch-classes** on bass+chord1+chord2;
@@ -377,7 +377,7 @@ path, which is core/ABI-adjacent work, not a `constexpr`-table edit. Unchanged f
 the prior pass's verdict; still a candidate for its own scoped follow-up, not this
 wave.
 
-## 6. What Nazzareno needs to touch (clean-slice list)
+## 6. What Giotto needs to touch (clean-slice list)
 
 Every item below is a `constexpr` array addition/edit inside the named file, no
 `style_model.hpp`/`arranger.hpp`/`motif.hpp` change, no new role, no ABI surface:

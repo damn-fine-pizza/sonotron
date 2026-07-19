@@ -3,7 +3,7 @@
 Status: PROPOSAL — read-only move-plan, not executed. Physical layout only
 (directory/target/file placement); the logical shape of the `ISoundEngine`
 contract itself (method signatures, ownership, error handling) is Corelli's
-and Nazzareno's call, not fixed here beyond what placement requires.
+and Giotto's call, not fixed here beyond what placement requires.
 
 Owner decisions this proposal converges on (2026-07-14/15):
 - Misfiling confirmed: `apps/gui-sonotron/src/audio_engine.{hpp,cpp}` has no
@@ -168,7 +168,7 @@ choice of which backend to build lives at the composition root
 (`apps/gui-sonotron`'s CMakeLists + `main.cpp`), not inside `components/
 audio`. How `AudioEngine` receives its `ISoundEngine` (constructor
 reference, `unique_ptr`, factory) is a logical/API question I hand to
-Corelli/Nazzareno — I only fix that the LINK EDGE from `audio` to any
+Corelli/Giotto — I only fix that the LINK EDGE from `audio` to any
 concrete engine must not exist.
 
 ---
@@ -212,7 +212,7 @@ core-capable engine) to freestanding/no-heap — documented intent, NOT built:**
 
 ---
 
-## 5. Concrete CMake sketch (illustrative, for Nazzareno — not applied here)
+## 5. Concrete CMake sketch (illustrative, for Giotto — not applied here)
 
 `components/audio-engines/CMakeLists.txt` (pure grouping, mirrors `components/`
 itself):
@@ -280,7 +280,7 @@ add_subdirectory(apps/tools/melodd)          # unchanged
 - `main.cpp`'s `#include "src/audio_engine.hpp"` → `#include "audio/
   audio_engine.hpp"`; construction gains an explicit step to build the
   `SoundfontEngine` before constructing `AudioEngine` (content-level wiring,
-  Nazzareno's).
+  Giotto's).
 
 ---
 
@@ -315,7 +315,7 @@ port_reachable.cpp:19` both include `src/in_process_brain_session.hpp`, not
 6. `git mv apps/gui-sonotron/tests/test_spsc_ring.cpp components/audio/tests/`
 7. `git mv apps/gui-sonotron/tests/test_audio_engine_smoke.cpp components/audio/tests/`
 8. Write `components/audio-engines/core/include/audio_engines/i_sound_engine.hpp`
-   (new file, Corelli/Nazzareno's contract design) + its `CMakeLists.txt`.
+   (new file, Corelli/Giotto's contract design) + its `CMakeLists.txt`.
 9. Write `components/audio-engines/soundfont/{include/soundfont/engine.hpp,
    src/engine.cpp}` (new adapter over `melodd::Synth`) + its `CMakeLists.txt`
    + `tests/`.
@@ -347,4 +347,4 @@ paths yet); step 11 SAFE (mechanical include-path edits); steps 12-14
 NEEDS-BUILD-EDIT (the CMake/main.cpp edits that make the tree consistent
 again); step 9's `ISoundEngine` adapter class shape and step 12's exact
 `AudioEngine`-receives-`ISoundEngine` wiring are NEEDS-DECISION (Corelli/
-Nazzareno, not a placement question).
+Giotto, not a placement question).

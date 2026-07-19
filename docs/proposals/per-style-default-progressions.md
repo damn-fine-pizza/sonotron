@@ -424,7 +424,7 @@ different reason (a real caller exists). Not required for this task.
    this is moot. On a LIVE `style switch` (browser_panel's playing-time
    morph), the new harmony loop's phase would start "now", not aligned to
    the quantized bar boundary the style morph itself waits for — an audible
-   chord/section phase mismatch of up to one bar. Flagged for Nazzareno's
+   chord/section phase mismatch of up to one bar. Flagged for Giotto's
    judgment (a small fix would teach `kSeqPlay` to honor
    `Boundary::kNextBar` when set); not something I will solve here.
 

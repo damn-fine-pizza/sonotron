@@ -1,7 +1,7 @@
 // Oracle-backed acceptance test for preview::preview_for()'s three confirmed
 // fidelity gaps vs the real engine (owner task #4). Originally authored
 // RED-before-green against the OLD one-bar/repeat=0/placeholder-harmony
-// preview_for(); Nazzareno's SLICE 1 (multi-bar window + per-bar real
+// preview_for(); Giotto's SLICE 1 (multi-bar window + per-bar real
 // default-progression harmony + repeat=bar motif approximation) has since
 // landed in apps/gui-sonotron/src/preview.cpp, so this file is now the
 // GREEN acceptance gate for that fix, kept as a standing regression test

@@ -13,7 +13,7 @@
 //
 // STATUS: this test was authored RED-first against the pre-fix tree (see the
 // FAIL trail below for the exact failing assertion and root cause observed
-// at that point). Nazzareno's fix landed in grid_panel.cpp concurrently, in
+// at that point). Giotto's fix landed in grid_panel.cpp concurrently, in
 // the same shared tree, while this test was being written and verified --
 // `handle_master_play_launch` now does `if (fx.auto_song) { fx.active_scene =
 // 0; fx.auto_song_last_bar = app_state.bar(); }` before computing which
@@ -330,7 +330,7 @@ void test_master_play_restart_rewinds_to_first_scene_when_auto_song_on() {
 // single-scene loop, ui_state.hpp's own comment) -- master Play must keep
 // re-launching THAT scene, never rewind to scene 0. This nails down the
 // boundary so a fix for TEST 1's bug does not silently regress into rewinding
-// UNCONDITIONALLY (ignoring auto_song) -- Nazzareno's actual fix (see the
+// UNCONDITIONALLY (ignoring auto_song) -- Giotto's actual fix (see the
 // file's own header comment) does gate the rewind on `fx.auto_song`, and this
 // test is what proves that gate holds.
 // -----------------------------------------------------------------------

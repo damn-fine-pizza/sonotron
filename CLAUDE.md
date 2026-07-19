@@ -168,9 +168,9 @@ Do not invoke agents merely to add ceremony. Handle trivial lookups and very sma
 
 | Need                                                                                             | Agent                             |
 | ------------------------------------------------------------------------------------------------ | --------------------------------- |
-| Implement a feature, refactor, or fix product code                                               | `nazzareno-cpp-implementor`       |
+| Implement a feature, refactor, or fix product code                                               | `giotto-cpp-implementor`       |
 | Own test strategy, write/run functional, integration, fuzz, sanitizer, golden, or coverage tests | `torquato-qa-lead`                |
-| General C++ review: correctness, bugs, UB, ownership, concurrency, idioms                        | `fabrizio-bofh-cpp`               |
+| General C++ review: correctness, bugs, UB, ownership, concurrency, idioms                        | `aretino-bofh-cpp`               |
 | Readability and performance-vs-clarity review                                                    | `clementi-craftsmanship-critic`   |
 | Existing logical architecture, coupling, ABI, layering, dual-target seams                        | `corelli-architecture-critic`     |
 | Repository layout, file placement, naming, moves, splits, and physical structure                 | `palladio-structure-steward`      |
@@ -191,8 +191,8 @@ Do not normally invoke subordinate agents directly. Route work through their own
 
 | Subordinate                | Owner and permitted use                                                                           |
 | -------------------------- | ------------------------------------------------------------------------------------------------- |
-| `taddeo-cpp-apprentice`    | Nazzareno: exact, mechanical, bounded C++ work                                                    |
-| `filippino-cpp-journeyman` | Nazzareno: bounded but substantial C++ implementation slice                                       |
+| `taddeo-cpp-executor`    | Giotto: exact, mechanical, bounded C++ work                                                    |
+| `filippino-cpp-journeyman` | Giotto: bounded but substantial C++ implementation slice                                       |
 | `cennino-ut-scribe`        | Torquato: precisely specified unit-test implementation                                            |
 | `celestino-corpus-hand`    | Ottorino: exact corpus measurement commands with raw output only                                  |
 | `benedetto-golden-hand`    | Authorized senior: mechanical regeneration of an explicit golden-file list with required sign-off |
@@ -214,9 +214,9 @@ Use exactly one primary owner when a task has one dominant purpose.
 
 Examples:
 
-* A bug fix belongs to Nazzareno, even when tests are required for validation.
+* A bug fix belongs to Giotto, even when tests are required for validation.
 * A request to design tests belongs to Torquato, even when a product bug may be exposed.
-* A review request belongs to Fabrizio unless it explicitly targets architecture, physical layout, or craftsmanship.
+* A review request belongs to Aretino unless it explicitly targets architecture, physical layout, or craftsmanship.
 * A proposed idea belongs to Prospero; an already-built architecture belongs to Corelli.
 * Corpus behavior belongs to Ottorino; musician value and product fit belong to Puccini.
 * One proposed direction belongs to Prospero; the entire roadmap belongs to Verdi.

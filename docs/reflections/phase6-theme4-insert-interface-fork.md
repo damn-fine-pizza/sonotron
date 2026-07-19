@@ -7,7 +7,7 @@ last"), kept as a new `docs/reflections/` file per this reviewer's
 read-only-on-existing-docs discipline (mirrors `docs/reflections/phase6-theme3-
 master-transpose-scope.md` and `docs/reflections/phase6-theme3-performance-
 format-v2-review.md`'s own precedent). Feeds an owner decision, then an
-implementation brief for `nazzareno-cpp-implementor`.
+implementation brief for `giotto-cpp-implementor`.
 
 ## What was asked
 
@@ -429,7 +429,7 @@ for `on_tick`-capable slots. [NEEDS-DECISION — widens the D40 kernel's own
 shape, no new dependency]** Not a drop-in addition to `InsertChain::apply`'s
 existing call site (`arranger.hpp:530-532`); a second traversal outside the
 `if (count == 0) continue`-gated loop. Sizing/exact placement is
-implementation work for `nazzareno-cpp-implementor`, but the STRUCTURAL fact
+implementation work for `giotto-cpp-implementor`, but the STRUCTURAL fact
 that `Arranger::on_tick` must grow a second per-role pass is itself an
 owner-visible cost of adopting `5220`, not a hidden implementation detail.
 
@@ -457,7 +457,7 @@ owner-visible cost of adopting `5220`, not a hidden implementation detail.
   already-present core vocabulary (`switch`-dispatched tagged unions,
   `StaticVector`, `constexpr` pure functions) and the already-established
   core/host split — no CLI-deps flag needed.
-- **P5's kernel widening** is the one item I would want `nazzareno-cpp-
+- **P5's kernel widening** is the one item I would want `giotto-cpp-
   implementor`'s brief to treat as real, scoped work, not a one-line
   addition — it changes `Arranger::on_tick`'s own shape, the single most
   heavily-commented, cognitive-complexity-suppressed function in the core

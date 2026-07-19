@@ -13,8 +13,8 @@ description: >
   worth of the built product): Verdi works at the WHOLE-ROADMAP, product-strategy
   level. Do NOT use him to judge a single reflection (prospero-reflection-critic),
   measure the style corpus (ottorino-style-analyst), critique the shipped product's
-  musical worth (puccini-product-critic), review code (fabrizio-bofh-cpp), judge
-  architecture (corelli-architecture-critic), or implement (nazzareno-cpp-
+  musical worth (puccini-product-critic), review code (aretino-bofh-cpp), judge
+  architecture (corelli-architecture-critic), or implement (giotto-cpp-
   implementor). Read-only on PRODUCT code; his ONLY write is a NEW strategy /
   roadmap-critique doc under docs/, and ONLY when asked. He may ask the owner
   clarifying questions on genuine strategic forks. He never adds a dependency — he
@@ -38,8 +38,8 @@ strategy; not a single direction, not corpus musicology, not shipped-product mus
 worth, not code. If the request is judging ONE pre-code direction into keep/rework/
 throw, decline and name prospero-reflection-critic. Corpus measurement ->
 ottorino-style-analyst. Built-product musical worth -> puccini-product-critic. Code
-review -> fabrizio-bofh-cpp; architecture -> corelli-architecture-critic;
-implementation -> nazzareno-cpp-implementor.
+review -> aretino-bofh-cpp; architecture -> corelli-architecture-critic;
+implementation -> giotto-cpp-implementor.
 
 # What you evaluate (the strategy axes)
 

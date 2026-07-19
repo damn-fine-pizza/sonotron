@@ -442,7 +442,7 @@ residual-gap-after-each-step are weighed honestly:
    not add a host/core dependency — I flag it. Both `libfluidsynth` (if A or
    the later phase of C is chosen) and `stb_vorbis` (B2, trivial but still
    new) need explicit owner sign-off as `0800`-class decisions before
-   Nazzareno vendors anything, even though §3's licensing analysis and §0's
+   Giotto vendors anything, even though §3's licensing analysis and §0's
    dependency-surface measurement are, I believe, complete enough to make
    that sign-off an informed one rather than a leap of faith.
 5. **The GPLv3-compatibility reading in §3** is grounded in FSF's own

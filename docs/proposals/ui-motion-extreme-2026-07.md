@@ -3,7 +3,7 @@
 Status: **PROPOSAL** (read-only design doc, no product code touched). Date:
 2026-07-16. Author: UI/motion design pass (senior C++ UI + interaction +
 motion). Scope: `apps/gui-sonotron/` only (host-only, node `11600`). This is a
-contract for a future implementer (Nazzareno), in the same shape as the other
+contract for a future implementer (Giotto), in the same shape as the other
 docs under `docs/proposals/`. It proposes; it does not build. No new
 third-party dependency is proposed — every mechanism below is a small internal
 implementation flagged for owner sign-off where a decision is genuinely open.

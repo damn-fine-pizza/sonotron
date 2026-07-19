@@ -26,7 +26,7 @@
 // test_releasing_a_held_chord_note_by_note_stages_a_phantom_chord below.
 //
 // This file is a DIAGNOSIS pass: it does not fix anything. Any RED case here
-// is a pinned defect handed to Nazzareno; do not silence it by loosening the
+// is a pinned defect handed to Giotto; do not silence it by loosening the
 // assertion.
 
 #include "arrangrr/common/static_vector.hpp"

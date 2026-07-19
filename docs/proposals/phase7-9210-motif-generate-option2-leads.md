@@ -6,7 +6,7 @@ batch (commit `f850ea2`, `docs/reflections/phase7-9210-motif-authoring-all16.md`
 §3.12–3.15, §5.2) deliberately left open — bossa, samba, funk, ballad, each a
 `motif::generate` (Option-2) seed, not a transform of existing authored content.
 Every value below is a PROPOSAL for owner sign-off. Once signed off, wiring is
-mechanical (`Nazzareno`): add one new `TrackRole::kLead` `StylePattern` entry with
+mechanical (`Giotto`): add one new `TrackRole::kLead` `StylePattern` entry with
 `.events` empty (Option-2 selector) and `.motif = &kLeadMotif` to each style's
 peak-variation section, exactly the shape already used 11 times in the corpus.
 
@@ -105,7 +105,7 @@ each style's **peak/fullest variation only** (`bossa::kDP`/VarD, `samba::kDP`/Va
 | **funk** | VarD (`kDP`) | `kDrums` | `kDiatonicTranspose` | 1402 | 3 | 0 (root, → C5) | 96 | `kGateStab` (200) | 61 — Brass Section (flagged, §4.2) |
 | **ballad** | VarD (`kVarDPatterns`) | `kDrums` | `kDiatonicTranspose` | 1503 | 3 | 2 (3rd, +4 st → E5) | 62 | `kGateHeld` (3600, flagged, §4.3) | 53 — Voice Oohs (flagged, §4.3) |
 
-Illustrative attach shape (NOT a patch — Nazzareno decides the exact diff):
+Illustrative attach shape (NOT a patch — Giotto decides the exact diff):
 
 ```cpp
 // bossa.hpp, additive, alongside kTwoBassMotif:
@@ -279,7 +279,7 @@ Golden regeneration for these four styles is pre-authorized as part of node
 
 ---
 
-## 5. Golden impact (for Nazzareno's staging, not a claim I can verify myself)
+## 5. Golden impact (for Giotto's staging, not a claim I can verify myself)
 
 All four styles gain a wholly NEW `TrackRole::kLead` voice in their peak
 variation where none exists today — this is new content, not a transform of

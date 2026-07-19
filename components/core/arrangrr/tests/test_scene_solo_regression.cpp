@@ -12,7 +12,7 @@
 // recall (`scene_hold_bars == 0`), which is the only case the live mute/
 // solo rig should ever be clobbered by a recalled mask.
 //
-// Fixed by Nazzareno: Engine::apply_performance now gates the
+// Fixed by Giotto: Engine::apply_performance now gates the
 // set_mute()/set_solo() restore behind `scene_hold_bars == 0`, so a genuine
 // Performance/pad recall still restores the captured mask byte-exact
 // (test_perf_capture_recall_round_trip_restores_everything, test_

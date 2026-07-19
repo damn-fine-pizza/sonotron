@@ -211,7 +211,7 @@ void draw_scene_header_column_highlight(const UiState& fx, std::size_t s, ImVec2
                                             neon::u32(theme::kCyan, 0.13F), 4.0F);
 }
 
-// GridRow/kRows moved to launch_rows.hpp (Fabrizio review, 2026-07-18): both
+// GridRow/kRows moved to launch_rows.hpp (Aretino review, 2026-07-18): both
 // this panel and seqedit_panel.cpp now share the SAME 7-row launch set, so
 // Sequence Edit's lane set can never again drift from the Repeat Zone's own
 // rows -- see that header's own comment for the full rationale.

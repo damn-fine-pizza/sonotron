@@ -29,7 +29,7 @@ Land everything on an honest baseline before feature work.
   are), then close the pre-existing non-dispatch debt (`runtime/midi_parser.hpp`
   57%, `common/function_ref.hpp` 54%, `clip/clip_matrix.hpp` 7%). See
   memory `coverage-gate-local-not-ci`.
-- **1c Firmware-assert robustness** (`nazzareno`, real safety item): `ARR_ASSERT`
+- **1c Firmware-assert robustness** (`giotto`, real safety item): `ARR_ASSERT`
   is `__builtin_trap()` in *every* preset — no `ARRANGRR_NO_ASSERT` release path
   — so a reachable cap-hit traps the firmware (the class of bug just fixed in
   `InsertChain::apply`). Add a firmware-release build path that compiles
@@ -108,7 +108,7 @@ The biggest architectural fork — done deliberately, last. Closes Phase 6.
   the union) with a per-role `ArpeggiatorEngine m_role_arp[kRoleCount]`
   (session-only) and a new ungated per-role-per-tick pass in
   `Arranger::on_tick`.
-- QA (Torquato) found and Nazzareno fixed two defects before landing: stale
+- QA (Torquato) found and Giotto fixed two defects before landing: stale
   arp on live style switch (`request_style` now resets), and a dual-arp
   output collision (`OutScheduler` retrigger-care now scoped per-producer).
   Design source of truth: `docs/reflections/phase6-theme4-insert-interface-fork.md`.

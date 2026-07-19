@@ -46,8 +46,8 @@
 // is ever built. A real per-role, per-pitch wire capture is therefore not
 // buildable from test code today without a product-side change to that
 // decode -- FLAGGED in this workstream's report as a wanted test seam for
-// Nazzareno (additive fields only, no behavior change), not something this
-// QA pass may add itself (it lives in apps/gui-sonotron/src/, Nazzareno's
+// Giotto (additive fields only, no behavior change), not something this
+// QA pass may add itself (it lives in apps/gui-sonotron/src/, Giotto's
 // disjoint lane on this workstream). Part (a) instead calls the identical
 // production kernel functions the real engine invokes for the SAME (style,
 // section, role, repeat) -- which is a strictly MORE precise and fully

@@ -6,7 +6,7 @@ code written or edited by this review. Companion piece to
 per this reviewer's read-only-on-existing-docs discipline (mirrors
 `docs/reflections/phase6-theme3-master-transpose-scope.md`'s own precedent).
 Feeds an owner decision, then an implementation brief for
-`nazzareno-cpp-implementor`.
+`giotto-cpp-implementor`.
 
 ## What was asked
 
@@ -306,7 +306,7 @@ today — device-side recall stays "load a v2 project or don't," matching line
   scope call on reopening node `8200`'s locked exclusion — not mine to make.
 - **Deriva 3 (host-only migrator placement)** is a structural correction I am
   confident in (it is a direct, cited application of DESIGN.md line 588), but
-  it does change where `nazzareno-cpp-implementor` will need to write code —
+  it does change where `giotto-cpp-implementor` will need to write code —
   `components/hostrt`, not `arrangrr/perf/performance.hpp` — flagging so the
   implementation brief scopes the right component.
 - **No new dependency anywhere in P1-P4.** Everything proposed stays within

@@ -19,7 +19,7 @@
 // TWO DISJOINT vertical (Y) ranges, never overlapping -- the rendered proof
 // that these are separate lanes, not one shared occluded rect.
 //
-// Fabrizio review (2026-07-18, track-set + content divergence from the
+// Aretino review (2026-07-18, track-set + content divergence from the
 // Repeat Zone): render_seqedit_panel now also takes a GridModel& (the SAME
 // one the Repeat Zone renders), and every lane's content is resolved through
 // launch_rows.hpp's shared resolve_track_cell_preview() against a REAL
@@ -315,7 +315,7 @@ void test_lane_checkbox_toggles_bars_visibility_lane_stays() {
   ImGui::DestroyContext();
 }
 
-// Fabrizio review (2026-07-18, track-set + content divergence from the
+// Aretino review (2026-07-18, track-set + content divergence from the
 // Repeat Zone): the Repeat Zone's own launch grid only ever has 7 real rows
 // (launch_rows.hpp's kRows -- drums, perc, bass, chord1, chord2, pad, arp);
 // the other 2 TrackRole values (Phrase, Lead) have no corresponding

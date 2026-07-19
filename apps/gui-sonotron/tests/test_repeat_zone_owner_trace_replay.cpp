@@ -87,7 +87,7 @@
 // single cell a user happened to click -- reintroducing, in a new form, the
 // exact "no playhead sweep ever appeared" symptom (owner bug #1) this test
 // was written to guard end to end. This is a genuine PRODUCT gap exposed by
-// Phase 1, not a test artifact: flagged here and handed to Nazzareno (see
+// Phase 1, not a test artifact: flagged here and handed to Giotto (see
 // this pass's QA report), NOT silently fixed or asserted around.
 
 #include "imgui.h"
@@ -299,7 +299,7 @@ void test_no_playhead_under_owner_recorded_session_traffic() {
   // independently armed and reads `playing == false` (AppState::clip_state
   // stays kStopped for clip id 1) -- draw_cell's playhead paint is gated on
   // exactly that flag, so it never fires here. THIS ASSERTION IS EXPECTED TO
-  // FAIL until Nazzareno re-wires SOME real per-cell "playing" signal for the
+  // FAIL until Giotto re-wires SOME real per-cell "playing" signal for the
   // SceneChain-driven active scene (see this pass's QA report for the
   // handoff) -- it is deliberately NOT relaxed, removed, or redirected to a
   // cell this test never claims is the song's real current scene.

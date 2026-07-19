@@ -317,7 +317,7 @@ void test_grid_cell_preview_matches_sequence_edit_across_all_bars() {
   ImGui::DestroyContext();
 }
 
-// Fabrizio review (2026-07-18, track-set + content divergence): before this
+// Aretino review (2026-07-18, track-set + content divergence): before this
 // pass, seqedit_panel.cpp drew every lane from the STATIC style table
 // (preview::preview_for(active_style, section, role)), completely ignoring
 // what a cell's REAL GridModel content actually was -- a live kStepTrack

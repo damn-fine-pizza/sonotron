@@ -3,7 +3,7 @@ roadmap task #26 — Rename proposal: retire the "v02" version-numbered identifi
 
 Status: PROPOSAL (Palladio, structure-steward pass, 2026-07-17). Read-only audit —
 no source file touched. This is the "audit + propose" step; a separate mechanical
-pass (Nazzareno / Taddeo / Figaro class) executes it after owner approval.
+pass (Giotto / Taddeo / Figaro class) executes it after owner approval.
 
 Trigger: owner, on seeing `apps/gui-sonotron/src/v02_state.hpp` — "v02????" — dislikes
 source identifiers/filenames with a design/version number baked in. See memory

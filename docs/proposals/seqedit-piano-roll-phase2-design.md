@@ -354,7 +354,7 @@ flag it here so it is not rediscovered as a bug after both features ship.
   `preview::preview_for_track`/`neon::ClipPattern` for this one lane (§5/§6).
 - Files touched: `apps/gui-sonotron/src/seqedit_panel.cpp` only (plus
   whatever small pitch-row/keyboard-gutter helper is factored out, either
-  inline or as a new tiny header if `clementi`/`nazzareno` judge the function
+  inline or as a new tiny header if `clementi`/`giotto` judge the function
   too large — that split is an implementation call, not an architecture one).
 - Risk: coexistence with the in-flight bar-visibility rework — implement
   AFTER that lands, or coordinate file ownership explicitly; both touch the

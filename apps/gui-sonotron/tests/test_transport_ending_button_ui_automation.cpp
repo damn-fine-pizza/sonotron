@@ -24,7 +24,7 @@
 // ever gets to fire, the exact failure mode task #37's own §4 item 4 flags).
 //
 // STATUS AT AUTHORING TIME: RED-first, by design. `transport_panel.cpp` (the
-// file Nazzareno is implementing the button in, in parallel, in the same
+// file Giotto is implementing the button in, in parallel, in the same
 // shared tree) had NO ending pad at all when this test was written -- only
 // the pre-existing Play/Stop/Panic three (see this file's own header comment
 // in transport_panel.hpp). What HAS already landed in the tree (uncommitted,
@@ -38,7 +38,7 @@
 // just trusts the comment) the moment the button itself exists to drive it.
 //
 // LOCATE STRATEGY, AND THE ONE ASSUMPTION IT ENCODES (flagged, not hidden):
-// this test cannot know Nazzareno's exact accent color/glyph choice for the
+// this test cannot know Giotto's exact accent color/glyph choice for the
 // new pad ahead of time, so rather than guessing a specific ImU32 (which
 // would silently rot the moment his real choice differs), it locates the
 // button POSITIONALLY: the gap between the Panic pad's own rect and the
@@ -47,7 +47,7 @@
 // the tempo inset by ImGui's own child-window list, imgui_headless_harness.
 // hpp's find_child_window_rect). Whatever widget lands in that gap, in
 // whatever color, is taken to be the new Ending pad -- this only requires
-// Nazzareno to group it with the other three pad buttons (matching this
+// Giotto to group it with the other three pad buttons (matching this
 // exact file's own "Play/Stop/Panic neon pad buttons" comment block), not to
 // pick any specific visual. If he places it somewhere else entirely, this
 // locate step itself will fail (found=false) and needs reconciling once his
@@ -247,7 +247,7 @@ void test_ending_button_cues_ending_then_engine_stops_transport_without_autosong
   const th::Rect ending_rect =
       th::find_rect_in_region_excluding_colors(pre_click_frame, probe, {window_bg});
   // Was RED at authoring time (no button existed in the Panic<->tempo-inset
-  // gap yet); GREEN now that Nazzareno's render_ending_pad (transport_panel.
+  // gap yet); GREEN now that Giotto's render_ending_pad (transport_panel.
   // cpp) has landed at exactly this position.
   CHECK(ending_rect.found);
   const ImVec2 ending_click_pos = ending_rect.found ? ending_rect.center() : probe.center();

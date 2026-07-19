@@ -4,7 +4,7 @@ Status: **PROPOSED** (owner-authored, 2026-07-17; branch `gui-sonotron`). Scope:
 `apps/gui-sonotron/` only (host-only, node `11600`). This is a concrete
 implementation plan — code blocks, state tables, priorities (P0/P1/P2) and a
 recommended build order — for whoever executes the motion work next
-(`nazzareno-cpp-implementor`), not a redesign of the GUI's visual language.
+(`giotto-cpp-implementor`), not a redesign of the GUI's visual language.
 Translated into English from the owner's Italian analysis with all technical
 content preserved; a small number of code-grounded claims were checked against
 the tree and one is corrected below (marked **[Correction]**).

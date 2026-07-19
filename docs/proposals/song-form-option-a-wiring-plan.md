@@ -5,7 +5,7 @@ document's author. Builds directly on the prior analysis in
 `docs/proposals/song-form-autoarrange.md` (§1-§4) — that document answers
 "does a song-form concept exist" and sketches three options (A/B/C); THIS
 document re-confirms the state it found still holds today, then turns its
-Option A into a file-by-file, line-cited plan Nazzareno can execute without
+Option A into a file-by-file, line-cited plan Giotto can execute without
 re-deriving the design, and (§3, added for task #35) documents the
 established cross-vendor arranger convention for Stop/Ending and matches
 sonotron's own Stop→cue-Ending gesture to it.
@@ -200,7 +200,7 @@ above it, per its own multi-paragraph comment about the `test_repeat_zone_
 playhead_ui_automation.cpp` layout-shift regression) when the answer is
 "no next" — i.e. show nothing/an explicit "— end —" rather than a wrong
 number. This is a small, single-file, no-ABI change; the exact plumbing
-(pass the already-computed value in vs. recomputing) is Nazzareno's call at
+(pass the already-computed value in vs. recomputing) is Giotto's call at
 implementation time, not a design fork.
 
 ### 2.3 Content: give the shipped demo an audible Ending (recommended, separable)
@@ -225,7 +225,7 @@ alone is a complete, correct, testable fix to the advance decision. §2.3 is
 what makes the shipped build actually demonstrate "plays through, ends on the
 Ending, stops" without the user dragging one in first. Recommend both ship
 together in the same task, but they are two independent diffs and could be
-split if Nazzareno/the owner wants the mechanism reviewed alone first.
+split if Giotto/the owner wants the mechanism reviewed alone first.
 
 ### 2.4 How the user arms/selects Option A — an OPEN FORK, not resolved here
 

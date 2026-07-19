@@ -1,4 +1,4 @@
-// FUNCTIONAL ACCEPTANCE TESTS (Nazzareno, task #5 Phase-1): hardens the
+// FUNCTIONAL ACCEPTANCE TESTS (Giotto, task #5 Phase-1): hardens the
 // per-section REPEAT COUNT contract added on top of song-mode-scenechain-
 // adoption.md's own Phase 1 machinery -- host-only, ZERO ABI/core change.
 // Mirrors test_song_mode_scenechain_contract.cpp's own real-backend, real-
