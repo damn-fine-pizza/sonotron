@@ -115,6 +115,67 @@ inline void queue_mouse_up(ImVec2 pos) {
   io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
 }
 
+// A REAL multi-frame drag-and-drop gesture (Torquato QA pass, roadmap node
+// 14120: closing the "search + click-to-apply is covered, drag is not" gap):
+// mouse-down at `from`, several move frames stepping toward `to` while the
+// button stays held, one extra hold frame at `to`, then mouse-up at `to`.
+// Every step rides the SAME io.AddMousePosEvent/AddMouseButtonEvent queue
+// click_at() (per-test-file helper) already uses -- nothing here ever writes
+// a BrowserModel/GridModel/UiState field directly; a drag is a sequence of
+// real mouse events plus real rendered frames, exactly like a live user
+// dragging a browser row onto a grid drop target.
+//
+// The frame cadence below is NOT an arbitrary guess -- it is read directly
+// off ImGui's own drag-and-drop state machine (third_party/imgui/imgui.cpp):
+//
+//   - ImGui::BeginDragDropSource() only activates once
+//     ImGui::IsMouseDragging()/IsMouseDragPastThreshold() reports the CURRENT
+//     mouse position has moved past `io.MouseDragThreshold` (6px default)
+//     from the press origin -- a single down-then-up pair, or a move frame
+//     that lands too close to `from`, never engages it. The `steps` interior
+//     move frames below interpolate from `from` to `to`; for any real
+//     cross-panel drag distance the very first interpolated step already
+//     clears 6px, so the source activates mid-gesture exactly like a live
+//     drag (BeginDragDropSource() itself is re-evaluated every frame the
+//     source row is drawn, and stays true as long as its own ActiveId is
+//     still held -- it does not require the mouse to stay over the source
+//     row once dragging has begun).
+//   - ImGui::AcceptDragDropPayload()'s own `Delivery` flag is gated on
+//     `was_accepted_previously = (g.DragDropAcceptIdPrev == g.DragDropTargetId)
+//     && !IsMouseDown(...)`, and `DragDropAcceptIdPrev` is only populated
+//     from the PREVIOUS frame's own `DragDropAcceptIdCurr` -- so the target
+//     must be hovered (with the button still held) on AT LEAST ONE frame
+//     strictly BEFORE the release frame, or Delivery never flips true even
+//     though the mouse genuinely released over it. The move loop's own last
+//     step already lands on `to` (button held); the explicit extra hold
+//     frame below is the SECOND such "accepted" frame, so the following
+//     mouse-up frame is guaranteed to see `was_accepted_previously == true`
+//     and actually deliver the payload -- the exact frame count
+//     AcceptDragDropPayload's own source requires, not a number tuned to
+//     pass by luck.
+//
+// `render_frame` is the caller's own zero-argument render callable (each
+// test file's own render_one_frame, capturing its models/session/app_state/
+// fx by reference) -- called once per frame described above, in order.
+template <typename RenderFn>
+inline void drag_to(ImVec2 from, ImVec2 to, RenderFn&& render_frame, int steps = 4) {
+  queue_mouse_down(from);
+  render_frame();
+  for (int i = 1; i <= steps; ++i) {
+    const float t = static_cast<float>(i) / static_cast<float>(steps);
+    queue_mouse_move(ImVec2(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t));
+    render_frame();
+  }
+  // Extra hold frame at the target, button still down: the second
+  // consecutive "accepted" frame AcceptDragDropPayload's own
+  // was_accepted_previously gate needs before the release frame below can
+  // report Delivery == true (see this function's own header comment above).
+  queue_mouse_move(to);
+  render_frame();
+  queue_mouse_up(to);
+  render_frame();
+}
+
 // ---------------------------------------------------------------------------
 // Rendered-draw-data widget/region discovery.
 
@@ -255,7 +316,8 @@ inline int color_channel_distance(ImU32 a, ImU32 b) {
 // as a real, solidly-filled widget.
 inline Rect find_rect_in_region_excluding_colors(const ImDrawData* draw_data, const Rect& region,
                                                  const std::vector<ImU32>& exclude_colors,
-                                                 int tolerance = 40, int min_matching_vertices = 8) {
+                                                 int tolerance = 40,
+                                                 int min_matching_vertices = 8) {
   Rect r;
   int matching = 0;
   for (int i = 0; i < draw_data->CmdListsCount; ++i) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -78,6 +80,33 @@ class InProcessBrainSession final : public BrainSession {
   // set in --control mode), in which case OutEvents are simply never
   // realized locally, same as today.
   void set_audio_ring(AudioMidiRing* ring);
+
+  // Roadmap 14110 (host-only clock-injection seam): run_engine()'s tick-
+  // generation loop normally converts REAL elapsed wall-clock time
+  // (std::chrono::steady_clock, read by the .cpp's own monotonic_us()) into
+  // core ticks, and paces itself with a real std::this_thread::sleep_for --
+  // see in_process_brain_session.cpp's run_engine() for both touchpoints.
+  // TEST-ONLY: `now_us` replaces the steady_clock read, `wait` replaces the
+  // pacing sleep, letting a test drive the engine thread's tick math off
+  // deterministic virtual time instead of real elapsed time (no more
+  // multi-second real wall-clock waits in a test). Neither field names an
+  // arrangrr/core type -- std::function<std::uint64_t()> and
+  // std::function<void()> only -- so this header stays D38-clean, same as
+  // AudioMidiRing above.
+  //
+  // MUST be called BEFORE start(), same "read once at thread-start, no
+  // atomic needed" discipline set_audio_ring() documents above (std::
+  // thread's own constructor is the happens-before edge). An unset (default-
+  // constructed, i.e. empty std::function) field is left at its production
+  // default inside Impl -- calling this with a default-constructed
+  // ClockHooks is a safe no-op. Never called by main.cpp; production
+  // behavior (real steady_clock + a real 500us sleep) is unchanged unless a
+  // test explicitly overrides it.
+  struct ClockHooks {
+    std::function<std::uint64_t()> now_us;
+    std::function<void()> wait;
+  };
+  void set_clock_hooks_for_test(ClockHooks hooks);
 
   // BrainSession
   void send(std::string_view command_line) override;

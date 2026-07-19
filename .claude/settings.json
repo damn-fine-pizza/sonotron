@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.description // \"\"' | { read -r desc; if [[ \"$desc\" =~ ^\\[[A-Za-z0-9\\ /_.+-]+\\][[:space:]] ]]; then printf '{\"continue\":true}'; else printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Agent description must start with a bracketed model tag, e.g. [Sonnet] Fix X (memory rule agent-launch-show-model.md). Retry with the tag added.\"}}'; fi; }"
+          }
+        ]
+      }
+    ]
+  }
+}

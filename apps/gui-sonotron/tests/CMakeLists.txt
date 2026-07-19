@@ -399,6 +399,51 @@ add_test(NAME test_browser_style_switch_while_playing_ui_automation
 set_tests_properties(test_browser_style_switch_while_playing_ui_automation PROPERTIES
   LABELS functional)
 
+# browser-redesign-taxonomy.md Phase 1 deliverable 2: "click a variation leaf
+# -> style section <name>".
+add_executable(test_browser_variation_click_apply_ui_automation
+  test_browser_variation_click_apply_ui_automation.cpp)
+target_link_libraries(test_browser_variation_click_apply_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_browser_variation_click_apply_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_browser_variation_click_apply_ui_automation
+  COMMAND test_browser_variation_click_apply_ui_automation)
+set_tests_properties(test_browser_variation_click_apply_ui_automation PROPERTIES
+  LABELS functional)
+
+# Roadmap node 14120 (Torquato QA pass, 2026-07-19): a genuine multi-frame
+# drag gesture through ImGui's own BeginDragDropSource/AcceptDragDropPayload
+# state machine -- style leaf -> empty grid cell, and variation leaf -> scene
+# header -- closing the "drag is claimed shipped but never actually driven by
+# a test" gap. Renders browser_panel AND grid_panel together (needs both
+# gui_sonotron_layout's panels and a real InProcessBrainSession for the
+# engine-observable readback), same link set as the other real-backend UI-
+# automation tests above.
+add_executable(test_browser_grid_drag_drop_ui_automation
+  test_browser_grid_drag_drop_ui_automation.cpp)
+target_link_libraries(test_browser_grid_drag_drop_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_browser_grid_drag_drop_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_browser_grid_drag_drop_ui_automation
+  COMMAND test_browser_grid_drag_drop_ui_automation)
+set_tests_properties(test_browser_grid_drag_drop_ui_automation PROPERTIES
+  LABELS functional)
+
+# browser-redesign-taxonomy.md Phase 1 deliverable 3: "click a voice leaf ->
+# program <port>[:ch] <voice> at the CURRENT destination".
+add_executable(test_browser_voice_program_send_destination_ui_automation
+  test_browser_voice_program_send_destination_ui_automation.cpp)
+target_link_libraries(test_browser_voice_program_send_destination_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_browser_voice_program_send_destination_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_browser_voice_program_send_destination_ui_automation
+  COMMAND test_browser_voice_program_send_destination_ui_automation)
+set_tests_properties(test_browser_voice_program_send_destination_ui_automation PROPERTIES
+  LABELS functional)
+
 # §2c "Auto-song bookkeeping surviving a transport stop/restart" -- extends
 # test_grid_panel_auto_song_real_backend.cpp's happy-path shape with a real
 # Stop/Play click cycle (real backend, real render loop).

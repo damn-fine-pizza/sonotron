@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -1815,6 +1816,16 @@ struct InProcessBrainSession::Impl {
   // synchronization argument. Never touched after run_engine() reads it
   // once at thread-start.
   AudioMidiRing* audio_ring = nullptr;
+  // Roadmap 14110: default hooks reproduce today's real behavior byte-for-
+  // byte (monotonic_us()/the loop's own 500us pacing sleep, both below) --
+  // set_clock_hooks_for_test() overrides one or both BEFORE start(); see
+  // that method's own doc comment (in_process_brain_session.hpp) for the
+  // synchronization argument. Never touched after run_engine() starts
+  // reading them.
+  std::function<std::uint64_t()> now_us_hook = monotonic_us;
+  std::function<void()> wait_hook = [] {
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
+  };
   std::atomic<bool> running{false};
   std::atomic<bool> prefer_flats{false};
   std::atomic<Status> status{Status::kDisconnected};
@@ -1925,7 +1936,7 @@ void InProcessBrainSession::Impl::run_engine() {
   status.store(Status::kConnected, std::memory_order_release);
 
   TickAccumulator acc;
-  std::uint64_t last_us = monotonic_us();
+  std::uint64_t last_us = now_us_hook();
 
   // Default harmonic progression (docs/proposals/per-style-default-
   // progressions.md): re-applied on EVERY successful style load/switch,
@@ -2011,7 +2022,7 @@ void InProcessBrainSession::Impl::run_engine() {
       }
     }
 
-    const std::uint64_t now_us = monotonic_us();
+    const std::uint64_t now_us = now_us_hook();
     acc.set_bpm(shell.engine().transport().bpm());
     const std::uint32_t ticks = acc.advance_us(now_us - last_us);
     last_us = now_us;
@@ -2108,7 +2119,9 @@ void InProcessBrainSession::Impl::run_engine() {
     // Short sleep, not a busy spin: there is no fd to block on here (unlike
     // sonotron-server's timerfd + poll()), so this is the clock's wakeup
     // cadence -- 0.5 ms, same interval sonotron-server's timerfd uses.
-    std::this_thread::sleep_for(std::chrono::microseconds(500));
+    // (Roadmap 14110: real sleep_for is the DEFAULT `wait_hook` value above;
+    // a test may swap it for a cheap yield so it never waits real time.)
+    wait_hook();
   }
 }
 
@@ -2137,6 +2150,19 @@ void InProcessBrainSession::stop() {
 }
 
 void InProcessBrainSession::set_audio_ring(AudioMidiRing* ring) { m_impl->audio_ring = ring; }
+
+void InProcessBrainSession::set_clock_hooks_for_test(ClockHooks hooks) {
+  // An empty (default-constructed) std::function field means "the caller
+  // did not override this one" -- leave Impl's own default in place rather
+  // than replacing a real hook with an empty std::function that would throw
+  // std::bad_function_call the moment run_engine() called it.
+  if (hooks.now_us) {
+    m_impl->now_us_hook = std::move(hooks.now_us);
+  }
+  if (hooks.wait) {
+    m_impl->wait_hook = std::move(hooks.wait);
+  }
+}
 
 void InProcessBrainSession::send(std::string_view command_line) {
   if (command_line == "quit" || command_line == "exit") {

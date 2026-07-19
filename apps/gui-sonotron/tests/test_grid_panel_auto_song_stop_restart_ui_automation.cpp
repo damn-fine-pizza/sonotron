@@ -13,18 +13,36 @@
 // rather than hand-written `session.send("transport start")` calls, closing
 // the residual click-injection gap the EXISTING real-backend test's own
 // header comment leaves open ("press Play" there is still a literal send()
-// call, not a click). The auto-song ARM itself stays a direct UiState field
-// write (`click_arm_auto_song`, copied verbatim from the sibling test) --
-// there is still no click-injection seam for the auto-song header's
-// ImGui::SmallButton (alpha-0-at-rest background, imgui_headless_harness.
-// hpp's own documented residual gap), unchanged by this pass.
+// call, not a click).
 //
-// Root cause under test: grid_panel.cpp's update_auto_song detects a bar
-// REWIND (`current_bar < previous_last_bar`) and re-anchors `fx.active_
-// scene_start_bar` to the fresh post-restart bar -- without this, `bars_
-// elapsed` would go deeply negative after a stop/restart and the active
-// scene would never advance again (the "stuck after restart" failure mode
-// this test pins against).
+// UPDATED (Torquato QA, roadmap node 14120 investigation): this test used to
+// carry a `click_arm_auto_song` helper that hand-wrote `fx.auto_song = true`
+// to stand in for a header-toggle click, because the OLD per-frame FSM
+// (grid_panel.cpp's now-fully-retired update_auto_song) never armed itself
+// on its own. That helper is gone. Two things changed underneath it:
+//   1. `auto_song` now DEFAULTS to true (ui_state.hpp, owner decision
+//      2026-07-17) -- there is nothing left to "arm"; every fresh UiState
+//      already starts in the state the old helper used to fake.
+//   2. A real click on the header toggle when auto_song is ALREADY true
+//      would TOGGLE IT OFF (grid_panel.cpp render_header's `fx.auto_song =
+//      !fx.auto_song`), the opposite of what the old helper simulated -- so
+//      converting the call into a real click would have made this test
+//      click the WRONG direction, not a more faithful one.
+// The CHECK(fx.auto_song) below now stands in the old helper's place: it
+// documents and pins the precondition the rest of the test relies on
+// (auto-song is armed from frame 0, no click required to reach that state)
+// instead of hand-writing it.
+//
+// Root cause under test: the CURRENT mechanism (Song-mode Phase 1,
+// grid_panel.cpp's handle_master_play_launch + reconcile_active_scene)
+// rebuilds the whole SceneChain from scratch on every fresh Play
+// (fx.master_play_launched re-arms the instant the transport is observed
+// NOT playing) rather than carrying forward any stale bar-anchored
+// bookkeeping across a stop/restart cycle -- this test proves the song
+// genuinely advances AGAIN after a real stop/restart, through real clicks
+// end to end, which is exactly what the old bar-rewind-guard FSM this test
+// was originally written against also had to prove for its own (now
+// retired) mechanism.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
@@ -92,17 +110,6 @@ ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsM
   return render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
 }
 
-// Mimics the EXACT state mutation the "auto-song" header button click
-// performs (grid_panel.cpp render_header's `if (ImGui::SmallButton(...))`
-// block) -- verbatim copy of test_grid_panel_auto_song_real_backend.cpp's
-// own click_arm_auto_song: there is still no click-injection seam for an
-// ImGui::SmallButton with an alpha-0-at-rest background in this codebase.
-void click_arm_auto_song(UiState& fx, const AppState& app_state) {
-  fx.auto_song = true;
-  fx.active_scene_start_bar = app_state.bar();
-  fx.auto_song_last_bar = app_state.bar();
-}
-
 void poll_once(BrainSession& session, AppState& app_state) {
   std::vector<BrainEvent> events;
   session.poll(events);
@@ -126,6 +133,11 @@ void test_auto_song_advances_again_after_a_real_stop_restart_cycle() {
   PartsModel parts;
   UiState fx;
   AppState app_state;
+  // Song-mode Phase 1 precondition (see this file's own header comment):
+  // auto-song starts ARMED by default -- nothing needs to click the header
+  // toggle to reach this state, so this CHECK stands in for the old
+  // click_arm_auto_song helper's field write.
+  CHECK(fx.auto_song);
 
   InProcessBrainSession session;
   CHECK(session.start());
@@ -160,7 +172,11 @@ void test_auto_song_advances_again_after_a_real_stop_restart_cycle() {
       poll_once(session, app_state);
       max_bar_seen_round1 = std::max(max_bar_seen_round1, app_state.bar());
       if (!armed && app_state.transport() == AppState::Transport::kPlaying) {
-        click_arm_auto_song(fx, app_state);  // documented gap: direct field write, not a click
+        // No click needed here: auto_song was already true from frame 0
+        // (CHECK'd above), so the transport reporting "playing" is the only
+        // real-world signal left to wait for -- handle_master_play_launch
+        // (grid_panel.cpp) already built and launched the song on this same
+        // transition, through production code, not this test.
         armed = true;
       }
       render_one_frame(model, seqedit, parts, session, app_state, fx);

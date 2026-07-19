@@ -540,9 +540,11 @@ tempo/swing-different from another style.*
     percussion-Kit category on the `program` verb) are ✅ shipped and
     counted under `11610`'s Browser-redesign contribution. What remains is
     proposal Phase 3 of `docs/proposals/browser-redesign-taxonomy.md`:
-    Songs/scene-chains and Performances tabs (blocked on song-mode Phase 2,
-    `11650`, per that proposal's own §4 — "earliest sane start... is after
-    song-mode Phase 2"), Chord-progressions/Loops/Pad-FX-Groove-preset tabs
+    Songs/scene-chains and Performances tabs (previously blocked on
+    song-mode Phase 2, `11650`, per that proposal's own §4 — "earliest sane
+    start... is after song-mode Phase 2"; `11650` shipped `76a8774`, so
+    that block is LIFTED — Phase 3 itself is not scheduled, only no longer
+    gated), Chord-progressions/Loops/Pad-FX-Groove-preset tabs
     (each needs its own host-side naming registry, none scheduled), and
     Controller-maps/Routing-profiles (recommended to route to a future
     Settings surface instead, per that proposal's fork 4). Not started.
@@ -558,13 +560,37 @@ tempo/swing-different from another style.*
     the earlier `docs/proposals/ui-motion-extreme-2026-07.md` audit (no
     motion is beat-synchronised) — see that proposal's own reconciliation
     note for how the two relate.*
-  - `11650` Song-mode Phase 2 — ○ not started. Scope (per
+  - `11650` Song-mode Phase 2 — ✅ done (commit `76a8774`,
+    "feat(gui-sonotron): Song-mode Phase 2 — per-scene style/groove/
+    key/tempo overrides", PR #4, merged to `main`; HEAD `c863d5c` sits
+    directly on top of it). Scope (per
     `docs/proposals/song-mode-scenechain-adoption.md` §"Phasing", Phase
-    2): `GridModel` grows a `ScenePerformance` per-scene record
-    (style/groove/key/tempo) + a per-scene editor UI; the Phase-1
-    capture-and-override mechanism (already shipped, `11610`) picks the
-    new fields up automatically once they exist. Blocks `11630`'s
-    Songs/Performances Browser tabs.
+    2): `GridModel` grows a per-scene style/groove/key/tempo override
+    record (`apps/gui-sonotron/src/grid_model.hpp`/`.cpp`:
+    `scene_style_id`/`set_scene_style_id`, `scene_groove`/
+    `set_scene_groove`, `scene_key_root`/`scene_key_mode`/`set_scene_key`,
+    `scene_tempo_x100`/`set_scene_tempo_x100`, each independently gated by
+    its own sentinel/override-flag) + a per-scene editor UI
+    (`render_scene_editor_popup`, `apps/gui-sonotron/src/grid_panel.cpp`,
+    right-click on the scene-header cell); the `song build` wire line
+    carries four trailing per-scene override tokens
+    (`apps/gui-sonotron/src/in_process_brain_session.cpp`), folded into
+    each scene's baked `Performance` before `apply_song_build` stores
+    it — the Phase-1 capture-and-override mechanism (already shipped,
+    `11610`) picks the new fields up automatically, no new engine
+    mechanism, zero core-ABI change. The tempo override also carries a
+    live-readback path (`OutEvent::kParamState`/`kTransportTempo`
+    confirmation echo, `components/core/arrangrr/src/engine.cpp`,
+    `apps/gui-sonotron/src/brain_event_from_outevent.cpp`), so a recalled
+    tempo round-trips to the GUI the same way style/groove/key already
+    did. Pinned by `apps/gui-sonotron/tests/test_grid_model.cpp` and
+    `test_song_mode_scene_performance_overrides_contract.cpp` (both
+    re-verified green in this pass: `ctest --test-dir build/host -R
+    "test_grid_model|test_song_mode_scene_performance_overrides_contract"`
+    — 2/2 passed). Meets the `11610` DONE criterion end-to-end:
+    contract-test-pinned, no known NO-OP path. No longer blocks `11630`'s
+    Songs/Performances Browser tabs (see `11630` below — the block is
+    lifted; that sub-node's own scheduling is unchanged).
 
   *Dual-target note: the whole `11600` band is HOST-ONLY by construction —
   the GUI is a desktop client. The STM32 target (`12000`) keeps its OWN
@@ -639,6 +665,405 @@ tempo/swing-different from another style.*
   - `12540` RPN/NRPN/14-bit/aftertouch — ○ SHIPPABLE
   - `12550` MIDI-Learn/ControllerMap — ○ SHIPPABLE
 - `12600` Laptop tools: SMF import/export, style/device editor — ○ HOST-ONLY
+
+### 13000 — Desktop feature expansion (proposed) — ○ not started, PROPOSED only (not yet DECIDED, prioritized, or scheduled)
+
+*Twelve desktop-feature evolutions proposed 2026-07-19, translated in full
+and filed at `docs/proposals/desktop-feature-expansion-2026-07.md`. Filed
+as a new top-level band per this file's own numbering rule (a new band
+takes "the next free thousand") — `13000` is the first unused thousand-band
+as of this pass (verified against every existing 5-digit node number in
+this file). The owner asked only that the proposal be placed at the
+correct spot in the tree; nothing here is committed to being built. Every
+leaf below therefore carries **○ not started** and no status stronger than
+PROPOSED — prioritization and sequencing judgment is explicitly deferred to
+whoever schedules this band later (`verdi-roadmap-strategist`'s domain, not
+this filing pass).*
+
+*The source document's own closing section groups the twelve features into
+four architectural stabilization blocks plus a set of cross-cutting
+principles; both are preserved here as the band's organizing hundreds
+(`13100`–`13400`) rather than flattened, because the source explicitly
+frames the twelve as one coherent system rather than independent panels,
+with load-bearing ordering between blocks: Block B (the Transaction Engine)
+is meant to land before Block A's live edits touch too many subsystems at
+once, and Block C's three resource nodes are "designed together, even if
+implemented incrementally."*
+
+- **13100 Block A — Immediate value on the current code.** Four features
+  that exploit primitives already shipped and produce host-visible value
+  without waiting on the other blocks.
+  - `13110` Looper in the Repeat Zone — ○ not started, HOST-ONLY (GUI/host
+    integration work; the core primitives already ship). Builds DIRECTLY on
+    shipped infrastructure, not greenfield: `LoopBuffer` record/overdub/
+    replace/erase/undo/quantize (`6100`/`6200`/`6400`, ✅ done, part of the
+    `6000` Looper band which stays ◑ partial pending `6500`'s sync half),
+    `RetroCaptureRing` retroactive capture (`6300`, ✅ done), and
+    `ContentKind::kLoopBuffer`/`Engine::apply_clip_content()`'s existing
+    loop branch plus the Repeat Zone's `kArmed`/`kPlaying`/`kQueuedStop`
+    core launch-state model. Cross-reference, not duplication: see `6000`
+    (core Looper) and `11610` (Repeat Zone GUI foundation, ✅ done,
+    "Repeat Zone slices 1–3") — this node is the remaining HOST/GUI
+    integration work (real hardware MIDI capture, virtual-surface wiring,
+    recording-lifecycle UI, cell↔slot persistence) that those two nodes do
+    not yet cover. See also `docs/proposals/repeat-zone-real-contract.md`
+    and `docs/proposals/repeat-count-phase2-abi.md` for adjacent as-built/
+    ABI analysis of the same Repeat Zone surface.
+  - `13120` Complete, live Sequence Edit — ○ not started, HOST-ONLY. Extends
+    the already-shipped host-side `SeqEditModel`/piano-roll/step-view/
+    `StepPatternStore` surface to more content types (LoopBuffer, imported
+    clips, Style Sections, ChordSequence) and a current/draft/pending
+    editing model. Not currently itemized as its own roadmap node; see
+    `docs/proposals/seqedit-piano-roll-phase2-design.md` and
+    `docs/proposals/seqedit-column-view-and-zoom.md` for the existing
+    design work this node extends.
+  - `13130` Performance Transformation Surface — ○ not started, HOST-ONLY.
+    Explicitly proposed to ORCHESTRATE, not duplicate, already-shipped
+    `InsertChain` (`5100`, ✅ core shipped), groove/swing/humanize/accent/
+    quantize (`3250`/`7300`, ✅ done), and quantized launch/change
+    machinery.
+  - `13140` Visualized Musical Causality — ○ not started, HOST-ONLY.
+    Overlaps in spirit with `11640` (UI-animation, ○ not started): both are
+    about beat/bar-synchronized, causally-meaningful GUI motion. Distinct
+    focus: `11640` is the motion/animation MECHANISM
+    (`docs/proposals/ui-animation-roadmap.md`, its own Steps 1–4); `13140`
+    is the causal DATA MODEL that motion would express (current/pending/
+    predicted/candidate/historical state, a Causal Event Model layered on
+    `BrainEvent`/`AppState`) — `13140` would consume `11640`'s motion
+    primitives once both exist, not replace them. `11640`'s own entry
+    already cross-references `docs/proposals/ui-motion-extreme-2026-07.md`;
+    the same finding that motion is not yet beat-synchronized bears on
+    `13140` too.
+- **13200 Block B — Coherence of live operations.**
+  - `13210` Live Musical Transaction Engine — ○ not started, HOST-ONLY,
+    NEEDS-DECISION (the bundle/ABI shape for multi-subsystem atomic commits
+    is unspecified). Proposed to coordinate, then eventually reduce
+    duplication among, already-shipped pending/boundary primitives:
+    `BoundaryLatch`, `ClipMatrix::arm()`, `due_bar_index`, SceneChain
+    transitions (`8100`, ✅ done), Performance recall (`8200`, ✅ done), and
+    Style changes. Per the source document's own dependency framing, this
+    node is meant to land before `13120`/`13130`/`13140` (Block A) start
+    producing live edits that touch more than one subsystem at once — a
+    sequencing note carried over from the source, not a hard gate decided
+    by this filing pass.
+- **13300 Block C — Resource model.** The source document is explicit that
+  these three must be designed together even if implemented incrementally.
+  - `13310` Musical Resource Graph — ○ not started, mostly HOST-ONLY (the
+    core would only ever see bounded handles/compiled descriptors derived
+    from it, never the graph itself). Cross-reference, not duplication:
+    overlaps the Browser-taxonomy remainder at `11630` (Songs/Performances/
+    Chord-progressions/Loops/Pad-FX tabs, per-type naming registries) —
+    `11630`'s scope is the BROWSER PANEL surfacing a taxonomy; `13310`
+    would be the underlying shared RESOURCE MODEL (Resource ID, descriptor,
+    relationship edges, capability queries) that `11630`'s per-type naming
+    registries could sit on top of instead of each growing its own ad hoc
+    list. This does not expand `11630`'s already-written scope — it is a
+    separate, unscheduled node that a future `11630` implementation could
+    build on to avoid duplicating taxonomies.
+  - `13320` Universal Resource Runtime — ○ not started, split HOST-ONLY
+    (registry/adapters/plugins) + SHIPPABLE core-side compiled layer
+    (bounded handles, no realtime allocation — explicitly must NOT become
+    dynamic polymorphism in the core). Proposed Phase 1 scope adapts the
+    existing four `ContentKind` values (`kStyleSection`/`kChordSequence`/
+    `kStepTrack`/`kLoopBuffer`) and `Engine::apply_clip_content()`'s
+    existing switch; does not propose replacing that switch.
+  - `13330` Semantic Resource Browser — ○ not started, HOST-ONLY. Overlaps
+    directly with `11630`'s remaining scope (Songs/Performances/Chord-
+    progressions/Loops/Pad-FX tabs, per-type naming registries — see
+    `docs/proposals/browser-redesign-taxonomy.md`). `11630` already ships
+    (as of `11610`'s F1/F2) the category-selector, click-to-apply, and
+    drag-and-drop mechanics this node's Phase 1 ("unified browser") would
+    build on; `13330` proposes generalizing `BrowserModel` onto `13310`'s
+    resource model plus adding compatibility ranking and similarity
+    search, which is not part of `11630`'s existing scope text. Cross-
+    reference only — `11630`'s existing scope description is unchanged by
+    this filing.
+- **13400 Block D — Intelligent composition.**
+  - `13410` Lead Sheet and intelligent Chord Map — ○ not started,
+    HOST-ONLY. Proposed to expose the already-shipped `ChordSequence`/
+    chord-follow/live-priority/detector machinery (`2300`–`2500`, ✅ done)
+    through a new visual/editable model; ChordPro import already exists in
+    the converter tool. See also
+    `docs/proposals/gui-live-harmony-musical-design.md` and
+    `docs/proposals/per-style-default-progressions.md` for adjacent
+    ChordSequence/default-progression design this would need to align
+    with.
+  - `13420` Seeded Variation Lab — ○ not started, HOST-ONLY. Proposed to
+    elevate the determinism/seed infrastructure already used by groove,
+    humanization, probability, and motif generation (`9210`, ✅ done) into
+    a first-class, genealogy-tracked product surface.
+  - `13430` Smart Form Builder — ○ not started, HOST-ONLY. Builds on
+    `SceneChain`/`SceneStep` (`11650`, ✅ done) and `PerformanceStore`,
+    proposing structure generation on top of them, not a replacement.
+    Genuine overlap found beyond the task's own list: this is the same
+    problem space already analyzed in
+    `docs/proposals/song-form-autoarrange.md` and
+    `docs/proposals/song-form-option-a-wiring-plan.md` (auto-song form,
+    energy-curve-driven section choice, archetype templates) — those two
+    documents predate the SceneChain adoption (`11650`) and were written
+    against the OLD hand-rolled auto-song mechanism; neither is marked
+    superseded anywhere in this tree. Whoever schedules `13430` should read
+    those two documents first rather than re-deriving the same analysis.
+  - `13440` Nonlinear Arrangement Graph — ○ not started, HOST-ONLY (the
+    Graph is proposed to live host-side and compile bounded transactions
+    into the core, the same boundary discipline as `13210`). Builds on
+    `SceneChain`/`SceneStep` (`11650`, ✅ done) the same way `13430` does —
+    `SceneTransitionKind` today supports only `kCut`; this node's node/edge
+    model is explicitly scoped as sitting ABOVE `SceneChain`, compiling
+    paths into it, not replacing it.
+
+*Cross-cutting principles carried over from the source document (transport
+never stops for creative ops; live changes must be quantizable; determinism
+given identical seed/input; generative proposals must stay inspectable and
+editable; the UI must distinguish current/draft/pending/preview; persistent
+resources are never identified by runtime index; the realtime core stays
+bounded with no dynamic allocation while the desktop host may keep richer
+dynamic models; every feature must produce observable events/state;
+important behavior must be reproducible via tests/trace; initial simplicity
+must not block progressive depth; animations must communicate state/time/
+causality, never be decoration) restate invariants `0100`/`0200`/`0600`/
+`0700` already declared for this whole tree — they are this band's own
+confirmation that none of the twelve features asks for an exception to
+`0000`, not new obligations.*
+
+---
+
+### 14000 — BDD testing architecture (Gherkin + BabyBehave) — cross-cutting QA infrastructure for `13000` — ○ not started, DECIDED (accept-with-changes, 2026-07-19)
+
+*Reviewed 2026-07-19 by the orchestrator plus six read-only research passes
+(`torquato-qa-lead`, a general-purpose WebFetch pass, `corelli-architecture-
+critic`, `guido-process-analyst`, two `Explore` passes) against a proposal
+to cover the twelve `13000` features with a Gherkin+BabyBehave BDD layer.
+Verdict: **ACCEPT WITH CHANGES.** Filed here per that BDD-architecture
+review session, 2026-07-19 — no proposal document exists for this pass (it
+was a chat-session decision, not a translated source document like `13000`
+itself); every finding below was independently verified against the real
+tree by that review, cited by exact path. New top-level band per this
+file's own numbering rule (`14000` is the first unused thousand-band, verified
+against every 5-digit node in this file as of this pass) — the closest
+existing testing-infrastructure band, `1300` (`1310`–`1340`), is the
+core/protocol harness and already fully `✅ done`; this is a distinct,
+GUI-facing testing SYSTEM for the still-unscheduled `13000` band, not an
+extension of `1300`'s closed scope.*
+
+*Dependency and scope calls already settled by the review, not re-opened
+here: **`BabyBehave`** (`github.com/crsnplusplus/BabyBehave`) is real, MIT,
+header-only C++23 (C++17 fallback), with a real CMake/vcpkg/Conan/Bazel
+packaging story — but it is NOT a Gherkin/Cucumber engine (no `.feature`
+parsing, scenario auto-discovery, CTest auto-integration, tag filtering, or
+"World" concept): it is a fluent Given/With/When/Then C++ chaining DSL with
+JUnit-XML/TAP reporters, so a semantic Gherkin-parsing/step-registry layer
+is still needed on top of it. Pre-1.0, no tagged releases — pin an exact
+commit SHA via `FetchContent`, never `GIT_TAG main` (policy `0800`
+dependency-fork evaluation, satisfied by this review). Existing test
+infrastructure is stronger than the proposal assumed:
+`apps/gui-sonotron/tests/imgui_headless_harness.hpp` already does real ImGui
+IO-event injection (`AddMousePosEvent`/`AddMouseButtonEvent`) with real
+`ImDrawData` read-back assertions; `apps/gui-sonotron/src/input_trace.hpp`
+already provides real `--trace-input`/`--replay-input` record/replay; ImGui
+is vendored at v1.92.8 (`third_party/imgui`) with the full IO-event-queue
+API; real drag-and-drop payloads already exist
+(`kStyleDragPayloadId`/`kVariationDragPayloadId`, `browser_model.hpp`); the
+project-wide harness is a custom `CHECK`-macro pattern (`test.hpp`), no
+gtest/catch2/doctest. **Feature-ID decision:** reuse the existing `13xxx`
+node numbers directly as Gherkin tags (`@feature:13110` etc.) — no separate
+Feature Registry file. **Interaction Plan / `.flow.yaml` — rejected** as a
+separate artifact (would duplicate Gherkin scenario text plus the C++
+step-registry binding; no YAML dependency introduced).*
+
+*Owner-ranked MVP priority (refined 2026-07-19, supersedes the flatter
+"precise things + several wows + UI matters" framing this band opened
+with): **(1) NO CRASH** — stability/robustness, non-negotiable, above
+either wow tier below (`14100.1`); **(2) WOW** — the functional milestone
+sequence Browser → Sequence Edit → Looper (`14110`–`14150`, unchanged from
+this band's original filing); **(3) SUPERWOW** — fluid, animated,
+innovative UI as its own goal, sequenced strictly AFTER (2) (`14400`).*
+
+- **14100 Priority #2 (wow) — Foundational seam fix + the three-milestone
+  BDD program, in order.**
+  - `14100.1` No-crash / stability gate — ◑ partial (commit `3eb005d`,
+    "feat(gui-sonotron): sanitizer preset + clock-injection seam
+    (14100.1/14110)"), **PRIORITY #1, non-negotiable, supersedes both wow
+    tiers below.** No feature milestone (`14120`/`14130`/`14140`) counts as
+    done if it introduces or leaves in place a crash/UB risk. Requires
+    ASan/UBSan sanitizer runs on the new BDD test binary and on any GUI
+    code each milestone touches. **Infra gap CLOSED:** `CMakePresets.json`
+    now carries a `sanitize` configurePreset+buildPreset+testPreset triad
+    (inherits `host`, `-fsanitize=address,undefined
+    -fno-omit-frame-pointer -g -O1`, own `build/sanitize` dir) —
+    previously verified absent (`host`/`host-release`/`coverage`/`tidy`/
+    `arm`/`arm-release` only). Verified by a full rebuild under the
+    `sanitize` preset + `ctest --test-dir build/sanitize -E
+    "live_alsa|live_tracks"` → 163/163 tests passed, zero ASan/UBSan
+    diagnostics; the `host` preset was independently reverified at
+    163/163 alongside this change. **Still open (why this is `◑`, not
+    `✅`):** the gate has not yet been exercised against "the new BDD test
+    binary" or against `14120`/`14130`/`14140`'s own GUI code in full,
+    because only one of those three milestones has landed so far.
+    `14120` (see below, commit `6fc84e6`) is now CLOSED and is the first of
+    the three verified clean under the `sanitize` preset (full rebuild +
+    `ctest --test-dir build/sanitize -E "live_alsa|live_tracks"` →
+    164/164, zero ASan/UBSan diagnostics) — this node still does not close
+    to `✅` on that alone: `14130` and `14140` remain `○ not started` below,
+    and per this node's own rule each landed milestone must itself be
+    verified clean under `sanitize` before `14100.1` closes fully.
+    *(Discrepancy flagged, not written as fact: an earlier
+    framing of this gate cited "zero regression-labeled CTest tests" and an
+    aspirational "metric-3 bug registry" — re-checked against the tree and
+    found FALSE. `1340` (this same file) already records the three-metric
+    unit/functional/regression convention as `✅ done`, and
+    `components/core/arrangrr/tests/CMakeLists.txt` carries real,
+    passing, `LABELS regression` tests today — e.g. `test_step_locks`,
+    `test_performance_style_id_regression`,
+    `test_insert_chain_fan_overflow_regression`,
+    `test_master_transpose_voicing_regression`,
+    `test_clip_matrix_live_meter_change_regression` (10+ such tests,
+    `ctest -L regression` finds 11 in the current `build/host`). No
+    "bug registry"/"metric-3" term appears anywhere in this repo. This
+    gate is filed on the verified sanitizer gap alone; the regression-count
+    claim is not repeated here.)* Closing `14110`'s clock-injection seam and
+    `14130`'s `StepPatternModel` read-back gap are THIS priority's work, not
+    merely test-writing convenience: a hardcoded wall-clock scheduler and a
+    silent core-write rejection are both correctness/no-crash-adjacent gaps
+    independent of BDD — the fact that fixing them also unblocks trustworthy
+    `@ui` scenarios is a side effect, not the reason to do them.
+  - `14110` GUI↔backend clock-injection seam — ✅ done (commit `3eb005d`,
+    "feat(gui-sonotron): sanitizer preset + clock-injection seam
+    (14100.1/14110)"), HOST-ONLY. `InProcessBrainSession::run_engine()`
+    (`apps/gui-sonotron/src/in_process_brain_session.cpp`) previously
+    hardcoded real `steady_clock`/`sleep_for` with no injectable
+    clock/scheduler hook, even though core (`Transport`,
+    `TestEngine::advance_ticks`) already had a fully deterministic
+    tick-injection model — root cause of the 50+ wall-clock `sleep_for`
+    polling loops in the GUI test suite, and of
+    `test_in_process_brain_session_bar_advance.cpp`'s own admitted weak
+    assertion ("did it advance at all", to dodge CI flakiness). Now closed:
+    a `ClockHooks{now_us, wait}` seam
+    (`apps/gui-sonotron/src/in_process_brain_session.hpp`), settable via
+    `set_clock_hooks_for_test()` before `start()`, production defaults
+    reproducing the old real-time behavior byte-for-byte
+    (`Impl::now_us_hook`/`wait_hook` in
+    `in_process_brain_session.cpp`; `run_engine()` now reads the hooks
+    instead of calling `monotonic_us()`/`std::this_thread::sleep_for`
+    directly). `test_in_process_brain_session_bar_advance.cpp` was
+    rewritten to drive a virtual clock and assert the exact expected bar
+    instead of the old weak "did it advance at all" check — runtime
+    dropped from ~6s real wall-clock to ~0.02–0.07s. Full `host` preset
+    reverified at 163/163 tests passed alongside this change.
+  - `14120` Browser (`13330`) BDD milestone — ✅ done (commit `6fc84e6`,
+    "test(gui-sonotron): node 14120 -- retire stale auto-song click sim +
+    real drag-drop @ui coverage"), HOST-ONLY, gated on `14110` (CLOSED — see
+    `14110` above, commit `3eb005d`). **Both deliverables this node
+    originally named turned out to rest on a stale premise, corrected by
+    the investigation, not merely checked off as filed:**
+    (a) the `click_arm_auto_song()` fix — the field-write helper
+    (`apps/gui-sonotron/tests/test_grid_panel_auto_song_stop_restart_ui_automation.cpp:100,163`
+    at filing time) was NOT "convert to a real click" as originally framed;
+    `auto_song` now defaults to `true` (Song-mode Phase 1) and a real click
+    on the header toggle from that state would TOGGLE IT OFF — the opposite
+    of "arm". The real fix removed the vestigial simulation across all
+    three duplicated sites
+    (`test_grid_panel_auto_song_stop_restart_ui_automation.cpp`,
+    `test_grid_panel_auto_song_real_backend.cpp`,
+    `test_grid_panel_master_play_restart_rewind_ui_automation.cpp`) and
+    replaced it with a `CHECK(fx.auto_song)` precondition documenting the
+    new default. (b) the milestone's own headline claim — "real search +
+    real drag-and-drop already ship" — was UNPROVEN: no test drove ImGui's
+    real `BeginDragDropSource`/`AcceptDragDropPayload` state machine at all.
+    Closed by adding `sonotron::test_harness::drag_to()`
+    (`apps/gui-sonotron/tests/imgui_headless_harness.hpp`) and a new
+    `test_browser_grid_drag_drop_ui_automation.cpp` proving real style-leaf
+    and variation-leaf drags via engine-observable `AppState` echoes,
+    non-vacuity confirmed by an explicit negative control (shrinking the
+    drag below ImGui's `MouseDragThreshold` produces a real `FAIL`). The
+    originally named product-hook concern — a semantic wrapper around
+    `ImGui::GetItemRectMin()`/`GetItemRectMax()` for an alpha-0-at-rest
+    `SmallButton` — turned out UNNEEDED for both deliverables: (a) needed
+    no click at all, (b) the real drag sources/targets sit on
+    already-locatable standard ImGui items (a `Selectable` row, an
+    `InvisibleButton`). Verified: full rebuild + `ctest --test-dir
+    build/host -E "live_alsa|live_tracks"` → 164/164 tests passed; full
+    rebuild + `ctest --test-dir build/sanitize -E "live_alsa|live_tracks"`
+    (ASan+UBSan) → 164/164 tests passed, zero sanitizer diagnostics — the
+    first of the three feature milestones (`14120`/`14130`/`14140`)
+    verified clean under the `sanitize` preset since `14100.1` was filed.
+  - `14130` Sequence Edit (`13120`) BDD milestone — ○ not started,
+    HOST-ONLY, gated on closing `StepPatternModel`'s core read-back gap.
+    `StepPatternModel` is explicitly "the GUI's own local echo of core
+    state, not a replacement for it" (its own header comment,
+    `step_pattern_model.hpp:23`); every edit op mutates the local echo and
+    fire-and-forgets a command to core with NO read-back query confirming
+    core accepted it — a BDD scenario asserting only against
+    `StepPatternModel` would pass even if core silently rejected the edit.
+    This is a blocking architectural gap (a real core read-back query must
+    be added), not a test-writing task, and must close before `13120` gets
+    any DoD-level `@ui` coverage. Second milestone: "precise" must come
+    before "wow" is trustworthy. Serves priority #1 (`14100.1`) first: a
+    silent core-write rejection is a correctness gap independent of
+    testing, not merely a precision-for-its-own-sake nicety.
+  - `14140` Looper (`13110`) BDD milestone — ○ not started, HOST-ONLY,
+    gated on new GUI gesture work (press-and-hold record) not yet built.
+    Third milestone: a real third wow, but there is nothing to demo until
+    the gesture exists.
+  - `14150` MVP cutline — governing marker (does not itself schedule work,
+    the same role `11700` plays for the GUI freeze line). **MVP = through
+    `14140` landing the Looper milestone with a trustworthy `@ui`
+    scenario, with `14100.1`'s no-crash gate held throughout.** `14200`
+    (legacy-debt baseline / CI-gate hardening) is explicitly POST-MVP
+    process hardening, filed as a distinct later step, not part of the MVP
+    itself. `14400` (SUPERWOW, priority #3) sits strictly after this
+    cutline too — it is not part of the functional MVP either.
+- **14200 Post-MVP process hardening.**
+  - `14210` Legacy-debt baseline + CI-gate hardening — ○ not started,
+    HOST-ONLY, gated on `14150` (comes AFTER the MVP cutline, never
+    before).
+- **14300 Deferred — not yet scheduled ("finché non serve").**
+  - `14310` `IMidiHal` fake/test-double for injected MIDI input — ○ not
+    started, DEFERRED, **NEEDS-DECISION** (connection class confirmed by
+    owner as USB MIDI; the specific device/model to characterize against
+    remains an open owner decision, left open for now — do not invent a
+    device). No fake exists today (only three real hardware
+    backends: ALSA/CoreMIDI/WinMM). Do NOT write the fake from reading the
+    code alone: the risk is a plausible-but-wrong fake silently encoding
+    incorrect assumptions about real MIDI hardware, inherited invisibly by
+    both product code and any `@engine`/`@ui` scenario built on it.
+    Required sequencing when this is scheduled: (a) FIRST, a small set of
+    `@live_smoke` characterization scenarios against REAL MIDI hardware,
+    measuring concrete numbers (timing jitter note-on/off, running-status
+    behavior, SysEx chunking/timeout, multi-port event ordering,
+    connect/disconnect events); (b) THEN build the `IMidiHal` fake to
+    satisfy that measured contract, not to "seem reasonable"; (c) KEEP the
+    `@live_smoke` scenarios in the tree permanently as drift detectors,
+    never delete them once the fake exists.
+- **14400 Priority #3 (SUPERWOW) — fluid, animated, innovative UI as its own
+  goal.** ○ not started, sequenced strictly AFTER the three functional-wow
+  milestones (`14120`–`14140`) land, not alongside them: there must be real,
+  working, boundary-synchronized functionality on screen before animating
+  it means anything causally.
+  - `14410` UI-animation + causal data model, combined — ○ not started.
+    Cross-reference only, no new sub-nodes invented under either parent:
+    `11640` (UI-animation MECHANISM — its own entry already finds motion
+    "not yet beat-synchronized") together with `13140` (Visualized Musical
+    Causality — the CAUSAL DATA MODEL, current/pending/predicted/candidate/
+    historical state layered on `BrainEvent`/`AppState`, that motion would
+    express; `13140`'s own text already says it "would consume `11640`'s
+    motion primitives once both exist"). This band's SUPERWOW tier IS
+    `11640` + `13140` together, once whoever schedules that work takes it
+    up — their own scheduling and scope are unchanged by this filing. BDD
+    scenario coverage for this tier is explicitly OUT OF SCOPE here: to be
+    designed once `11640`/`13140` are scheduled, not invented in this pass.
+
+*Test-authoring order vs. product-build order — do not conflate.*
+`14120`→`14130`→`14140` is a TEST-AUTHORING order (which of the three
+already-partially-built `13000` features gets BDD coverage first). This is
+distinct from `13210`'s own existing product-BUILD sequencing note ("this
+node is meant to land before `13120`/`13130`/`13140` (Block A) start
+producing live edits that touch more than one subsystem at once — a
+sequencing note carried over from the source, not a hard gate decided by
+this filing pass"): that note is about construction order for NOT-YET-BUILT
+features; this band's order is about which of the three already-real
+features earns BDD scenarios first. The two do not contradict each other —
+they answer different questions.
 
 ---
 
@@ -780,7 +1205,8 @@ the behind-the-line set.
    At the time of this split, `11620` (in-process `program`-verb no-op),
    `11630` (Browser redesign remainder), `11640` (UI-animation), `11650`
    (song-mode Phase 2) were open sub-nodes; `11620` has since shipped
-   ✅ done (commit `ec5b90d`, see `11600` above) — `11630`/`11640`/`11650`
+   ✅ done (commit `ec5b90d`, see `11600` above) and `11650` has since
+   shipped ✅ done (commit `76a8774`, see `11650` above) — `11630`/`11640`
    remain open. Parent `11600` stays OPEN — the instrument is never
    "done." The DONE criterion for a GUI sub-node is recorded verbatim
    under `11600` above.
@@ -794,6 +1220,72 @@ the behind-the-line set.
    into `12520` DeviceProfile+ExternalSound, `12530` ordered Bank/PC/CC
    init, `12540` RPN/NRPN/14-bit/aftertouch, `12550`
    MIDI-Learn/ControllerMap.
+10. **New band `13000` — Desktop feature expansion (twelve features)**
+    (2026-07-19) — **PROPOSED, not decided.** Filed from a strategic
+    proposal document translated in full to English
+    (`docs/proposals/desktop-feature-expansion-2026-07.md`), describing
+    twelve desktop feature evolutions — Looper in the Repeat Zone,
+    Performance Transformation Surface, complete live Sequence Edit, Smart
+    Form Builder, Seeded Variation Lab, Visualized Musical Causality, Live
+    Musical Transaction Engine, Semantic Resource Browser, Musical Resource
+    Graph, Lead Sheet and intelligent Chord Map, Nonlinear Arrangement
+    Graph, Universal Resource Runtime — grouped into four architectural
+    blocks (`13100`–`13400`, mirroring the source document's own Block
+    A/B/C/D framing) with twelve leaf nodes (`13110`–`13440`). STATUS:
+    every leaf is **○ not started / proposed only** — the owner asked only
+    to have the proposal filed at the correct place in the tree, not to
+    commit to building it, prioritize it, or schedule it; no existing
+    node's status or wording was changed by this pass. Cross-references
+    filed against `6000`/`11610` (Looper), `11630` (Browser/Resource
+    Graph/Semantic Browser), `11640` (UI-animation/Causality), `11650`
+    (SceneChain — Smart Form Builder/Arrangement Graph), plus two
+    additional overlaps found during filing that are not tracked
+    elsewhere in this tree: `docs/proposals/song-form-autoarrange.md` and
+    `docs/proposals/song-form-option-a-wiring-plan.md` (pre-existing,
+    unsuperseded auto-song-form analysis overlapping Smart Form Builder,
+    `13430`).
+11. **New band `14000` — BDD testing architecture (Gherkin + BabyBehave)**
+    (2026-07-19) — **DECIDED: ACCEPT WITH CHANGES.** Filed from a
+    BDD-testing-architecture review session (orchestrator +
+    `torquato-qa-lead` + a general-purpose WebFetch pass +
+    `corelli-architecture-critic` + `guido-process-analyst` + two `Explore`
+    passes, 2026-07-19; no proposal document — this was a chat-session
+    decision, its findings independently verified against the tree).
+    Reuses `13xxx` node numbers directly as Gherkin tags (no separate
+    Feature Registry); rejects a separate Interaction Plan / `.flow.yaml`
+    artifact. Records the foundational clock-injection seam fix (`14110`)
+    as blocking any timed `@ui` scenario at scale, the owner-set BDD
+    milestone order Browser (`13330`) → Sequence Edit (`13120`) → Looper
+    (`13110`) (`14120`–`14140`) — distinct from `13210`'s own product-build
+    sequencing note, not a contradiction of it — the MVP cutline at
+    `14150`, legacy-debt-baseline/CI-gate hardening as a distinct POST-MVP
+    step (`14210`), and the `IMidiHal` fake/test-double (`14310`) filed as
+    explicitly DEFERRED / NEEDS-DECISION (which real hardware to
+    characterize against is still an open owner decision, not answered by
+    this pass). No existing `13000` leaf's status or wording was changed by
+    this filing.
+11b. **Refined MVP priority ranking for band `14000`** (2026-07-19,
+    same-day follow-up) — **DECIDED: three explicit priority tiers,
+    ranked.** (1) NO CRASH — a non-negotiable stability gate (`14100.1`)
+    above either wow tier, requiring ASan/UBSan sanitizer runs on the new
+    BDD test binary and touched GUI code (verified absent today:
+    `CMakePresets.json` has no sanitizer preset); closing `14110`'s
+    clock-injection seam and `14130`'s read-back gap now explicitly serve
+    this priority, not merely BDD convenience. (2) WOW — the existing
+    Browser → Sequence Edit → Looper milestone sequence (`14110`–`14150`),
+    unchanged. (3) SUPERWOW — a new tier, fluid/animated/innovative UI as
+    its own goal, filed at `14400`/`14410`, cross-referencing `11640`
+    (motion mechanism) + `13140` (causal data model) without adding new
+    sub-nodes under either, sequenced strictly after tier (2). *Discrepancy
+    found and NOT recorded as fact: the relayed brief for this follow-up
+    also claimed "grepping for regression-labeled CTest tests project-wide
+    returns zero hits" and an aspirational "metric-3 bug registry" —
+    re-checked against the tree and found FALSE (`1340` already records the
+    three-metric convention as `✅ done`; real `LABELS regression` tests
+    exist and pass, e.g. `test_step_locks`,
+    `test_performance_style_id_regression`; "bug registry"/"metric-3"
+    appears nowhere in the repo). That specific claim is omitted from
+    `14100.1`; only the verified sanitizer-preset gap is recorded there.
 
 ---
 

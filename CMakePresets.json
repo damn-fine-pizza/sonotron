@@ -31,6 +31,18 @@
       }
     },
     {
+      "name": "sanitize",
+      "displayName": "Host (ASan+UBSan, sanitizer-instrumented)",
+      "inherits": "host",
+      "binaryDir": "${sourceDir}/build/sanitize",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1",
+        "CMAKE_CXX_COMPILER_LAUNCHER": ""
+      }
+    },
+    {
       "name": "tidy",
       "displayName": "Clang compile database for clang-tidy",
       "generator": "Ninja",
@@ -66,6 +78,7 @@
     { "name": "host", "configurePreset": "host" },
     { "name": "host-release", "configurePreset": "host-release" },
     { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "sanitize", "configurePreset": "sanitize" },
     { "name": "arm", "configurePreset": "arm" },
     { "name": "arm-release", "configurePreset": "arm-release" }
   ],
@@ -78,6 +91,11 @@
     {
       "name": "coverage",
       "configurePreset": "coverage",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "sanitize",
+      "configurePreset": "sanitize",
       "output": { "outputOnFailure": true }
     }
   ]

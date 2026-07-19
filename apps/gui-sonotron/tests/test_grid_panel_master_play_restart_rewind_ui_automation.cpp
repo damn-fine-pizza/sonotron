@@ -126,15 +126,6 @@ ImDrawData* click_at(ImVec2 pos, GridModel& model, SeqEditModel& seqedit, PartsM
   return render_one_frame(model, seqedit, parts, brain_session, app_state, fx);
 }
 
-// Mimics the auto-song header button click's own field mutation -- verbatim
-// copy of the sibling stop/restart test's own helper (documented gap: no
-// click-injection seam for an alpha-0-at-rest ImGui::SmallButton).
-void click_arm_auto_song(UiState& fx, const AppState& app_state) {
-  fx.auto_song = true;
-  fx.active_scene_start_bar = app_state.bar();
-  fx.auto_song_last_bar = app_state.bar();
-}
-
 void poll_once(BrainSession& session, AppState& app_state) {
   std::vector<BrainEvent> events;
   session.poll(events);
@@ -186,8 +177,12 @@ MidSongFixture drive_to_mid_song(GridModel& model, SeqEditModel& seqedit, PartsM
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(6000);
     while (std::chrono::steady_clock::now() < deadline) {
       poll_once(session, app_state);
+      // Auto-song was already armed from frame 0 (CHECK'd in the caller) --
+      // the transport reporting "playing" is the only real-world signal
+      // left to wait for; handle_master_play_launch (grid_panel.cpp)
+      // already built and launched the song on this same transition,
+      // through production code.
       if (!armed && app_state.transport() == AppState::Transport::kPlaying) {
-        click_arm_auto_song(fx, app_state);  // documented gap: direct field write, not a click
         armed = true;
       }
       render_one_frame(model, seqedit, parts, session, app_state, fx);
@@ -221,6 +216,10 @@ void test_master_play_restart_rewinds_to_first_scene_when_auto_song_on() {
   SeqEditModel seqedit;
   PartsModel parts;
   UiState fx;
+  // Song-mode Phase 1 precondition (see this file's own header comment):
+  // auto-song starts ARMED by default -- nothing needs to click the header
+  // toggle to reach this state.
+  CHECK(fx.auto_song);
   AppState app_state;
   InProcessBrainSession session;
 
@@ -346,6 +345,10 @@ void test_master_play_restart_preserves_selected_scene_when_auto_song_off() {
   SeqEditModel seqedit;
   PartsModel parts;
   UiState fx;
+  // Song-mode Phase 1 precondition (see this file's own header comment):
+  // auto-song starts ARMED by default -- nothing needs to click the header
+  // toggle to reach this state.
+  CHECK(fx.auto_song);
   AppState app_state;
   InProcessBrainSession session;
 

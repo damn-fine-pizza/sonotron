@@ -20,9 +20,15 @@
 // start")`), every frame drains session.poll() and reduces through a REAL
 // AppState::apply(), exactly main.cpp's own frame shape (main.cpp:696-697),
 // and render_grid_panel is the REAL production entry point, not a stand-in.
-// The ONLY hand-written state mutation left is click_arm_auto_song (there is
-// still no ImGui::SmallButton click-injection seam in this codebase) -- the
-// bar, the beats, and the transport state all travel the real pipeline.
+//
+// UPDATED (Torquato QA, roadmap node 14120 investigation): the hand-written
+// state mutation this comment used to describe (`click_arm_auto_song`) is
+// gone. `auto_song` now DEFAULTS to true (ui_state.hpp, owner decision
+// 2026-07-17), so there is nothing left to arm by hand -- a real click on
+// the header toggle from this state would TOGGLE IT OFF, the opposite of
+// what the old helper simulated. The CHECK(fx.auto_song) below documents
+// that precondition instead of hand-writing it; the bar, the beats, and the
+// transport state all still travel the real pipeline, untouched.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
@@ -70,18 +76,6 @@ void render_one_frame(GridModel& model, SeqEditModel& seqedit, PartsModel& parts
   sonotron::render_grid_panel(model, seqedit, parts, brain_session, app_state, fx);
   ImGui::End();
   ImGui::EndFrame();
-}
-
-// Mimics the EXACT state mutation the "auto-song" header button click
-// performs (grid_panel.cpp render_header's `if (ImGui::SmallButton(...))`
-// block) -- verbatim copy of test_grid_panel_auto_song.cpp's own
-// click_arm_auto_song: there is still no click-injection seam for an
-// ImGui::SmallButton in this codebase (headless mouse-event simulation would
-// test ImGui itself, not this feature).
-void click_arm_auto_song(UiState& fx, const AppState& app_state) {
-  fx.auto_song = true;
-  fx.active_scene_start_bar = app_state.bar();
-  fx.auto_song_last_bar = app_state.bar();
 }
 
 // Shared poll-render-until-predicate loop: drains the REAL brain session,
@@ -139,6 +133,10 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
   PartsModel parts;
   UiState fx;
   AppState app_state;
+  // Song-mode Phase 1 precondition (see this file's own header comment):
+  // auto-song starts ARMED by default -- nothing needs to click the header
+  // toggle to reach this state.
+  CHECK(fx.auto_song);
 
   // SOURCE-OF-TRUTH TRANSITION (owner task #3, see grid_panel.cpp's update_
   // auto_song header comment): the advance no longer reads GridModel::
@@ -197,11 +195,11 @@ void test_bar_and_auto_song_advance_through_real_backend_and_real_render_loop() 
     }
     max_bar_seen = std::max(max_bar_seen, app_state.bar());
 
-    // Arm auto-song the first frame the transport is confirmed playing
-    // (mirrors a user who presses Play, sees it take, THEN clicks the
-    // header button) -- exactly once, same one-shot shape as a real click.
+    // Auto-song was already armed from frame 0 (CHECK'd above) -- the
+    // transport reporting "playing" is the only real-world signal left to
+    // wait for; handle_master_play_launch (grid_panel.cpp) already built and
+    // launched the song on this same transition, through production code.
     if (!armed && app_state.transport() == AppState::Transport::kPlaying) {
-      click_arm_auto_song(fx, app_state);
       armed = true;
     }
 
