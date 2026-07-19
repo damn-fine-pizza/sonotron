@@ -118,9 +118,28 @@ class ChordSequencer {
 
   // Call once per transport tick while the transport runs (and once with the
   // start tick right after transport start).
+  //
+  // Regression (spike follow-up, docs/proposals/gui-live-harmony-musical-
+  // design.md): play() rebases m_base to whatever tick the transport is AT
+  // when called -- including while the transport is STOPPED (Transport::
+  // stop() intentionally preserves position, MIDI Stop semantics). A
+  // subsequent Transport::start() rewinds the transport itself back to tick
+  // 0 (MIDI Start semantics, also intentional) but does nothing to this
+  // class on its own -- the old unconditional `transport_tick < m_base`
+  // early-return would then silently starve the sequence until the tick
+  // counter numerically caught back up to the stale m_base (which, for any
+  // reasonably long previous run, is effectively "never" within a session).
+  // `transport_tick < m_base` can only mean the transport itself was
+  // rewound since m_base was last set (ticks only ever increase while
+  // playing otherwise), so treat it as this run's fresh start and re-anchor
+  // here, rather than assuming transport_tick is monotonic against a stale
+  // anchor.
   void on_tick(Tick transport_tick, FireFn fire, ReleaseFn release) {
-    if (!m_playing || transport_tick < m_base) {
+    if (!m_playing) {
       return;
+    }
+    if (transport_tick < m_base) {
+      m_base = transport_tick;
     }
     ChordSequence* seq = current();
     const Tick len = seq->length();

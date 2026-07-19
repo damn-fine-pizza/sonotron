@@ -429,6 +429,60 @@ void test_seq_use_paired_with_play_gives_clean_bar_aligned_handoff() {
   CHECK(SeqFixture::degree(a_chords[1]) == 4);  // then V -- bar-aligned to the switch tick
 }
 
+// Regression (rebase-while-stopped + fresh restart): ChordSequencer::play()
+// rebases m_base to whatever tick the Transport is AT when called --
+// including while the Transport is STOPPED (Transport::stop() intentionally
+// PRESERVES position, MIDI Stop semantics, runtime/transport.hpp). This is
+// exactly what a host-side style load/switch does today (in_process_brain_
+// session.cpp's handle_style_change_progression()/step_cadence(): they issue
+// kSeqPlay unconditionally, whether the transport is playing or stopped). If
+// the Transport is LATER given a fresh start() (which intentionally REWINDS
+// to tick 0, also MIDI semantics, also unchanged by this fix), the old
+// unconditional `transport_tick < m_base` early-return in on_tick() would
+// silently starve the sequence -- ignoring every tick until the counter
+// numerically caught back up to the stale m_base, which for any realistic
+// prior run is effectively "never" within a session. This test drives
+// ChordSequencer + Transport directly (no Engine, no ABI Command), the
+// EXACT pairing described as fragile, to pin the class's own invariant
+// independent of any one caller happening to compensate for it.
+void test_on_tick_recovers_from_stale_base_after_transport_restart() {
+  Transport transport;
+  transport.start();
+  constexpr Tick kStaleTick = 500;
+  for (Tick i = 0; i < kStaleTick; ++i) {
+    transport.advance_one();
+  }
+  transport.stop();
+  CHECK(transport.tick() == kStaleTick);  // MIDI Stop: position preserved
+
+  ChordSequencer seq;
+  CHECK(seq.add_sequence(Key{0, Mode::kMajor}) == 0);
+  CHECK(seq.current()->append(0, -1, 100, kTicksPerBar));  // I, one bar
+  seq.current()->loop = true;
+
+  // Rebase WHILE STOPPED, at the stale tick -- the unconditional kSeqPlay a
+  // style load/switch issues today, regardless of transport state.
+  CHECK(seq.play(transport.tick()));
+  CHECK(seq.playing());
+
+  // A fresh Transport::start() rewinds the transport to tick 0 -- MIDI Start
+  // semantics, unchanged by this fix. Nothing else touches `seq` here.
+  transport.start();
+  CHECK(transport.tick() == 0);
+
+  int fired = 0;
+  seq.on_tick(
+      transport.tick(),
+      [&](std::uint8_t root_note, ChordQuality, std::uint8_t degree, std::uint8_t) {
+        ++fired;
+        CHECK(root_note == 60);  // C4, degree 0 in C major
+        CHECK(degree == 0);
+      },
+      []() {});
+  CHECK(fired == 1);     // must fire the tonic step AT tick 0, not stall
+  CHECK(seq.playing());  // and must still be a live, healthy sequence
+}
+
 void test_seq_warns() {
   SeqFixture f;
   f.cmd(Param::kSeqPlay);  // no sequence exists at all
@@ -468,6 +522,7 @@ int main() {
   test_seq_use_bare_switch_leaves_target_out_of_phase();
   test_on_tick_pos_greater_than_length_stops_playback();
   test_seq_use_paired_with_play_gives_clean_bar_aligned_handoff();
+  test_on_tick_recovers_from_stale_base_after_transport_restart();
   test_seq_warns();
   if (arrangrr::test::failures() == 0) {
     std::printf("test_chord_seq: all OK\n");

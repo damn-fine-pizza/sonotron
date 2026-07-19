@@ -53,6 +53,7 @@ using arrangrr::kMinBpm;
 using arrangrr::kNoExplicitClipId;
 using arrangrr::kNoLoopExplicitId;
 using arrangrr::kPpqn;
+using arrangrr::kSceneRepeatInfinite;
 using arrangrr::LoopLengthMode;
 using arrangrr::LoopRecordMode;
 using arrangrr::Op;
@@ -1424,35 +1425,64 @@ void handle_style_change_progression(Shell& shell, const Command& cmd,
 // (`kScenePlay`) -- exactly the ABI sequence the observable contract
 // requires, and no more.
 //
-// Task #5 (per-section REPEAT COUNT, Phase-1: host-only, ZERO ABI/core
-// change): each scene's own `repeat` (SongBuildScene, above) decides how
-// MANY consecutive, identical `kSceneAdd` steps this loop emits for that
-// scene -- all referencing the SAME PerformanceStore slot `i` (a SceneStep
-// is a `{performance_slot, n_bars, ...}` pair, arrangrr/scene/scene_chain.hpp;
-// `store(i, perf)` still happens exactly ONCE per scene, only the number of
-// steps that POINT AT slot `i` changes), so the section holds for
-// `n_bars * repeat` bars total before the chain advances to the next scene.
-// An infinite scene (kSongBuildRepeatInfinite) needs only ONE such step: the
-// core SceneChain's own "the last step holds forever, no implicit loop"
-// semantic (scene_chain.hpp's on_bar()) already gives the infinite hold for
-// free once that step is the chain's last one -- so this loop emits that one
-// step and then BREAKS, deliberately never building the remaining scenes at
+// Task #5 (per-section REPEAT COUNT) + repeat-count Phase-2 (core primitive,
+// arrangrr/scene/scene_chain.hpp -- SceneStep::repeat_count, SceneChain::
+// on_bar's own lap-cycling, Engine::scene_add reading `cmd.idx`): each
+// scene's own `repeat` (SongBuildScene, above) decides how many bars the
+// scene holds before the chain advances, but the expansion now happens
+// INSIDE the core, not here. This loop emits exactly ONE `kSceneAdd` per
+// populated scene column, translating `repeat` into `cmd.idx`, which
+// Engine::scene_add reads straight into the pushed SceneStep's own
+// `repeat_count` -- SceneChain::on_bar then holds that single step for
+// `n_bars * repeat_count` bars, firing `kSceneLap` OutEvents (not a real
+// transition/TransitionFn re-fire) for every intermediate lap and a genuine
+// transition only on the final one. This SUPERSEDES the earlier host-expand
+// mechanism, which used to push `repeat` CONSECUTIVE, identical `kSceneAdd`
+// steps (one core SceneStep per repeat, each referencing the same
+// PerformanceStore slot `i`) to reach the same total hold length -- an
+// up-to-8x step-count blowup this file no longer needs now that the core
+// itself understands "hold this step K times."
+//
+// The wire's finite range for `repeat`, [1,255], IS Engine::scene_add's own
+// clamp range for `cmd.idx` (`cmd.idx` is `std::uint16_t`, so the
+// `std::uint8_t repeat` widens without loss) -- no translation math needed,
+// a finite repeat is passed straight through. kSongBuildRepeatInfinite (0,
+// this file's own sentinel, above) is NOT the same numeric value as the
+// core's own infinite sentinel, arrangrr::kSceneRepeatInfinite (255,
+// scene_chain.hpp) -- deliberately kept distinct, same reason as always
+// (D38: this file has no dependency on grid_model.hpp/arrangrr's own
+// repeat-sentinel constants) -- so this loop translates explicitly rather
+// than passing `repeat` through unchanged: Engine::scene_add treats
+// `cmd.idx == 0` as "repeat_count = 1", NOT infinite, so
+// kSongBuildRepeatInfinite must never reach `cmd.idx` verbatim.
+//
+// An infinite scene (kSongBuildRepeatInfinite) still needs only ONE step,
+// same as before, but for a slightly different underlying reason now:
+// SceneChain::on_bar never completes the final lap of a step whose
+// repeat_count is arrangrr::kSceneRepeatInfinite (its own "hold forever"
+// semantic), so that step is never left, and this loop BREAKS immediately
+// after emitting it, deliberately never building the remaining scenes at
 // all (they are simply unreachable until a fresh song-build call replaces
 // the whole chain -- e.g. a manual scene-header click, activate_scene_column
 // in grid_panel.cpp, which is exactly the "explicit user gesture to resume"
 // the design calls for).
 //
 // Budget guard: `kMaxScenes` (arrangrr/config.hpp, 64) is the core
-// SceneChain's own hard step-count ceiling (a fixed-capacity StaticVector) --
-// `steps_emitted` tracks the running total across every scene's own repeat
-// expansion so this loop NEVER pushes more than `kMaxScenes` total
-// `kSceneAdd` commands, clamping the current scene's own repeat count down
-// (or skipping it outright once the budget is exhausted) rather than relying
-// on Engine::scene_add's own defensive kSceneTableFull warn as the only
-// backstop. In practice this clamp is never actually exercised by the GUI's
-// own inputs (kMaxSongScenes(8) populated columns x GridModel::
-// kMaxSceneRepeat(8) each == exactly kMaxScenes), but a wire line is not
-// bound to have come from the GUI, so the guard stays real, not decorative.
+// SceneChain's own hard step-count ceiling (a fixed-capacity StaticVector).
+// Now that every scene costs exactly ONE step regardless of its own repeat
+// count, `kMaxSongScenes`(8) populated columns can never come remotely close
+// to that ceiling on its own -- the "8 populated columns x 8 repeat == kMax
+// Scenes" arithmetic this comment used to cite no longer applies to THIS
+// function's own math (that invariant is now purely a CORE-side capacity
+// fact, still hardened by the cross-file static_asserts in config.hpp --
+// those stay valid as documentation of the core's own ceiling relationship,
+// they are just not exercised by anything this loop computes anymore).
+// `steps_emitted` and this guard stay in place as pure defense-in-depth
+// against a non-GUI-originated wire command (a raw `song build` line typed
+// by hand, or sent by a future non-GUI client, is not bound to respect
+// kMaxSongScenes) -- the guard stays real, not decorative, exactly as
+// before, it is just no longer a load-bearing capacity fact of this
+// function's own arithmetic.
 //
 // Slot 0 doubles as BOTH the scratch capture target and scene 0's own step
 // Performance: `base` is copied out locally before scene 0's own store()
@@ -1503,21 +1533,22 @@ bool apply_song_build(Shell& shell, const SongBuildCommand& build) {
     }
     const std::uint8_t repeat = build.scenes[i].repeat;
     const bool infinite = repeat == kSongBuildRepeatInfinite;
-    // One step suffices for an infinite hold (see this function's own header
-    // comment); otherwise the scene's own repeat count, clamped so this
-    // scene alone never pushes the running total past kMaxScenes.
-    const std::size_t requested = infinite ? std::size_t{1} : std::size_t{repeat};
-    const std::size_t emit_count = std::min(requested, kMaxScenes - steps_emitted);
-    for (std::size_t r = 0; r < emit_count; ++r) {
-      Command add_cmd{};
-      add_cmd.param = Param::kSceneAdd;
-      add_cmd.a = static_cast<std::int32_t>(i);
-      add_cmd.b = static_cast<std::int32_t>(build.scenes[i].n_bars) |
-                  (static_cast<std::int32_t>(base.beats_per_bar) << 8);
-      add_cmd.c = static_cast<std::int32_t>(SceneTransitionKind::kCut);
-      shell.push_command(add_cmd);
-    }
-    steps_emitted += emit_count;
+    // Exactly one kSceneAdd per scene now (see this function's own header
+    // comment): cmd.idx carries the repeat count straight into the core's
+    // own SceneStep::repeat_count via Engine::scene_add, with an explicit
+    // sentinel translation for the infinite case (kSongBuildRepeatInfinite
+    // is 0, arrangrr::kSceneRepeatInfinite is 255 -- passing 0 through
+    // verbatim would mean "repeat_count = 1" to Engine::scene_add, not
+    // infinite).
+    Command add_cmd{};
+    add_cmd.param = Param::kSceneAdd;
+    add_cmd.a = static_cast<std::int32_t>(i);
+    add_cmd.b = static_cast<std::int32_t>(build.scenes[i].n_bars) |
+                (static_cast<std::int32_t>(base.beats_per_bar) << 8);
+    add_cmd.c = static_cast<std::int32_t>(SceneTransitionKind::kCut);
+    add_cmd.idx = infinite ? kSceneRepeatInfinite : repeat;
+    shell.push_command(add_cmd);
+    ++steps_emitted;
     if (infinite) {
       ends_infinite = true;
       break;  // truncate the rest of the built chain -- this scene holds forever.
