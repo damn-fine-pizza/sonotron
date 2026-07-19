@@ -10,8 +10,22 @@
 //
 // Click and drag are NOT mutually exclusive (repeat-zone-real-contract.md
 // SLICE 4a, kept unchanged by this slice) -- this test only pins the click
-// path; the pre-existing drag-to-scene-header path is unaffected and stays
-// covered by grid_panel.cpp's own drop-target tests.
+// path.
+//
+// CORRECTED (Torquato QA, roadmap node 14120 investigation, 2026-07-19): this
+// comment used to claim the drag-to-scene-header path "stays covered by
+// grid_panel.cpp's own drop-target tests". That claim was FALSE -- no such
+// file ever existed, and a grep across every test file for the real ImGui
+// drag-drop payload IDs (kStyleDragPayloadId, kVariationDragPayloadId,
+// BeginDragDropSource, AcceptDragDropPayload) found zero hits before this
+// pass. The only pre-existing "drag" mention near grid_panel.cpp's drop
+// targets was test_repeat_zone_playhead_ui_automation.cpp's own root-cause
+// PROSE comment, which explains that the browser drag-drop handler is the
+// only path that registers a real ClipMatrix clip -- it never drove a drag
+// gesture itself, real or simulated. Real drag coverage (both the style and
+// the variation drag source/target pairs, driven through a genuine multi-
+// frame BeginDragDropSource/AcceptDragDropPayload gesture) now lives in
+// test_browser_grid_drag_drop_ui_automation.cpp.
 
 #include "imgui.h"
 #include "src/app_state.hpp"
