@@ -83,6 +83,7 @@ class LoggingBrainSession final : public BrainSession {
       case BrainEvent::Kind::kChord:
       case BrainEvent::Kind::kChordFollowed:
       case BrainEvent::Kind::kLoop:
+      case BrainEvent::Kind::kParamState:
       case BrainEvent::Kind::kUnknown:
         return;  // not requested -- kept out of the trace to limit noise
     }

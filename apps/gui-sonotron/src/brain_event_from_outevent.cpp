@@ -128,16 +128,17 @@ BrainEvent brain_event_from_outevent(const arrangrr::OutEvent& ev, bool prefer_f
       out.time_sig_beats_per_bar = ev.code;
       break;
 
+    // Song-mode Phase 2 live-readback gap closure (docs/proposals/song-mode-
+    // scenechain-adoption.md): a real, generic decode of the core's
+    // OutEvent::param_state echo -- see brain_event.hpp's own kParamState/
+    // param_id-group comments for the field-by-field meaning. A plain,
+    // uninterpreted copy: this file does not branch on the specific Param.
     case OutEvent::Kind::kParamState:
-      // Phase 3a (docs/design/orchestrator-pipeline-extraction.md §17.3b): the
-      // GUI does not decode this echo yet (its own panel-mirror-struct wiring
-      // is future work, mirroring hostrt's Seam D) -- treat it exactly like a
-      // line the GUI does not model, matching parse_brain_event's own
-      // "unmodeled" convention (kind=kUnknown, invalid), NOT kWarn (ev.code
-      // here is a Param id, not a WarnCode -- falling through to the kWarn
-      // branch below would render a bogus "unknown" warning).
-      out.kind = BrainEvent::Kind::kUnknown;
-      out.valid = false;
+      out.kind = BrainEvent::Kind::kParamState;
+      out.param_id = ev.code;
+      out.param_sub = ev.port;
+      out.param_v0 = ev.msg.status;
+      out.param_v1 = ev.msg.d1;
       break;
 
     case OutEvent::Kind::kWarn:

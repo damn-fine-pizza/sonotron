@@ -1935,6 +1935,14 @@ void Engine::emit_performance_confirmation(const Performance& perf, EventSink si
   const auto transpose_u16 = static_cast<std::uint16_t>(perf.master_transpose);
   sink(OutEvent::param_state(Param::kMasterTranspose, 0,
                              static_cast<std::uint8_t>(transpose_u16 & 0xFFu), 0, m_now));
+  // Phase 7 (song-mode-scenechain-adoption.md Phase 2 gap closure): tempo,
+  // recalled by apply_performance's own m_transport.set_bpm(perf.tempo_x100)
+  // above, had no confirmation echo, unlike every other recalled field in
+  // this function -- split low/high byte exactly like kStyleLoad's own
+  // 16-bit split above.
+  sink(OutEvent::param_state(Param::kTransportTempo, 0,
+                             static_cast<std::uint8_t>(perf.tempo_x100 & 0xFF),
+                             static_cast<std::uint8_t>((perf.tempo_x100 >> 8) & 0xFF), m_now));
 }
 
 void Engine::apply_pending_performance_recall(EventSink sink) {

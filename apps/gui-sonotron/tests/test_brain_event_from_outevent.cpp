@@ -16,6 +16,7 @@
 using arrangrr::ChordQuality;
 using arrangrr::ChordState;
 using arrangrr::OutEvent;
+using arrangrr::Param;
 using arrangrr::Producer;
 using arrangrr::TransportState;
 using arrangrr::WarnCode;
@@ -105,6 +106,17 @@ void test_chord_followed_invalid_renders_dash() {
   CHECK(decoded.followed_next == "-");
 }
 
+void test_param_state_decode() {
+  const OutEvent ev = OutEvent::param_state(Param::kTransportTempo, 0, 0x34, 0x12, 55);
+  const BrainEvent decoded = brain_event_from_outevent(ev, false);
+  CHECK(decoded.kind == BrainEvent::Kind::kParamState);
+  CHECK(decoded.param_id == static_cast<int>(Param::kTransportTempo));
+  CHECK(decoded.param_sub == 0);
+  CHECK(decoded.param_v0 == 0x34);
+  CHECK(decoded.param_v1 == 0x12);
+  CHECK(decoded.tick == 55);
+}
+
 void test_midi_noteon_decode() {
   const arrangrr::MidiMessage msg{.status = 0x90, .d1 = 64, .d2 = 100};
   const OutEvent ev = OutEvent::midi(0, msg, 5);
@@ -125,6 +137,7 @@ int main() {
   test_chord_decode_prefers_sharps_by_default();
   test_chord_followed_decode();
   test_chord_followed_invalid_renders_dash();
+  test_param_state_decode();
   test_midi_noteon_decode();
   return sonotron::test::failures();
 }

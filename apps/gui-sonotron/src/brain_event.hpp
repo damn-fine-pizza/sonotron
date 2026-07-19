@@ -115,6 +115,15 @@ struct BrainEvent {
     // keeps AppState's default beats_per_bar until that host-side gap is
     // closed.
     kTimeSig,
+    // additive, Song-mode Phase 2 live-readback gap closure (docs/proposals/
+    // song-mode-scenechain-adoption.md): a GENERIC decode of the core's own
+    // OutEvent::Kind::kParamState echo (abi.hpp) -- style/groove/key/chord-
+    // mode/master-transpose/tempo all ride this ONE wire shape, tagged by a
+    // Param id. Deliberately kept as four plain integers (not one field per
+    // Param) since this header has no core include and must never reference
+    // arrangrr::Param or GrooveField directly -- a consumer that cares about
+    // a specific Param decodes param_id itself.
+    kParamState,
   };
 
   Kind kind = Kind::kUnknown;
@@ -185,6 +194,19 @@ struct BrainEvent {
   // arrangrr::kMaxBeatsPerBar), announced whenever it changes (a style load/
   // switch or a Performance recall) -- see the kTimeSig comment above.
   int time_sig_beats_per_bar = 0;
+
+  // param-state (additive, Song-mode Phase 2 live-readback gap closure): a
+  // generic decode of OutEvent::param_state's own packing -- `param_id` is
+  // the core's Param enum value verbatim (as a plain int, this header never
+  // names arrangrr::Param), `param_sub` is the per-Param role/field selector
+  // (`sub`/`port` in the core's own packing), `param_v0`/`param_v1` are the
+  // two value bytes (v1 is 0 for single-byte values; v0|v1<<8 forms a 16-bit
+  // value for wider fields, e.g. tempo_x100 or a builtin style index) --
+  // mirrors OutEvent::param_state's own comment in abi.hpp field-for-field.
+  int param_id = 0;
+  int param_sub = 0;
+  int param_v0 = 0;
+  int param_v1 = 0;
 
   // per-client error
   std::string error;

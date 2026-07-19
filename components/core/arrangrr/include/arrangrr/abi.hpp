@@ -567,6 +567,7 @@ struct OutEvent {
     //   kChordMode    port=0 (unused)    status    = ChordMode
     //   kKeySet       port=0 (unused)    status = root pitch class (0..11),
     //                                    d1 = Mode
+    //   kTransportTempo port=0 (unused) status,d1 = bpm_x100 (16-bit LE)
     kParamState = 7,
     // Phase-5 Item #2 (docs/design/clip-primitive-design.md): a ClipMatrix
     // cell's launch-state changed -- which cell is armed/playing/stopped.

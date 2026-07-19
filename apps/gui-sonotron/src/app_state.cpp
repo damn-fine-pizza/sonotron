@@ -34,6 +34,10 @@ std::string format_log_line(const BrainEvent& ev) {
       return "loop " + std::to_string(ev.loop_slot_id) + " " + ev.loop_event_kind;
     case BrainEvent::Kind::kTimeSig:
       return "time-sig " + std::to_string(ev.time_sig_beats_per_bar) + "/4";
+    case BrainEvent::Kind::kParamState:
+      return "param-state id=" + std::to_string(ev.param_id) +
+             " sub=" + std::to_string(ev.param_sub) + " v0=" + std::to_string(ev.param_v0) +
+             " v1=" + std::to_string(ev.param_v1);
     case BrainEvent::Kind::kUnknown:
     default:
       return "unknown/malformed event";
@@ -142,6 +146,12 @@ void AppState::apply(const BrainEvent& ev) {
     // recording-state view yet -- that is item 10/11's GUI panel work, a
     // later slice. Logged above; no view-state change here yet.
     case BrainEvent::Kind::kLoop:
+    // Song-mode Phase 2 live-readback gap closure: decoded generically above
+    // (brain_event_from_outevent.cpp), but AppState has no per-Param view-
+    // state mirror yet -- rendering a decoded value in a live panel is
+    // explicitly out of this slice's scope (a consumer that cares reads the
+    // BrainEvent's own param_id/param_sub/param_v0/param_v1 fields directly).
+    case BrainEvent::Kind::kParamState:
       break;  // logged above, no other view-state change
   }
 }
