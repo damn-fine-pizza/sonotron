@@ -399,6 +399,32 @@ add_test(NAME test_browser_style_switch_while_playing_ui_automation
 set_tests_properties(test_browser_style_switch_while_playing_ui_automation PROPERTIES
   LABELS functional)
 
+# browser-redesign-taxonomy.md Phase 1 deliverable 2: "click a variation leaf
+# -> style section <name>".
+add_executable(test_browser_variation_click_apply_ui_automation
+  test_browser_variation_click_apply_ui_automation.cpp)
+target_link_libraries(test_browser_variation_click_apply_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_browser_variation_click_apply_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_browser_variation_click_apply_ui_automation
+  COMMAND test_browser_variation_click_apply_ui_automation)
+set_tests_properties(test_browser_variation_click_apply_ui_automation PROPERTIES
+  LABELS functional)
+
+# browser-redesign-taxonomy.md Phase 1 deliverable 3: "click a voice leaf ->
+# program <port>[:ch] <voice> at the CURRENT destination".
+add_executable(test_browser_voice_program_send_destination_ui_automation
+  test_browser_voice_program_send_destination_ui_automation.cpp)
+target_link_libraries(test_browser_voice_program_send_destination_ui_automation PRIVATE
+  gui_sonotron_layout gui_sonotron_brain gui_sonotron_engine)
+target_compile_options(test_browser_voice_program_send_destination_ui_automation PRIVATE
+  -Wall -Wextra -Werror)
+add_test(NAME test_browser_voice_program_send_destination_ui_automation
+  COMMAND test_browser_voice_program_send_destination_ui_automation)
+set_tests_properties(test_browser_voice_program_send_destination_ui_automation PROPERTIES
+  LABELS functional)
+
 # §2c "Auto-song bookkeeping surviving a transport stop/restart" -- extends
 # test_grid_panel_auto_song_real_backend.cpp's happy-path shape with a real
 # Stop/Play click cycle (real backend, real render loop).
