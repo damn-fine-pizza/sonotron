@@ -131,6 +131,27 @@ class SeqEditModel {
   BrainSession* brain_session() const { return m_brain_session; }
   void set_brain_session(BrainSession* session) { m_brain_session = session; }
 
+  // Phase-2 piano-roll pitch-axis window (docs/proposals/seqedit-piano-roll-
+  // phase2-design.md §6): the scrollable/zoomable absolute-MIDI [low,high]
+  // row band the editable canvas renders for the open step track. Fit once
+  // per newly-opened track (fit-to-content-with-margin, seqedit_panel.cpp's
+  // own ensure_piano_roll_window_fitted), not every frame -- so a user's
+  // manual pan/zoom of an ALREADY-fitted window survives across frames of
+  // the SAME open track. `piano_roll_fitted_track()` records which
+  // open_step_track() index the window was last fitted for; a caller
+  // re-fits only when that no longer matches the currently open track (a
+  // different cell was opened, or none was).
+  int piano_roll_low_note() const { return m_piano_roll_low_note; }
+  int piano_roll_high_note() const { return m_piano_roll_high_note; }
+  void set_piano_roll_window(int low_note, int high_note) {
+    m_piano_roll_low_note = low_note;
+    m_piano_roll_high_note = high_note;
+  }
+  int piano_roll_fitted_track() const { return m_piano_roll_fitted_track; }
+  void set_piano_roll_fitted_track(int step_track_index) {
+    m_piano_roll_fitted_track = step_track_index;
+  }
+
  private:
   std::size_t m_part_index = 0;
   std::string m_clip_label = "-";
@@ -142,6 +163,9 @@ class SeqEditModel {
   StepPatternStore m_step_tracks;
   int m_open_step_track = -1;
   BrainSession* m_brain_session = nullptr;
+  int m_piano_roll_low_note = 36;
+  int m_piano_roll_high_note = 96;
+  int m_piano_roll_fitted_track = -1;
 };
 
 }  // namespace sonotron

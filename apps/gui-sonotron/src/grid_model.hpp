@@ -190,6 +190,24 @@ class GridModel {
   static constexpr int kDefaultSceneRepeat = 1;
   static constexpr int kMaxSceneRepeat = 8;
   static constexpr int kSceneRepeatInfinite = kMaxSceneRepeat + 1;
+  // Cross-file capacity coupling (repeat-count Phase-2 hardening, docs/
+  // proposals/repeat-count-phase2-abi.md §1.4): kMaxSceneCount * kMaxSceneRepeat
+  // must never exceed the CORE's own kMaxScenes (components/core/arrangrr/
+  // include/arrangrr/config.hpp, currently 64) -- Phase-1's apply_song_build
+  // (in_process_brain_session.cpp) runs at exactly 100% of that budget by
+  // construction with zero headroom. This model class deliberately has no
+  // dependency on arrangrr/config.hpp (same GUI/core layering discipline
+  // in_process_brain_session.cpp's own kMaxSongScenes/kSongBuildRepeatInfinite
+  // comments already document for the wire-translation layer), so the core's
+  // value is mirrored here as a literal, commented constant rather than an
+  // #include -- config.hpp carries the matching static_assert on ITS side
+  // referencing THIS value by name/comment, so a bump to EITHER side's
+  // constants fails loudly at compile time instead of silently truncating
+  // songs.
+  static constexpr std::size_t kCoreMaxScenesMirror = 64;  // arrangrr::kMaxScenes
+  static_assert(kMaxSceneCount * static_cast<std::size_t>(kMaxSceneRepeat) <= kCoreMaxScenesMirror,
+                "GridModel::kMaxSceneCount * kMaxSceneRepeat must not exceed the core's "
+                "kMaxScenes (see arrangrr/config.hpp's own mirrored static_assert)");
   int scene_repeat(std::size_t scene_index) const;
   void set_scene_repeat(std::size_t scene_index, int repeat);
 

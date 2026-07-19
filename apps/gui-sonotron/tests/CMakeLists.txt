@@ -53,6 +53,12 @@ endfunction()
 gui_sonotron_engine_test(test_brain_event_from_outevent unit)
 gui_sonotron_engine_test(test_in_process_brain_session functional)
 
+# Ritardando (Arm A, docs/proposals/ritardando-tempo-curve-fork.md): pure
+# ramp-curve math (ritardando_ramp.hpp), independent of the Shell/OutEvent
+# wiring in in_process_brain_session.cpp -- links gui_sonotron_engine only
+# because ritardando_ramp.hpp names arrangrr::BpmX100 (common/time.hpp).
+gui_sonotron_engine_test(test_ritardando_ramp unit)
+
 # Torquato QA pass (live-bug repro, real backend, no synthetic kBeat
 # injection): drives a REAL InProcessBrainSession across several REAL
 # wall-clock seconds and asserts AppState::bar() actually climbs -- see this
@@ -101,6 +107,16 @@ gui_sonotron_engine_test(test_step_track_end_to_end_contract functional)
 # vamp) -- see this test file's own header comment.
 gui_sonotron_engine_test(test_default_style_progression_functional functional)
 
+# Option B cadence tag (docs/proposals/gui-live-harmony-musical-design.md
+# S3.4): proves the REAL InProcessBrainSession path -- `style load`/
+# `transport start`/`style section ending1`/`style section varA`, nothing
+# hand-written -- actually swaps in a dedicated cadential resolution the
+# instant Ending fires, and that the main progression resumes cleanly
+# afterward (no stale ChordSequencer phase). A dedicated file, not folded
+# into test_default_style_progression_functional.cpp above, to keep that
+# already-long-running (16-style) suite from growing further.
+gui_sonotron_engine_test(test_cadence_ending_functional functional)
+
 # Device-independent AudioBackend/SoundfontEngine smoke test (Torquato QA
 # pass): moved to components/platform/audio/tests (docs/proposals/
 # components-restructure-move-plan.md §2/§3 Step 5, docs/proposals/
@@ -121,6 +137,15 @@ gui_sonotron_model_test(test_browser_model unit)
 gui_sonotron_model_test(test_grid_model unit)
 gui_sonotron_model_test(test_seqedit_model unit)
 gui_sonotron_model_test(test_parts_model unit)
+
+# Task #11 Phase 2 (Sequence Edit piano-roll real note editing, docs/
+# proposals/seqedit-piano-roll-phase2-design.md §3/§7): unit tests for the
+# pure step-array algebra + full-restate wire composition every gesture in
+# seqedit_panel.cpp's interactive canvas ends in -- including the design
+# doc's own flagged "trickiest piece", tie-chain resize correctness. No
+# ImGui needed (piano_roll_edit_ops.hpp is deliberately UI-free), so this
+# fits the lighter gui_sonotron_models link set, same as its siblings above.
+gui_sonotron_model_test(test_piano_roll_edit_ops unit)
 
 # scenes.json persistence round-trip (repeat-zone-real-contract.md §4/§8b
 # decision 3) -- a functional test in the same load/save/temp-dir shape as

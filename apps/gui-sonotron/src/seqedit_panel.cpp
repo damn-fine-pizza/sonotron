@@ -12,6 +12,8 @@
 #include "imgui.h"
 #include "launch_rows.hpp"
 #include "neon_widgets.hpp"
+#include "piano_roll_edit_ops.hpp"
+#include "piano_roll_gutter.hpp"
 #include "preview.hpp"
 #include "step_pattern_model.hpp"
 #include "theme.hpp"
@@ -81,6 +83,382 @@ void draw_role_pattern(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1, int t
   }
 }
 
+// Width in px of the piano-key gutter drawn along the left edge of the
+// editable piano-roll canvas (piano_roll_gutter.hpp), task #11 Phase 2
+// (docs/proposals/seqedit-piano-roll-phase2-design.md §6). Thin by design --
+// this is a "which row is which pitch" affordance, not a full keyboard
+// widget -- so it costs little of the lane's own kLaneLabelW-trimmed width.
+constexpr float kPianoKeyGutterW = 14.0F;
+
+// Task #11 Phase 2 (Sequence Edit real note editing): default velocity/gate
+// for a newly-added note. Mirrors render_step_grid's own kDefaultVel/
+// kDefaultGate exactly (Phase-1's own click-to-toggle defaults) so a note
+// added from either view starts out identical.
+constexpr std::uint8_t kPianoRollDefaultVel = 100;
+constexpr std::uint16_t kPianoRollDefaultGate = 120;  // half a step
+
+// One drag gesture's in-flight state for the piano-roll canvas
+// (render_piano_roll_canvas below). A SINGLE static instance is safe: only
+// ONE piano-roll canvas (the open track's own lane) is ever interactive in
+// a given frame, mirroring ImGui's own single g.ActiveId discipline -- this
+// is NOT SeqEditModel state (that header's own comment requires it stay
+// ImGui-free pure-data) and not per-widget ImGui storage (a drag spans
+// multiple steps' worth of screen space, outliving any one InvisibleButton
+// press-release pair only in the sense that the SAME button stays active
+// throughout -- this struct exists to remember what was grabbed and its
+// pre-drag content, needed only at commit time on release).
+struct PianoRollDrag {
+  enum class Mode : std::uint8_t { kNone, kPendingClick, kMove, kResize };
+  Mode mode = Mode::kNone;
+  std::size_t anchor = 0;      // resize: run-start index; move/click: pressed step
+  std::size_t old_last = 0;    // resize only: the run's last index before the drag
+  StepPatternStep original{};  // full content at press time (source for locks/note/vel)
+  ImVec2 press_pos{};
+};
+
+PianoRollDrag& piano_roll_drag_state() {
+  static PianoRollDrag state;
+  return state;
+}
+
+// Fit-to-content-with-margin (design doc §6, owner-recommended, non-
+// contested UX default): on first opening a step track in the piano-roll
+// view, the pitch window fits [min(observed)-3, max(observed)+3], clamped
+// to [0,127] -- or a sane general-purpose default (roughly C2-C7) when the
+// track has no authored notes yet, rather than a degenerate single-row
+// band. Recomputed only when SeqEditModel::piano_roll_fitted_track() no
+// longer matches the currently open track (a DIFFERENT cell was opened, or
+// none was) -- so a user's own manual pan/zoom of an already-fitted window
+// survives frame to frame while the SAME track stays open.
+void ensure_piano_roll_window_fitted(SeqEditModel& model, const StepPatternModel& track) {
+  if (model.piano_roll_fitted_track() == model.open_step_track()) {
+    return;
+  }
+  int lo = 127;
+  int hi = 0;
+  bool any = false;
+  const int total =
+      std::clamp(static_cast<int>(track.length()), 1, static_cast<int>(kStepPatternMaxSteps));
+  for (int i = 0; i < total; ++i) {
+    const StepPatternStep& s = track.step(static_cast<std::size_t>(i));
+    if (s.vel == 0) {
+      continue;
+    }
+    any = true;
+    lo = std::min(lo, static_cast<int>(s.note));
+    hi = std::max(hi, static_cast<int>(s.note));
+  }
+  if (any) {
+    model.set_piano_roll_window(std::clamp(lo - 3, 0, 127), std::clamp(hi + 3, 0, 127));
+  } else {
+    model.set_piano_roll_window(36, 96);
+  }
+  model.set_piano_roll_fitted_track(model.open_step_track());
+}
+
+// Task #11 Phase 2 (Sequence Edit real note editing, roadmap node
+// 11600/11610, docs/proposals/seqedit-piano-roll-phase2-design.md): the
+// interactive absolute-pitch canvas for the OPEN step track's own lane.
+// Unlike every other (read-only) role's draw_role_pattern lane, this reads
+// StepPatternModel directly -- bypassing preview::preview_for_track/
+// neon::ClipPattern's lossy relative-pitch compression entirely (design
+// doc §5/§6) -- and writes it back through piano_roll_edit_ops.hpp's
+// full-restate operations: add/delete/move/re-pitch/resize(tie-chain)/
+// velocity, per the design doc §3's own gesture->wire mapping table.
+//
+// Pitch axis: absolute MIDI row = note (0-127), windowed to
+// [model.piano_roll_low_note(), piano_roll_high_note()], invertibly 1:1
+// screen-Y<->note -- the SAME row formula piano_roll_gutter.hpp's own
+// keyboard-gutter draw uses (see that header's comment), so a note row
+// always lines up with its gutter key.
+//
+// Step axis: bounded by StepPatternModel::length() (up to
+// kStepPatternMaxSteps == 64) directly, NOT the 2-bar neon::ClipPattern::
+// kMaxBars clamp render_step_grid's own kStep view still uses -- task #11
+// Phase 2c, design doc §5's own "the clamp is a pre-flagged placeholder,
+// Phase-2's own call to remove it for the new canvas" resolution.
+//
+// Gesture discrimination (an interaction-design call the design doc's own
+// §3 explicitly leaves to whoever implements, both for "click vs drag" and
+// for the resize/tie-chain trigger distance -- see this function's own
+// per-branch comments below):
+//  - press on an EMPTY step, release on the SAME step -> Add.
+//  - press on an OCCUPIED note's run, release on the SAME (step, note)
+//    -> Delete (a plain click with no movement).
+//  - press on an OCCUPIED note's run body (not near its right edge),
+//    release on the SAME step but a DIFFERENT note -> Re-pitch.
+//  - press on an OCCUPIED note's run body, release on a DIFFERENT step
+//    -> Move (optionally also re-pitched, if the release row differs too).
+//  - press within kResizeEdgeGrabPx of an OCCUPIED run's rendered RIGHT
+//    EDGE -> Resize: dragging within the run's own last step's column
+//    just grows/shrinks its release gate (design doc's "just grow gate"
+//    case); dragging across one or more FURTHER step-column boundaries
+//    ties the crossed steps into the run (design doc's "held over N
+//    sixteenths" tie-chain case) -- both are the SAME resize_note_run()
+//    call, since they differ only in how many steps the target run spans.
+//  - dragging FROM an empty step to a different step is left a no-op (the
+//    design doc does not specify a drag-to-create gesture).
+// Pure screen<->pitch/step conversion for one frame's piano-roll canvas,
+// extracted out of render_piano_roll_canvas (readability-function-cognitive-
+// complexity) -- the SAME formulas the lambdas used to compute inline, now
+// callable from the press/release helper functions below too, without
+// duplicating the geometry or re-deriving it from raw ImVec2/int arguments
+// at each call site.
+struct PianoRollGeometry {
+  ImVec2 grid_p0;
+  ImVec2 grid_p1;
+  int low_note = 0;
+  int high_note = 0;
+  int total_steps = 1;
+  float row_h = 1.0F;
+  float col_w = 1.0F;
+
+  float y_top_for_note(int note) const {
+    return grid_p1.y - static_cast<float>(note - low_note + 1) * row_h;
+  }
+  float y_bottom_for_note(int note) const {
+    return grid_p1.y - static_cast<float>(note - low_note) * row_h;
+  }
+  int note_from_y(float y) const {
+    const int row = static_cast<int>(std::floor((grid_p1.y - y) / row_h));
+    return std::clamp(low_note + row, low_note, high_note);
+  }
+  float x_for_step(std::size_t step) const { return grid_p0.x + col_w * static_cast<float>(step); }
+  int step_from_x(float x) const {
+    const int step = static_cast<int>((x - grid_p0.x) / col_w);
+    return std::clamp(step, 0, total_steps - 1);
+  }
+};
+
+PianoRollGeometry compute_piano_roll_geometry(const SeqEditModel& model, const ImVec2& grid_p0,
+                                              const ImVec2& grid_p1, int total_steps) {
+  PianoRollGeometry g;
+  g.grid_p0 = grid_p0;
+  g.grid_p1 = grid_p1;
+  g.total_steps = total_steps;
+  g.low_note = std::clamp(model.piano_roll_low_note(), 0, 127);
+  g.high_note = std::clamp(model.piano_roll_high_note(), g.low_note, 127);
+  const int rows = g.high_note - g.low_note + 1;
+  g.row_h = (grid_p1.y - grid_p0.y) / static_cast<float>(rows);
+  g.col_w = (grid_p1.x - grid_p0.x) / static_cast<float>(total_steps);
+  return g;
+}
+
+// Draws every note RUN once (a maximal same-note tied chain draws as ONE
+// continuous bar spanning its whole duration, never one rect per absorbed
+// step) -- skips a step that is itself absorbed into an earlier run
+// (tied_run_start(track, step) != step), it is drawn when the loop reaches
+// its own run start. Extracted out of render_piano_roll_canvas
+// (readability-function-cognitive-complexity), pure refactor.
+void draw_piano_roll_notes(ImDrawList* dl, const StepPatternModel& track,
+                           const PianoRollGeometry& g, const ImVec4& color, bool glow) {
+  for (int step = 0; step < g.total_steps; ++step) {
+    const std::size_t s = static_cast<std::size_t>(step);
+    const StepPatternStep& cur = track.step(s);
+    if (cur.vel == 0) {
+      continue;
+    }
+    if (tied_run_start(track, s) != s) {
+      continue;
+    }
+    const std::size_t last = tied_run_last(track, s, static_cast<std::size_t>(g.total_steps));
+    const std::uint32_t duration_ticks =
+        (static_cast<std::uint32_t>(last - s) * kStepPatternTicksPerStep) + track.step(last).gate;
+    const float x0 = g.x_for_step(s);
+    const float x1 =
+        x0 + (static_cast<float>(duration_ticks) / static_cast<float>(kStepPatternTicksPerStep)) *
+                 g.col_w;
+    const float yt = g.y_top_for_note(cur.note);
+    const float yb = g.y_bottom_for_note(cur.note);
+    const ImVec2 b0(x0 + 1.0F, yt + 1.0F);
+    const ImVec2 b1(std::max(x1 - 1.0F, x0 + 2.0F), yb - 1.0F);
+    if (glow) {
+      neon::glow_rect(dl, b0, b1, color, 3.0F, 0.7F, glow);
+    }
+    // 0.85F matches every other opened-role note-content treatment in this
+    // file (draw_role_pattern's own "role == model.part_index()" branch) --
+    // the shared house convention test_grid_cell_preview_vs_seqedit_ui_
+    // automation.cpp's own note_color constant is keyed on, so the launch-
+    // cell mini-preview and this canvas paint the SAME opened track's notes
+    // in the SAME color, not merely the same hue at a different opacity.
+    dl->AddRectFilled(b0, b1, neon::u32(color, 0.85F), 2.0F);
+  }
+}
+
+// Press-classification for one piano-roll drag gesture -- extracted out of
+// render_piano_roll_canvas (readability-function-cognitive-complexity), pure
+// refactor, no behavior change. Sets `drag`'s mode/anchor/original from the
+// step under the mouse at press time: an occupied step's own resize-edge
+// (within kResizeEdgeGrabPx of the run's current end) starts a Resize, any
+// other point on an occupied step starts a Move, and an empty step starts a
+// PendingClick (resolved to Add-or-noop on release).
+void handle_piano_roll_press(const StepPatternModel& track, const PianoRollGeometry& g,
+                             ImVec2 mouse, PianoRollDrag& drag) {
+  const std::size_t press_step = static_cast<std::size_t>(g.step_from_x(mouse.x));
+  const StepPatternStep cur = track.step(press_step);
+  drag.press_pos = mouse;
+  if (cur.vel == 0) {
+    drag.mode = PianoRollDrag::Mode::kPendingClick;
+    drag.anchor = press_step;
+    return;
+  }
+  const std::size_t rs = tied_run_start(track, press_step);
+  const std::size_t old_last = tied_run_last(track, rs, static_cast<std::size_t>(g.total_steps));
+  const StepPatternStep& start_step = track.step(rs);
+  const std::uint32_t duration_ticks =
+      (static_cast<std::uint32_t>(old_last - rs) * kStepPatternTicksPerStep) +
+      track.step(old_last).gate;
+  const float x0 = g.x_for_step(rs);
+  const float x1 =
+      x0 +
+      (static_cast<float>(duration_ticks) / static_cast<float>(kStepPatternTicksPerStep)) * g.col_w;
+  constexpr float kResizeEdgeGrabPx = 6.0F;
+  if (std::abs(mouse.x - x1) <= kResizeEdgeGrabPx) {
+    drag.mode = PianoRollDrag::Mode::kResize;
+    drag.anchor = rs;
+    drag.old_last = old_last;
+    drag.original = start_step;
+  } else {
+    drag.mode = PianoRollDrag::Mode::kMove;
+    drag.anchor = press_step;
+    drag.original = cur;
+  }
+}
+
+// Release commit for PianoRollDrag::Mode::kMove -- extracted out of
+// handle_piano_roll_release (readability-function-cognitive-complexity),
+// pure refactor, no behavior change. Dispatches to delete/re-pitch/move/
+// move-and-re-pitch depending on how the release step/note compare to the
+// pressed step/note, per this canvas's own gesture-mapping (design doc §3).
+void commit_piano_roll_move(StepPatternModel& track, BrainSession* session, int track_idx,
+                            const PianoRollDrag& drag, int release_note, std::size_t release_step) {
+  if (release_step == drag.anchor && release_note == drag.original.note) {
+    // A plain click on an occupied note, no movement at all: Delete.
+    delete_note(track, session, track_idx, drag.anchor);
+  } else if (release_step == drag.anchor) {
+    repitch_note(track, session, track_idx, drag.anchor, static_cast<std::uint8_t>(release_note));
+  } else if (static_cast<std::uint8_t>(release_note) == drag.original.note) {
+    move_note(track, session, track_idx, drag.anchor, release_step);
+  } else {
+    // Moved AND re-pitched in the same drag (design doc's own Move model-op
+    // is generic "set_step(newI, p, ...)" -- p may differ).
+    StepPatternStep moved = drag.original;
+    moved.note = static_cast<std::uint8_t>(release_note);
+    clear_step_full_restate(track, session, track_idx, drag.anchor);
+    write_step_full_restate(track, session, track_idx, release_step, moved);
+  }
+}
+
+// Release commit for PianoRollDrag::Mode::kResize -- extracted out of
+// handle_piano_roll_release (readability-function-cognitive-complexity),
+// pure refactor, no behavior change. Computes the run's new absolute
+// duration from the anchor to the current mouse X, clamped so it never
+// overruns the pattern's own length or swallows a foreign already-authored
+// step beyond the run being resized (design doc's own "don't visually
+// overrun the next occupied step" rule, reused here for the tie-chain case).
+void commit_piano_roll_resize(StepPatternModel& track, BrainSession* session, int track_idx,
+                              const PianoRollGeometry& g, const PianoRollDrag& drag, ImVec2 mouse) {
+  const float x0 = g.x_for_step(drag.anchor);
+  const float target_ticks_f =
+      std::max(1.0F, (mouse.x - x0) / g.col_w) * static_cast<float>(kStepPatternTicksPerStep);
+  std::uint32_t target_ticks = static_cast<std::uint32_t>(std::max(1.0F, target_ticks_f));
+  std::size_t boundary = static_cast<std::size_t>(g.total_steps) - 1;
+  for (std::size_t i = std::max(drag.anchor + 1, drag.old_last + 1);
+       i < static_cast<std::size_t>(g.total_steps); ++i) {
+    if (track.step(i).vel > 0) {
+      boundary = i - 1;
+      break;
+    }
+  }
+  const std::uint32_t max_ticks =
+      static_cast<std::uint32_t>(boundary - drag.anchor + 1) * kStepPatternTicksPerStep;
+  target_ticks = std::min(target_ticks, max_ticks);
+  const std::uint32_t steps_full = (target_ticks - 1) / kStepPatternTicksPerStep;
+  std::size_t new_last = drag.anchor + steps_full;
+  std::uint16_t release_gate =
+      static_cast<std::uint16_t>(target_ticks - steps_full * kStepPatternTicksPerStep);
+  if (new_last > boundary) {
+    new_last = boundary;
+    release_gate = static_cast<std::uint16_t>(kStepPatternTicksPerStep);
+  }
+  resize_note_run(track, session, track_idx, drag.anchor, drag.old_last, new_last,
+                  drag.original.note, drag.original.vel, release_gate);
+}
+
+// Release-commit dispatch for one piano-roll drag gesture -- extracted out
+// of render_piano_roll_canvas (readability-function-cognitive-complexity),
+// pure refactor, no behavior change.
+void handle_piano_roll_release(StepPatternModel& track, BrainSession* session, int track_idx,
+                               const PianoRollGeometry& g, ImVec2 mouse, PianoRollDrag& drag) {
+  const int release_note = g.note_from_y(mouse.y);
+  const std::size_t release_step = static_cast<std::size_t>(g.step_from_x(mouse.x));
+  switch (drag.mode) {
+    case PianoRollDrag::Mode::kPendingClick:
+      if (release_step == drag.anchor) {
+        add_note(track, session, track_idx, release_step, static_cast<std::uint8_t>(release_note),
+                 kPianoRollDefaultVel, kPianoRollDefaultGate);
+      }
+      break;
+    case PianoRollDrag::Mode::kMove:
+      commit_piano_roll_move(track, session, track_idx, drag, release_note, release_step);
+      break;
+    case PianoRollDrag::Mode::kResize:
+      commit_piano_roll_resize(track, session, track_idx, g, drag, mouse);
+      break;
+    case PianoRollDrag::Mode::kNone:
+      break;
+  }
+  drag.mode = PianoRollDrag::Mode::kNone;
+}
+
+void render_piano_roll_canvas(SeqEditModel& model, StepPatternModel& track, int track_idx,
+                              ImDrawList* dl, const ImVec2& lane_p0, const ImVec2& lane_p1,
+                              const ImVec4& color, bool glow) {
+  BrainSession* session = model.brain_session();
+  const int total_steps =
+      std::clamp(static_cast<int>(track.length()), 1, static_cast<int>(kStepPatternMaxSteps));
+
+  const ImVec2 gutter_p0 = lane_p0;
+  const ImVec2 gutter_p1(lane_p0.x + kPianoKeyGutterW, lane_p1.y);
+  const ImVec2 grid_p0(lane_p0.x + kPianoKeyGutterW, lane_p0.y);
+  const ImVec2 grid_p1 = lane_p1;
+  const PianoRollGeometry g = compute_piano_roll_geometry(model, grid_p0, grid_p1, total_steps);
+
+  draw_piano_key_gutter(dl, gutter_p0, gutter_p1, g.low_note, g.high_note);
+  draw_piano_roll_notes(dl, track, g, color, glow);
+
+  PianoRollDrag& drag = piano_roll_drag_state();
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+
+  ImGui::SetCursorScreenPos(grid_p0);
+  ImGui::InvisibleButton("piano_roll_input", ImVec2(grid_p1.x - grid_p0.x, grid_p1.y - grid_p0.y));
+
+  // Velocity edit (design doc §3 "if cheap"): Ctrl+scroll-wheel while
+  // hovering nudges the hovered step's velocity by a few units per notch.
+  // Gated on a held Ctrl (an implementer's interaction-design call, design
+  // doc §3 explicitly leaves the exact trigger open) so a plain scroll
+  // still scrolls the outer "seq_canvas" child normally -- stealing the
+  // wheel unconditionally here would break scrolling to the OTHER lanes
+  // whenever the mouse happens to hover the open track's own lane.
+  if (ImGui::IsItemHovered() && drag.mode == PianoRollDrag::Mode::kNone && ImGui::GetIO().KeyCtrl) {
+    const float wheel = ImGui::GetIO().MouseWheel;
+    if (wheel != 0.0F) {
+      constexpr int kVelocityStep = 3;
+      const int delta = (wheel > 0.0F ? kVelocityStep : -kVelocityStep);
+      const std::size_t hovered_step = static_cast<std::size_t>(g.step_from_x(mouse.x));
+      apply_velocity_delta(track, session, track_idx, hovered_step, delta);
+    }
+  }
+
+  if (ImGui::IsItemActivated()) {
+    handle_piano_roll_press(track, g, mouse, drag);
+  }
+
+  if (ImGui::IsItemDeactivated()) {
+    handle_piano_roll_release(track, session, track_idx, g, mouse, drag);
+  }
+}
+
 // Lane-partition fix (owner bug: "Sequence Edit still doesn't show all
 // tracks" -- overlaying every visible role into ONE shared rect made 9
 // roles mutually occlude each other on the same pitch axis). Draws each
@@ -139,19 +517,45 @@ void draw_piano_roll_lanes(ImDrawList* dl, const ImVec2& p0, const ImVec2& p1,
     const ImVec2 lane_p0(p0.x, p0.y + static_cast<float>(i) * kLaneH);
     const ImVec2 lane_p1(p1.x, lane_p0.y + kLaneH);
 
+    // Task #11 Phase 2 (design doc §6 "coexistence with the per-role lane
+    // view"): the OPENED role's own lane, while a real step track is open
+    // (model.open_step_track() >= 0), IS the interactive piano-roll canvas
+    // -- it reads/writes StepPatternModel directly instead of the read-only
+    // `preview`/draw_role_pattern path every other lane still uses.
+    const bool is_open_track_lane = (role == model.part_index()) && model.open_step_track() >= 0;
+
     // Bars: only when this lane's own checkbox (below) is checked. Indented
     // past kLaneLabelW so they never draw under the name/checkbox column.
     // Unchecked leaves the name+checkbox in place and simply skips painting
     // any note content for this lane -- fully reversible, nothing removed.
     if (model.role_visible(role)) {
       const ImVec2 bars_p0(lane_p0.x + kLaneLabelW, lane_p0.y);
-      if (role == model.part_index()) {
+      if (is_open_track_lane) {
+        StepPatternModel* open_track =
+            model.step_tracks().track(static_cast<std::size_t>(model.open_step_track()));
+        if (open_track != nullptr) {
+          ensure_piano_roll_window_fitted(model, *open_track);
+          render_piano_roll_canvas(model, *open_track, model.open_step_track(), dl, bars_p0,
+                                   lane_p1, track_color, fx.glow);
+        }
+      } else if (role == model.part_index()) {
         draw_role_pattern(dl, bars_p0, lane_p1, lane_total_steps, preview.pattern, track_color,
                           0.85F, fx.glow);
       } else {
         draw_role_pattern(dl, bars_p0, lane_p1, lane_total_steps, preview.pattern,
                           theme::kRoleTint[role], 0.45F, false);
       }
+    } else if (is_open_track_lane) {
+      // Placeholder-when-hidden (owner-locked decision, design doc §6): the
+      // opened role's lane is the ONLY way to edit the open step track, so
+      // hiding its bars must never silently remove the editing surface --
+      // an explicit placeholder replaces the canvas instead of forcing the
+      // checkbox back on (the owner's preferred alternative to force-
+      // visibility, preserving full hide-ability for every lane uniformly).
+      const ImVec2 bars_p0(lane_p0.x + kLaneLabelW, lane_p0.y);
+      const char* hint = "role hidden -- toggle lane visibility to edit";
+      dl->AddText(ImVec2(bars_p0.x + 4.0F, lane_p0.y + kLaneH * 0.5F - 6.0F),
+                  neon::u32(theme::kTextMuted), hint);
     }
     if (i > 0) {
       dl->AddLine(lane_p0, ImVec2(lane_p1.x, lane_p0.y), neon::u32(theme::kTextMuted, 0.18F), 1.0F);
@@ -384,7 +788,22 @@ void render_seqedit_panel(SeqEditModel& model, const UiState& fx, const GridMode
     opened_preview = resolve_track_cell_preview(grid, model, *opened_row, scene, opened_cell,
                                                 opened_filled, fx.active_style);
   }
-  const int bars = std::clamp(opened_preview.pattern.bars, 1, neon::ClipPattern::kMaxBars);
+  int bars = std::clamp(opened_preview.pattern.bars, 1, neon::ClipPattern::kMaxBars);
+
+  // Task #11 Phase 2c (design doc §5): once a real step track is open in
+  // the piano-roll view, the bar-guide count must reflect its OWN authored
+  // length (up to kStepPatternMaxSteps == 64), not the 2-bar preview clamp
+  // above -- otherwise the vertical bar guides would only ever span 2 bars
+  // while render_piano_roll_canvas's own editable canvas shows up to 4.
+  if (open && model.view() == SeqEditView::kPianoRoll && model.open_step_track() >= 0) {
+    const StepPatternModel* open_track =
+        model.step_tracks().track(static_cast<std::size_t>(model.open_step_track()));
+    if (open_track != nullptr) {
+      const int steps = std::clamp(static_cast<int>(open_track->length()), 1,
+                                   static_cast<int>(kStepPatternMaxSteps));
+      bars = (steps + preview::kSteps - 1) / preview::kSteps;
+    }
+  }
 
   // Header.
   ImGui::TextColored(theme::kCyan, "SEQUENCE EDIT");

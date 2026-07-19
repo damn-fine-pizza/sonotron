@@ -18,10 +18,12 @@
 #include "arrangrr/scene/scene_chain.hpp"
 #include "audio/spsc_ring.hpp"
 #include "brain_event_from_outevent.hpp"
+#include "cadence_progressions.hpp"
 #include "common/time.hpp"
 #include "default_style_progressions.hpp"
 #include "gm_program.hpp"
 #include "midi_hal.hpp"
+#include "ritardando_ramp.hpp"
 #include "shell.hpp"
 
 // The engine-thread half of Phase 2b's "integrated" mode (docs/design/
@@ -40,12 +42,17 @@ namespace sonotron {
 namespace {
 
 using arrangrr::Boundary;
+using arrangrr::BpmX100;
 using arrangrr::Command;
 using arrangrr::ContentKind;
+using arrangrr::kBeatsPerBar;
 using arrangrr::kMaxPorts;
 using arrangrr::kMaxScenes;
+using arrangrr::kMidiClockDivider;
+using arrangrr::kMinBpm;
 using arrangrr::kNoExplicitClipId;
 using arrangrr::kNoLoopExplicitId;
+using arrangrr::kPpqn;
 using arrangrr::LoopLengthMode;
 using arrangrr::LoopRecordMode;
 using arrangrr::Op;
@@ -53,8 +60,11 @@ using arrangrr::OutEvent;
 using arrangrr::Param;
 using arrangrr::Performance;
 using arrangrr::SceneTransitionKind;
+using arrangrr::section_is_ending;
 using arrangrr::SectionType;
 using arrangrr::Span;
+using arrangrr::Style;
+using arrangrr::StyleSection;
 using arrangrr::TickAccumulator;
 using arrangrr::TrackRole;
 using arrangrr::host::IMidiHal;
@@ -1115,6 +1125,15 @@ void append_default_progression_commands(const sonotron::DefaultProgression& pro
   out.push_back(play_cmd);
 }
 
+// The MAIN progression always lives in pool slot 0, by construction: it is
+// the FIRST ChordSequence ever created (the very first style load's own
+// kSeqNew, append_default_progression_commands()'s "trap #2" comment). The
+// cadence tag (Option B, docs/proposals/gui-live-harmony-musical-design.md
+// S3.4) is created SECOND, the first time any Ending fires, and always
+// occupies slot 1 thereafter -- see CadenceState's own header comment.
+constexpr std::uint16_t kMainProgressionSlot = 0;
+constexpr std::uint16_t kCadenceSlot = 1;
+
 // Default-harmony-progression state, owned by run_engine()'s own stack frame
 // (engine-thread-local, resets naturally on every fresh run_engine() call --
 // a brand-new Shell/Engine also has a brand-new, empty ChordSequencer pool,
@@ -1131,7 +1150,186 @@ struct DefaultProgressionState {
   bool pending_valid = false;
   std::uint32_t pending_arm_bar_index = 0;
   std::vector<Command> pending_commands;
+  // The kBuiltins index this progression is CURRENTLY keyed to -- set from
+  // `cmd.a` every time handle_style_change_progression() runs (the ONLY
+  // place that value is available). Option B's cadence-entry hook (below)
+  // reads this to know which style's cadence tag to author, since it fires
+  // later, off a kSection OutEvent, with no Command of its own to read a
+  // style index from.
+  std::int32_t active_style_index = 0;
 };
+
+// Option B cadence tags (docs/proposals/gui-live-harmony-musical-design.md
+// S3.4, cadence_progressions.hpp): builds the SAME shape of Command batch
+// append_default_progression_commands() does above, but targeting the
+// SHARED cadence pool slot (kCadenceSlot) instead of the main progression's
+// slot 0 -- kSeqUse/kSeqNew-or-Clear/kSeqTranspose/kSeqAdd*/kSeqLoop(false)/
+// kSeqPlay, all through the existing verb surface, zero ABI change.
+//
+// Re-keying (kSeqTranspose): Engine::seq_add resolves each added chord's
+// DEGREE against the CURRENT sequence's OWN captured `key` field
+// (ChordSequence::key, set once at kSeqNew time from whatever the global
+// key was then), never the engine's live global key -- so a shared slot
+// reused across DIFFERENT styles must be explicitly re-keyed to the
+// CURRENTLY active style before its content is rebuilt, or a later style's
+// chords would resolve (or fail kNotInKey) against an earlier style's
+// stale key/mode. kSeqTranspose (Engine::seq_transpose ->
+// ChordSequence::transpose_to) is the existing verb for exactly this, and
+// is harmless to issue even on the very first-ever creation (the sequence
+// is empty at that point, nothing to re-derive).
+void append_cadence_commands(const CadenceProgression& cadence, std::uint8_t key_root_pc,
+                             arrangrr::Mode key_mode, bool seq_already_created,
+                             std::uint32_t ticks_per_bar, std::vector<Command>& out) {
+  Command use_cmd{};
+  use_cmd.op = Op::kDo;
+  use_cmd.param = Param::kSeqUse;
+  use_cmd.idx = kCadenceSlot;
+  if (seq_already_created) {
+    out.push_back(use_cmd);
+  }
+
+  Command seq_setup{};
+  seq_setup.param = seq_already_created ? Param::kSeqClear : Param::kSeqNew;
+  out.push_back(seq_setup);
+
+  Command transpose_cmd{};
+  transpose_cmd.op = Op::kSet;
+  transpose_cmd.param = Param::kSeqTranspose;
+  transpose_cmd.a = static_cast<std::int32_t>(key_root_pc);
+  transpose_cmd.b = static_cast<std::int32_t>(key_mode);
+  out.push_back(transpose_cmd);
+
+  constexpr std::uint8_t kDefaultVelocity = 100;  // matches append_default_progression_commands
+  constexpr std::uint8_t kOctave4Base = 60;
+  for (const sonotron::ProgressionStep& step : cadence.steps) {
+    Command add_cmd{};
+    add_cmd.param = Param::kSeqAdd;
+    add_cmd.a = static_cast<std::int32_t>(kOctave4Base) + step.root_pc;
+    add_cmd.b = (static_cast<std::int32_t>(step.quality_ovr) + 1) |
+                (static_cast<std::int32_t>(kDefaultVelocity) << 8);
+    add_cmd.c = static_cast<std::int32_t>(step.bars) * static_cast<std::int32_t>(ticks_per_bar);
+    out.push_back(add_cmd);
+  }
+
+  Command loop_cmd{};
+  loop_cmd.op = Op::kSet;
+  loop_cmd.param = Param::kSeqLoop;
+  loop_cmd.a = 0;  // holds on the resolved tonic, never wraps back to the approach chord
+  out.push_back(loop_cmd);
+
+  Command play_cmd{};
+  play_cmd.param = Param::kSeqPlay;
+  out.push_back(play_cmd);
+}
+
+// Option B state (docs/proposals/gui-live-harmony-musical-design.md S3.4),
+// owned by run_engine()'s own stack frame, same discipline as
+// DefaultProgressionState/RitardandoState above -- the sink lambda (below)
+// can only RECORD what the OutEvent stream reported (kSection), since
+// `shell` does not exist yet at that point in this file's constructor
+// argument; run_engine()'s own outer loop consumes these flags and acts.
+struct CadenceState {
+  // Set true the first time the cadence pool slot is created (kSeqNew);
+  // every subsequent Ending re-authors it with kSeqClear instead -- the
+  // SAME "trap #2" pool-exhaustion guard DefaultProgressionState::
+  // seq_created applies to the main progression, applied here to a SECOND,
+  // SHARED slot reused across every style and every Ending -- never one
+  // cadence slot per style.
+  bool seq_created = false;
+  // True from the moment the cadence sequence is swapped in (an Ending
+  // entry) until the swap-back to the main progression actually fires.
+  bool active = false;
+  bool saw_ending_entry = false;
+  SectionType which_ending = SectionType::kEnding1;
+  // The OTHER trigger for "resume the main progression" (the task's own
+  // "next fresh VarA/style load" wording): a live return to a non-Ending
+  // section while the cadence slot is still selected -- mirrors
+  // RitardandoState::saw_non_ending_section's own kSection observation, but
+  // gated on `active` so an ordinary VarA<->VarB<->VarC<->VarD switch that
+  // never touched Ending at all does NOT retrigger a swap-back (S3.2: the
+  // chord track must stay untouched by such switches). A fresh style
+  // load/switch is the OTHER trigger, handled inline inside
+  // handle_style_change_progression()'s own leading kSeqUse -- see that
+  // function's comment.
+  bool saw_return_to_main = false;
+};
+
+// Record-only half of Option B's Ending-entry/swap-back detection (mirrors
+// RitardandoState's own kSection observation in run_engine()'s sink lambda):
+// called from that lambda for EVERY OutEvent, fully additive, never
+// interferes with the ritardando block's own flags. `saw_return_to_main`
+// only latches while a cadence is actually `active`, so an ordinary
+// VarA<->VarB<->VarC<->VarD switch that never touched Ending at all does not
+// spuriously trigger a swap-back (S3.2: such switches must leave the chord
+// track untouched). Extracted into its own function (rather than left
+// inline like ritardando's own block) purely to keep the sink lambda's
+// contribution to run_engine()'s cognitive complexity under the project's
+// clang-tidy threshold -- no behavior change.
+void observe_cadence_section_event(const OutEvent& ev, CadenceState& cadence) {
+  if (ev.kind != OutEvent::Kind::kSection) {
+    return;
+  }
+  const auto section = static_cast<SectionType>(ev.code);
+  if (section_is_ending(section)) {
+    cadence.saw_ending_entry = true;
+    cadence.which_ending = section;
+  } else if (cadence.active) {
+    cadence.saw_return_to_main = true;
+  }
+}
+
+// Option B (Cadence, S3.4) step: consumes what the sink lambda (Shell's own
+// ctor argument, run_engine() below) recorded onto `cadence` during the
+// advance_by() call that just returned, and acts against `shell` -- this
+// cannot happen inside the sink lambda itself, `shell` does not exist yet at
+// that point in run_engine()'s own scope (CadenceState's own header
+// comment). Extracted out of run_engine() (rather than left inline), same
+// reasoning as drain_command_ring's own extraction above: keeps run_engine()'s
+// own cognitive complexity under the project's clang-tidy threshold, no
+// behavior change. Cancel/swap-back is handled BEFORE arming a fresh entry,
+// same ordering as the ritardando block in run_engine() this mirrors, so a
+// same-iteration leave-then-re-enter (were that ever possible) always lands
+// on the freshly-armed state, never the stale one.
+void step_cadence(Shell& shell, CadenceState& cadence,
+                  const DefaultProgressionState& progression_state) {
+  if (cadence.saw_return_to_main) {
+    // The OTHER "resume the main progression" trigger (S3.2/S3.4): a live
+    // return to a non-Ending section while the cadence was active, with no
+    // intervening style load/switch -- handle_style_change_progression()'s
+    // own leading kSeqUse handles that other trigger inline. Paired
+    // kSeqUse+kSeqPlay (never a bare kSeqUse), exactly the idiom the spike
+    // proved is required to avoid leaving the main slot's phase stale
+    // (docs/proposals/gui-live-harmony-musical-design.md S3.4).
+    Command use_main{};
+    use_main.op = Op::kDo;
+    use_main.param = Param::kSeqUse;
+    use_main.idx = kMainProgressionSlot;
+    shell.push_command(use_main);
+    Command play_main{};
+    play_main.param = Param::kSeqPlay;
+    shell.push_command(play_main);
+    cadence.active = false;
+  }
+  cadence.saw_return_to_main = false;
+
+  if (cadence.saw_ending_entry) {
+    const sonotron::DefaultProgression& main_prog =
+        sonotron::default_progression_for(progression_state.active_style_index);
+    const sonotron::CadenceProgression& tag =
+        sonotron::cadence_progression_for(progression_state.active_style_index);
+    std::vector<Command> cadence_cmds;
+    cadence_cmds.reserve(sonotron::kCadenceStepCount + 4);
+    append_cadence_commands(tag, main_prog.key_root_pc, main_prog.key_mode, cadence.seq_created,
+                            static_cast<std::uint32_t>(shell.engine().transport().ticks_per_bar()),
+                            cadence_cmds);
+    for (const Command& cadence_cmd : cadence_cmds) {
+      shell.push_command(cadence_cmd);
+    }
+    cadence.seq_created = true;
+    cadence.active = true;
+  }
+  cadence.saw_ending_entry = false;
+}
 
 // Builds and dispatches the default progression for `cmd` right after a
 // successful kStyleLoad/kStyleSwitch (the caller must have already called
@@ -1154,8 +1352,33 @@ struct DefaultProgressionState {
 // deferred style morph itself targets (Arranger::on_tick's own
 // section-relative bar gate, which stays in phase with Transport's grid as
 // long as the meter does not change mid-switch).
+//
+// Option B addition (docs/proposals/gui-live-harmony-musical-design.md
+// S3.4): a fresh style load/switch is one of the two "resume the main
+// progression" triggers (the other, a live return to a non-Ending section,
+// is handled in run_engine()'s own outer loop off `cadence.saw_return_to_
+// main`). An Ending entry may have left the pool's CURRENT slot pointed at
+// the shared cadence slot (kCadenceSlot); append_default_progression_
+// commands() always builds its kSeqClear-or-kSeqNew/kSeqAdd*/kSeqPlay
+// batch against WHATEVER slot is current at push time, so this function
+// must force it back to kMainProgressionSlot FIRST -- guarded on `state.
+// seq_created` (the main slot has ever been created at all) so the very
+// first-ever style load, before pool slot 0 exists, never issues a kSeqUse
+// against an empty pool (which would warn). `cadence.active` also resets
+// here: whichever trigger fires first (this one, or the non-Ending-section
+// one below) is the one that actually resumes the main progression.
 void handle_style_change_progression(Shell& shell, const Command& cmd,
-                                     DefaultProgressionState& state) {
+                                     DefaultProgressionState& state, CadenceState& cadence) {
+  state.active_style_index = cmd.a;
+  if (state.seq_created) {
+    Command use_main{};
+    use_main.op = Op::kDo;
+    use_main.param = Param::kSeqUse;
+    use_main.idx = kMainProgressionSlot;
+    shell.push_command(use_main);
+  }
+  cadence.active = false;
+
   std::vector<Command> progression_cmds;
   progression_cmds.reserve(sonotron::kMaxProgressionSteps + 4);
   append_default_progression_commands(
@@ -1320,7 +1543,7 @@ bool apply_song_build(Shell& shell, const SongBuildCommand& build) {
 // (rather than left inline) purely to keep that function's own cognitive
 // complexity under the project's clang-tidy threshold -- no behavior change.
 void drain_command_ring(Shell& shell, SpscRing<Command, kCommandRingCapacity>& command_ring,
-                        DefaultProgressionState& progression_state) {
+                        DefaultProgressionState& progression_state, CadenceState& cadence) {
   Command cmd;
   while (command_ring.try_pop(cmd)) {
     if (cmd.param == Param::kNoteRaw) {
@@ -1332,7 +1555,7 @@ void drain_command_ring(Shell& shell, SpscRing<Command, kCommandRingCapacity>& c
     }
     shell.push_command(cmd);
     if (cmd.param == Param::kStyleLoad || cmd.param == Param::kStyleSwitch) {
-      handle_style_change_progression(shell, cmd, progression_state);
+      handle_style_change_progression(shell, cmd, progression_state, cadence);
     }
   }
 }
@@ -1353,6 +1576,50 @@ std::uint64_t monotonic_us() {
   return static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::microseconds>(epoch).count());
 }
+
+// Engine-thread-local ritardando state (Arm A, "HOST-NUDGE" -- docs/
+// proposals/ritardando-tempo-curve-fork.md, owner-picked over the core-
+// primitive Arm B): rides nothing but the EXISTING tempo write path
+// (Param::kTransportTempo via Shell::push_command) and the EXISTING
+// OutEvent::kSection/kBeat events this file already decodes -- zero ABI
+// change, zero core change, zero firmware impact (this whole file is
+// host-only, never built for arm-none-eabi, see this app's own
+// CMakeLists.txt comment). The pure ramp-curve math (ritardando::bpm_at) is
+// hoisted into ritardando_ramp.hpp so it stays independently unit-testable;
+// this struct is the stateful wiring, owned by run_engine()'s own
+// stack frame -- same "resets naturally on every fresh run_engine() call"
+// discipline as DefaultProgressionState above. Armed the instant an Ending
+// kSection fires (arrangrr::section_is_ending(), true for kEnding1/kEnding2)
+// and stepped once per outer-loop iteration off however many OutEvent::kBeat
+// pulses landed during that iteration's shell.advance_by() call.
+struct RitardandoState {
+  bool active = false;
+  // The OutEvent sink (Shell's own ctor argument, which runs BEFORE `shell`
+  // itself exists in run_engine()'s scope) can only record WHAT happened;
+  // arming or stepping the ramp needs `shell` (to read the current style/bpm
+  // and to push the next tempo command), so run_engine()'s outer loop
+  // consumes and clears these two flags once per iteration, right after
+  // shell.advance_by() returns -- mirroring the existing
+  // scene_chain_was_playing idiom just below it, for exactly the same
+  // reason.
+  bool saw_ending_entry = false;
+  bool saw_non_ending_section = false;
+  // Which Ending fired (kEnding1 or kEnding2 -- section_is_ending() accepts
+  // both) -- recorded so run_engine() looks up the RIGHT StyleSection's own
+  // `bars` for the ramp length, not a guessed default.
+  SectionType which_ending = SectionType::kEnding1;
+  std::uint32_t elapsed_pulses = 0;
+  std::uint32_t total_pulses = 0;
+  BpmX100 start_bpm = 0;
+  BpmX100 target_bpm = 0;
+  // The bpm THIS ramp last wrote -- lets run_engine() tell "nothing else
+  // touched tempo since my last step" apart from "a manual bpm/transport
+  // command landed out from under me", which cancels the ramp outright (the
+  // task's own "simplest safe behavior", no resume/queue semantic). 0 is a
+  // safe "nothing written yet" sentinel: BpmX100 0 is never a valid tempo
+  // (kMinBpm is 2000, 20.00 bpm).
+  BpmX100 last_written_bpm = 0;
+};
 
 }  // namespace
 
@@ -1408,10 +1675,42 @@ void InProcessBrainSession::Impl::run_engine() {
   // why no atomic is needed here).
   AudioMidiRing* const audio_out_ring = audio_ring;
 
-  Shell shell([this, &midi, alsa_ok, audio_out_ring](const OutEvent& ev) {
+  // Ritardando (Arm A): see RitardandoState's own header comment. Declared
+  // before `shell` because the sink lambda below (Shell's own ctor argument)
+  // captures it by reference.
+  RitardandoState ritardando;
+
+  // Option B (docs/proposals/gui-live-harmony-musical-design.md S3.4): see
+  // CadenceState's own header comment. Declared alongside `ritardando` for
+  // the same reason -- the sink lambda below captures it by reference too.
+  CadenceState cadence;
+
+  Shell shell([this, &midi, alsa_ok, audio_out_ring, &ritardando, &cadence](const OutEvent& ev) {
     if (alsa_ok && ev.kind == OutEvent::Kind::kMidi) {
       midi->send(ev.port, ev.msg);
     }
+    // Ritardando (Arm A): record WHAT happened; run_engine()'s own outer
+    // loop (below) does the actual arm/step/push against `shell`, which does
+    // not exist yet at this point in this constructor's own lambda argument.
+    if (ev.kind == OutEvent::Kind::kSection) {
+      const auto section = static_cast<SectionType>(ev.code);
+      if (section_is_ending(section)) {
+        ritardando.saw_ending_entry = true;
+        ritardando.which_ending = section;
+      } else {
+        ritardando.saw_non_ending_section = true;
+      }
+    } else if (ev.kind == OutEvent::Kind::kBeat && ritardando.active) {
+      ++ritardando.elapsed_pulses;
+    }
+    // Option B (Cadence, S3.4): same record-only split as ritardando just
+    // above -- fully additive, reads the SAME kSection events, never
+    // interferes with the ritardando block's own flags. Extracted into its
+    // own function (rather than left inline like ritardando's own block) to
+    // keep this constructor lambda's own contribution to run_engine()'s
+    // cognitive complexity under the project's clang-tidy threshold -- no
+    // behavior change.
+    observe_cadence_section_event(ev, cadence);
     // Phase-6 Theme 2 (Decision 1/3/4): realize ONLY the primary integrated
     // output port through the ISoundEngine wired behind AudioBackend.
     // audio_out_ring is null in --control mode and whenever no AudioBackend
@@ -1493,7 +1792,7 @@ void InProcessBrainSession::Impl::run_engine() {
   bool active_song_ends_infinite = false;
 
   while (running.load(std::memory_order_acquire)) {
-    drain_command_ring(shell, command_ring, progression_state);
+    drain_command_ring(shell, command_ring, progression_state, cadence);
     release_pending_progression_if_due(shell, progression_state);
 
     SongBuildCommand song_build;
@@ -1543,6 +1842,67 @@ void InProcessBrainSession::Impl::run_engine() {
       std::string tick_error;
       shell.advance_by(ticks, tick_error);
     }
+
+    // Ritardando (Arm A) step: consume what the OutEvent sink observed during
+    // the advance_by() call just above, then act on `shell` (arm on Ending
+    // entry, cancel on leaving the Ending section or on an external tempo
+    // write, otherwise push this iteration's ramp bpm) -- this cannot happen
+    // inside the sink itself, see RitardandoState's own header comment.
+    if (ritardando.saw_non_ending_section) {
+      ritardando.active = false;
+    }
+    ritardando.saw_non_ending_section = false;
+
+    if (ritardando.saw_ending_entry) {
+      const Style* const style = shell.engine().arranger().current_style();
+      const StyleSection* const ending_section =
+          style == nullptr ? nullptr : style->find(ritardando.which_ending);
+      const std::uint32_t bars = ending_section == nullptr ? 1 : ending_section->bars;
+      const std::uint32_t beats_per_bar = style == nullptr ? kBeatsPerBar : style->beats_per_bar;
+      constexpr std::uint32_t kPulsesPerBeat = kPpqn / kMidiClockDivider;  // 24, MIDI-clock rate
+      ritardando.start_bpm = shell.engine().transport().bpm();
+      ritardando.target_bpm =
+          std::max(kMinBpm, static_cast<BpmX100>(static_cast<float>(ritardando.start_bpm) *
+                                                 ritardando::kTargetBpmRatio));
+      ritardando.total_pulses = bars * beats_per_bar * kPulsesPerBeat;
+      ritardando.elapsed_pulses = 0;
+      // A fresh arm must not be mistaken for "a manual write raced my last
+      // step" the first time this ramp pushes below -- 0 is the "nothing
+      // written yet" sentinel (RitardandoState's own comment).
+      ritardando.last_written_bpm = 0;
+      ritardando.active = true;
+    }
+    ritardando.saw_ending_entry = false;
+
+    if (ritardando.active) {
+      const BpmX100 live_bpm = shell.engine().transport().bpm();
+      if (ritardando.last_written_bpm != 0 && live_bpm != ritardando.last_written_bpm) {
+        // A manual `bpm`/`transport tempo` command changed tempo since our
+        // own last step -- cancel outright rather than fight it (the
+        // simplest safe behavior; no resume/queue semantic, per the task).
+        ritardando.active = false;
+      } else {
+        const BpmX100 next_bpm =
+            ritardando::bpm_at(ritardando.start_bpm, ritardando.target_bpm,
+                               ritardando.elapsed_pulses, ritardando.total_pulses);
+        Command tempo_cmd;
+        tempo_cmd.op = Op::kSet;
+        tempo_cmd.param = Param::kTransportTempo;
+        tempo_cmd.a = static_cast<std::int32_t>(next_bpm);
+        shell.push_command(tempo_cmd);
+        ritardando.last_written_bpm = shell.engine().transport().bpm();
+        if (ritardando.elapsed_pulses >= ritardando.total_pulses) {
+          ritardando.active = false;  // ramp complete, holding at target_bpm
+        }
+      }
+    }
+
+    // Option B (Cadence, S3.4) step: consume what the sink observed during
+    // the advance_by() call just above -- extracted into its own function,
+    // same "keep run_engine()'s own cognitive complexity under the
+    // project's clang-tidy threshold" reasoning as drain_command_ring's own
+    // extraction above, no behavior change.
+    step_cadence(shell, cadence, progression_state);
 
     // Song-mode Phase 1, design decision 3: cue the Ending the instant the
     // SceneChain's own last step finishes holding -- the bare, bar-quantized

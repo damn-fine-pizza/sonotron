@@ -35,12 +35,25 @@ find_package(Threads REQUIRED)
 # names. Sits in this library (not gui_sonotron_layout, alongside
 # layout_json.cpp) because it only needs GridModel + STL file I/O, no ImGui
 # -- same host-only, GPU-free unit-testability as grid_model.cpp itself.
+# piano_roll_edit_ops.cpp/piano_roll_velocity_ops.cpp (Sequence Edit Phase-2,
+# docs/proposals/seqedit-piano-roll-phase2-design.md §3/§7): the pure step-
+# array algebra + full-restate `track step ...` wire composition every
+# gesture in seqedit_panel.cpp's interactive piano-roll canvas ends in.
+# Deliberately UI-free (no ImGui type named) so the trickiest piece
+# (tie-chain resize correctness) is unit-testable directly against
+# StepPatternModel, without a headless ImGui context -- see piano_roll_edit_
+# ops.hpp's own header comment. Split into two .cpp files on ONE shared
+# header (piano_roll_edit_ops.hpp) purely for disjoint-file parallel
+# authorship (add/delete/move/re-pitch/resize in one, the small velocity-
+# nudge op in the other); both compile into this same library.
 add_library(gui_sonotron_models STATIC
   src/browser_model.cpp
   src/grid_model.cpp
   src/scenes_json.cpp
   src/seqedit_model.cpp
   src/step_pattern_model.cpp
+  src/piano_roll_edit_ops.cpp
+  src/piano_roll_velocity_ops.cpp
 )
 target_include_directories(gui_sonotron_models PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(gui_sonotron_models PRIVATE -Wall -Wextra -Werror)
@@ -124,6 +137,7 @@ add_library(gui_sonotron_layout STATIC
   src/launch_rows.cpp
   src/grid_panel.cpp
   src/seqedit_panel.cpp
+  src/piano_roll_gutter.cpp
   src/parts_panel.cpp
   src/intention_panel.cpp
 )

@@ -599,6 +599,20 @@ struct OutEvent {
     //   msg.status = LoopEventKind (0 record-started, 1 record-stopped/
     //                quantized, 2 erased, 3 undone)
     kLoop = 10,
+    // Phase 7 (node 8100, repeat-count Phase-2 -- docs/proposals/repeat-
+    // count-phase2-abi.md §3.3/§4): an INTERMEDIATE SceneChain repeat lap
+    // occurred -- same step, no genuine transition -- so a host can show
+    // "lap 3 of 5" feedback without a real kSection/kTimeSig/apply_scene_
+    // transition re-fire (the refire-avoidance decision: re-firing the real
+    // transition on every repeat lap risks re-triggering Arranger::
+    // request_scene's phase/anchor logic, the exact stale-anchor bug class
+    // already on record for this codebase). Rides the SAME 16-byte OutEvent
+    // layout unchanged (no new field, no resize).
+    //   code       = the SceneChain step index the lap occurred on
+    //   msg.status = the current lap number (1-based, saturates at 255)
+    //   msg.d1     = the step's own repeat_count (255 == kSceneRepeatInfinite)
+    //   msg.d2     = reserved (0)
+    kSceneLap = 11,
   };
 
   Kind kind = Kind::kMidi;
@@ -727,6 +741,18 @@ struct OutEvent {
     e.kind = Kind::kLoop;
     e.code = id;
     e.msg = MidiMessage{.status = static_cast<std::uint8_t>(state), .d1 = 0, .d2 = 0};
+    e.tick = t;
+    return e;
+  }
+  // Packs a kSceneLap event (Phase 7, repeat-count Phase-2): the step index
+  // rides `code`, the 1-based lap number and the step's own repeat_count ride
+  // msg.status/msg.d1. Plain numeric packing like every other factory here.
+  static constexpr OutEvent scene_lap(std::uint16_t step_index, std::uint8_t lap,
+                                      std::uint8_t repeat_count, Tick t) noexcept {
+    OutEvent e;
+    e.kind = Kind::kSceneLap;
+    e.code = step_index;
+    e.msg = MidiMessage{.status = lap, .d1 = repeat_count, .d2 = 0};
     e.tick = t;
     return e;
   }

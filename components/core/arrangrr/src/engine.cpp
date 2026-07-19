@@ -966,7 +966,15 @@ void Engine::cmd_scene(const Command& cmd, EventSink sink) {
 // Host/script-only registration (mirrors kLoopNew/kClipAdd's own convention:
 // no return-value echo, the host tracks the sequential id). a =
 // performance_slot; b = n_bars (low byte, 0 clamps to 1) | (beats_per_bar <<
-// 8) (high byte, 0 = default 4/4); c = SceneTransitionKind.
+// 8) (high byte, 0 = default 4/4); c = SceneTransitionKind; idx = repeat_count
+// (repeat-count Phase-2, docs/proposals/repeat-count-phase2-abi.md §4) --
+// `cmd.idx` was genuinely unread by this function before (confirmed by
+// direct inspection, §1.3), so this rides the EXISTING Command shape with
+// zero struct growth. 0 (unset, every pre-existing scene_add call) clamps to
+// 1 -- byte-identical default: play once, no repeat lap ever fires. Values
+// above 255 clamp down to 255, which happens to coincide with
+// kSceneRepeatInfinite -- "hold forever" is exactly what an unbounded repeat
+// request degrades to.
 void Engine::scene_add(const Command& cmd, EventSink sink) {
   if (cmd.a < 0 || static_cast<std::size_t>(cmd.a) >= kMaxPerformances) {
     sink(OutEvent::warn(WarnCode::kBadArgument, m_now));
@@ -989,6 +997,13 @@ void Engine::scene_add(const Command& cmd, EventSink sink) {
   step.n_bars = n_bars == 0 ? std::uint8_t{1} : n_bars;
   step.time_sig.beats_per_bar = beats_per_bar;
   step.transition = static_cast<SceneTransitionKind>(cmd.c);
+  if (cmd.idx == 0) {
+    step.repeat_count = 1;
+  } else if (cmd.idx > 255) {
+    step.repeat_count = 255;
+  } else {
+    step.repeat_count = static_cast<std::uint8_t>(cmd.idx);
+  }
   if (!m_scene_chain.add_scene(step)) {
     sink(OutEvent::warn(WarnCode::kSceneTableFull, m_now));
   }
@@ -1055,7 +1070,10 @@ void Engine::apply_scene_transition(std::size_t step_index, const SceneStep& ste
 // !m_playing).
 void Engine::fire_scene(EventSink sink) {
   m_scene_chain.on_bar(
-      [&](std::size_t idx, const SceneStep& step) { apply_scene_transition(idx, step, sink); });
+      [&](std::size_t idx, const SceneStep& step) { apply_scene_transition(idx, step, sink); },
+      [&](std::size_t idx, std::uint8_t lap, std::uint8_t repeat_count) {
+        sink(OutEvent::scene_lap(static_cast<std::uint16_t>(idx), lap, repeat_count, m_now));
+      });
 }
 
 // Feeds a captured live note-on/off into the LoopBuffer (Engine::

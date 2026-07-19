@@ -130,9 +130,13 @@ class ChordSequencer {
     Tick pos = transport_tick - m_base;
     if (pos >= len) {
       if (!seq->loop) {
-        if (pos == len) {
-          stop_playback(release);  // sequence over: silence
-        }
+        // Stop on reaching OR overshooting the end: a stale m_base (e.g. a
+        // bare kSeqUse switch to a shorter sequence, never paired with a
+        // rebasing kSeqPlay) can leave pos > len, not just == len. Treat
+        // both as "sequence over" -- the old pos == len check silently
+        // stalled forever instead of stopping when pos overshot (spike:
+        // docs/proposals/gui-live-harmony-musical-design.md S3.4 Option B).
+        stop_playback(release);
         return;
       }
       pos %= len;

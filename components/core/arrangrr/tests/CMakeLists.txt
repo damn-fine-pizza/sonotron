@@ -310,6 +310,23 @@ arrangrr_test(test_scene_meter_gate_regression regression)
 # (engine.cpp gates the mute/solo restore behind scene_hold_bars == 0); was
 # RED, now GREEN.
 arrangrr_test(test_scene_solo_regression regression)
+# test_scene_repeat_cycling (Phase 7, node 8100, repeat-count Phase-2 --
+# docs/proposals/repeat-count-phase2-abi.md §3.3/§4): pure, Engine-free unit
+# tests for SceneChain::on_bar's own lap-cycling semantics (SceneStep::
+# repeat_count, SceneChain::LapFn) -- direct instantiation of the single
+# SceneChain class, no Engine involved -> unit, same precedent as
+# test_function_ref.cpp's own pure-unit coverage.
+arrangrr_test(test_scene_repeat_cycling unit)
+# test_scene_repeat_count (repeat-count Phase-2 companion, ABI level): the
+# same repeat-count contract proven through the real Engine/ABI -- a
+# kSceneAdd step's cmd.idx operand holding K*n_bars bars before
+# apply_scene_transition's real effect advances, the wire kSceneLap event
+# shape, the omitted-idx and above-255-clamp edges, and the critical
+# regression guard that an intermediate repeat lap never re-fires
+# kSection/kTimeSig (the refire-avoidance decision this whole feature exists
+# to protect). Subject is Engine's own cross-producer wiring -> functional,
+# same precedent as test_scene.cpp/test_scene_hardening.cpp.
+arrangrr_test(test_scene_repeat_count functional)
 # test_retro_capture (Phase 7, node 6300, "grab last N bars" -- retroactive
 # capture): the MINIMAL happy-path pass -- arm captures live notes across a
 # couple of bars into RetroCaptureRing, kRetroCaptureGrab materializes the
