@@ -512,20 +512,28 @@ tempo/swing-different from another style.*
     capability here meets the DONE criterion above (contract-test-pinned,
     no known no-op path). Full evidence:
     `docs/roadmaps/completed-nodes-archive.md#11610-formerly-the-pre-split-11600--full-mechanicalgui-foundation-history`.
-  - `11620` In-process `program`-verb no-op fix — ○ HOST-ONLY. KNOWN GAP:
-    `apps/gui-sonotron/src/in_process_brain_session.cpp`'s
-    `command_line_to_command` — the translator the DEFAULT in-process GUI
-    backend uses — has no `"program"` case among its `if` branches and
-    falls through to `TranslateOutcome::kUnknownCommand` (re-verified
-    2026-07-18: no `"program"` branch present), so BOTH the F1 Voices
-    picker and the F2 Kits picker (see `11630`) silently no-op when the GUI
-    runs in-process (the default). `program` only reaches the engine today
-    via an external server (`--control`/UDS,
-    `components/platform/hostrt/shell_music_commands.cpp`'s `cmd_program`,
-    reached through `UdsBrainSession`). This node fails the `11610` DONE
-    criterion by construction (a known NO-OP path in the default run mode)
-    — that is exactly why it is its own open sub-node rather than folded
-    into `11610`.
+  - `11620` In-process `program`-verb no-op fix — ✅ done (commit
+    `ec5b90d`, "fix(gui-sonotron): honor 'program' verb in in-process
+    backend"). `command_line_to_command`
+    (`apps/gui-sonotron/src/in_process_brain_session.cpp`) — the
+    translator the DEFAULT in-process GUI backend uses — now carries a
+    `t[0] == "program"` arm mirroring `hostrt`'s own `cmd_program` grammar
+    (voice by GM name or bare number, `out0`/numeric port, optional
+    `:channel`) and dispatches `Op::kSet`/`Param::kProgram`, so BOTH the F1
+    Voices picker and the F2 Kits picker (see `11630`) now reach the engine
+    when the GUI runs in-process (the default), not only over
+    `--control`/UDS as before. Meets the `11610` DONE criterion
+    end-to-end, not merely at the translator: pinned by
+    `test_program_voice_by_name_reaches_program_command` and
+    `test_program_kit_by_number_on_channel_ten_reaches_program_command`
+    (`apps/gui-sonotron/tests/test_in_process_brain_session.cpp`), each of
+    which polls for the resulting real MIDI program-change `BrainEvent`
+    (`kMidiOut`/`"program"`) — i.e. proof through `Engine`'s real
+    voice-change dispatch, not just a successfully-parsed `Command`. The
+    unresolvable-voice and unresolvable-port error paths are pinned too
+    (`test_program_unknown_voice_name_surfaces_clean_error`,
+    `test_program_unknown_port_surfaces_clean_error`). No known NO-OP path
+    remains for `program` in the default run mode.
   - `11630` Browser redesign — remainder — ○ HOST-ONLY. F1 (commit
     `bce71ab`: category selector + Sections/Variations click→apply +
     Voices/GM-program picker) and F2 (commit `6a8799e`: real GM
@@ -769,9 +777,11 @@ the behind-the-line set.
 7. **`11600` split into `11610`–`11650`** (2026-07-18) — **DECIDED:**
    `11610` "GUI foundation" is ✅ done (mechanical strand + core-dependent
    strand + Repeat Zone 1–3 + song-mode Phase 1, all contract-test-pinned).
-   `11620` (in-process `program`-verb no-op), `11630` (Browser redesign
-   remainder), `11640` (UI-animation), `11650` (song-mode Phase 2) are
-   open sub-nodes. Parent `11600` stays OPEN — the instrument is never
+   At the time of this split, `11620` (in-process `program`-verb no-op),
+   `11630` (Browser redesign remainder), `11640` (UI-animation), `11650`
+   (song-mode Phase 2) were open sub-nodes; `11620` has since shipped
+   ✅ done (commit `ec5b90d`, see `11600` above) — `11630`/`11640`/`11650`
+   remain open. Parent `11600` stays OPEN — the instrument is never
    "done." The DONE criterion for a GUI sub-node is recorded verbatim
    under `11600` above.
 8. **New node `11640` — UI-animation** (2026-07-18) — **DECIDED:** carries
