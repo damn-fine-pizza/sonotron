@@ -828,6 +828,219 @@ confirmation that none of the twelve features asks for an exception to
 
 ---
 
+### 14000 — BDD testing architecture (Gherkin + BabyBehave) — cross-cutting QA infrastructure for `13000` — ○ not started, DECIDED (accept-with-changes, 2026-07-19)
+
+*Reviewed 2026-07-19 by the orchestrator plus six read-only research passes
+(`torquato-qa-lead`, a general-purpose WebFetch pass, `corelli-architecture-
+critic`, `guido-process-analyst`, two `Explore` passes) against a proposal
+to cover the twelve `13000` features with a Gherkin+BabyBehave BDD layer.
+Verdict: **ACCEPT WITH CHANGES.** Filed here per that BDD-architecture
+review session, 2026-07-19 — no proposal document exists for this pass (it
+was a chat-session decision, not a translated source document like `13000`
+itself); every finding below was independently verified against the real
+tree by that review, cited by exact path. New top-level band per this
+file's own numbering rule (`14000` is the first unused thousand-band, verified
+against every 5-digit node in this file as of this pass) — the closest
+existing testing-infrastructure band, `1300` (`1310`–`1340`), is the
+core/protocol harness and already fully `✅ done`; this is a distinct,
+GUI-facing testing SYSTEM for the still-unscheduled `13000` band, not an
+extension of `1300`'s closed scope.*
+
+*Dependency and scope calls already settled by the review, not re-opened
+here: **`BabyBehave`** (`github.com/crsnplusplus/BabyBehave`) is real, MIT,
+header-only C++23 (C++17 fallback), with a real CMake/vcpkg/Conan/Bazel
+packaging story — but it is NOT a Gherkin/Cucumber engine (no `.feature`
+parsing, scenario auto-discovery, CTest auto-integration, tag filtering, or
+"World" concept): it is a fluent Given/With/When/Then C++ chaining DSL with
+JUnit-XML/TAP reporters, so a semantic Gherkin-parsing/step-registry layer
+is still needed on top of it. Pre-1.0, no tagged releases — pin an exact
+commit SHA via `FetchContent`, never `GIT_TAG main` (policy `0800`
+dependency-fork evaluation, satisfied by this review). Existing test
+infrastructure is stronger than the proposal assumed:
+`apps/gui-sonotron/tests/imgui_headless_harness.hpp` already does real ImGui
+IO-event injection (`AddMousePosEvent`/`AddMouseButtonEvent`) with real
+`ImDrawData` read-back assertions; `apps/gui-sonotron/src/input_trace.hpp`
+already provides real `--trace-input`/`--replay-input` record/replay; ImGui
+is vendored at v1.92.8 (`third_party/imgui`) with the full IO-event-queue
+API; real drag-and-drop payloads already exist
+(`kStyleDragPayloadId`/`kVariationDragPayloadId`, `browser_model.hpp`); the
+project-wide harness is a custom `CHECK`-macro pattern (`test.hpp`), no
+gtest/catch2/doctest. **Feature-ID decision:** reuse the existing `13xxx`
+node numbers directly as Gherkin tags (`@feature:13110` etc.) — no separate
+Feature Registry file. **Interaction Plan / `.flow.yaml` — rejected** as a
+separate artifact (would duplicate Gherkin scenario text plus the C++
+step-registry binding; no YAML dependency introduced).*
+
+*Owner-ranked MVP priority (refined 2026-07-19, supersedes the flatter
+"precise things + several wows + UI matters" framing this band opened
+with): **(1) NO CRASH** — stability/robustness, non-negotiable, above
+either wow tier below (`14100.1`); **(2) WOW** — the functional milestone
+sequence Browser → Sequence Edit → Looper (`14110`–`14150`, unchanged from
+this band's original filing); **(3) SUPERWOW** — fluid, animated,
+innovative UI as its own goal, sequenced strictly AFTER (2) (`14400`).*
+
+- **14100 Priority #2 (wow) — Foundational seam fix + the three-milestone
+  BDD program, in order.**
+  - `14100.1` No-crash / stability gate — ◑ partial (commit `3eb005d`,
+    "feat(gui-sonotron): sanitizer preset + clock-injection seam
+    (14100.1/14110)"), **PRIORITY #1, non-negotiable, supersedes both wow
+    tiers below.** No feature milestone (`14120`/`14130`/`14140`) counts as
+    done if it introduces or leaves in place a crash/UB risk. Requires
+    ASan/UBSan sanitizer runs on the new BDD test binary and on any GUI
+    code each milestone touches. **Infra gap CLOSED:** `CMakePresets.json`
+    now carries a `sanitize` configurePreset+buildPreset+testPreset triad
+    (inherits `host`, `-fsanitize=address,undefined
+    -fno-omit-frame-pointer -g -O1`, own `build/sanitize` dir) —
+    previously verified absent (`host`/`host-release`/`coverage`/`tidy`/
+    `arm`/`arm-release` only). Verified by a full rebuild under the
+    `sanitize` preset + `ctest --test-dir build/sanitize -E
+    "live_alsa|live_tracks"` → 163/163 tests passed, zero ASan/UBSan
+    diagnostics; the `host` preset was independently reverified at
+    163/163 alongside this change. **Still open (why this is `◑`, not
+    `✅`):** the gate has not yet been exercised against "the new BDD test
+    binary" or against `14120`/`14130`/`14140`'s own GUI code, because
+    none of those three milestones has landed yet (each remains `○ not
+    started` below) — this node closes fully only once each landed
+    milestone has itself been verified clean under the `sanitize` preset.
+    *(Discrepancy flagged, not written as fact: an earlier
+    framing of this gate cited "zero regression-labeled CTest tests" and an
+    aspirational "metric-3 bug registry" — re-checked against the tree and
+    found FALSE. `1340` (this same file) already records the three-metric
+    unit/functional/regression convention as `✅ done`, and
+    `components/core/arrangrr/tests/CMakeLists.txt` carries real,
+    passing, `LABELS regression` tests today — e.g. `test_step_locks`,
+    `test_performance_style_id_regression`,
+    `test_insert_chain_fan_overflow_regression`,
+    `test_master_transpose_voicing_regression`,
+    `test_clip_matrix_live_meter_change_regression` (10+ such tests,
+    `ctest -L regression` finds 11 in the current `build/host`). No
+    "bug registry"/"metric-3" term appears anywhere in this repo. This
+    gate is filed on the verified sanitizer gap alone; the regression-count
+    claim is not repeated here.)* Closing `14110`'s clock-injection seam and
+    `14130`'s `StepPatternModel` read-back gap are THIS priority's work, not
+    merely test-writing convenience: a hardcoded wall-clock scheduler and a
+    silent core-write rejection are both correctness/no-crash-adjacent gaps
+    independent of BDD — the fact that fixing them also unblocks trustworthy
+    `@ui` scenarios is a side effect, not the reason to do them.
+  - `14110` GUI↔backend clock-injection seam — ✅ done (commit `3eb005d`,
+    "feat(gui-sonotron): sanitizer preset + clock-injection seam
+    (14100.1/14110)"), HOST-ONLY. `InProcessBrainSession::run_engine()`
+    (`apps/gui-sonotron/src/in_process_brain_session.cpp`) previously
+    hardcoded real `steady_clock`/`sleep_for` with no injectable
+    clock/scheduler hook, even though core (`Transport`,
+    `TestEngine::advance_ticks`) already had a fully deterministic
+    tick-injection model — root cause of the 50+ wall-clock `sleep_for`
+    polling loops in the GUI test suite, and of
+    `test_in_process_brain_session_bar_advance.cpp`'s own admitted weak
+    assertion ("did it advance at all", to dodge CI flakiness). Now closed:
+    a `ClockHooks{now_us, wait}` seam
+    (`apps/gui-sonotron/src/in_process_brain_session.hpp`), settable via
+    `set_clock_hooks_for_test()` before `start()`, production defaults
+    reproducing the old real-time behavior byte-for-byte
+    (`Impl::now_us_hook`/`wait_hook` in
+    `in_process_brain_session.cpp`; `run_engine()` now reads the hooks
+    instead of calling `monotonic_us()`/`std::this_thread::sleep_for`
+    directly). `test_in_process_brain_session_bar_advance.cpp` was
+    rewritten to drive a virtual clock and assert the exact expected bar
+    instead of the old weak "did it advance at all" check — runtime
+    dropped from ~6s real wall-clock to ~0.02–0.07s. Full `host` preset
+    reverified at 163/163 tests passed alongside this change.
+  - `14120` Browser (`13330`) BDD milestone — ○ not started, HOST-ONLY,
+    gated on `14110` (CLOSED — see `14110` above, commit `3eb005d`). First
+    milestone: the most demo-ready "wow" today (real
+    search + real drag-and-drop already ship, per `13330`'s own
+    cross-reference to `11630`'s shipped F1/F2 category-selector/
+    click-to-apply/drag-and-drop). Bundles a REAL fix to
+    `click_arm_auto_song()`
+    (`apps/gui-sonotron/tests/test_grid_panel_auto_song_stop_restart_ui_automation.cpp:100,163`
+    — currently writes the `UiState` field directly instead of clicking the
+    real button, its own comment admitting "documented gap: direct field
+    write, not a click") — landed WITH this milestone, never filed as
+    tolerated legacy debt. Requires a semantic wrapper reading
+    `ImGui::GetItemRectMin()`/`GetItemRectMax()` right after the real widget
+    call (works even for a `SmallButton` at rest-alpha-0, which the current
+    color-vertex-scanning harness cannot locate) — a second, related
+    harness gap closed by the same milestone.
+  - `14130` Sequence Edit (`13120`) BDD milestone — ○ not started,
+    HOST-ONLY, gated on closing `StepPatternModel`'s core read-back gap.
+    `StepPatternModel` is explicitly "the GUI's own local echo of core
+    state, not a replacement for it" (its own header comment,
+    `step_pattern_model.hpp:23`); every edit op mutates the local echo and
+    fire-and-forgets a command to core with NO read-back query confirming
+    core accepted it — a BDD scenario asserting only against
+    `StepPatternModel` would pass even if core silently rejected the edit.
+    This is a blocking architectural gap (a real core read-back query must
+    be added), not a test-writing task, and must close before `13120` gets
+    any DoD-level `@ui` coverage. Second milestone: "precise" must come
+    before "wow" is trustworthy. Serves priority #1 (`14100.1`) first: a
+    silent core-write rejection is a correctness gap independent of
+    testing, not merely a precision-for-its-own-sake nicety.
+  - `14140` Looper (`13110`) BDD milestone — ○ not started, HOST-ONLY,
+    gated on new GUI gesture work (press-and-hold record) not yet built.
+    Third milestone: a real third wow, but there is nothing to demo until
+    the gesture exists.
+  - `14150` MVP cutline — governing marker (does not itself schedule work,
+    the same role `11700` plays for the GUI freeze line). **MVP = through
+    `14140` landing the Looper milestone with a trustworthy `@ui`
+    scenario, with `14100.1`'s no-crash gate held throughout.** `14200`
+    (legacy-debt baseline / CI-gate hardening) is explicitly POST-MVP
+    process hardening, filed as a distinct later step, not part of the MVP
+    itself. `14400` (SUPERWOW, priority #3) sits strictly after this
+    cutline too — it is not part of the functional MVP either.
+- **14200 Post-MVP process hardening.**
+  - `14210` Legacy-debt baseline + CI-gate hardening — ○ not started,
+    HOST-ONLY, gated on `14150` (comes AFTER the MVP cutline, never
+    before).
+- **14300 Deferred — not yet scheduled ("finché non serve").**
+  - `14310` `IMidiHal` fake/test-double for injected MIDI input — ○ not
+    started, DEFERRED, **NEEDS-DECISION** (connection class confirmed by
+    owner as USB MIDI; the specific device/model to characterize against
+    remains an open owner decision, left open for now — do not invent a
+    device). No fake exists today (only three real hardware
+    backends: ALSA/CoreMIDI/WinMM). Do NOT write the fake from reading the
+    code alone: the risk is a plausible-but-wrong fake silently encoding
+    incorrect assumptions about real MIDI hardware, inherited invisibly by
+    both product code and any `@engine`/`@ui` scenario built on it.
+    Required sequencing when this is scheduled: (a) FIRST, a small set of
+    `@live_smoke` characterization scenarios against REAL MIDI hardware,
+    measuring concrete numbers (timing jitter note-on/off, running-status
+    behavior, SysEx chunking/timeout, multi-port event ordering,
+    connect/disconnect events); (b) THEN build the `IMidiHal` fake to
+    satisfy that measured contract, not to "seem reasonable"; (c) KEEP the
+    `@live_smoke` scenarios in the tree permanently as drift detectors,
+    never delete them once the fake exists.
+- **14400 Priority #3 (SUPERWOW) — fluid, animated, innovative UI as its own
+  goal.** ○ not started, sequenced strictly AFTER the three functional-wow
+  milestones (`14120`–`14140`) land, not alongside them: there must be real,
+  working, boundary-synchronized functionality on screen before animating
+  it means anything causally.
+  - `14410` UI-animation + causal data model, combined — ○ not started.
+    Cross-reference only, no new sub-nodes invented under either parent:
+    `11640` (UI-animation MECHANISM — its own entry already finds motion
+    "not yet beat-synchronized") together with `13140` (Visualized Musical
+    Causality — the CAUSAL DATA MODEL, current/pending/predicted/candidate/
+    historical state layered on `BrainEvent`/`AppState`, that motion would
+    express; `13140`'s own text already says it "would consume `11640`'s
+    motion primitives once both exist"). This band's SUPERWOW tier IS
+    `11640` + `13140` together, once whoever schedules that work takes it
+    up — their own scheduling and scope are unchanged by this filing. BDD
+    scenario coverage for this tier is explicitly OUT OF SCOPE here: to be
+    designed once `11640`/`13140` are scheduled, not invented in this pass.
+
+*Test-authoring order vs. product-build order — do not conflate.*
+`14120`→`14130`→`14140` is a TEST-AUTHORING order (which of the three
+already-partially-built `13000` features gets BDD coverage first). This is
+distinct from `13210`'s own existing product-BUILD sequencing note ("this
+node is meant to land before `13120`/`13130`/`13140` (Block A) start
+producing live edits that touch more than one subsystem at once — a
+sequencing note carried over from the source, not a hard gate decided by
+this filing pass"): that note is about construction order for NOT-YET-BUILT
+features; this band's order is about which of the three already-real
+features earns BDD scenarios first. The two do not contradict each other —
+they answer different questions.
+
+---
+
 ## Recommended sequence for the open work (the through-line)
 
 **Superseded in part by the GUI freeze line (`11700`), owner-decided.** The
@@ -1005,6 +1218,48 @@ the behind-the-line set.
     `docs/proposals/song-form-option-a-wiring-plan.md` (pre-existing,
     unsuperseded auto-song-form analysis overlapping Smart Form Builder,
     `13430`).
+11. **New band `14000` — BDD testing architecture (Gherkin + BabyBehave)**
+    (2026-07-19) — **DECIDED: ACCEPT WITH CHANGES.** Filed from a
+    BDD-testing-architecture review session (orchestrator +
+    `torquato-qa-lead` + a general-purpose WebFetch pass +
+    `corelli-architecture-critic` + `guido-process-analyst` + two `Explore`
+    passes, 2026-07-19; no proposal document — this was a chat-session
+    decision, its findings independently verified against the tree).
+    Reuses `13xxx` node numbers directly as Gherkin tags (no separate
+    Feature Registry); rejects a separate Interaction Plan / `.flow.yaml`
+    artifact. Records the foundational clock-injection seam fix (`14110`)
+    as blocking any timed `@ui` scenario at scale, the owner-set BDD
+    milestone order Browser (`13330`) → Sequence Edit (`13120`) → Looper
+    (`13110`) (`14120`–`14140`) — distinct from `13210`'s own product-build
+    sequencing note, not a contradiction of it — the MVP cutline at
+    `14150`, legacy-debt-baseline/CI-gate hardening as a distinct POST-MVP
+    step (`14210`), and the `IMidiHal` fake/test-double (`14310`) filed as
+    explicitly DEFERRED / NEEDS-DECISION (which real hardware to
+    characterize against is still an open owner decision, not answered by
+    this pass). No existing `13000` leaf's status or wording was changed by
+    this filing.
+11b. **Refined MVP priority ranking for band `14000`** (2026-07-19,
+    same-day follow-up) — **DECIDED: three explicit priority tiers,
+    ranked.** (1) NO CRASH — a non-negotiable stability gate (`14100.1`)
+    above either wow tier, requiring ASan/UBSan sanitizer runs on the new
+    BDD test binary and touched GUI code (verified absent today:
+    `CMakePresets.json` has no sanitizer preset); closing `14110`'s
+    clock-injection seam and `14130`'s read-back gap now explicitly serve
+    this priority, not merely BDD convenience. (2) WOW — the existing
+    Browser → Sequence Edit → Looper milestone sequence (`14110`–`14150`),
+    unchanged. (3) SUPERWOW — a new tier, fluid/animated/innovative UI as
+    its own goal, filed at `14400`/`14410`, cross-referencing `11640`
+    (motion mechanism) + `13140` (causal data model) without adding new
+    sub-nodes under either, sequenced strictly after tier (2). *Discrepancy
+    found and NOT recorded as fact: the relayed brief for this follow-up
+    also claimed "grepping for regression-labeled CTest tests project-wide
+    returns zero hits" and an aspirational "metric-3 bug registry" —
+    re-checked against the tree and found FALSE (`1340` already records the
+    three-metric convention as `✅ done`; real `LABELS regression` tests
+    exist and pass, e.g. `test_step_locks`,
+    `test_performance_style_id_regression`; "bug registry"/"metric-3"
+    appears nowhere in the repo). That specific claim is omitted from
+    `14100.1`; only the verified sanitizer-preset gap is recorded there.
 
 ---
 
