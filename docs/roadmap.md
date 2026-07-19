@@ -666,6 +666,166 @@ tempo/swing-different from another style.*
   - `12550` MIDI-Learn/ControllerMap — ○ SHIPPABLE
 - `12600` Laptop tools: SMF import/export, style/device editor — ○ HOST-ONLY
 
+### 13000 — Desktop feature expansion (proposed) — ○ not started, PROPOSED only (not yet DECIDED, prioritized, or scheduled)
+
+*Twelve desktop-feature evolutions proposed 2026-07-19, translated in full
+and filed at `docs/proposals/desktop-feature-expansion-2026-07.md`. Filed
+as a new top-level band per this file's own numbering rule (a new band
+takes "the next free thousand") — `13000` is the first unused thousand-band
+as of this pass (verified against every existing 5-digit node number in
+this file). The owner asked only that the proposal be placed at the
+correct spot in the tree; nothing here is committed to being built. Every
+leaf below therefore carries **○ not started** and no status stronger than
+PROPOSED — prioritization and sequencing judgment is explicitly deferred to
+whoever schedules this band later (`verdi-roadmap-strategist`'s domain, not
+this filing pass).*
+
+*The source document's own closing section groups the twelve features into
+four architectural stabilization blocks plus a set of cross-cutting
+principles; both are preserved here as the band's organizing hundreds
+(`13100`–`13400`) rather than flattened, because the source explicitly
+frames the twelve as one coherent system rather than independent panels,
+with load-bearing ordering between blocks: Block B (the Transaction Engine)
+is meant to land before Block A's live edits touch too many subsystems at
+once, and Block C's three resource nodes are "designed together, even if
+implemented incrementally."*
+
+- **13100 Block A — Immediate value on the current code.** Four features
+  that exploit primitives already shipped and produce host-visible value
+  without waiting on the other blocks.
+  - `13110` Looper in the Repeat Zone — ○ not started, HOST-ONLY (GUI/host
+    integration work; the core primitives already ship). Builds DIRECTLY on
+    shipped infrastructure, not greenfield: `LoopBuffer` record/overdub/
+    replace/erase/undo/quantize (`6100`/`6200`/`6400`, ✅ done, part of the
+    `6000` Looper band which stays ◑ partial pending `6500`'s sync half),
+    `RetroCaptureRing` retroactive capture (`6300`, ✅ done), and
+    `ContentKind::kLoopBuffer`/`Engine::apply_clip_content()`'s existing
+    loop branch plus the Repeat Zone's `kArmed`/`kPlaying`/`kQueuedStop`
+    core launch-state model. Cross-reference, not duplication: see `6000`
+    (core Looper) and `11610` (Repeat Zone GUI foundation, ✅ done,
+    "Repeat Zone slices 1–3") — this node is the remaining HOST/GUI
+    integration work (real hardware MIDI capture, virtual-surface wiring,
+    recording-lifecycle UI, cell↔slot persistence) that those two nodes do
+    not yet cover. See also `docs/proposals/repeat-zone-real-contract.md`
+    and `docs/proposals/repeat-count-phase2-abi.md` for adjacent as-built/
+    ABI analysis of the same Repeat Zone surface.
+  - `13120` Complete, live Sequence Edit — ○ not started, HOST-ONLY. Extends
+    the already-shipped host-side `SeqEditModel`/piano-roll/step-view/
+    `StepPatternStore` surface to more content types (LoopBuffer, imported
+    clips, Style Sections, ChordSequence) and a current/draft/pending
+    editing model. Not currently itemized as its own roadmap node; see
+    `docs/proposals/seqedit-piano-roll-phase2-design.md` and
+    `docs/proposals/seqedit-column-view-and-zoom.md` for the existing
+    design work this node extends.
+  - `13130` Performance Transformation Surface — ○ not started, HOST-ONLY.
+    Explicitly proposed to ORCHESTRATE, not duplicate, already-shipped
+    `InsertChain` (`5100`, ✅ core shipped), groove/swing/humanize/accent/
+    quantize (`3250`/`7300`, ✅ done), and quantized launch/change
+    machinery.
+  - `13140` Visualized Musical Causality — ○ not started, HOST-ONLY.
+    Overlaps in spirit with `11640` (UI-animation, ○ not started): both are
+    about beat/bar-synchronized, causally-meaningful GUI motion. Distinct
+    focus: `11640` is the motion/animation MECHANISM
+    (`docs/proposals/ui-animation-roadmap.md`, its own Steps 1–4); `13140`
+    is the causal DATA MODEL that motion would express (current/pending/
+    predicted/candidate/historical state, a Causal Event Model layered on
+    `BrainEvent`/`AppState`) — `13140` would consume `11640`'s motion
+    primitives once both exist, not replace them. `11640`'s own entry
+    already cross-references `docs/proposals/ui-motion-extreme-2026-07.md`;
+    the same finding that motion is not yet beat-synchronized bears on
+    `13140` too.
+- **13200 Block B — Coherence of live operations.**
+  - `13210` Live Musical Transaction Engine — ○ not started, HOST-ONLY,
+    NEEDS-DECISION (the bundle/ABI shape for multi-subsystem atomic commits
+    is unspecified). Proposed to coordinate, then eventually reduce
+    duplication among, already-shipped pending/boundary primitives:
+    `BoundaryLatch`, `ClipMatrix::arm()`, `due_bar_index`, SceneChain
+    transitions (`8100`, ✅ done), Performance recall (`8200`, ✅ done), and
+    Style changes. Per the source document's own dependency framing, this
+    node is meant to land before `13120`/`13130`/`13140` (Block A) start
+    producing live edits that touch more than one subsystem at once — a
+    sequencing note carried over from the source, not a hard gate decided
+    by this filing pass.
+- **13300 Block C — Resource model.** The source document is explicit that
+  these three must be designed together even if implemented incrementally.
+  - `13310` Musical Resource Graph — ○ not started, mostly HOST-ONLY (the
+    core would only ever see bounded handles/compiled descriptors derived
+    from it, never the graph itself). Cross-reference, not duplication:
+    overlaps the Browser-taxonomy remainder at `11630` (Songs/Performances/
+    Chord-progressions/Loops/Pad-FX tabs, per-type naming registries) —
+    `11630`'s scope is the BROWSER PANEL surfacing a taxonomy; `13310`
+    would be the underlying shared RESOURCE MODEL (Resource ID, descriptor,
+    relationship edges, capability queries) that `11630`'s per-type naming
+    registries could sit on top of instead of each growing its own ad hoc
+    list. This does not expand `11630`'s already-written scope — it is a
+    separate, unscheduled node that a future `11630` implementation could
+    build on to avoid duplicating taxonomies.
+  - `13320` Universal Resource Runtime — ○ not started, split HOST-ONLY
+    (registry/adapters/plugins) + SHIPPABLE core-side compiled layer
+    (bounded handles, no realtime allocation — explicitly must NOT become
+    dynamic polymorphism in the core). Proposed Phase 1 scope adapts the
+    existing four `ContentKind` values (`kStyleSection`/`kChordSequence`/
+    `kStepTrack`/`kLoopBuffer`) and `Engine::apply_clip_content()`'s
+    existing switch; does not propose replacing that switch.
+  - `13330` Semantic Resource Browser — ○ not started, HOST-ONLY. Overlaps
+    directly with `11630`'s remaining scope (Songs/Performances/Chord-
+    progressions/Loops/Pad-FX tabs, per-type naming registries — see
+    `docs/proposals/browser-redesign-taxonomy.md`). `11630` already ships
+    (as of `11610`'s F1/F2) the category-selector, click-to-apply, and
+    drag-and-drop mechanics this node's Phase 1 ("unified browser") would
+    build on; `13330` proposes generalizing `BrowserModel` onto `13310`'s
+    resource model plus adding compatibility ranking and similarity
+    search, which is not part of `11630`'s existing scope text. Cross-
+    reference only — `11630`'s existing scope description is unchanged by
+    this filing.
+- **13400 Block D — Intelligent composition.**
+  - `13410` Lead Sheet and intelligent Chord Map — ○ not started,
+    HOST-ONLY. Proposed to expose the already-shipped `ChordSequence`/
+    chord-follow/live-priority/detector machinery (`2300`–`2500`, ✅ done)
+    through a new visual/editable model; ChordPro import already exists in
+    the converter tool. See also
+    `docs/proposals/gui-live-harmony-musical-design.md` and
+    `docs/proposals/per-style-default-progressions.md` for adjacent
+    ChordSequence/default-progression design this would need to align
+    with.
+  - `13420` Seeded Variation Lab — ○ not started, HOST-ONLY. Proposed to
+    elevate the determinism/seed infrastructure already used by groove,
+    humanization, probability, and motif generation (`9210`, ✅ done) into
+    a first-class, genealogy-tracked product surface.
+  - `13430` Smart Form Builder — ○ not started, HOST-ONLY. Builds on
+    `SceneChain`/`SceneStep` (`11650`, ✅ done) and `PerformanceStore`,
+    proposing structure generation on top of them, not a replacement.
+    Genuine overlap found beyond the task's own list: this is the same
+    problem space already analyzed in
+    `docs/proposals/song-form-autoarrange.md` and
+    `docs/proposals/song-form-option-a-wiring-plan.md` (auto-song form,
+    energy-curve-driven section choice, archetype templates) — those two
+    documents predate the SceneChain adoption (`11650`) and were written
+    against the OLD hand-rolled auto-song mechanism; neither is marked
+    superseded anywhere in this tree. Whoever schedules `13430` should read
+    those two documents first rather than re-deriving the same analysis.
+  - `13440` Nonlinear Arrangement Graph — ○ not started, HOST-ONLY (the
+    Graph is proposed to live host-side and compile bounded transactions
+    into the core, the same boundary discipline as `13210`). Builds on
+    `SceneChain`/`SceneStep` (`11650`, ✅ done) the same way `13430` does —
+    `SceneTransitionKind` today supports only `kCut`; this node's node/edge
+    model is explicitly scoped as sitting ABOVE `SceneChain`, compiling
+    paths into it, not replacing it.
+
+*Cross-cutting principles carried over from the source document (transport
+never stops for creative ops; live changes must be quantizable; determinism
+given identical seed/input; generative proposals must stay inspectable and
+editable; the UI must distinguish current/draft/pending/preview; persistent
+resources are never identified by runtime index; the realtime core stays
+bounded with no dynamic allocation while the desktop host may keep richer
+dynamic models; every feature must produce observable events/state;
+important behavior must be reproducible via tests/trace; initial simplicity
+must not block progressive depth; animations must communicate state/time/
+causality, never be decoration) restate invariants `0100`/`0200`/`0600`/
+`0700` already declared for this whole tree — they are this band's own
+confirmation that none of the twelve features asks for an exception to
+`0000`, not new obligations.*
+
 ---
 
 ## Recommended sequence for the open work (the through-line)
@@ -821,6 +981,30 @@ the behind-the-line set.
    into `12520` DeviceProfile+ExternalSound, `12530` ordered Bank/PC/CC
    init, `12540` RPN/NRPN/14-bit/aftertouch, `12550`
    MIDI-Learn/ControllerMap.
+10. **New band `13000` — Desktop feature expansion (twelve features)**
+    (2026-07-19) — **PROPOSED, not decided.** Filed from a strategic
+    proposal document translated in full to English
+    (`docs/proposals/desktop-feature-expansion-2026-07.md`), describing
+    twelve desktop feature evolutions — Looper in the Repeat Zone,
+    Performance Transformation Surface, complete live Sequence Edit, Smart
+    Form Builder, Seeded Variation Lab, Visualized Musical Causality, Live
+    Musical Transaction Engine, Semantic Resource Browser, Musical Resource
+    Graph, Lead Sheet and intelligent Chord Map, Nonlinear Arrangement
+    Graph, Universal Resource Runtime — grouped into four architectural
+    blocks (`13100`–`13400`, mirroring the source document's own Block
+    A/B/C/D framing) with twelve leaf nodes (`13110`–`13440`). STATUS:
+    every leaf is **○ not started / proposed only** — the owner asked only
+    to have the proposal filed at the correct place in the tree, not to
+    commit to building it, prioritize it, or schedule it; no existing
+    node's status or wording was changed by this pass. Cross-references
+    filed against `6000`/`11610` (Looper), `11630` (Browser/Resource
+    Graph/Semantic Browser), `11640` (UI-animation/Causality), `11650`
+    (SceneChain — Smart Form Builder/Arrangement Graph), plus two
+    additional overlaps found during filing that are not tracked
+    elsewhere in this tree: `docs/proposals/song-form-autoarrange.md` and
+    `docs/proposals/song-form-option-a-wiring-plan.md` (pre-existing,
+    unsuperseded auto-song-form analysis overlapping Smart Form Builder,
+    `13430`).
 
 ---
 
