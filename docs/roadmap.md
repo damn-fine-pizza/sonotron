@@ -540,9 +540,11 @@ tempo/swing-different from another style.*
     percussion-Kit category on the `program` verb) are ✅ shipped and
     counted under `11610`'s Browser-redesign contribution. What remains is
     proposal Phase 3 of `docs/proposals/browser-redesign-taxonomy.md`:
-    Songs/scene-chains and Performances tabs (blocked on song-mode Phase 2,
-    `11650`, per that proposal's own §4 — "earliest sane start... is after
-    song-mode Phase 2"), Chord-progressions/Loops/Pad-FX-Groove-preset tabs
+    Songs/scene-chains and Performances tabs (previously blocked on
+    song-mode Phase 2, `11650`, per that proposal's own §4 — "earliest sane
+    start... is after song-mode Phase 2"; `11650` shipped `76a8774`, so
+    that block is LIFTED — Phase 3 itself is not scheduled, only no longer
+    gated), Chord-progressions/Loops/Pad-FX-Groove-preset tabs
     (each needs its own host-side naming registry, none scheduled), and
     Controller-maps/Routing-profiles (recommended to route to a future
     Settings surface instead, per that proposal's fork 4). Not started.
@@ -558,13 +560,37 @@ tempo/swing-different from another style.*
     the earlier `docs/proposals/ui-motion-extreme-2026-07.md` audit (no
     motion is beat-synchronised) — see that proposal's own reconciliation
     note for how the two relate.*
-  - `11650` Song-mode Phase 2 — ○ not started. Scope (per
+  - `11650` Song-mode Phase 2 — ✅ done (commit `76a8774`,
+    "feat(gui-sonotron): Song-mode Phase 2 — per-scene style/groove/
+    key/tempo overrides", PR #4, merged to `main`; HEAD `c863d5c` sits
+    directly on top of it). Scope (per
     `docs/proposals/song-mode-scenechain-adoption.md` §"Phasing", Phase
-    2): `GridModel` grows a `ScenePerformance` per-scene record
-    (style/groove/key/tempo) + a per-scene editor UI; the Phase-1
-    capture-and-override mechanism (already shipped, `11610`) picks the
-    new fields up automatically once they exist. Blocks `11630`'s
-    Songs/Performances Browser tabs.
+    2): `GridModel` grows a per-scene style/groove/key/tempo override
+    record (`apps/gui-sonotron/src/grid_model.hpp`/`.cpp`:
+    `scene_style_id`/`set_scene_style_id`, `scene_groove`/
+    `set_scene_groove`, `scene_key_root`/`scene_key_mode`/`set_scene_key`,
+    `scene_tempo_x100`/`set_scene_tempo_x100`, each independently gated by
+    its own sentinel/override-flag) + a per-scene editor UI
+    (`render_scene_editor_popup`, `apps/gui-sonotron/src/grid_panel.cpp`,
+    right-click on the scene-header cell); the `song build` wire line
+    carries four trailing per-scene override tokens
+    (`apps/gui-sonotron/src/in_process_brain_session.cpp`), folded into
+    each scene's baked `Performance` before `apply_song_build` stores
+    it — the Phase-1 capture-and-override mechanism (already shipped,
+    `11610`) picks the new fields up automatically, no new engine
+    mechanism, zero core-ABI change. The tempo override also carries a
+    live-readback path (`OutEvent::kParamState`/`kTransportTempo`
+    confirmation echo, `components/core/arrangrr/src/engine.cpp`,
+    `apps/gui-sonotron/src/brain_event_from_outevent.cpp`), so a recalled
+    tempo round-trips to the GUI the same way style/groove/key already
+    did. Pinned by `apps/gui-sonotron/tests/test_grid_model.cpp` and
+    `test_song_mode_scene_performance_overrides_contract.cpp` (both
+    re-verified green in this pass: `ctest --test-dir build/host -R
+    "test_grid_model|test_song_mode_scene_performance_overrides_contract"`
+    — 2/2 passed). Meets the `11610` DONE criterion end-to-end:
+    contract-test-pinned, no known NO-OP path. No longer blocks `11630`'s
+    Songs/Performances Browser tabs (see `11630` below — the block is
+    lifted; that sub-node's own scheduling is unchanged).
 
   *Dual-target note: the whole `11600` band is HOST-ONLY by construction —
   the GUI is a desktop client. The STM32 target (`12000`) keeps its OWN
@@ -780,7 +806,8 @@ the behind-the-line set.
    At the time of this split, `11620` (in-process `program`-verb no-op),
    `11630` (Browser redesign remainder), `11640` (UI-animation), `11650`
    (song-mode Phase 2) were open sub-nodes; `11620` has since shipped
-   ✅ done (commit `ec5b90d`, see `11600` above) — `11630`/`11640`/`11650`
+   ✅ done (commit `ec5b90d`, see `11600` above) and `11650` has since
+   shipped ✅ done (commit `76a8774`, see `11650` above) — `11630`/`11640`
    remain open. Parent `11600` stays OPEN — the instrument is never
    "done." The DONE criterion for a GUI sub-node is recorded verbatim
    under `11600` above.
