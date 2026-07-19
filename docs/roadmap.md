@@ -898,10 +898,15 @@ innovative UI as its own goal, sequenced strictly AFTER (2) (`14400`).*
     diagnostics; the `host` preset was independently reverified at
     163/163 alongside this change. **Still open (why this is `◑`, not
     `✅`):** the gate has not yet been exercised against "the new BDD test
-    binary" or against `14120`/`14130`/`14140`'s own GUI code, because
-    none of those three milestones has landed yet (each remains `○ not
-    started` below) — this node closes fully only once each landed
-    milestone has itself been verified clean under the `sanitize` preset.
+    binary" or against `14120`/`14130`/`14140`'s own GUI code in full,
+    because only one of those three milestones has landed so far.
+    `14120` (see below, commit `6fc84e6`) is now CLOSED and is the first of
+    the three verified clean under the `sanitize` preset (full rebuild +
+    `ctest --test-dir build/sanitize -E "live_alsa|live_tracks"` →
+    164/164, zero ASan/UBSan diagnostics) — this node still does not close
+    to `✅` on that alone: `14130` and `14140` remain `○ not started` below,
+    and per this node's own rule each landed milestone must itself be
+    verified clean under `sanitize` before `14100.1` closes fully.
     *(Discrepancy flagged, not written as fact: an earlier
     framing of this gate cited "zero regression-labeled CTest tests" and an
     aspirational "metric-3 bug registry" — re-checked against the tree and
@@ -945,22 +950,43 @@ innovative UI as its own goal, sequenced strictly AFTER (2) (`14400`).*
     instead of the old weak "did it advance at all" check — runtime
     dropped from ~6s real wall-clock to ~0.02–0.07s. Full `host` preset
     reverified at 163/163 tests passed alongside this change.
-  - `14120` Browser (`13330`) BDD milestone — ○ not started, HOST-ONLY,
-    gated on `14110` (CLOSED — see `14110` above, commit `3eb005d`). First
-    milestone: the most demo-ready "wow" today (real
-    search + real drag-and-drop already ship, per `13330`'s own
-    cross-reference to `11630`'s shipped F1/F2 category-selector/
-    click-to-apply/drag-and-drop). Bundles a REAL fix to
-    `click_arm_auto_song()`
+  - `14120` Browser (`13330`) BDD milestone — ✅ done (commit `6fc84e6`,
+    "test(gui-sonotron): node 14120 -- retire stale auto-song click sim +
+    real drag-drop @ui coverage"), HOST-ONLY, gated on `14110` (CLOSED — see
+    `14110` above, commit `3eb005d`). **Both deliverables this node
+    originally named turned out to rest on a stale premise, corrected by
+    the investigation, not merely checked off as filed:**
+    (a) the `click_arm_auto_song()` fix — the field-write helper
     (`apps/gui-sonotron/tests/test_grid_panel_auto_song_stop_restart_ui_automation.cpp:100,163`
-    — currently writes the `UiState` field directly instead of clicking the
-    real button, its own comment admitting "documented gap: direct field
-    write, not a click") — landed WITH this milestone, never filed as
-    tolerated legacy debt. Requires a semantic wrapper reading
-    `ImGui::GetItemRectMin()`/`GetItemRectMax()` right after the real widget
-    call (works even for a `SmallButton` at rest-alpha-0, which the current
-    color-vertex-scanning harness cannot locate) — a second, related
-    harness gap closed by the same milestone.
+    at filing time) was NOT "convert to a real click" as originally framed;
+    `auto_song` now defaults to `true` (Song-mode Phase 1) and a real click
+    on the header toggle from that state would TOGGLE IT OFF — the opposite
+    of "arm". The real fix removed the vestigial simulation across all
+    three duplicated sites
+    (`test_grid_panel_auto_song_stop_restart_ui_automation.cpp`,
+    `test_grid_panel_auto_song_real_backend.cpp`,
+    `test_grid_panel_master_play_restart_rewind_ui_automation.cpp`) and
+    replaced it with a `CHECK(fx.auto_song)` precondition documenting the
+    new default. (b) the milestone's own headline claim — "real search +
+    real drag-and-drop already ship" — was UNPROVEN: no test drove ImGui's
+    real `BeginDragDropSource`/`AcceptDragDropPayload` state machine at all.
+    Closed by adding `sonotron::test_harness::drag_to()`
+    (`apps/gui-sonotron/tests/imgui_headless_harness.hpp`) and a new
+    `test_browser_grid_drag_drop_ui_automation.cpp` proving real style-leaf
+    and variation-leaf drags via engine-observable `AppState` echoes,
+    non-vacuity confirmed by an explicit negative control (shrinking the
+    drag below ImGui's `MouseDragThreshold` produces a real `FAIL`). The
+    originally named product-hook concern — a semantic wrapper around
+    `ImGui::GetItemRectMin()`/`GetItemRectMax()` for an alpha-0-at-rest
+    `SmallButton` — turned out UNNEEDED for both deliverables: (a) needed
+    no click at all, (b) the real drag sources/targets sit on
+    already-locatable standard ImGui items (a `Selectable` row, an
+    `InvisibleButton`). Verified: full rebuild + `ctest --test-dir
+    build/host -E "live_alsa|live_tracks"` → 164/164 tests passed; full
+    rebuild + `ctest --test-dir build/sanitize -E "live_alsa|live_tracks"`
+    (ASan+UBSan) → 164/164 tests passed, zero sanitizer diagnostics — the
+    first of the three feature milestones (`14120`/`14130`/`14140`)
+    verified clean under the `sanitize` preset since `14100.1` was filed.
   - `14130` Sequence Edit (`13120`) BDD milestone — ○ not started,
     HOST-ONLY, gated on closing `StepPatternModel`'s core read-back gap.
     `StepPatternModel` is explicitly "the GUI's own local echo of core
